@@ -14,21 +14,27 @@ interface ServiceArtifactOptions {
 	artifactPath: string;
 	expectedSha256: string;
 	serviceCommit: string;
-	protocolVersion: string;
+	protocolVersion: number;
 	desktopCommit: string;
 	appDirectory: string;
 }
 
+/**
+ * The runtime manifest read by `src/vs/code/electron-main/cloudForgeService.ts`. The desktop reads
+ * at most 4 KiB, requires `architecture: 'x64'`, compares `protocolVersion` with its own protocol,
+ * and verifies `sha256` against the packaged executable before every launch.
+ */
 interface ServiceArtifactManifest {
-	schemaVersion: 1;
-	executable: 'cloudforge-service.exe';
-	declaredTarget: 'win32-x64';
 	serviceCommit: string;
-	protocolVersion: string;
-	desktopCommit: string;
+	protocolVersion: number;
+	architecture: 'x64';
 	sha256: string;
-	bytes: number;
 }
+
+export const serviceDirectoryName = 'cloudforge-service';
+export const serviceExecutableName = 'cloudforge-service.exe';
+export const serviceManifestName = 'manifest.json';
+const maxManifestBytes = 4 * 1024;
 
 function validateHex(value: string, length: number, name: string): string {
 	if (typeof value !== 'string' || value.length !== length || !/^[a-f\d]+$/i.test(value)) {
@@ -61,8 +67,8 @@ export async function stageServiceArtifact(options: ServiceArtifactOptions, copy
 	const sha256 = validateHex(options.expectedSha256, 64, 'SHA-256');
 	const serviceCommit = validateHex(options.serviceCommit, 40, 'Service commit');
 	const desktopCommit = validateHex(options.desktopCommit, 40, 'Desktop commit');
-	if (typeof options.protocolVersion !== 'string' || !/^[a-z\d][a-z\d._+-]{0,63}$/i.test(options.protocolVersion)) {
-		throw new Error('Protocol version must be 1–64 letters, digits, dots, underscores, plus signs, or hyphens, starting with a letter or digit.');
+	if (!Number.isSafeInteger(options.protocolVersion) || options.protocolVersion < 1) {
+		throw new Error('Protocol version must be a positive integer.');
 	}
 
 	const appDirectory = path.resolve(options.appDirectory);
@@ -81,9 +87,9 @@ export async function stageServiceArtifact(options: ServiceArtifactOptions, copy
 
 	const artifactPath = path.resolve(options.artifactPath);
 	await verifyArtifact(artifactPath, sha256);
-	const directory = path.join(appDirectory, 'cloudforge-service');
-	const executablePath = path.join(directory, 'cloudforge-service.exe');
-	const manifestPath = path.join(directory, 'service-manifest.json');
+	const directory = path.join(appDirectory, serviceDirectoryName);
+	const executablePath = path.join(directory, serviceExecutableName);
+	const manifestPath = path.join(directory, serviceManifestName);
 
 	// Reserve this exact directory exclusively. Failure here must never clean an existing bundle.
 	await fs.mkdir(directory);
@@ -98,22 +104,22 @@ export async function stageServiceArtifact(options: ServiceArtifactOptions, copy
 			await executable.close();
 		}
 		// Verify the copied bytes too: the source may have changed since the first hash.
-		const bytes = await verifyArtifact(executablePath, sha256);
+		await verifyArtifact(executablePath, sha256);
 		const manifest: ServiceArtifactManifest = {
-			schemaVersion: 1,
-			executable: 'cloudforge-service.exe',
-			declaredTarget: 'win32-x64',
 			serviceCommit,
 			protocolVersion: options.protocolVersion,
-			desktopCommit,
+			architecture: 'x64',
 			sha256,
-			bytes,
 		};
+		const manifestBytes = Buffer.from(`${JSON.stringify(manifest, undefined, '\t')}\n`, 'utf8');
+		if (manifestBytes.length > maxManifestBytes) {
+			throw new Error('Service manifest exceeds the desktop runtime limit.');
+		}
 		// The manifest is the completion marker. Packaging must await this function's success.
 		const manifestFile = await fs.open(manifestPath, 'wx');
 		manifestOwned = true;
 		try {
-			await manifestFile.writeFile(`${JSON.stringify(manifest, undefined, '\t')}\n`);
+			await manifestFile.writeFile(manifestBytes);
 		} finally {
 			await manifestFile.close();
 		}
@@ -148,7 +154,7 @@ async function main(): Promise<void> {
 		allowPositionals: false,
 	});
 	if (values.help) {
-		console.log('Usage: node build/cloudforge/serviceArtifact.ts --artifact <exe> --sha256 <digest> --service-commit <sha> --protocol <version> --desktop-commit <sha> --app-directory <packaged resources/app>');
+		console.log('Usage: node build/cloudforge/serviceArtifact.ts --artifact <exe> --sha256 <digest> --service-commit <sha> --protocol <positive integer> --desktop-commit <sha> --app-directory <packaged resources/app>');
 		return;
 	}
 	for (const name of ['artifact', 'sha256', 'service-commit', 'protocol', 'desktop-commit', 'app-directory'] as const) {
@@ -156,11 +162,14 @@ async function main(): Promise<void> {
 			throw new Error(`Missing required option --${name}.`);
 		}
 	}
+	if (!/^[1-9]\d{0,8}$/.test(values.protocol!)) {
+		throw new Error('--protocol must be a positive decimal integer without leading zeros.');
+	}
 	const result = await stageServiceArtifact({
 		artifactPath: values.artifact!,
 		expectedSha256: values.sha256!,
 		serviceCommit: values['service-commit']!,
-		protocolVersion: values.protocol!,
+		protocolVersion: Number(values.protocol),
 		desktopCommit: values['desktop-commit']!,
 		appDirectory: values['app-directory']!,
 	});

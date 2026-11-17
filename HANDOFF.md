@@ -69,8 +69,26 @@ Selected in response to the user's instruction to continue working from the hand
 - The initial targeted lint attempt found missing tooling dependencies. `corepack pnpm install --frozen-lockfile --ignore-scripts` then installed this worktree's locked dependencies. Native/postinstall setup was deliberately not run for this build-tool task; this is not a prepared editor build. No package manifest or lockfile changed.
 - Validation: 34 Node tests passed with no skips; targeted strict TypeScript checking and targeted oxlint passed. No new desktop build, real Rust service, installer, or runtime connection was tested.
 
+## Proof and stager integration slice
+
+Branch `fxrazor/service-staging-integration` in worktree `Z:\CloudForge-Code\.claude\worktrees\service-staging`. It merges `main` (`080f2b03bd8`, the stager) into `codex/cloudforge-desktop-proof` (`0e5307e3c63`, the verified proof) with no conflicts. The proof's runtime code is unchanged. No other active worktree touches `build/cloudforge/` or `build/win32/code.iss`. The `feature/workspace-graph-desktop` worktree reads the same `cloudforge-service/manifest.json` and does not change its schema.
+
+- [serviceArtifact.ts](build/cloudforge/serviceArtifact.ts) now writes the runtime `manifest.json` that `cloudForgeService.ts` verifies: `serviceCommit`, integer `protocolVersion`, `architecture: "x64"`, and `sha256`, with no BOM and under the 4 KiB read limit. The old `service-manifest.json` build-metadata schema is gone. `--protocol` takes a positive decimal integer.
+- [package-win32-x64.ps1](build/cloudforge/package-win32-x64.ps1) stages through the stager instead of an inline copy and manifest write. It replaces a reused payload's previous service only when that directory holds exactly the two staged files and neither is a link; otherwise it stops unchanged.
+- [code.iss](build/win32/code.iss) deletes `resources/app/cloudforge-service` on normal install or upgrade for the `cloudforge-proof` product, so stale service files cannot survive an upgrade.
+- The proof is unsigned, so staged bytes are final. A signed release must sign the service before staging, or restage after signing, as recorded in the [staging guide](docs/cloudforge/service-artifact.md#signing-and-integration).
+
+| Check | Result |
+| --- | --- |
+| `node --test build/lib/test/cloudforgeServiceArtifact.test.ts` | 36 passed, 0 skipped. Covers the exact runtime manifest shape and size, and integer protocol validation for the API and CLI. |
+| Strict `tsc` (TypeScript 6 from the main checkout) using `build/tsconfig.json` with Node types on the two build files | Passed. |
+| `node build/oxlint.ts` on the two build files | Passed. Temporary junctions to the main checkout's `node_modules` were used because this worktree has no installed dependencies, and were removed afterwards. |
+| PowerShell parse of `package-win32-x64.ps1`; scratch run of its staging block | No parse errors. A fresh payload and a reused payload produced the expected executable and manifest; unexpected content stopped staging with the directory untouched. |
+
+Not run: a desktop build, the Inno installer, a real Rust service, or the installed smoke. Rerun the [installer proof](#verified-windows-installer-proof) from a clean checkout of this branch to confirm the handshake, upgrade-over-install cleanup, and uninstall.
+
 ## Next actions
 
-1. Integrate the verified desktop/service proof from its recorded branches separately. Preserve its protocol-1 handshake scope and the canonical [service draft](Z:/CloudForge/docs/protocol/cloudforge-service-v1.md); workspace and graph operations remain the follow-on slice.
-2. Reconcile the standalone artifact stager with the proof's existing manifest and bundled-extension payload layout before adding a packaging hook. Its current build-metadata schema and `resources/app/cloudforge-service/` location are not the proof's runtime manifest/layout. Resolve final signing/hash ordering and stale-file cleanup on upgrade.
+1. Review and merge `fxrazor/service-staging-integration` into `main`. This brings the verified desktop/service proof onto `main` with the reconciled stager. Then rerun the installed proof from a clean short-path checkout. Preserve its protocol-1 handshake scope and the canonical [service draft](Z:/CloudForge/docs/protocol/cloudforge-service-v1.md); workspace and graph operations remain the follow-on slice.
+2. Before a signed release, settle where the service is signed relative to staging and the recursive payload signer.
 3. Keep the integration owner responsible for the desktop/service revision pair, installed smoke, and follow-on window/workspace boundary. Use separate implementation worktrees and preserve the Rust checkout's existing changes.

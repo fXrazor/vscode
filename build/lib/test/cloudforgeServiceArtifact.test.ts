@@ -26,7 +26,7 @@ async function fixture() {
 	await fs.writeFile(artifactPath, bytes);
 	return {
 		root,
-		options: { artifactPath, expectedSha256: sha256, serviceCommit, protocolVersion: 'test-only', desktopCommit, appDirectory },
+		options: { artifactPath, expectedSha256: sha256, serviceCommit, protocolVersion: 1, desktopCommit, appDirectory },
 		output: path.join(appDirectory, 'cloudforge-service'),
 		async dispose() {
 			// mkdtemp creates this resolved child of the OS temporary directory for this test only.
@@ -37,21 +37,28 @@ async function fixture() {
 }
 
 suite('CloudForge service artifact', () => {
-	test('stages matching bytes and records supplied provenance without changing product metadata', async () => {
+	test('stages matching bytes and writes the desktop runtime manifest without changing product metadata', async () => {
 		const f = await fixture();
 		try {
 			const result = await stageServiceArtifact({ ...f.options, expectedSha256: sha256.toUpperCase(), serviceCommit: serviceCommit.toUpperCase() });
+			const manifestBytes = await fs.readFile(path.join(f.output, 'manifest.json'));
 			assert.deepStrictEqual({
 				directory: result.directory,
-				manifest: JSON.parse(await fs.readFile(path.join(f.output, 'service-manifest.json'), 'utf8')),
+				files: (await fs.readdir(f.output)).sort(),
+				manifest: JSON.parse(manifestBytes.toString('utf8')),
 				copied: await fs.readFile(path.join(f.output, 'cloudforge-service.exe')),
 				product: JSON.parse(await fs.readFile(path.join(f.options.appDirectory, 'product.json'), 'utf8')),
 			}, {
 				directory: f.output,
-				manifest: { schemaVersion: 1, executable: 'cloudforge-service.exe', declaredTarget: 'win32-x64', serviceCommit, protocolVersion: 'test-only', desktopCommit, sha256, bytes: bytes.length },
+				files: ['cloudforge-service.exe', 'manifest.json'],
+				// Exactly the fields cloudForgeService.ts verifies before launching the service.
+				manifest: { serviceCommit, protocolVersion: 1, architecture: 'x64', sha256 },
 				copied: bytes,
 				product: { commit: desktopCommit },
 			});
+			// The desktop reads at most 4 KiB with a fatal UTF-8 decoder; a BOM would break JSON.parse.
+			assert.ok(manifestBytes.length <= 4 * 1024);
+			assert.notEqual(manifestBytes[0], 0xef);
 		} finally {
 			await f.dispose();
 		}
@@ -63,10 +70,12 @@ suite('CloudForge service artifact', () => {
 		'malformed service commit': { serviceCommit: '../service' },
 		'service commit control character': { serviceCommit: `${'b'.repeat(39)}\n` },
 		'malformed desktop commit': { desktopCommit: 'abc' },
-		'empty protocol version': { protocolVersion: '' },
-		'protocol control character': { protocolVersion: 'test\nversion' },
-		'protocol trailing newline': { protocolVersion: 'test\n' },
-		'oversized protocol version': { protocolVersion: 'v'.repeat(65) },
+		'zero protocol version': { protocolVersion: 0 },
+		'negative protocol version': { protocolVersion: -1 },
+		'fractional protocol version': { protocolVersion: 1.5 },
+		'non-finite protocol version': { protocolVersion: Number.NaN },
+		'unsafe protocol version': { protocolVersion: Number.MAX_SAFE_INTEGER + 1 },
+		'string protocol version': { protocolVersion: '1' as unknown as number },
 	})) {
 		test(`rejects ${name} before writing`, async () => {
 			const f = await fixture();
@@ -223,9 +232,9 @@ suite('CloudForge service artifact', () => {
 		try {
 			await assert.rejects(stageServiceArtifact(f.options, async (_source, destination) => {
 				await destination.writeFile(bytes);
-				await fs.writeFile(path.join(f.output, 'service-manifest.json'), 'keep', { flag: 'wx' });
+				await fs.writeFile(path.join(f.output, 'manifest.json'), 'keep', { flag: 'wx' });
 			}), /cleanup was incomplete/);
-			assert.equal(await fs.readFile(path.join(f.output, 'service-manifest.json'), 'utf8'), 'keep');
+			assert.equal(await fs.readFile(path.join(f.output, 'manifest.json'), 'utf8'), 'keep');
 		} finally {
 			await f.dispose();
 		}
@@ -240,7 +249,7 @@ suite('CloudForge service artifact', () => {
 				rejected: results.filter(result => result.status === 'rejected').map(result => result.reason.code),
 				files: await fs.readdir(f.output),
 				copied: await fs.readFile(path.join(f.output, 'cloudforge-service.exe')),
-			}, { fulfilled: 1, rejected: ['EEXIST'], files: ['cloudforge-service.exe', 'service-manifest.json'], copied: bytes });
+			}, { fulfilled: 1, rejected: ['EEXIST'], files: ['cloudforge-service.exe', 'manifest.json'], copied: bytes });
 		} finally {
 			await f.dispose();
 		}
@@ -252,8 +261,11 @@ suite('CloudForge service artifact', () => {
 			const script = path.resolve(import.meta.dirname, '../../cloudforge/serviceArtifact.ts');
 			const run = (args: string[]) => spawnSync(process.execPath, [script, ...args], { encoding: 'utf8' });
 			assert.deepStrictEqual({ missing: run([]).status, unknown: run(['--unknown']).status, help: run(['--help']).status }, { missing: 1, unknown: 1, help: 0 });
-			const staged = run(['--artifact', f.options.artifactPath, '--sha256', sha256, '--service-commit', serviceCommit, '--protocol', 'test-only', '--desktop-commit', desktopCommit, '--app-directory', f.options.appDirectory]);
-			assert.deepStrictEqual({ status: staged.status, directory: JSON.parse(staged.stdout).directory }, { status: 0, directory: f.output });
+			const args = (protocol: string) => ['--artifact', f.options.artifactPath, '--sha256', sha256, '--service-commit', serviceCommit, '--protocol', protocol, '--desktop-commit', desktopCommit, '--app-directory', f.options.appDirectory];
+			assert.deepStrictEqual(['0', '01', '1.0', '1x', 'test-only', ''].map(protocol => run(args(protocol)).status), [1, 1, 1, 1, 1, 1]);
+			assert.deepStrictEqual(await fs.readdir(f.options.appDirectory), ['product.json']);
+			const staged = run(args('1'));
+			assert.deepStrictEqual({ status: staged.status, directory: JSON.parse(staged.stdout).directory, protocolVersion: JSON.parse(staged.stdout).manifest.protocolVersion }, { status: 0, directory: f.output, protocolVersion: 1 });
 		} finally {
 			await f.dispose();
 		}
