@@ -97,6 +97,13 @@ try {
         --protocol 1 --desktop-commit $productCommit --app-directory $app
     if ($LASTEXITCODE -ne 0) { throw 'CloudForge service staging failed.' }
 
+    # Gate the payload immediately before Inno packages it. Any step that rewrites the staged
+    # executable (such as a future signing pass) must run before this check, which fails if the
+    # executable no longer matches its manifest or the pinned build inputs.
+    node build/cloudforge/serviceArtifact.ts --verify --app-directory $app --sha256 $hash `
+        --service-commit $ServiceCommit --protocol 1 --desktop-commit $productCommit
+    if ($LASTEXITCODE -ne 0) { throw 'CloudForge service verification failed before packaging.' }
+
     foreach ($task in @('vscode-win32-x64-inno-updater', 'vscode-win32-x64-user-setup')) {
         corepack pnpm run gulp $task
         if ($LASTEXITCODE -ne 0) { throw "Packaging task failed: $task" }

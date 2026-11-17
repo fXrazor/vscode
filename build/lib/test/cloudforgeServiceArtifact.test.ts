@@ -10,7 +10,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { suite, test } from 'node:test';
-import { stageServiceArtifact } from '../../cloudforge/serviceArtifact.ts';
+import { stageServiceArtifact, verifyStagedService } from '../../cloudforge/serviceArtifact.ts';
 
 const desktopCommit = 'a'.repeat(40);
 const serviceCommit = 'b'.repeat(40);
@@ -266,6 +266,200 @@ suite('CloudForge service artifact', () => {
 			assert.deepStrictEqual(await fs.readdir(f.options.appDirectory), ['product.json']);
 			const staged = run(args('1'));
 			assert.deepStrictEqual({ status: staged.status, directory: JSON.parse(staged.stdout).directory, protocolVersion: JSON.parse(staged.stdout).manifest.protocolVersion }, { status: 0, directory: f.output, protocolVersion: 1 });
+		} finally {
+			await f.dispose();
+		}
+	});
+});
+
+suite('CloudForge staged service verification', () => {
+	async function staged() {
+		const f = await fixture();
+		await stageServiceArtifact(f.options);
+		return {
+			...f,
+			manifestPath: path.join(f.output, 'manifest.json'),
+			executablePath: path.join(f.output, 'cloudforge-service.exe'),
+			async snapshot() {
+				const files = (await fs.readdir(f.output)).sort();
+				return Promise.all(files.map(async name => [name, await fs.readFile(path.join(f.output, name))] as const));
+			},
+		};
+	}
+
+	const manifest = { serviceCommit, protocolVersion: 1, architecture: 'x64', sha256 };
+
+	test('accepts a freshly staged folder with only the required protocol or every expectation pinned, read-only', async () => {
+		const f = await staged();
+		try {
+			const before = await f.snapshot();
+			const loose = await verifyStagedService({ appDirectory: f.options.appDirectory, expectedProtocolVersion: 1 });
+			const pinned = await verifyStagedService({
+				appDirectory: f.options.appDirectory,
+				expectedSha256: sha256.toUpperCase(),
+				expectedServiceCommit: serviceCommit.toUpperCase(),
+				expectedProtocolVersion: 1,
+				desktopCommit,
+			});
+			assert.deepStrictEqual({ loose, pinned }, {
+				loose: { directory: f.output, manifest, size: bytes.length },
+				pinned: { directory: f.output, manifest, size: bytes.length },
+			});
+			assert.deepStrictEqual(await f.snapshot(), before);
+		} finally {
+			await f.dispose();
+		}
+	});
+
+	test('rejects an executable rewritten after staging, as signing would, without changing the folder', async () => {
+		const f = await staged();
+		try {
+			await fs.appendFile(f.executablePath, 'appended signature');
+			const before = await f.snapshot();
+			await assert.rejects(verifyStagedService({ appDirectory: f.options.appDirectory, expectedProtocolVersion: 1 }), /does not match its manifest\. Restage after signing/);
+			assert.deepStrictEqual(await f.snapshot(), before);
+		} finally {
+			await f.dispose();
+		}
+	});
+
+	const expectationCases: [string, Partial<Parameters<typeof verifyStagedService>[0]>, RegExp][] = [
+		['different digest', { expectedSha256: 'c'.repeat(64) }, /SHA-256 does not match the expected digest/],
+		['different service commit', { expectedServiceCommit: 'c'.repeat(40) }, /commit does not match the expected service commit/],
+		['different protocol', { expectedProtocolVersion: 2 }, /protocol version does not match/],
+		['different desktop commit', { desktopCommit: 'c'.repeat(40) }, /product commit does not match/],
+		['malformed digest expectation', { expectedSha256: 'xyz' }, /exactly 64 hexadecimal/],
+		['malformed protocol expectation', { expectedProtocolVersion: 0 }, /positive integer/],
+	];
+	for (const [name, overrides, message] of expectationCases) {
+		test(`rejects a ${name}`, async () => {
+			const f = await staged();
+			try {
+				await assert.rejects(verifyStagedService({ appDirectory: f.options.appDirectory, expectedProtocolVersion: 1, ...overrides }), message);
+			} finally {
+				await f.dispose();
+			}
+		});
+	}
+
+	const manifestCases: [string, string | Buffer, RegExp][] = [
+		['byte-order mark', Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(JSON.stringify(manifest))]), /byte-order mark/],
+		['invalid UTF-8', Buffer.from([0x7b, 0xff, 0x7d]), /valid UTF-8 JSON/],
+		['non-object JSON', '[]', /JSON object/],
+		['extra field', JSON.stringify({ ...manifest, extra: true }), /exactly architecture, protocolVersion, serviceCommit, sha256/],
+		['missing field', JSON.stringify({ serviceCommit, architecture: 'x64', sha256 }), /exactly architecture/],
+		['wrong architecture', JSON.stringify({ ...manifest, architecture: 'arm64' }), /architecture must be x64/],
+		['uppercase digest', JSON.stringify({ ...manifest, sha256: sha256.toUpperCase() }), /sha256 must be 64 lowercase/],
+		['uppercase commit', JSON.stringify({ ...manifest, serviceCommit: serviceCommit.toUpperCase() }), /serviceCommit must be 40 lowercase/],
+		['string protocol', JSON.stringify({ ...manifest, protocolVersion: '1' }), /protocolVersion must be a positive integer/],
+		['zero protocol', JSON.stringify({ ...manifest, protocolVersion: 0 }), /protocolVersion must be a positive integer/],
+		['negative protocol', JSON.stringify({ ...manifest, protocolVersion: -1 }), /protocolVersion must be a positive integer/],
+		['fractional protocol', JSON.stringify({ ...manifest, protocolVersion: 1.5 }), /protocolVersion must be a positive integer/],
+		// The desktop launches only its own protocol, so another valid version must fail the gate too.
+		['other protocol than required', JSON.stringify({ ...manifest, protocolVersion: 2 }), /protocol version does not match/],
+		['one byte over the limit', JSON.stringify(manifest).padEnd(4 * 1024 + 1, ' '), /exceeds the desktop runtime limit/],
+	];
+	for (const [name, content, message] of manifestCases) {
+		test(`rejects a manifest with ${name}`, async () => {
+			const f = await staged();
+			try {
+				await fs.writeFile(f.manifestPath, content);
+				await assert.rejects(verifyStagedService({ appDirectory: f.options.appDirectory, expectedProtocolVersion: 1 }), message);
+			} finally {
+				await f.dispose();
+			}
+		});
+	}
+
+	test('accepts a manifest of exactly the desktop limit', async () => {
+		const f = await staged();
+		try {
+			await fs.writeFile(f.manifestPath, JSON.stringify(manifest).padEnd(4 * 1024, ' '));
+			assert.equal((await fs.stat(f.manifestPath)).size, 4 * 1024);
+			assert.deepStrictEqual((await verifyStagedService({ appDirectory: f.options.appDirectory, expectedProtocolVersion: 1 })).manifest, manifest);
+		} finally {
+			await f.dispose();
+		}
+	});
+
+	test('rejects a missing folder, extra content, a missing manifest, and an empty executable', async () => {
+		const f = await fixture();
+		try {
+			await assert.rejects(verifyStagedService({ appDirectory: f.options.appDirectory, expectedProtocolVersion: 1 }), { code: 'ENOENT' });
+			await stageServiceArtifact(f.options);
+			const extra = path.join(f.output, 'stale.dll');
+			await fs.writeFile(extra, 'stale');
+			await assert.rejects(verifyStagedService({ appDirectory: f.options.appDirectory, expectedProtocolVersion: 1 }), /must hold exactly/);
+			await fs.rm(extra);
+			const manifestBytes = await fs.readFile(path.join(f.output, 'manifest.json'));
+			await fs.rm(path.join(f.output, 'manifest.json'));
+			await assert.rejects(verifyStagedService({ appDirectory: f.options.appDirectory, expectedProtocolVersion: 1 }), /must hold exactly/);
+			await fs.writeFile(path.join(f.output, 'manifest.json'), manifestBytes);
+			await fs.writeFile(path.join(f.output, 'cloudforge-service.exe'), '');
+			await assert.rejects(verifyStagedService({ appDirectory: f.options.appDirectory, expectedProtocolVersion: 1 }), /nonempty regular file/);
+		} finally {
+			await f.dispose();
+		}
+	});
+
+	test('rejects a junctioned service folder', async () => {
+		const f = await staged();
+		try {
+			const elsewhere = path.join(f.root, 'elsewhere');
+			await fs.rename(f.output, elsewhere);
+			await fs.symlink(elsewhere, f.output, 'junction');
+			await assert.rejects(verifyStagedService({ appDirectory: f.options.appDirectory, expectedProtocolVersion: 1 }), /regular directory, not a link/);
+		} finally {
+			await f.dispose();
+		}
+	});
+
+	for (const [name, message] of [['manifest.json', /manifest must be a regular file, not a link/], ['cloudforge-service.exe', /executable must be a nonempty regular file, not a symbolic link/]] as const) {
+		test(`rejects a symbolically linked ${name}`, async t => {
+			const f = await staged();
+			try {
+				const target = path.join(f.root, name);
+				await fs.rename(path.join(f.output, name), target);
+				try {
+					await fs.symlink(target, path.join(f.output, name), 'file');
+				} catch (error) {
+					if ((error as NodeJS.ErrnoException).code === 'EPERM') {
+						// Windows file symbolic links need Developer Mode or elevation. Report a skip, not a pass.
+						t.skip('file symbolic links are not permitted for this user');
+						return;
+					}
+					throw error;
+				}
+				await assert.rejects(verifyStagedService({ appDirectory: f.options.appDirectory, expectedProtocolVersion: 1 }), message);
+			} finally {
+				await f.dispose();
+			}
+		});
+	}
+
+	test('CLI verifies a staged fixture, reports drift with exit code 1, and rejects --artifact in verify mode', async () => {
+		const f = await staged();
+		try {
+			const script = path.resolve(import.meta.dirname, '../../cloudforge/serviceArtifact.ts');
+			const run = (args: string[]) => spawnSync(process.execPath, [script, '--verify', ...args], { encoding: 'utf8' });
+			const app = ['--app-directory', f.options.appDirectory];
+			const ok = run([...app, '--sha256', sha256, '--service-commit', serviceCommit, '--protocol', '1', '--desktop-commit', desktopCommit]);
+			assert.deepStrictEqual({ status: ok.status, result: JSON.parse(ok.stdout) }, { status: 0, result: { directory: f.output, manifest, size: bytes.length } });
+			const statuses = (cases: Record<string, string[]>) => Object.fromEntries(Object.entries(cases).map(([name, args]) => [name, run(args).status]));
+			assert.deepStrictEqual(statuses({
+				missingApp: ['--protocol', '1'],
+				missingProtocol: app,
+				withArtifact: [...app, '--protocol', '1', '--artifact', f.options.artifactPath],
+				badProtocol: [...app, '--protocol', '01'],
+				otherProtocol: [...app, '--protocol', '2'],
+				otherSha256: [...app, '--protocol', '1', '--sha256', 'c'.repeat(64)],
+				otherServiceCommit: [...app, '--protocol', '1', '--service-commit', 'c'.repeat(40)],
+				otherDesktopCommit: [...app, '--protocol', '1', '--desktop-commit', 'c'.repeat(40)],
+			}), { missingApp: 1, missingProtocol: 1, withArtifact: 1, badProtocol: 1, otherProtocol: 1, otherSha256: 1, otherServiceCommit: 1, otherDesktopCommit: 1 });
+			await fs.appendFile(f.executablePath, 'signed');
+			const drift = run([...app, '--protocol', '1']);
+			assert.equal(drift.status, 1);
+			assert.match(drift.stderr, /^CloudForge service verification failed: .*Restage after signing/);
 		} finally {
 			await f.dispose();
 		}

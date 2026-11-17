@@ -62,11 +62,26 @@ An existing staging directory, file, or junction is rejected unchanged. A failed
 
 The directory is not published atomically. The caller must await successful completion; downstream consumers must require a complete, valid manifest and verify the executable against it. Run this as a serialized packaging step against trusted build directories, not as a filesystem authorization boundary for the extension or Webview.
 
+## Verifying a staged or installed service
+
+`--verify` rechecks an existing `cloudforge-service` folder without changing it:
+
+```powershell
+node build/cloudforge/serviceArtifact.ts --verify --app-directory <resources/app> --protocol <n> `
+  [--sha256 <digest>] [--service-commit <sha>] [--desktop-commit <sha>]
+```
+
+`--protocol` is required because the desktop launches only its own protocol version; the proof uses `1`.
+
+It requires a regular directory holding exactly `cloudforge-service.exe` and `manifest.json`, neither a link. The manifest must be BOM-free UTF-8 JSON of at most 4 KiB with exactly the four runtime fields, lowercase hex, `architecture: "x64"`, and a positive integer protocol. The executable must be a nonempty regular file and match the manifest digest. With `--protocol` set to the desktop's version, these checks are at least as strict as the desktop's launch check. Each optional flag pins one value to the trusted build inputs; `--desktop-commit` checks the packaged `product.json`. Success prints JSON with the directory, manifest, and executable size. Any mismatch exits with code 1 and names the failed check.
+
+The proof script runs this gate with every flag pinned immediately before the Inno tasks. Use the same command on an installed `resources\app` folder during installed smoke. Like staging, verification proves byte identity against the recorded manifest. It does not authenticate the manifest, inspect PE architecture, or check signatures.
+
 ## Signing and integration
 
 Signing changes executable bytes. Stage final signed service bytes, or refresh and reverify the manifest against final bytes after any signing step that modifies the staged executable. The existing Windows signer can sign executables recursively, so its ordering must be resolved before adding an automatic packaging hook. A pre-sign digest must not remain in a released package after the binary changes.
 
-The proof installer is unsigned, so the staged bytes are final. A signed release must sign `cloudforge-service.exe` before staging, or run the stager again on the signed bytes, and must keep the recursive payload signer from changing the staged executable afterwards. A pre-sign digest must not remain in a released package.
+The proof installer is unsigned, so the staged bytes are final. A signed release must sign `cloudforge-service.exe` before staging, or run the stager again on the signed bytes, and must keep the recursive payload signer from changing the staged executable afterwards. A pre-sign digest must not remain in a released package. The pre-Inno `--verify` gate in the proof script fails the build if the staged executable was rewritten after staging, so any signing pass must run before it.
 
 For the `cloudforge-proof` product, [code.iss](../../build/win32/code.iss) deletes `resources/app/cloudforge-service` during a normal install or upgrade (`InstallDelete`, skipped for background updates like the other payload entries). The service is therefore replaced as a unit and no stale executable or manifest survives. Uninstall removes the installed files as before.
 
@@ -74,4 +89,4 @@ The [product handoff](../../HANDOFF.md#verified-windows-installer-proof) records
 
 ## Validation
 
-`node --test build/lib/test/cloudforgeServiceArtifact.test.ts` covers byte identity, the exact runtime manifest shape and size, invalid protocol versions, invalid inputs/package metadata, symbolic links and junctions, existing destinations, corrupt/interrupted copies, preservation during cleanup, concurrent staging, and CLI success/failure. The fixture bytes are never executed. Targeted TypeScript checking and `corepack pnpm run oxlint build/cloudforge/serviceArtifact.ts build/lib/test/cloudforgeServiceArtifact.test.ts` cover the two changed build-tool files.
+`node --test build/lib/test/cloudforgeServiceArtifact.test.ts` covers byte identity, the exact runtime manifest shape and size, invalid protocol versions, invalid inputs/package metadata, symbolic links and junctions, existing destinations, corrupt/interrupted copies, preservation during cleanup, concurrent staging, and CLI success/failure. Its verification suite covers a read-only pass, an executable rewritten after staging, each pinned expectation, malformed and noncanonical manifests, missing or extra files, a junction folder and a linked manifest, and the `--verify` CLI. The fixture bytes are never executed. Targeted TypeScript checking and `corepack pnpm run oxlint build/cloudforge/serviceArtifact.ts build/lib/test/cloudforgeServiceArtifact.test.ts` cover the two changed build-tool files.
