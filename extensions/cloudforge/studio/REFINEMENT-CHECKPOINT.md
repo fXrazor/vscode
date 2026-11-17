@@ -112,3 +112,9 @@ Preserve the source checkout. Do not share node_modules between worktrees or mod
 ## Current limits
 
 No 100% pixel or feature parity claim has been made. Architecture content, CloudForge identity, quieter grid and whiteboard tools intentionally differ; sample JSON, partial provider forms and disconnected services remain substantive differences. Reload resets the in-memory graph. Unapplied code drafts survive panel transitions only within the current tab, not browser reload. PDF save, large-graph performance and packaged desktop integration remain unverified.
+
+## Saved revision and validation scope
+
+Implementation checkpoint commit: e780e4d3b7a (local, not pushed). Node dependencies and dist output are ignored and were not committed. Source and bundled preview assets were saved.
+
+The repository-wide staged whitespace check reports pre-existing whitespace in copied vendor distributions/assets. Those third-party files were preserved byte-for-byte rather than reformatted. The scoped check of authored source, scripts, package/lock files and handoff/checkpoint documentation passed. TypeScript, all ten tests and standalone build passed immediately before saving.
