@@ -242,22 +242,19 @@ A cross-session message about the split was held by the `stingaree` session and 
 | --- | --- |
 | `node --test extensions/cloudforge/test/projectModel.test.ts` | 8 passed. Every project, inspection, and Git result in the 18 CloudForge fixtures parses. Unsafe data is refused: credential remotes, finding values, foreign links, and bad indexes. |
 | Extension type check (`tsc6 -p extensions/cloudforge`) and core type check (TypeScript 7 `tsc --project src/tsconfig.json --noEmit --skipLibCheck`) | Both passed. The TypeScript 6 core check ran out of memory at 8 GB, so TypeScript 7 was used, as in the Stage 1 tests. |
-| `build/oxlint.ts` and `build/hygiene.ts` on all changed files | Passed. `code-no-accessor-after-await` caught services taken after an `await` in the bridge; this was fixed before commit. Hygiene refuses new `.mjs` files, so the test is TypeScript. Codex's `terraformDetection.test.mjs` will hit the same rule. |
+| `build/oxlint.ts` and `build/hygiene.ts` on all changed files | Passed. `code-no-accessor-after-await` caught services taken after an `await` in the bridge; this was fixed before commit. Hygiene refuses new `.mjs` files, so the test is TypeScript. Codex's tests were renamed to `.ts` on integration. |
 | esbuild bundle of the extension | 58 KB, including all seven project modules. |
 
 **Not done or not verified:**
 
-- No desktop build or interactive run. The flows need D1's broker methods, which are not on `main` yet.
-- The controller's Terraform check (`hasTerraform`) duplicates Codex's `findTerraformImportCandidates`. Switch to that module when both branches merge.
-- `.vscodeignore` still ships `test/`. Codex's branch adds the exclusion.
+- No desktop build or interactive run. The [Stage 2 desktop integration](#stage-2-desktop-integration-2026-11-17) replaced `hasTerraform` with Codex's detection and added the `test/` exclusion to `.vscodeignore`.
 
 ## Next actions
 
 The [Runner View design](docs/cloudforge/runner-view-design.md) is a documentation proposal based on desktop `main` at `c9f463818ef` in `Z:\CloudForge-Code`. This work adds the design and this handoff entry. The first slice would validate a saved Terraform revision offline and present the execution in the Workbench. The local links resolved and the documentation whitespace checks passed. Review the scope and name an integration owner before defining the service capability or starting implementation.
 
-1. **Stage 2 desktop.** The [extension slice](#stage-2-extension-slice-2026-11-17) (D2, D4–D7, D9) and the [D1 broker](#stage-2-d1-electron-main-broker-2026-11-17) are merged on `main`. The extension can now reach the Stage 2 methods through Electron main.
-   - **Remaining:** Codex's D3 and D8 branch (`codex/stage2-terraform-detection`).
-   - **After those merge:** replace `hasTerraform` in `extensions/cloudforge/src/project/controller.ts` with `findTerraformImportCandidates`, and rename Codex's test to `.ts`. Then build, package, and run the installed smoke against the design's 12 acceptance criteria.
+1. **Stage 2 desktop.** The [extension slice](#stage-2-extension-slice-2026-11-17) (D2, D4–D7, D9) and the [D1 broker](#stage-2-d1-electron-main-broker-2026-11-17) are on `main`. Codex's D3 and D8 work is on `fxrazor/stage2-integration`, wired into the import flow (see [Stage 2 desktop integration](#stage-2-desktop-integration-2026-11-17)).
+   - **Remaining:** merge `fxrazor/stage2-integration` into `main`. Then build, package with the Rust service from CloudForge `main` (`ca09ef6` or later), and run the installed smoke against the design's 12 acceptance criteria, including the Welcome entry.
    - **Contract:** the [protocol's Stage 2 section](Z:/CloudForge/docs/protocol/cloudforge-service-v1.md#stage-2-projects-with-repositories) and [fixtures](Z:/CloudForge/docs/protocol/fixtures/stage2/README.md). Broker-supplied paths (`projectPath`, `workspaceFolders`, `folderPath`, `parentPath`) come from Electron main, never from the extension.
    - **Already done on CloudForge `main`:** Phase 0 and the Rust tasks (`ae5785d`, `ca09ef6`).
 2. Before a signed release, sign the service before staging. The pre-Inno `--verify` gate checks the final signed executable against the manifest digest. See the [staging guide](docs/cloudforge/service-artifact.md#signing-and-integration).
@@ -280,3 +277,30 @@ The preview installer from `Z:\CFStage\Code` at `696a213e335` was 321,099,975 by
 - The chat and agent panel are unchanged.
 
 Screenshots are in the preview session scratchpad (`look-welcome.png`, `look-walkthrough.png`, `look-light.png`). The user's own installed profile had already selected Tokyo Night Light.
+
+## Stage 2 desktop integration (2026-11-17)
+
+Branch `fxrazor/stage2-integration` in `Z:\CloudForge-Code\.claude\worktrees\stage2-integration`, based on `main` at `70c72e1b523`, which has the D1 broker and the extension slice. It merges Codex's `codex/stage2-desktop-integration` at `faa65e8f83f` without conflicts. Codex's branch was built in `Z:\CFWelcome` and adds:
+
+- the Welcome entry **Clone into a CloudForge project…**, which calls `cloudforge.cloneRepository`;
+- `findTerraformImportCandidates`, which detects Terraform by file name;
+- `validateImportSelections`;
+- the `test/**` exclusion in `.vscodeignore`.
+
+Codex reported its Welcome syntax check, five logic tests, and strict TypeScript check as passing. The branch uses the Stage 2 contract from CloudForge `ae5785d`.
+
+Integration changes:
+
+- **Import offer:** uses `findTerraformImportCandidates` and excludes ignored folders, the project folder, and registered repos. `hasTerraform` is removed.
+- **Architecture names:** the name prompt and a final check before `importRepository` use `validateImportSelections`. It applies the service's Windows naming rules, including reserved device names, and refuses case-insensitive name collisions.
+- **Tests:** Codex's two tests are now `.test.ts`, because hygiene refuses new `.mjs` files.
+- **Reserved-name pattern:** uses `\u00B9\u00B2\u00B3` escapes instead of literal superscript digits, which hygiene also refuses.
+
+| Check | Result |
+| --- | --- |
+| `node --test extensions/cloudforge/test/*.test.ts` | 13 passed: 8 project model, 3 import selection, 2 Terraform detection. |
+| Extension type check (`tsc6`) and core type check (TypeScript 7) | Both passed. The two new tests also type-check against the extension sources. |
+| `build/oxlint.ts` and `build/hygiene.ts` on all 8 changed files | Passed after the escape fix. |
+| esbuild bundle of the extension | 61,759 bytes, including the detection and selection modules. |
+
+**Not done:** no desktop build, package, or interactive run. The Welcome entry, the import offer after a clone, and the 12 acceptance criteria still need the installed smoke.
