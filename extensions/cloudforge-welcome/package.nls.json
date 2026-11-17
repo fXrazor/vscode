@@ -1,0 +1,15 @@
+{
+	"displayName": "CloudForge Welcome",
+	"description": "Adds the CloudForge getting-started walkthrough to the Welcome page.",
+	"walkthrough.title": "Get started with CloudForge",
+	"walkthrough.description": "Open your cloud infrastructure, check the local CloudForge service, and set up your workspace.",
+	"media.altText": "The CloudForge logo",
+	"step.openWorkspace.title": "Open a CloudForge workspace",
+	"step.openWorkspace.description": "Choose a CloudForge project or a Terraform folder. CloudForge reads it without changing your files.\n[Open Workspace](command:cloudforge.openWorkspace)",
+	"step.service.title": "Check the CloudForge service",
+	"step.service.description": "CloudForge runs a local service for guarded file access and Terraform analysis. Check that it started and which version is running.\n[Show Service Status](command:cloudforge.showProofStatus)",
+	"step.theme.title": "Choose your theme",
+	"step.theme.description": "CloudForge uses Tokyo Night by default, and Tokyo Night Light when your system uses light mode.\n[Browse Color Themes](command:workbench.action.selectTheme)",
+	"step.terminal.title": "Use the terminal for your cloud tools",
+	"step.terminal.description": "Run your own scripts and cloud CLIs in the integrated terminal. CloudForge never runs them for you without asking.\n[Open Terminal](command:workbench.action.terminal.new)"
+}

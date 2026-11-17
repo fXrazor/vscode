@@ -1,0 +1,56 @@
+{
+  "name": "cloudforge-welcome",
+  "displayName": "%displayName%",
+  "description": "%description%",
+  "version": "0.1.0",
+  "publisher": "vscode",
+  "license": "MIT",
+  "engines": {
+    "vscode": "*"
+  },
+  "categories": ["Other"],
+  "contributes": {
+    "walkthroughs": [
+      {
+        "id": "cloudforge.welcome",
+        "title": "%walkthrough.title%",
+        "description": "%walkthrough.description%",
+        "when": "!isWeb",
+        "steps": [
+          {
+            "id": "cloudforge.welcome.openWorkspace",
+            "title": "%step.openWorkspace.title%",
+            "description": "%step.openWorkspace.description%",
+            "completionEvents": ["onCommand:cloudforge.openWorkspace"],
+            "media": { "image": "media/cloudforge.png", "altText": "%media.altText%" }
+          },
+          {
+            "id": "cloudforge.welcome.service",
+            "title": "%step.service.title%",
+            "description": "%step.service.description%",
+            "completionEvents": ["onCommand:cloudforge.showProofStatus"],
+            "media": { "image": "media/cloudforge.png", "altText": "%media.altText%" }
+          },
+          {
+            "id": "cloudforge.welcome.theme",
+            "title": "%step.theme.title%",
+            "description": "%step.theme.description%",
+            "completionEvents": ["onCommand:workbench.action.selectTheme"],
+            "media": { "image": "media/cloudforge.png", "altText": "%media.altText%" }
+          },
+          {
+            "id": "cloudforge.welcome.terminal",
+            "title": "%step.terminal.title%",
+            "description": "%step.terminal.description%",
+            "completionEvents": ["onCommand:workbench.action.terminal.new"],
+            "media": { "image": "media/cloudforge.png", "altText": "%media.altText%" }
+          }
+        ]
+      }
+    ]
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fXrazor/vscode.git"
+  }
+}
