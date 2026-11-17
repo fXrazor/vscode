@@ -14,7 +14,18 @@ import { stageServiceArtifact, verifyStagedService } from '../../cloudforge/serv
 
 const desktopCommit = 'a'.repeat(40);
 const serviceCommit = 'b'.repeat(40);
-const bytes = Buffer.from('Service artifact fixture. Never executed.');
+// Inert fixture with one PE32+ section header and no executable code.
+const peOffset = 0x80;
+const optionalHeaderSize = 0xf0;
+const bytes = Buffer.alloc(peOffset + 24 + optionalHeaderSize + 40);
+bytes.write('MZ');
+bytes.writeUInt32LE(peOffset, 0x3c);
+bytes.write('PE\0\0', peOffset);
+bytes.writeUInt16LE(0x8664, peOffset + 4); // AMD64
+bytes.writeUInt16LE(1, peOffset + 6); // NumberOfSections
+bytes.writeUInt16LE(optionalHeaderSize, peOffset + 20);
+bytes.writeUInt16LE(0x0002, peOffset + 22); // Executable image
+bytes.writeUInt16LE(0x020b, peOffset + 24); // PE32+
 const sha256 = createHash('sha256').update(bytes).digest('hex');
 
 async function fixture() {
@@ -288,6 +299,44 @@ suite('CloudForge staged service verification', () => {
 	}
 
 	const manifest = { serviceCommit, protocolVersion: 1, architecture: 'x64', sha256 };
+
+	const invalidHeaders: [string, (header: Buffer) => void, RegExp][] = [
+		['x86', header => header.writeUInt16LE(0x014c, peOffset + 4), /must target Windows x64/],
+		['ARM64', header => header.writeUInt16LE(0xaa64, peOffset + 4), /must target Windows x64/],
+		['DLL', header => header.writeUInt16LE(0x2002, peOffset + 22), /must be a Windows PE executable image/],
+		['object file', header => header.writeUInt16LE(0, peOffset + 22), /must be a Windows PE executable image/],
+		['missing MZ signature', header => header.writeUInt16LE(0, 0), /invalid Windows PE headers/],
+		['missing PE signature', header => header.writeUInt32LE(0, peOffset), /invalid Windows PE headers/],
+		['out-of-bounds PE header', header => header.writeUInt32LE(0xffffffff, 0x3c), /invalid Windows PE headers/],
+		['PE32 optional header', header => header.writeUInt16LE(0x010b, peOffset + 24), /invalid Windows PE headers/],
+		['truncated section table', header => header.writeUInt16LE(2, peOffset + 6), /invalid Windows PE headers/],
+	];
+	for (const [name, changeHeader, message] of invalidHeaders) {
+		test(`rejects ${name} even when the executable matches the expected digest`, async () => {
+			const f = await fixture();
+			try {
+				const invalid = Buffer.from(bytes);
+				changeHeader(invalid);
+				const digest = createHash('sha256').update(invalid).digest('hex');
+				await fs.writeFile(f.options.artifactPath, invalid);
+				await assert.rejects(stageServiceArtifact({ ...f.options, expectedSha256: digest }), message);
+				assert.deepStrictEqual(await fs.readdir(f.options.appDirectory), ['product.json']);
+
+				// A matching manifest also cannot make an invalid binary pass the read-only gate.
+				await fs.mkdir(f.output);
+				const executablePath = path.join(f.output, 'cloudforge-service.exe');
+				const manifestPath = path.join(f.output, 'manifest.json');
+				const invalidManifest = JSON.stringify({ ...manifest, sha256: digest });
+				await fs.writeFile(executablePath, invalid);
+				await fs.writeFile(manifestPath, invalidManifest);
+				await assert.rejects(verifyStagedService({ appDirectory: f.options.appDirectory, expectedProtocolVersion: 1 }), message);
+				assert.deepStrictEqual(await fs.readFile(executablePath), invalid);
+				assert.strictEqual(await fs.readFile(manifestPath, 'utf8'), invalidManifest);
+			} finally {
+				await f.dispose();
+			}
+		});
+	}
 
 	test('accepts a freshly staged folder with only the required protocol or every expectation pinned, read-only', async () => {
 		const f = await staged();

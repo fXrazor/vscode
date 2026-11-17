@@ -31,7 +31,7 @@ These variables must come from the selected build inputs. Recomputing a digest f
 
 ## Output and failure behavior
 
-The tool checks the existing app directory and its product commit before making any changes. It rejects empty/non-file/symbolic-link artifacts and a mismatching SHA-256. It then reserves a new `cloudforge-service` directory exclusively, streams the copy, verifies the copied bytes again, and writes `manifest.json` last. Successful stdout is JSON containing the staged directory and manifest. Failure sets exit code 1.
+The tool checks the existing app directory and its product commit before making any changes. It requires a nonempty regular file with a matching SHA-256 and Windows x64 (AMD64) executable headers. It checks the PE signature, machine type, executable and DLL flags, PE32+ format, and header bounds. It then reserves a new `cloudforge-service` directory exclusively, streams the copy, repeats the artifact checks, and writes `manifest.json` last. Successful stdout is JSON containing the staged directory and manifest. Failure sets exit code 1. See [Microsoft's PE format reference](https://learn.microsoft.com/en-us/windows/win32/debug/pe-format).
 
 The staged layout is the one `src/vs/code/electron-main/cloudForgeService.ts` loads from the app root:
 
@@ -54,7 +54,7 @@ The staged layout is the one `src/vs/code/electron-main/cloudForgeService.ts` lo
 }
 ```
 
-At startup the desktop rejects an invalid manifest, a different protocol version, or an executable whose SHA-256 differs. It then sends `serviceCommit` in `initialize` and the service rejects a different embedded commit. The tool checks the packaged desktop commit but does not record it; `product.json` already carries it. The service commit, protocol, and architecture fields are declarations: this tool does not inspect PE architecture, attest source provenance, negotiate protocol compatibility, or verify Authenticode signatures.
+At startup the desktop rejects an invalid manifest, a different protocol version, or an executable whose SHA-256 differs. It then sends `serviceCommit` in `initialize` and the service rejects a different embedded commit. The tool checks the desktop commit against `product.json`. The manifest records the verified `x64` architecture and digest alongside the service commit and protocol version supplied by the caller.
 
 The proof script removes a previous `cloudforge-service` directory from a reused payload (`-UseBuiltDesktop`) only when it holds exactly `cloudforge-service.exe` and `manifest.json` and neither is a link. Any other content stops packaging unchanged.
 
@@ -73,9 +73,9 @@ node build/cloudforge/serviceArtifact.ts --verify --app-directory <resources/app
 
 `--protocol` is required because the desktop launches only its own protocol version; the proof uses `1`.
 
-It requires a regular directory holding exactly `cloudforge-service.exe` and `manifest.json`, neither a link. The manifest must be BOM-free UTF-8 JSON of at most 4 KiB with exactly the four runtime fields, lowercase hex, `architecture: "x64"`, and a positive integer protocol. The executable must be a nonempty regular file and match the manifest digest. With `--protocol` set to the desktop's version, these checks are at least as strict as the desktop's launch check. Each optional flag pins one value to the trusted build inputs; `--desktop-commit` checks the packaged `product.json`. Success prints JSON with the directory, manifest, and executable size. Any mismatch exits with code 1 and names the failed check.
+It requires a regular directory holding exactly `cloudforge-service.exe` and `manifest.json`, neither a link. The manifest must be BOM-free UTF-8 JSON of at most 4 KiB with exactly the four runtime fields, lowercase hex, `architecture: "x64"`, and a positive integer protocol. The executable must pass the same file, digest, and PE header checks as staging. Each optional flag pins one value to the trusted build inputs. `--desktop-commit` checks the packaged `product.json`. Success prints JSON with the directory, manifest, and executable size. Any mismatch exits with code 1 and names the failed check.
 
-The proof script runs this gate with every flag pinned immediately before the Inno tasks. Use the same command on an installed `resources\app` folder during installed smoke. Like staging, verification proves byte identity against the recorded manifest. It does not authenticate the manifest, inspect PE architecture, or check signatures.
+The proof script runs this gate with every flag pinned immediately before the Inno tasks. Use the same command on an installed `resources\app` folder during installed smoke. Source provenance and Authenticode signature verification require separate evidence. Installed smoke checks that Windows can load the executable and that the desktop and service can complete the handshake.
 
 ## Signing and integration
 
@@ -89,4 +89,4 @@ The [product handoff](../../HANDOFF.md#verified-windows-installer-proof) records
 
 ## Validation
 
-`node --test build/lib/test/cloudforgeServiceArtifact.test.ts` covers byte identity, the exact runtime manifest shape and size, invalid protocol versions, invalid inputs/package metadata, symbolic links and junctions, existing destinations, corrupt/interrupted copies, preservation during cleanup, concurrent staging, and CLI success/failure. Its verification suite covers a read-only pass, an executable rewritten after staging, each pinned expectation, malformed and noncanonical manifests, missing or extra files, a junction folder and a linked manifest, and the `--verify` CLI. The fixture bytes are never executed. Targeted TypeScript checking and `corepack pnpm run oxlint build/cloudforge/serviceArtifact.ts build/lib/test/cloudforgeServiceArtifact.test.ts` cover the two changed build-tool files.
+`node --test build/lib/test/cloudforgeServiceArtifact.test.ts` covers byte identity, the exact runtime manifest shape and size, invalid protocol versions, invalid inputs/package metadata, symbolic links and junctions, existing destinations, corrupt/interrupted copies, preservation during cleanup, concurrent staging, and CLI success/failure. Both staging and verification reject wrong machine types, DLLs, and invalid PE headers with matching digests. The verification suite also covers a read-only pass, an executable rewritten after staging, each pinned expectation, malformed and noncanonical manifests, missing or extra files, a junction folder and a linked manifest, and the `--verify` CLI. The fixture bytes are never executed. Targeted TypeScript checking and `corepack pnpm run oxlint build/cloudforge/serviceArtifact.ts build/lib/test/cloudforgeServiceArtifact.test.ts` cover the two build-tool files.

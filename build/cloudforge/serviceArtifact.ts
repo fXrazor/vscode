@@ -3,12 +3,12 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { parseArgs } from 'node:util';
-import { sha256OfFile } from '../agent-sdk/common.ts';
 
 interface ServiceArtifactOptions {
 	artifactPath: string;
@@ -43,13 +43,57 @@ function validateHex(value: string, length: number, name: string): string {
 	return value.toLowerCase();
 }
 
-async function verifyArtifact(artifactPath: string, expectedSha256: string): Promise<number> {
+async function verifyWindowsX64Executable(file: fs.FileHandle, size: number): Promise<void> {
+	const invalidHeader = 'Service executable has invalid Windows PE headers.';
+	const dosHeader = Buffer.alloc(64);
+	const dosRead = await file.read(dosHeader, 0, dosHeader.length, 0);
+	if (dosRead.bytesRead !== dosHeader.length || dosHeader.readUInt16LE(0) !== 0x5a4d) { // MZ
+		throw new Error(invalidHeader);
+	}
+
+	const peOffset = dosHeader.readUInt32LE(0x3c);
+	// Read the PE signature, the 20-byte COFF header, and the optional header magic.
+	const peHeader = Buffer.alloc(26);
+	if (peOffset < dosHeader.length || peOffset > size - peHeader.length) {
+		throw new Error(invalidHeader);
+	}
+	const peRead = await file.read(peHeader, 0, peHeader.length, peOffset);
+	if (peRead.bytesRead !== peHeader.length || peHeader.readUInt32LE(0) !== 0x00004550) { // PE\0\0
+		throw new Error(invalidHeader);
+	}
+	if (peHeader.readUInt16LE(4) !== 0x8664) { // IMAGE_FILE_MACHINE_AMD64
+		throw new Error('Service executable must target Windows x64 (AMD64).');
+	}
+	const characteristics = peHeader.readUInt16LE(22);
+	if (!(characteristics & 0x0002) || (characteristics & 0x2000)) { // Executable image, excluding DLLs
+		throw new Error('Service executable must be a Windows PE executable image.');
+	}
+	const sectionCount = peHeader.readUInt16LE(6);
+	const optionalHeaderSize = peHeader.readUInt16LE(20);
+	const sectionTableEnd = peOffset + 24 + optionalHeaderSize + sectionCount * 40;
+	// PE32+ has 112 fixed bytes before data directories. Windows allows at most 96 sections.
+	if (peHeader.readUInt16LE(24) !== 0x020b || optionalHeaderSize < 112 || sectionCount < 1 || sectionCount > 96 || sectionTableEnd > size) {
+		throw new Error(invalidHeader);
+	}
+}
+
+async function verifyArtifact(artifactPath: string, expectedSha256: string, digestMismatch = 'Service artifact SHA-256 does not match the expected digest.'): Promise<number> {
 	const stat = await fs.lstat(artifactPath);
 	if (!stat.isFile() || stat.size === 0) {
-		throw new Error('Service artifact must be a nonempty regular file, not a symbolic link.');
+		throw new Error('Service executable must be a nonempty regular file, not a symbolic link.');
 	}
-	if (await sha256OfFile(artifactPath) !== expectedSha256) {
-		throw new Error('Service artifact SHA-256 does not match the expected digest.');
+	const file = await fs.open(artifactPath, 'r');
+	try {
+		const hash = createHash('sha256');
+		for await (const chunk of file.createReadStream({ start: 0, autoClose: false })) {
+			hash.update(chunk);
+		}
+		if (hash.digest('hex') !== expectedSha256) {
+			throw new Error(digestMismatch);
+		}
+		await verifyWindowsX64Executable(file, stat.size);
+	} finally {
+		await file.close();
 	}
 	return stat.size;
 }
@@ -79,7 +123,7 @@ async function readPackagedCommit(appDirectory: string): Promise<string | undefi
  * Rechecks a staged or installed service folder without changing it. The checks are at least as
  * strict as the desktop's launch checks: a regular directory holding exactly the executable and the
  * manifest, neither a link, a BOM-free UTF-8 manifest of at most 4 KiB with exactly the runtime
- * fields in canonical lowercase form, and an executable whose bytes match the recorded digest.
+ * fields in canonical lowercase form, and a Windows x64 PE executable matching the recorded digest.
  * The protocol version is required because the desktop accepts only its own version. Run this
  * after any step that may rewrite the executable, such as Authenticode signing, so a pre-sign
  * digest cannot reach an installer. The optional expectations pin the other build inputs.
@@ -161,14 +205,8 @@ export async function verifyStagedService(options: VerifyServiceOptions): Promis
 	}
 
 	const executablePath = path.join(directory, serviceExecutableName);
-	const executableStat = await fs.lstat(executablePath);
-	if (!executableStat.isFile() || executableStat.size === 0) {
-		throw new Error('Service executable must be a nonempty regular file, not a symbolic link.');
-	}
-	if (await sha256OfFile(executablePath) !== sha256) {
-		throw new Error('Service executable SHA-256 does not match its manifest. Restage after signing or any other change to the executable.');
-	}
-	return { directory, manifest: { serviceCommit, protocolVersion, architecture, sha256 }, size: executableStat.size };
+	const size = await verifyArtifact(executablePath, sha256, 'Service executable SHA-256 does not match its manifest. Restage after signing or any other change to the executable.');
+	return { directory, manifest: { serviceCommit, protocolVersion, architecture, sha256 }, size };
 }
 
 async function copyArtifact(source: string, destination: fs.FileHandle): Promise<void> {
@@ -176,8 +214,8 @@ async function copyArtifact(source: string, destination: fs.FileHandle): Promise
 }
 
 /**
- * Stages a locally supplied service in a fresh packaged app. The manifest records caller-supplied
- * source/protocol/target declarations; hashing proves byte identity, not those declarations.
+ * Stages a locally supplied Windows x64 service in a fresh packaged app. The manifest records
+ * the verified target and digest alongside caller-supplied source and protocol declarations.
  * The copy dependency allows testing source changes and I/O failures during staging.
  */
 export async function stageServiceArtifact(options: ServiceArtifactOptions, copy: (source: string, destination: fs.FileHandle) => Promise<void> = copyArtifact): Promise<{ directory: string; manifest: ServiceArtifactManifest }> {

@@ -148,6 +148,13 @@ Not run: a full desktop build, the installer, or installed smoke. The earlier pe
 
 Next action: when a signing step is added, run it before the pre-Inno gate, and restage after signing as the staging guide describes. On the next installed smoke, also run `--verify` against the installed `resources\app` folder.
 
+## Windows x64 service executable validation (2026-11-17)
+
+- Branch `codex/verify-sidecar-architecture` in `Z:\CFArch`, based on desktop `main` at `f1a8b400e6a`.
+- [serviceArtifact.ts](build/cloudforge/serviceArtifact.ts) checks the AMD64 PE32+ executable headers on the supplied binary and staged copy. The pre-Inno and installed `--verify` command applies the same check. A matching SHA-256 alone can no longer admit an x86, ARM64, DLL, or malformed PE artifact.
+- [cloudforgeServiceArtifact.test.ts](build/lib/test/cloudforgeServiceArtifact.test.ts) passed 73 tests. The nine new cases failed against the baseline because staging accepted their matching digests. Targeted strict TypeScript checking passed. The read-only CLI accepted the binaries in `Z:\CFProof` and `Z:\CFStage` with all expected inputs pinned. A scratch staging run with the `CFProof` binary also passed the gate. A fresh installer and installed smoke remain pending.
+- The [staging guide](docs/cloudforge/service-artifact.md) describes the header checks. Before a signed release, stage the final signed bytes and run the pre-Inno verification gate on those bytes.
+
 ## Next actions
 
 1. `main` now contains the verified desktop/service proof and the reconciled stager. Preserve its protocol-1 handshake scope and the canonical [service draft](Z:/CloudForge/docs/protocol/cloudforge-service-v1.md); workspace and graph operations remain the follow-on slice. `feature/workspace-graph-desktop` is based on `0e5307e3c63` and can rebase onto `main` without conflicting files in `build/cloudforge/` or `build/win32/code.iss`. That worktree has uncommitted changes to `cloudForgeService.ts`, so after rebasing rerun `scripts\test.bat --run src/vs/code/test/electron-main/cloudForgeService.test.ts` ([details](#sidecar-handshake-unit-tests-2026-11-17)).
