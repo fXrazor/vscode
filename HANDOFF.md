@@ -105,4 +105,12 @@ Not rerun in this check: the firewall-blocked offline launch, the commit and pro
 
 1. `main` now contains the verified desktop/service proof and the reconciled stager. Preserve its protocol-1 handshake scope and the canonical [service draft](Z:/CloudForge/docs/protocol/cloudforge-service-v1.md); workspace and graph operations remain the follow-on slice. `feature/workspace-graph-desktop` is based on `0e5307e3c63` and can rebase onto `main` without conflicting files in `build/cloudforge/` or `build/win32/code.iss`.
 2. Before a signed release, settle where the service is signed relative to staging and the recursive payload signer.
-3. Keep the integration owner responsible for the desktop/service revision pair, installed smoke, and follow-on window/workspace boundary. Use separate implementation worktrees and preserve the Rust checkout's existing changes.
+3. **CloudForge look (unmerged):** branch `fxrazor/cloudforge-look` (worktree `Z:\CloudForge-Code\.claude\worktrees\cloudforge-look`, commit `696a213e335`) makes the bundled Tokyo Night themes the default (MIT, Enkia, upstream `7c0f11e`, byte-identical). It also adds a "Get started with CloudForge" walkthrough to the unchanged Welcome page. Its installer built from `Z:\CFStage\Code`: SHA-256 `c89a5b30ee02acbb32b96f9ed2803b3d68a8c8ef988bce255d86db0dcb601b34`, 321,099,975 bytes. Not merged; the walkthrough's Open Workspace step needs Stage 1's `cloudforge.openWorkspace`. **Verified 17 November 2026** on that build's portable payload (`Z:\CFStage\VSCode-win32-x64`) with a fresh profile:
+   - Startup used Tokyo Night (editor background `#1a1b26`), and Tokyo Night Light applied `#e6e7ed`.
+   - The theme picker labels them Default Dark and Default Light.
+   - The Welcome page is otherwise unchanged and lists "Get started with CloudForge" under Walkthroughs with its four steps.
+   - The chat and agent panel are unchanged.
+
+   Screenshots are in the session scratchpad (`look-welcome.png`, `look-walkthrough.png`, `look-light.png`). The user's own installed profile had already selected Tokyo Night Light.
+4. **Stage 2 (approved, waits for Stage 1):** follow the [Stage 2 plan](Z:/CloudForge/docs/superpowers/plans/2026-11-17-project-repos-import.md) and [design](Z:/CloudForge/docs/superpowers/specs/2026-11-17-project-repos-import-design.md). Desktop work goes on `feature/project-repos-desktop`, branched from `main` after Stage 1 merges.
+5. Keep the integration owner responsible for the desktop/service revision pair, installed smoke, and follow-on window/workspace boundary. Use separate implementation worktrees and preserve the Rust checkout's existing changes.
