@@ -17,6 +17,8 @@ import {
 	type ExtensionContext,
 	type WorkspaceFolder
 } from 'vscode';
+import { validateImportSelections, type ImportSelection, type ImportSelectionError } from '../importSelections';
+import { findTerraformImportCandidates } from '../terraformDetection';
 import { ensureGit, repositoryRemote } from './git';
 import {
 	cloneUrlPrefix,
@@ -223,22 +225,31 @@ export class ProjectController implements Disposable {
 		if (!picked || picked.length === 0) {
 			return;
 		}
-		const taken = new Set(project.architectures.map(architecture => architecture.displayName.toLowerCase()));
-		const selections: { candidateId: string; displayName: string }[] = [];
+		const existingNames = project.architectures.map(architecture => architecture.displayName);
+		const taken = new Set(existingNames.map(name => name.toLowerCase()));
+		const selections: ImportSelection[] = [];
 		for (const item of picked) {
 			const name = await window.showInputBox({
 				title: l10n.t('Architecture name'),
 				prompt: l10n.t('Name the architecture for {0}', item.label),
 				value: suggestArchitectureName(item.root, inspection.displayName, taken),
-				validateInput: value => !isPathComponent(value.trim())
-					? l10n.t('Use a valid Windows folder name.')
-					: taken.has(value.trim().toLowerCase()) ? l10n.t('An architecture with that name already exists.') : undefined
+				// The same rules the service applies to linked architecture names.
+				validateInput: value => selectionMessage(validateImportSelections(
+					choices,
+					[...selections, { candidateId: item.root.candidateId, displayName: value.trim() }],
+					existingNames
+				))
 			});
 			if (name === undefined) {
 				return;
 			}
 			taken.add(name.trim().toLowerCase());
 			selections.push({ candidateId: item.root.candidateId, displayName: name.trim() });
+		}
+		const invalid = selectionMessage(validateImportSelections(inspection.terraformRoots, selections, existingNames));
+		if (invalid) {
+			void window.showErrorMessage(invalid);
+			return;
 		}
 		const remote = await repositoryRemote(folder.uri);
 		const imported = await callProjectService('importRepository', {
@@ -337,12 +348,13 @@ export class ProjectController implements Disposable {
 
 	private async offerImport(index: number, afterClone: boolean): Promise<void> {
 		const folder = workspace.workspaceFolders?.[index];
-		const ignored = new Set(this.context.workspaceState.get<string[]>(IGNORED_FOLDERS_KEY, []));
-		if (!folder || folder.uri.scheme !== 'file' || ignored.has(folder.uri.toString()) || (!afterClone && this.offered.has(folder.uri.toString()))) {
+		if (!folder || (!afterClone && this.offered.has(folder.uri.toString()))) {
 			return;
 		}
+		// Mark before any await so the debounced reconnect after a clone does not offer it twice.
 		this.offered.add(folder.uri.toString());
-		if (!(await hasTerraform(folder))) {
+		const [candidate] = await findTerraformImportCandidates([folder], this.importExclusions(), findFilesInFolder);
+		if (!candidate) {
 			return;
 		}
 		const importLabel = l10n.t('Import…');
@@ -357,8 +369,27 @@ export class ProjectController implements Disposable {
 		if (choice === importLabel) {
 			await this.importFolder(index);
 		} else if (choice === ignore) {
-			await this.context.workspaceState.update(IGNORED_FOLDERS_KEY, [...ignored, folder.uri.toString()]);
+			const ignored = new Set(this.context.workspaceState.get<string[]>(IGNORED_FOLDERS_KEY, []));
+			ignored.add(folder.uri.toString());
+			await this.context.workspaceState.update(IGNORED_FOLDERS_KEY, [...ignored]);
 		}
+	}
+
+	/** Folders never offered for import: ignored ones, the project folder, and registered repos. */
+	private importExclusions(): Set<string> {
+		const excluded = new Set(this.context.workspaceState.get<string[]>(IGNORED_FOLDERS_KEY, []));
+		const project = this.projectFolder();
+		if (project) {
+			excluded.add(project.toString());
+		}
+		const folders = workspace.workspaceFolders ?? [];
+		for (const repository of this.project?.repositories ?? []) {
+			const folder = repository.workspaceFolderIndex === undefined ? undefined : folders[repository.workspaceFolderIndex];
+			if (folder) {
+				excluded.add(folder.uri.toString());
+			}
+		}
+		return excluded;
 	}
 
 	/** A project folder opened as a plain folder: offer its workspace file instead. */
@@ -484,9 +515,25 @@ async function exists(uri: Uri): Promise<boolean> {
 }
 
 /** Detection by file name only: no file contents are read before the user agrees to import. */
-async function hasTerraform(folder: WorkspaceFolder): Promise<boolean> {
-	const matches = await workspace.findFiles(new RelativePattern(folder, '**/*.{tf,tf.json}'), '**/.terraform/**', 1);
-	return matches.length > 0;
+function findFilesInFolder(folder: WorkspaceFolder, include: string, exclude: string, maxResults: number): Thenable<Uri[]> {
+	return workspace.findFiles(new RelativePattern(folder, include), exclude, maxResults);
+}
+
+function selectionMessage(error: ImportSelectionError | undefined): string | undefined {
+	switch (error) {
+		case undefined:
+			return undefined;
+		case 'invalidName':
+			return l10n.t('Use a valid Windows folder name.');
+		case 'duplicateName':
+			return l10n.t('An architecture with that name already exists.');
+		case 'noSelection':
+			return l10n.t('Choose at least one Terraform root to import.');
+		case 'duplicateCandidate':
+			return l10n.t('That Terraform root is already selected.');
+		case 'candidateUnavailable':
+			return l10n.t('That Terraform root is no longer available. Try the import again.');
+	}
 }
 
 async function pickProvider(): Promise<CloneProvider | undefined> {

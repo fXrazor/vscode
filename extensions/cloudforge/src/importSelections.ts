@@ -13,14 +13,14 @@ export interface ImportSelection {
 	readonly displayName: string;
 }
 
-type ImportSelectionError = 'noSelection' | 'candidateUnavailable' | 'duplicateCandidate' | 'invalidName' | 'duplicateName';
+export type ImportSelectionError = 'noSelection' | 'candidateUnavailable' | 'duplicateCandidate' | 'invalidName' | 'duplicateName';
 
 // The service applies the Windows component rules to each linked architecture name.
 function isArchitectureName(name: string): boolean {
 	const stem = name.split('.', 1)[0];
 	return name.length > 0 && name.length <= 255 && name.trim() === name && !name.endsWith('.')
 		&& !name.toLowerCase().startsWith('.cloudforge-staging-') && !/[<>:"/\\|?*\p{Cc}]/u.test(name)
-		&& !/^(?:CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|(?:COM|LPT)[1-9¹²³])$/i.test(stem);
+		&& !/^(?:CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|(?:COM|LPT)[1-9\u00B9\u00B2\u00B3])$/i.test(stem);
 }
 
 export function validateImportSelections(
