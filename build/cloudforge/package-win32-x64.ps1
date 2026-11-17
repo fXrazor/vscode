@@ -22,9 +22,20 @@ if (-not (Test-Path -LiteralPath (Join-Path $WindowsSdkBin 'signtool.exe') -Path
 }
 
 $oldPath = $env:PATH
+$oldSourceVersion = $env:BUILD_SOURCEVERSION
 Push-Location -LiteralPath $repo
 try {
     $env:PATH = "$WindowsSdkBin;$oldPath"
+    $productCommit = (git rev-parse HEAD).Trim()
+    if ($LASTEXITCODE -ne 0 -or $productCommit -cnotmatch '^[0-9a-f]{40}$') {
+        throw 'Could not resolve the desktop source revision.'
+    }
+    $changes = git status --porcelain
+    if ($LASTEXITCODE -ne 0 -or $changes) {
+        throw 'Package the desktop from a clean checkout.'
+    }
+    # The upstream version helper expects a .git directory, which worktrees do not have.
+    $env:BUILD_SOURCEVERSION = $productCommit
     $product = Get-Content -LiteralPath 'product.json' -Raw | ConvertFrom-Json
     if ($product.applicationName -ne 'cloudforge-proof' -or $product.win32VersionedUpdate) {
         throw 'This script packages the unversioned CloudForge Windows x64 proof.'
@@ -52,8 +63,7 @@ try {
     $payload = Join-Path (Split-Path -Parent $repo) 'VSCode-win32-x64'
     $app = Join-Path $payload 'resources/app'
     $packedProduct = Get-Content -LiteralPath (Join-Path $app 'product.json') -Raw | ConvertFrom-Json
-    $productCommit = (git rev-parse HEAD).Trim()
-    if ($LASTEXITCODE -ne 0 -or $packedProduct.commit -cne $productCommit -or $packedProduct.applicationName -cne $product.applicationName) {
+    if ($packedProduct.commit -cne $productCommit -or $packedProduct.applicationName -cne $product.applicationName) {
         throw 'The staged desktop does not match the current proof checkout.'
     }
 
@@ -94,4 +104,5 @@ try {
 finally {
     Pop-Location
     $env:PATH = $oldPath
+    $env:BUILD_SOURCEVERSION = $oldSourceVersion
 }
