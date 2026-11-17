@@ -155,9 +155,66 @@ Next action: when a signing step is added, run it before the pre-Inno gate, and 
 - [cloudforgeServiceArtifact.test.ts](build/lib/test/cloudforgeServiceArtifact.test.ts) passed 73 tests. The nine new cases failed against the baseline because staging accepted their matching digests. Targeted strict TypeScript checking passed. The read-only CLI accepted the binaries in `Z:\CFProof` and `Z:\CFStage` with all expected inputs pinned. A scratch staging run with the `CFProof` binary also passed the gate. A fresh installer and installed smoke remain pending.
 - The [staging guide](docs/cloudforge/service-artifact.md) describes the header checks. Before a signed release, stage the final signed bytes and run the pre-Inno verification gate on those bytes.
 
+## Stage 2 extension slice (2026-11-17)
+
+Branch `fxrazor/project-repos-extension` in worktree `Z:\CloudForge-Code\.claude\worktrees\project-repos-extension`, based on `main` at `7d54bb08544`. It implements desktop tasks D2, D4, D5, D6, D7, and D9 from the [Stage 2 plan](Z:/CloudForge/docs/superpowers/plans/2026-11-17-project-repos-import.md#desktop-featureproject-repos-desktop) against the [protocol](Z:/CloudForge/docs/protocol/cloudforge-service-v1.md#stage-2-projects-with-repositories) on CloudForge `main` at `ca09ef6` (Rust R1–R10 merged).
+
+**Ownership split (assigned by the user):**
+
+| Owner | Tasks | Files |
+| --- | --- | --- |
+| This branch | D2, D4, D5, D6, D7, D9 | `extensions/cloudforge/src/project/*`, `extensions/cloudforge/test/projectModel.test.ts`, the extension's manifest, strings, and `tsconfig.json`, wiring in `extension.ts`, and `src/vs/workbench/electron-browser/cloudForgeService.contribution.ts` |
+| `stingaree` session, branch `feature/project-repos-desktop` | D1 (broker) | `src/vs/code/electron-main/cloudForgeService*.ts`, `app.ts`, and their tests |
+| Codex, branch `codex/stage2-terraform-detection` in `Z:\CFWelcome` | D3, D8 | `extensions/cloudforge/src/terraformDetection.ts`, its test, `.vscodeignore`, `gettingStartedContent.ts` |
+
+A cross-session message about the split was held by the `stingaree` session and expired undelivered, so this table is the record.
+
+**What it does:**
+
+- **Project lifecycle (D2):**
+  - In a window whose workspace file, or single folder, holds `cloudforge.project.json`, the extension calls `openProject`. On `CONSENT_REQUIRED` it asks once, "Allow CloudForge to read this project and its imported repos?", then calls `grantProject`. A decline is remembered until **CloudForge: Refresh Project**.
+  - **Forget Project Access**, **Open as CloudForge Project** (a project folder opened plainly), and **Set Up for Repos** (`createWorkspaceFile`, then open the workspace) are included.
+  - Folder changes reconnect after a 0.5-second debounce.
+- **Import (D4):**
+  1. `inspectRepository` runs with a workspace folder index only.
+  2. Secret findings are listed, with a warning that other agents can still read the files.
+  3. You choose roots in a multi-select and name each architecture (unique, valid Windows name).
+  4. `importRepository` runs with the folder's Git remote, and the first imported graph opens.
+  - A stale project reloads the project.
+- **Clone (D5):**
+  - `cloudforge.cloneRepository` is the same command Codex's Welcome entry calls. It takes a provider argument (`github`, `gitlab`, `bitbucket`, `url`).
+  - Repositories clone into `<project>\repos` with `git.clone(url, parent, { postCloneAction: 'none', returnRepositoryPath: true })`. GitHub uses the Git extension's own picker. The new folder is added to the window, and then the import offer appears.
+  - Without a project, it offers **Create Project…** or **Open Project…** and continues the clone in the new window within 15 minutes. **Clone Again** re-clones a missing repository from its recorded remote.
+- **Projects view (D6):** `cloudforge.projects` in Explorer shows:
+  - repositories with their status and a remove action;
+  - linked and local architectures, which open in the Stage 1 graph view;
+  - window folders not yet imported, with an import action.
+
+  Its empty state has GitHub, GitLab, Bitbucket, Any Git URL, and Create Project links.
+- **Git (D7):** a missing Git is detected when the Git extension is enabled in settings but has no model. A modal states that installing accepts the Git for Windows license and the winget source agreement, then calls `installGit`. It reports installed (with a reload), cancelled, or falls back to the official download page.
+- **Secrets (D9):** findings go to Problems under the source `CloudForge`, as warnings with the finding code, the file and line, and no values. Flagged files are kept in workspace state for CloudForge's own future AI features.
+- **Bridge:** `_cloudforge.callService` forwards the nine Stage 2 methods without adding any path, and tracks the project grant: workspace ID, all architecture IDs, and each repository's folder index. `_cloudforge.openSource` resolves a linked architecture's source from its repository's workspace folder using `sourceBase`.
+
+| Check | Result |
+| --- | --- |
+| `node --test extensions/cloudforge/test/projectModel.test.ts` | 8 passed. Every project, inspection, and Git result in the 18 CloudForge fixtures parses. Unsafe data is refused: credential remotes, finding values, foreign links, and bad indexes. |
+| Extension type check (`tsc6 -p extensions/cloudforge`) and core type check (TypeScript 7 `tsc --project src/tsconfig.json --noEmit --skipLibCheck`) | Both passed. The TypeScript 6 core check ran out of memory at 8 GB, so TypeScript 7 was used, as in the Stage 1 tests. |
+| `build/oxlint.ts` and `build/hygiene.ts` on all changed files | Passed. `code-no-accessor-after-await` caught services taken after an `await` in the bridge; this was fixed before commit. Hygiene refuses new `.mjs` files, so the test is TypeScript. Codex's `terraformDetection.test.mjs` will hit the same rule. |
+| esbuild bundle of the extension | 58 KB, including all seven project modules. |
+
+**Not done or not verified:**
+
+- No desktop build or interactive run. The flows need D1's broker methods, which are not on `main` yet.
+- The controller's Terraform check (`hasTerraform`) duplicates Codex's `findTerraformImportCandidates`. Switch to that module when both branches merge.
+- `.vscodeignore` still ships `test/`. Codex's branch adds the exclusion.
+
 ## Next actions
 
-1. [Stage 2 Phase 0](Z:/CloudForge/docs/superpowers/plans/2026-11-17-project-repos-import.md#phase-0--contract-integration-owner-before-any-code) is done on CloudForge `main` at `ae5785d`. The [protocol's Stage 2 section](Z:/CloudForge/docs/protocol/cloudforge-service-v1.md#stage-2-projects-with-repositories) and the [fixtures](Z:/CloudForge/docs/protocol/fixtures/stage2/README.md) are the contract for desktop tasks D1–D9 on `feature/project-repos-desktop`. Start after the Rust tasks R1–R10 merge, or in parallel using the fixtures as canned service replies. Broker-supplied paths (`projectPath`, `workspaceFolders`, `folderPath`, `parentPath`) come from Electron main, never from the extension.
+1. **Stage 2 desktop.** The [extension slice](#stage-2-extension-slice-2026-11-17) (D2, D4–D7, D9) is merged on `main`. Until D1 lands, the automatic project connection stays quiet when the broker answers `INVALID_PARAMS`.
+   - **Remaining:** the D1 broker (`stingaree`, `feature/project-repos-desktop`), then Codex's D3 and D8 branch (`codex/stage2-terraform-detection`).
+   - **After those merge:** replace `hasTerraform` in `extensions/cloudforge/src/project/controller.ts` with `findTerraformImportCandidates`, and rename Codex's test to `.ts`. Then build, package, and run the installed smoke against the design's 12 acceptance criteria.
+   - **Contract:** the [protocol's Stage 2 section](Z:/CloudForge/docs/protocol/cloudforge-service-v1.md#stage-2-projects-with-repositories) and [fixtures](Z:/CloudForge/docs/protocol/fixtures/stage2/README.md). Broker-supplied paths (`projectPath`, `workspaceFolders`, `folderPath`, `parentPath`) come from Electron main, never from the extension.
+   - **Already done on CloudForge `main`:** Phase 0 and the Rust tasks (`ae5785d`, `ca09ef6`).
 2. Before a signed release, sign the service before staging. The pre-Inno `--verify` gate checks the final signed executable against the manifest digest. See the [staging guide](docs/cloudforge/service-artifact.md#signing-and-integration).
 
 ## Stage 1 merged revisions (2026-11-17)

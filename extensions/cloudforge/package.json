@@ -29,10 +29,65 @@
 				"command": "cloudforge.openWorkspace",
 				"title": "%command.openWorkspace%",
 				"category": "%displayName%"
+			},
+			{
+				"command": "cloudforge.cloneRepository",
+				"title": "%command.cloneRepository%",
+				"category": "%displayName%",
+				"icon": "$(repo-clone)"
+			},
+			{
+				"command": "cloudforge.createProject",
+				"title": "%command.createProject%",
+				"category": "%displayName%",
+				"icon": "$(new-folder)"
+			},
+			{
+				"command": "cloudforge.importRepository",
+				"title": "%command.importRepository%",
+				"category": "%displayName%",
+				"icon": "$(cloud-download)"
+			},
+			{
+				"command": "cloudforge.refreshProject",
+				"title": "%command.refreshProject%",
+				"category": "%displayName%",
+				"icon": "$(refresh)"
+			},
+			{
+				"command": "cloudforge.forgetProjectAccess",
+				"title": "%command.forgetProjectAccess%",
+				"category": "%displayName%"
+			},
+			{
+				"command": "cloudforge.installGit",
+				"title": "%command.installGit%",
+				"category": "%displayName%"
+			},
+			{
+				"command": "cloudforge.openArchitecture",
+				"title": "%command.openArchitecture%",
+				"category": "%displayName%"
+			},
+			{
+				"command": "cloudforge.removeRepository",
+				"title": "%command.removeRepository%",
+				"category": "%displayName%",
+				"icon": "$(close)"
+			},
+			{
+				"command": "cloudforge.cloneRepositoryAgain",
+				"title": "%command.cloneRepositoryAgain%",
+				"category": "%displayName%",
+				"icon": "$(repo-clone)"
 			}
 		],
 		"views": {
 			"explorer": [
+				{
+					"id": "cloudforge.projects",
+					"name": "%view.projects%"
+				},
 				{
 					"id": "cloudforge.resources",
 					"name": "%view.resources%"
@@ -43,7 +98,73 @@
 			{
 				"view": "cloudforge.resources",
 				"contents": "%view.resources.welcome%"
+			},
+			{
+				"view": "cloudforge.projects",
+				"contents": "%view.projects.welcome%",
+				"when": "!cloudforge.projectOpen"
 			}
-		]
-	}
+		],
+		"menus": {
+			"commandPalette": [
+				{
+					"command": "cloudforge.openArchitecture",
+					"when": "false"
+				},
+				{
+					"command": "cloudforge.removeRepository",
+					"when": "false"
+				},
+				{
+					"command": "cloudforge.cloneRepositoryAgain",
+					"when": "false"
+				},
+				{
+					"command": "cloudforge.importRepository",
+					"when": "cloudforge.projectOpen"
+				},
+				{
+					"command": "cloudforge.forgetProjectAccess",
+					"when": "cloudforge.projectOpen"
+				}
+			],
+			"view/title": [
+				{
+					"command": "cloudforge.cloneRepository",
+					"when": "view == cloudforge.projects",
+					"group": "navigation@1"
+				},
+				{
+					"command": "cloudforge.refreshProject",
+					"when": "view == cloudforge.projects",
+					"group": "navigation@2"
+				},
+				{
+					"command": "cloudforge.forgetProjectAccess",
+					"when": "view == cloudforge.projects && cloudforge.projectOpen",
+					"group": "project@1"
+				}
+			],
+			"view/item/context": [
+				{
+					"command": "cloudforge.cloneRepositoryAgain",
+					"when": "view == cloudforge.projects && viewItem =~ /^cloudforge\\.repository\\.missing\\.remote$/",
+					"group": "inline@1"
+				},
+				{
+					"command": "cloudforge.removeRepository",
+					"when": "view == cloudforge.projects && viewItem =~ /^cloudforge\\.repository\\./",
+					"group": "inline@2"
+				},
+				{
+					"command": "cloudforge.importRepository",
+					"when": "view == cloudforge.projects && viewItem == cloudforge.unimportedFolder",
+					"group": "inline@1"
+				}
+			]
+		}
+	},
+	"activationEvents": [
+		"workspaceContains:cloudforge.project.json"
+	]
 }

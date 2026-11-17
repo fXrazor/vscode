@@ -15,6 +15,7 @@ import {
 	type TreeDataProvider,
 	type TreeView
 } from 'vscode';
+import { activateProjects } from './project/index';
 
 interface WorkspaceArchitecture {
 	readonly architectureId: string;
@@ -423,7 +424,12 @@ async function openWorkspace(provider: CloudForgeGraphProvider, treeView: TreeVi
 		return;
 	}
 
-	const graph = await readArchitecture(choice.workspaceId, architecture.architectureId);
+	await showGraph(provider, treeView, choice.workspaceId, architecture.architectureId);
+}
+
+/** Reads an architecture that is already selected and shows it in the graph view. */
+async function showGraph(provider: CloudForgeGraphProvider, treeView: TreeView<GraphTreeItem>, workspaceId: string, architectureId: string): Promise<void> {
+	const graph = await readArchitecture(workspaceId, architectureId);
 	if (!graph) {
 		return;
 	}
@@ -465,4 +471,19 @@ export function activate(context: ExtensionContext): void {
 	context.subscriptions.push(commands.registerCommand('cloudforge.openWorkspace', () => {
 		return opening ??= openWorkspace(provider, treeView).finally(() => { opening = undefined; });
 	}));
+
+	// Stage 2: projects with repositories. Architectures chosen in the Projects view, including
+	// those that live in imported repositories, show in the same graph view.
+	activateProjects(context, {
+		async show(workspaceId, architectureId) {
+			provider.setGraph(undefined);
+			const selected = await callService<unknown>('selectArchitecture', { workspaceId, architectureId });
+			if (!selected.ok) {
+				showServiceError(selected.error);
+				return;
+			}
+			await showGraph(provider, treeView, workspaceId, architectureId);
+			await commands.executeCommand('cloudforge.resources.focus');
+		}
+	});
 }
