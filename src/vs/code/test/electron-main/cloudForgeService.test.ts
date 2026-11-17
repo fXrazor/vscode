@@ -11,7 +11,7 @@ import { join } from '../../../base/common/path.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../base/test/common/utils.js';
 import { getRandomTestPath } from '../../../base/test/node/testUtils.js';
 import { NullLogService } from '../../../platform/log/common/log.js';
-import { CloudForgeServiceProcess, readCloudForgeInitializeReply, safeServiceError } from '../../electron-main/cloudForgeService.js';
+import { cloudForgeServiceEnvironment, CloudForgeServiceProcess, readCloudForgeInitializeReply, safeServiceError } from '../../electron-main/cloudForgeService.js';
 
 const commit = 'a'.repeat(40);
 const otherCommit = 'b'.repeat(40);
@@ -171,6 +171,25 @@ suite('CloudForge service', () => {
 			['SERVICE_ERROR', undefined, 'SERVICE_ERROR'],
 			['SERVICE_ERROR', undefined, 'SERVICE_ERROR'],
 		]);
+	});
+
+	test('gives the service the Windows folders it needs and nothing else', () => {
+		const environment = cloudForgeServiceEnvironment({
+			LOCALAPPDATA: 'C:\\Users\\u\\AppData\\Local',
+			ProgramFiles: 'C:\\Program Files',
+			SystemRoot: 'C:\\WINDOWS',
+			windir: 'C:\\WINDOWS',
+			TEMP: '',
+			PATH: 'C:\\tools',
+			GITHUB_TOKEN: 'sentinel',
+			CLOUDFORGE_SERVICE_DATA_DIR: 'C:\\elsewhere',
+		});
+		assert.deepStrictEqual(environment, {
+			LOCALAPPDATA: 'C:\\Users\\u\\AppData\\Local',
+			ProgramFiles: 'C:\\Program Files',
+			SystemRoot: 'C:\\WINDOWS',
+			windir: 'C:\\WINDOWS',
+		});
 	});
 
 	suite('package verification', () => {

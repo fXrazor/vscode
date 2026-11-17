@@ -22,6 +22,30 @@ const headerEnd = Buffer.from('\r\n\r\n');
 const commitPattern = /^[0-9a-f]{40}$/;
 const hashPattern = /^[0-9a-f]{64}$/;
 
+/**
+ * The only environment variables the service receives: non-secret Windows folders and system
+ * facts. The service finds its consent store, winget, and Git through them, and passes this same
+ * set on to winget. Keep it in step with `ENVIRONMENT` in the service's `git.rs`.
+ */
+const serviceEnvironmentNames = [
+	'ALLUSERSPROFILE', 'APPDATA', 'COMPUTERNAME', 'HOMEDRIVE', 'HOMEPATH', 'LOCALAPPDATA',
+	'NUMBER_OF_PROCESSORS', 'OS', 'PATHEXT', 'PROCESSOR_ARCHITECTURE', 'ProgramData', 'ProgramFiles',
+	'ProgramFiles(x86)', 'ProgramW6432', 'PUBLIC', 'SystemDrive', 'SystemRoot', 'TEMP', 'TMP',
+	'USERNAME', 'USERPROFILE', 'windir',
+] as const;
+
+/** Copies the allowed variables that are set; everything else, including PATH and tokens, is left out. */
+export function cloudForgeServiceEnvironment(source: NodeJS.ProcessEnv): Record<string, string> {
+	const environment: Record<string, string> = {};
+	for (const name of serviceEnvironmentNames) {
+		const value = source[name];
+		if (value) {
+			environment[name] = value;
+		}
+	}
+	return environment;
+}
+
 /** Methods the broker may send after `initialize`. */
 export type CloudForgeServiceMethod =
 	| 'openWorkspace' | 'chooseTerraformRoot' | 'selectArchitecture' | 'readArchitecture'
@@ -318,7 +342,7 @@ export class CloudForgeServiceProcess {
 
 			const child = this.child = spawn(executable, [], {
 				cwd: directory,
-				env: { SystemRoot: process.env['SystemRoot'], WINDIR: process.env['WINDIR'] },
+				env: cloudForgeServiceEnvironment(process.env),
 				shell: false,
 				windowsHide: true,
 				stdio: ['pipe', 'pipe', 'pipe']
