@@ -125,10 +125,33 @@ Observations:
 - The Codex worktree `feature/workspace-graph-desktop` has uncommitted changes to `cloudForgeService.ts`. Rerun this test there after it rebases onto `main`.
 - Not covered by these tests: a successful spawn and handshake against a real service, and lifecycle on quit or forced termination. The [installed package check](#installed-package-check-2026-11-17) covers those.
 
+## Staged service verification gate (2026-11-17)
+
+Worktree `E:\Orca\CloudForge-Code\dab`, branch `fxrazor/collaborative-build-test-handoff`, based on `main` at `6f389944d1a74eecd0d0298d4a87f2e1d232bbfc`. Integration owner for this slice: this session (`dab`). It addresses next action 2: a digest recorded before signing must not reach an installer. The service protocol, runtime code, and Rust repository are unchanged.
+
+File ownership was agreed with the concurrent `stingaree` session (branch `fxrazor/chore-test-verify-handoff`). That session owns only the new `src/vs/code/test/electron-main/cloudForgeService.test.ts`, and this slice owns only the files below. Neither changes the other's files. The `feature/workspace-graph-desktop` Codex worktree still holds uncommitted changes to `src/vs/code/electron-main/cloudForgeService.ts`. These were not touched, but they may conflict with the stingaree test when it rebases.
+
+- [serviceArtifact.ts](build/cloudforge/serviceArtifact.ts) adds `verifyStagedService` and a read-only `--verify` CLI mode. It rechecks an existing `cloudforge-service` folder. The folder must be a regular directory holding exactly the executable and `manifest.json`, with no links. The manifest must be BOM-free UTF-8 of at most 4 KiB with exactly the four runtime fields in lowercase canonical form. The executable must be nonempty and match the manifest digest. `--protocol` is required. `--sha256`, `--service-commit`, and `--desktop-commit` optionally pin the other build inputs. Stage mode, its flags, and its messages are unchanged.
+- [package-win32-x64.ps1](build/cloudforge/package-win32-x64.ps1) runs `--verify` with every value pinned immediately before the Inno tasks. Any later signing pass must therefore run before this gate, or the build fails.
+- The [staging guide](docs/cloudforge/service-artifact.md#verifying-a-staged-or-installed-service) and the [installer README](build/cloudforge/README.md) document the mode and the gate.
+
+| Check (newly run in this worktree) | Result |
+| --- | --- |
+| `node --test build/lib/test/cloudforgeServiceArtifact.test.ts` | 64 passed, 0 skipped. This is the original 36 plus 28 verification tests. File symbolic links were permitted on this machine, so the linked-manifest and linked-executable cases ran. |
+| Mutation check: remove the digest check, the required protocol comparison, the executable or manifest link check, or the manifest protocol range, drop the CLI `--sha256` or `--desktop-commit` wiring, or raise the size limit by 1 byte | Each mutation failed at least one test. The source was restored afterwards. |
+| Independent review by a code-review subagent | One confirmed gap: bare `--verify` accepted any protocol while the desktop accepts only 1. It is fixed by requiring `--protocol`, with tests. The listed test gaps are also closed. |
+| Strict `tsc6` (TypeScript 6.0.2 from this worktree) on the two TypeScript files; `node build/oxlint.ts` on the same files | Both passed. The full `build/tsconfig.json` check reports 19 errors, all in `build/lib/policies` files and their tests. None are in CloudForge files. |
+| PowerShell parse of the packaging script; scratch run of its staging and gate commands on an inert fixture | No parse errors. The gate passed after a fresh stage and failed with exit code 1 after the staged executable was rewritten. |
+| `--verify` on the real built payloads `Z:\CFStage\VSCode-win32-x64` (product `696a213e335…`) and `Z:\CFProof\VSCode-win32-x64` (product `0e5307e3c63…`), pinned to service `9ff372e…`, SHA-256 `086f96fa…`, and protocol 1 | Both passed. The run was read-only. `--protocol 2` on CFStage failed as expected. |
+
+Not run: a full desktop build, the installer, or installed smoke. The earlier per-user install at `%LOCALAPPDATA%\Programs\CloudForge Proof` is no longer present, so the installed-folder check used the built payloads instead. The gate proves byte identity only. It does not authenticate the manifest, inspect PE architecture, or check Authenticode signatures.
+
+Next action: when a signing step is added, run it before the pre-Inno gate, and restage after signing as the staging guide describes. On the next installed smoke, also run `--verify` against the installed `resources\app` folder.
+
 ## Next actions
 
 1. `main` now contains the verified desktop/service proof and the reconciled stager. Preserve its protocol-1 handshake scope and the canonical [service draft](Z:/CloudForge/docs/protocol/cloudforge-service-v1.md); workspace and graph operations remain the follow-on slice. `feature/workspace-graph-desktop` is based on `0e5307e3c63` and can rebase onto `main` without conflicting files in `build/cloudforge/` or `build/win32/code.iss`.
-2. Before a signed release, settle where the service is signed relative to staging and the recursive payload signer.
+2. Before a signed release, settle where the service is signed relative to staging and the recursive payload signer. The pre-Inno `--verify` gate now fails any build whose staged executable changed after staging, so signing must run before it ([details](#staged-service-verification-gate-2026-11-17)).
 3. **CloudForge look (unmerged):** branch `fxrazor/cloudforge-look` (worktree `Z:\CloudForge-Code\.claude\worktrees\cloudforge-look`, commit `696a213e335`) makes the bundled Tokyo Night themes the default (MIT, Enkia, upstream `7c0f11e`, byte-identical). It also adds a "Get started with CloudForge" walkthrough to the unchanged Welcome page. Its installer built from `Z:\CFStage\Code`: SHA-256 `c89a5b30ee02acbb32b96f9ed2803b3d68a8c8ef988bce255d86db0dcb601b34`, 321,099,975 bytes. Not merged; the walkthrough's Open Workspace step needs Stage 1's `cloudforge.openWorkspace`. **Verified 17 November 2026** on that build's portable payload (`Z:\CFStage\VSCode-win32-x64`) with a fresh profile:
    - Startup used Tokyo Night (editor background `#1a1b26`), and Tokyo Night Light applied `#e6e7ed`.
    - The theme picker labels them Default Dark and Default Light.
