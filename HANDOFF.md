@@ -17,7 +17,7 @@ The upstream baseline executable is the portable Code OSS build. The [foundation
 
 ## Repository routing
 
-The user-facing deliverable is **one installable CloudForge app**: this Code OSS desktop packaged with the Rust service built from `Z:\CloudForge`. These are source boundaries, not two installed apps. Put shipped desktop UI, extension, product configuration, and installer work in this repository; put Rust service and core behavior in `Z:\CloudForge`. The React/Vite UI in the Tauri fallback does not get compiled into Code OSS. Preserve its existing changes, and explicitly implement in this repository any behavior that should appear in the shipped desktop. Follow the [foundation plan](Z:/CloudForge/docs/superpowers/plans/2026-11-16-code-oss-desktop.md) for scope gates: the handshake-only proof is approved; workspace/graph operations and the full product are not.
+The user-facing deliverable is **one installable CloudForge app**: this Code OSS desktop packaged with the Rust service built from `Z:\CloudForge`. These are source boundaries, not two installed apps. Put shipped desktop UI, extension, product configuration, and installer work in this repository; put Rust service and core behavior in `Z:\CloudForge`. The React/Vite UI in the Tauri fallback does not get compiled into Code OSS. Preserve its existing changes, and explicitly implement in this repository any behavior that should appear in the shipped desktop. Follow the [foundation plan](Z:/CloudForge/docs/superpowers/plans/2026-11-16-code-oss-desktop.md): the handshake-only proof passed, and the separately approved workspace/graph slice is the only next implementation scope. Broader product work remains gated.
 
 ## Approved handshake-only proof
 
@@ -40,7 +40,7 @@ A read-only review checked this proof against the fork at `a3cabfed1ada486415b1d
 - `product.json` still uses Code OSS AppIds, mutex, data folders, built-in Copilot with auto-updates, `voiceWsUrl`, and the `vscode-cdn.net` Webview template. At minimum, give the proof distinct AppIds, mutex, and data folders.
 - `builtInExtensions` accepts a local `vsix` with `sha256` (`build/lib/builtInExtensions.ts`), which suits the one-VSIX bundling check.
 
-The user approved the bounded installer proof. Workspace access and the read-only Terraform graph with native source navigation are the follow-on slice. The integration agent owns the packaged service pin, licensing and provenance checks for bundled artifacts, and the installed-product smoke. See the [Rust handoff](Z:/CloudForge/HANDOFF.md#read-only-inventories-completed-2026-11-17) for the existing safeguards and gaps.
+The user approved the bounded installer proof and later approved the separate workspace/graph slice. The integration owner owns the shared protocol, packaged service pin, licensing and provenance checks for bundled artifacts, and installed-product smoke. See the [Rust handoff](Z:/CloudForge/HANDOFF.md#read-only-inventories-completed-2026-11-17) and [approved slice design](Z:/CloudForge/docs/superpowers/specs/2026-11-17-workspace-graph-slice-design.md) for scope and safeguards.
 
 ## Verified Windows installer proof
 
@@ -85,10 +85,24 @@ Branch `fxrazor/service-staging-integration` in worktree `Z:\CloudForge-Code\.cl
 | `node build/oxlint.ts` on the two build files | Passed. Temporary junctions to the main checkout's `node_modules` were used because this worktree has no installed dependencies, and were removed afterwards. |
 | PowerShell parse of `package-win32-x64.ps1`; scratch run of its staging block | No parse errors. A fresh payload and a reused payload produced the expected executable and manifest; unexpected content stopped staging with the directory untouched. |
 
-Not run: a desktop build, the Inno installer, a real Rust service, or the installed smoke. Rerun the [installer proof](#verified-windows-installer-proof) from a clean checkout of this branch to confirm the handshake, upgrade-over-install cleanup, and uninstall.
+### Installed package check (2026-11-17)
+
+Built from the clean detached checkout `Z:\CFStage\Code` at `6f62ece11e4ca9623c4139b76b4a85fba4692086`. `corepack pnpm install --frozen-lockfile` passed in 3m 26s. `build/cloudforge/package-win32-x64.ps1` used the Rust service from `codex/cloudforge-sidecar-proof` at `9ff372edad50b636678ac90f3f8ea363c9c71d2a` (SHA-256 `086f96faaa9d39debb71137c0b6911ce46429aeda4721569e4fae7cd64f2f793`) and the pinned JavaScript Debugger VSIX (`7accf785…6abc1897`). The script passed in 12m 47s.
+
+| Item | Result |
+| --- | --- |
+| Installer | `Z:\CFStage\Code\.build\win32-x64\user-setup\CloudForgeProofSetup-x64.exe`, unsigned, 321,074,228 bytes, SHA-256 `9a7c33a9cd0d0af097c3bf12275eff780106cc5325245d4253f4e01b5a3331e2` |
+| Staged manifest | Written by the stager: service commit `9ff372e…`, protocol `1`, `x64`, and the service SHA-256 above |
+| Install | The user installed it per-user at the default `%LOCALAPPDATA%\Programs\CloudForge Proof`. The installed product commit and service manifest matched the build. |
+| Upgrade over install | A stale file was planted in `resources\app\cloudforge-service`, then the same installer was rerun silently (`/MERGETASKS=!runcode`, exit 0). Afterwards the folder held only `cloudforge-service.exe` and `manifest.json`, and both matched. |
+| Launch and handshake | Launched with a fresh user-data folder and a local fixture folder. The main log recorded `Initialized protocol 1, service 9ff372edad50b636678ac90f3f8ea363c9c71d2a`, with one sidecar running. |
+| Normal quit | After closing the main window, the desktop and the sidecar exited. |
+| Forced termination | After the desktop main process was killed, the sidecar exited within 20 s. No installed processes remained. |
+
+Not rerun in this check: the firewall-blocked offline launch, the commit and protocol mismatch cases, the partial-frame EOF test, and uninstall. The user's install was left in place, and the temporary user-data and fixture folders were removed. The original [installer proof](#verified-windows-installer-proof) covers those checks for the earlier packaging path.
 
 ## Next actions
 
-1. Review and merge `fxrazor/service-staging-integration` into `main`. This brings the verified desktop/service proof onto `main` with the reconciled stager. Then rerun the installed proof from a clean short-path checkout. Preserve its protocol-1 handshake scope and the canonical [service draft](Z:/CloudForge/docs/protocol/cloudforge-service-v1.md); workspace and graph operations remain the follow-on slice.
+1. `main` now contains the verified desktop/service proof and the reconciled stager. Preserve its protocol-1 handshake scope and the canonical [service draft](Z:/CloudForge/docs/protocol/cloudforge-service-v1.md); workspace and graph operations remain the follow-on slice. `feature/workspace-graph-desktop` is based on `0e5307e3c63` and can rebase onto `main` without conflicting files in `build/cloudforge/` or `build/win32/code.iss`.
 2. Before a signed release, settle where the service is signed relative to staging and the recursive payload signer.
 3. Keep the integration owner responsible for the desktop/service revision pair, installed smoke, and follow-on window/workspace boundary. Use separate implementation worktrees and preserve the Rust checkout's existing changes.
