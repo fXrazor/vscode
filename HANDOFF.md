@@ -280,3 +280,9 @@ The preview installer from `Z:\CFStage\Code` at `696a213e335` was 321,099,975 by
 - The chat and agent panel are unchanged.
 
 Screenshots are in the preview session scratchpad (`look-welcome.png`, `look-walkthrough.png`, `look-light.png`). The user's own installed profile had already selected Tokyo Night Light.
+
+## Stage 2 desktop integration
+
+`codex/stage2-desktop-integration` in `Z:\CFWelcome` carries the signed-off Welcome and Terraform detection merge `e9c05fd23a4` and the import-selection validation. It uses the Stage 2 contract from CloudForge `ae5785d`. The Welcome source syntax check, five extension logic tests, and the targeted strict TypeScript check passed.
+
+Bring these changes into the Stage 2 desktop branch with the import and clone flows. The import prompt supplies the current inspection candidates and project architecture names to `validateImportSelections`. Check the Welcome entry in the app once `cloudforge.cloneRepository` is registered.
