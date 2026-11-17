@@ -253,6 +253,8 @@ A cross-session message about the split was held by the `stingaree` session and 
 
 ## Next actions
 
+The [Runner View design](docs/cloudforge/runner-view-design.md) is a documentation proposal based on desktop `main` at `c9f463818ef` in `Z:\CloudForge-Code`. This work adds the design and this handoff entry. The first slice would validate a saved Terraform revision offline and present the execution in the Workbench. The local links resolved and the documentation whitespace checks passed. Review the scope and name an integration owner before defining the service capability or starting implementation.
+
 1. **Stage 2 desktop.** The [extension slice](#stage-2-extension-slice-2026-11-17) (D2, D4–D7, D9) and the [D1 broker](#stage-2-d1-electron-main-broker-2026-11-17) are merged on `main`. The extension can now reach the Stage 2 methods through Electron main.
    - **Remaining:** Codex's D3 and D8 branch (`codex/stage2-terraform-detection`).
    - **After those merge:** replace `hasTerraform` in `extensions/cloudforge/src/project/controller.ts` with `findTerraformImportCandidates`, and rename Codex's test to `.ts`. Then build, package, and run the installed smoke against the design's 12 acceptance criteria.
