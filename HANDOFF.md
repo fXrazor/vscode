@@ -157,14 +157,24 @@ Next action: when a signing step is added, run it before the pre-Inno gate, and 
 
 ## Next actions
 
-1. `main` now contains the verified desktop/service proof and the reconciled stager. Preserve its protocol-1 handshake scope and the canonical [service draft](Z:/CloudForge/docs/protocol/cloudforge-service-v1.md); workspace and graph operations remain the follow-on slice. `feature/workspace-graph-desktop` is based on `0e5307e3c63` and can rebase onto `main` without conflicting files in `build/cloudforge/` or `build/win32/code.iss`. That worktree has uncommitted changes to `cloudForgeService.ts`, so after rebasing rerun `scripts\test.bat --run src/vs/code/test/electron-main/cloudForgeService.test.ts` ([details](#sidecar-handshake-unit-tests-2026-11-17)).
-2. Before a signed release, settle where the service is signed relative to staging and the recursive payload signer. The pre-Inno `--verify` gate now fails any build whose staged executable changed after staging, so signing must run before it ([details](#staged-service-verification-gate-2026-11-17)).
-3. **CloudForge look (unmerged):** branch `fxrazor/cloudforge-look` (worktree `Z:\CloudForge-Code\.claude\worktrees\cloudforge-look`, commit `696a213e335`) makes the bundled Tokyo Night themes the default (MIT, Enkia, upstream `7c0f11e`, byte-identical). It also adds a "Get started with CloudForge" walkthrough to the unchanged Welcome page. Its installer built from `Z:\CFStage\Code`: SHA-256 `c89a5b30ee02acbb32b96f9ed2803b3d68a8c8ef988bce255d86db0dcb601b34`, 321,099,975 bytes. Not merged; the walkthrough's Open Workspace step needs Stage 1's `cloudforge.openWorkspace`. **Verified 17 November 2026** on that build's portable payload (`Z:\CFStage\VSCode-win32-x64`) with a fresh profile:
-   - Startup used Tokyo Night (editor background `#1a1b26`), and Tokyo Night Light applied `#e6e7ed`.
-   - The theme picker labels them Default Dark and Default Light.
-   - The Welcome page is otherwise unchanged and lists "Get started with CloudForge" under Walkthroughs with its four steps.
-   - The chat and agent panel are unchanged.
+1. Start [Stage 2 Phase 0](Z:/CloudForge/docs/superpowers/plans/2026-11-17-project-repos-import.md#phase-0--contract-integration-owner-before-any-code). Both Stage 1 merges are on `main`, and the user accepted the installed check. Phase 0 adds the protocol changes and fixtures on CloudForge `main` before the Stage 2 code branches start.
+2. Before a signed release, sign the service before staging. The pre-Inno `--verify` gate checks the final signed executable against the manifest digest. See the [staging guide](docs/cloudforge/service-artifact.md#signing-and-integration).
 
-   Screenshots are in the session scratchpad (`look-welcome.png`, `look-walkthrough.png`, `look-light.png`). The user's own installed profile had already selected Tokyo Night Light.
-4. **Stage 2 (approved, waits for Stage 1):** follow the [Stage 2 plan](Z:/CloudForge/docs/superpowers/plans/2026-11-17-project-repos-import.md) and [design](Z:/CloudForge/docs/superpowers/specs/2026-11-17-project-repos-import-design.md). Desktop work goes on `feature/project-repos-desktop`, branched from `main` after Stage 1 merges.
-5. Keep the integration owner responsible for the desktop/service revision pair, installed smoke, and follow-on window/workspace boundary. Use separate implementation worktrees and preserve the Rust checkout's existing changes.
+## Stage 1 merged revisions (2026-11-17)
+
+- Desktop `main` at `b36a727d3c6529283ac82116f45d32659088b2c6` includes the Stage 1 workspace command and resource tree (`b9c551d7411`), the x64 executable validation (`60f9d09293b`), and the Tokyo Night themes and walkthrough (`696a213e335`). The theme assets retain the upstream Enkia MIT notices. The walkthrough's **Open Workspace** action uses the merged command.
+- Rust `main` at `898b067fe7f4de56dcbb9bf26c905ce29a2d5b41` includes the guarded read-only service and [protocol](Z:/CloudForge/docs/protocol/cloudforge-service-v1.md). The service stages as protocol 1 with SHA-256 `6155b5c08e5d1526f2df35701b4224af585598c95f934881aaf27e2ee0619a08`.
+- Validation passed in `Z:\CFArch` and the `workspace-graph-service` worktree. Desktop client build and typecheck, extension typecheck, targeted oxlint, 26 desktop tests, 73 stager tests, 14 locked offline Rust tests, Rust formatting, and Clippy with warnings denied all passed. An RPC smoke test staged the release executable and passed the desktop handshake, graph read, cross-process grant refusal, and stale revision checks against it.
+- The [Windows x64 installer](Z:/CFMerge/CloudForgeProofSetup-x64.exe) is 321,395,983 bytes with SHA-256 `b107bf51b0bddaff9b978ceabdd89b1bd571cb0d06731f2f2e93c037fe43e6ff`. The upstream native dependency metadata step stalled after the desktop payload was assembled. The supported `-UseBuiltDesktop` mode packaged that payload and verified the pinned Rust service before Inno compilation.
+- Packaged-desktop smoke with a fresh profile passed for a direct Terraform root, picker cancellation, explicit nested root choice, project architecture isolation, navigation to source, byte preservation, stale source rejection, handshake, and normal sidecar exit. The user reported an earlier installation and removal, and accepted the installed smoke gate on that basis. The latest installer was verified at build time and the workbench checks ran against its packaged payload.
+
+### Tokyo Night preview evidence
+
+The preview installer from `Z:\CFStage\Code` at `696a213e335` was 321,099,975 bytes with SHA-256 `c89a5b30ee02acbb32b96f9ed2803b3d68a8c8ef988bce255d86db0dcb601b34`. Its portable payload in `Z:\CFStage\VSCode-win32-x64` showed the following with a fresh profile on 17 November 2026.
+
+- Startup used Tokyo Night (editor background `#1a1b26`), and Tokyo Night Light applied `#e6e7ed`.
+- The theme picker labels them Default Dark and Default Light.
+- The Welcome page is otherwise unchanged and lists “Get started with CloudForge” under Walkthroughs with its four steps.
+- The chat and agent panel are unchanged.
+
+Screenshots are in the preview session scratchpad (`look-welcome.png`, `look-walkthrough.png`, `look-light.png`). The user's own installed profile had already selected Tokyo Night Light.
