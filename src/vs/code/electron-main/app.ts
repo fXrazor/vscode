@@ -158,7 +158,7 @@ import ErrorTelemetry from '../../platform/telemetry/electron-main/errorTelemetr
 import { IProtocolMainService } from '../../platform/protocol/electron-main/protocol.js';
 import { createRemoteResourceRequestHandler } from '../../platform/protocol/electron-main/remoteResourceProtocol.js';
 import { logNodeCompileCacheStatus, markNodeCompileCacheReady, waitForNodeCompileCacheReady } from '../../base/node/nodeCompileCache.js';
-import { CloudForgeServiceProcess } from './cloudForgeService.js';
+import { CloudForgeServiceBroker } from './cloudForgeServiceChannel.js';
 
 type OSProxyConfigEvent = {
 	readonly success: boolean;
@@ -226,6 +226,7 @@ export class CodeApplication extends Disposable {
 	private windowsMainService: IWindowsMainService | undefined;
 	private auxiliaryWindowsMainService: IAuxiliaryWindowsMainService | undefined;
 	private nativeHostMainService: INativeHostMainService | undefined;
+	private cloudForgeServiceBroker: CloudForgeServiceBroker | undefined;
 
 	constructor(
 		private readonly mainProcessNodeIpcServer: NodeIPCServer,
@@ -729,15 +730,11 @@ export class CodeApplication extends Disposable {
 			this.logService.error(error);
 		}
 
-		const cloudForgeService = isWindows && process.arch === 'x64' && this.environmentMainService.isBuilt && this.productService.applicationName === 'cloudforge-proof'
-			? new CloudForgeServiceProcess(this.environmentMainService.appRoot, this.logService)
-			: undefined;
-
 		// Main process server (electron IPC based)
 		const mainProcessElectronServer = new ElectronIPCServer();
 		Event.once(this.lifecycleMainService.onWillShutdown)(e => {
-			if (cloudForgeService) {
-				e.join('cloudForgeService', cloudForgeService.stop());
+			if (this.cloudForgeServiceBroker) {
+				e.join('cloudForgeService', this.cloudForgeServiceBroker.stop());
 			}
 			if (e.reason === ShutdownReason.KILL) {
 				// When we go down abnormally, make sure to free up
@@ -814,9 +811,6 @@ export class CodeApplication extends Disposable {
 
 		// Post Open Windows Tasks
 		this.afterWindowOpen(appInstantiationService);
-		if (windows.length) {
-			void cloudForgeService?.start();
-		}
 
 		// Restart to apply updates while the screen is locked
 		this._register(appInstantiationService.createInstance(UnattendedRestartScheduler, {
@@ -1408,6 +1402,15 @@ export class CodeApplication extends Disposable {
 		// across apps until `requestSingleInstance` APIs are adopted.
 
 		const disposables = this._register(new DisposableStore());
+
+		if (isWindows && process.arch === 'x64' && this.environmentMainService.isBuilt && this.productService.applicationName === 'cloudforge-proof') {
+			const broker = this.cloudForgeServiceBroker = new CloudForgeServiceBroker(
+				this.environmentMainService.appRoot,
+				this.logService,
+				accessor.get(IWindowsMainService)
+			);
+			mainProcessElectronServer.registerChannel('cloudforge', broker);
+		}
 
 		const launchChannel = ProxyChannel.fromService(accessor.get(ILaunchMainService), disposables, { disableMarshalling: true });
 		this.mainProcessNodeIpcServer.registerChannel('launch', launchChannel);
