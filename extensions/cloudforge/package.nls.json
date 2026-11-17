@@ -4,5 +4,16 @@
 	"command.showProofStatus": "Show Proof Status",
 	"command.openWorkspace": "Open Workspace",
 	"view.resources": "CloudForge Graph",
-	"view.resources.welcome": "Open a folder with [CloudForge: Open Workspace](command:cloudforge.openWorkspace) to inspect its resources."
+	"view.resources.welcome": "Open a folder with [CloudForge: Open Workspace](command:cloudforge.openWorkspace) to inspect its resources.",
+	"command.cloneRepository": "Clone into Project…",
+	"command.createProject": "Create Project…",
+	"command.importRepository": "Import Terraform from Folder…",
+	"command.refreshProject": "Refresh Project",
+	"command.forgetProjectAccess": "Forget Project Access",
+	"command.installGit": "Install Git…",
+	"command.openArchitecture": "Show Architecture",
+	"command.removeRepository": "Remove from Project",
+	"command.cloneRepositoryAgain": "Clone Again",
+	"view.projects": "CloudForge Project",
+	"view.projects.welcome": "Clone a repository into a CloudForge project:\n[GitHub](command:cloudforge.cloneRepository?%5B%22github%22%5D)\n[GitLab](command:cloudforge.cloneRepository?%5B%22gitlab%22%5D)\n[Bitbucket](command:cloudforge.cloneRepository?%5B%22bitbucket%22%5D)\n[Any Git URL](command:cloudforge.cloneRepository?%5B%22url%22%5D)\nOr [create a project](command:cloudforge.createProject)."
 }
