@@ -13,14 +13,20 @@ import type { ILogService } from '../../platform/log/common/log.js';
 const protocolVersion = 1;
 const requestId = 'startup';
 const maxHeaderBytes = 4 * 1024;
+const maxRequestBytes = 64 * 1024;
 const maxResponseBytes = 8 * 1024 * 1024;
 const initializeTimeoutMs = 5000;
+const requestTimeoutMs = 30000;
 const shutdownTimeoutMs = 1500;
 const headerEnd = Buffer.from('\r\n\r\n');
 const commitPattern = /^[0-9a-f]{40}$/;
 const hashPattern = /^[0-9a-f]{64}$/;
 
-class ServiceError extends Error { }
+export class CloudForgeServiceError extends Error {
+	constructor(readonly code: string, readonly kind?: string) {
+		super(code);
+	}
+}
 
 function parseObject(bytes: Buffer): Record<string, unknown> {
 	try {
@@ -31,7 +37,7 @@ function parseObject(bytes: Buffer): Record<string, unknown> {
 	} catch {
 		// Never log the wire payload.
 	}
-	throw new ServiceError('INVALID_JSON');
+	throw new CloudForgeServiceError('INVALID_JSON');
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -51,25 +57,25 @@ async function verifyPackage(executable: string, manifestPath: string): Promise<
 			const bytes = Buffer.alloc(maxHeaderBytes + 1);
 			const { bytesRead } = await file.read(bytes);
 			if (bytesRead > maxHeaderBytes) {
-				throw new ServiceError('MANIFEST_TOO_LARGE');
+				throw new CloudForgeServiceError('MANIFEST_TOO_LARGE');
 			}
 			manifest = parseObject(bytes.subarray(0, bytesRead));
 		} finally {
 			await file.close();
 		}
 	} catch (error) {
-		if (error instanceof ServiceError) {
+		if (error instanceof CloudForgeServiceError) {
 			throw error;
 		}
-		throw new ServiceError('MANIFEST_UNAVAILABLE');
+		throw new CloudForgeServiceError('MANIFEST_UNAVAILABLE');
 	}
 
 	const { architecture, serviceCommit, sha256 } = manifest;
 	if (architecture !== 'x64' || typeof serviceCommit !== 'string' || !commitPattern.test(serviceCommit) || typeof sha256 !== 'string' || !hashPattern.test(sha256)) {
-		throw new ServiceError('INVALID_MANIFEST');
+		throw new CloudForgeServiceError('INVALID_MANIFEST');
 	}
 	if (manifest.protocolVersion !== protocolVersion) {
-		throw new ServiceError('PROTOCOL_MISMATCH');
+		throw new CloudForgeServiceError('PROTOCOL_MISMATCH');
 	}
 
 	const hash = createHash('sha256');
@@ -78,10 +84,10 @@ async function verifyPackage(executable: string, manifestPath: string): Promise<
 			hash.update(bytes);
 		}
 	} catch {
-		throw new ServiceError('SERVICE_UNAVAILABLE');
+		throw new CloudForgeServiceError('SERVICE_UNAVAILABLE');
 	}
 	if (hash.digest('hex') !== sha256) {
-		throw new ServiceError('SERVICE_HASH_MISMATCH');
+		throw new CloudForgeServiceError('SERVICE_HASH_MISMATCH');
 	}
 	return { serviceCommit, sha256 };
 }
@@ -99,7 +105,7 @@ export async function readCloudForgeInitializeReply(stream: AsyncIterable<Buffer
 			const delimiter = header.indexOf(headerEnd);
 			if (delimiter === -1) {
 				if (header.length >= maxHeaderBytes) {
-					throw new ServiceError('INVALID_FRAME_HEADER');
+					throw new CloudForgeServiceError('INVALID_FRAME_HEADER');
 				}
 				continue;
 			}
@@ -108,14 +114,14 @@ export async function readCloudForgeInitializeReply(stream: AsyncIterable<Buffer
 			const length = /^Content-Length: ([0-9]+)$/.exec(line)?.[1];
 			const bodyLength = length === undefined ? 0 : Number(length);
 			if (!Number.isSafeInteger(bodyLength) || bodyLength <= 0 || bodyLength > maxResponseBytes) {
-				throw new ServiceError('INVALID_FRAME_LENGTH');
+				throw new CloudForgeServiceError('INVALID_FRAME_LENGTH');
 			}
 			body = Buffer.alloc(bodyLength);
 			chunk = chunk.subarray(delimiter + headerEnd.length - previousHeaderLength);
 		}
 
 		if (chunk.length > body.length - offset) {
-			throw new ServiceError('UNEXPECTED_SERVICE_OUTPUT');
+			throw new CloudForgeServiceError('UNEXPECTED_SERVICE_OUTPUT');
 		}
 		offset += chunk.copy(body, offset);
 		if (offset !== body.length) {
@@ -124,29 +130,29 @@ export async function readCloudForgeInitializeReply(stream: AsyncIterable<Buffer
 
 		const reply = parseObject(body);
 		if (reply.jsonrpc !== '2.0' || reply.id !== requestId || (reply.result === undefined) === (reply.error === undefined)) {
-			throw new ServiceError('INVALID_INITIALIZE_RESPONSE');
+			throw new CloudForgeServiceError('INVALID_INITIALIZE_RESPONSE');
 		}
 		if (isRecord(reply.error)) {
 			if (reply.error.code === -32001) {
-				throw new ServiceError('PROTOCOL_MISMATCH');
+				throw new CloudForgeServiceError('PROTOCOL_MISMATCH');
 			}
 			if (reply.error.code === -32002) {
-				throw new ServiceError('SERVICE_COMMIT_MISMATCH');
+				throw new CloudForgeServiceError('SERVICE_COMMIT_MISMATCH');
 			}
-			throw new ServiceError('INITIALIZE_REJECTED');
+			throw new CloudForgeServiceError('INITIALIZE_REJECTED');
 		}
 		if (!isRecord(reply.result)) {
-			throw new ServiceError('INVALID_INITIALIZE_RESPONSE');
+			throw new CloudForgeServiceError('INVALID_INITIALIZE_RESPONSE');
 		}
 		if (reply.result.protocolVersion !== protocolVersion) {
-			throw new ServiceError('PROTOCOL_MISMATCH');
+			throw new CloudForgeServiceError('PROTOCOL_MISMATCH');
 		}
 		if (reply.result.serviceCommit !== expectedCommit) {
-			throw new ServiceError('SERVICE_COMMIT_MISMATCH');
+			throw new CloudForgeServiceError('SERVICE_COMMIT_MISMATCH');
 		}
 		return;
 	}
-	throw new ServiceError('SERVICE_EOF_BEFORE_INITIALIZE');
+	throw new CloudForgeServiceError('SERVICE_EOF_BEFORE_INITIALIZE');
 }
 
 async function withTimeout<T>(operation: Promise<T>, ms: number, code: string): Promise<T> {
@@ -155,7 +161,7 @@ async function withTimeout<T>(operation: Promise<T>, ms: number, code: string): 
 		return await Promise.race([
 			operation,
 			new Promise<never>((_, reject) => {
-				timer = setTimeout(() => reject(new ServiceError(code)), ms);
+				timer = setTimeout(() => reject(new CloudForgeServiceError(code)), ms);
 			})
 		]);
 	} finally {
@@ -163,15 +169,135 @@ async function withTimeout<T>(operation: Promise<T>, ms: number, code: string): 
 	}
 }
 
+function frameRequest(id: string, method: string, params: Record<string, unknown>): Buffer {
+	const body = Buffer.from(JSON.stringify({ jsonrpc: '2.0', id, method, params }), 'utf8');
+	if (body.length > maxRequestBytes) {
+		throw new CloudForgeServiceError('LIMIT_EXCEEDED');
+	}
+	return Buffer.concat([Buffer.from('Content-Length: ' + body.length + '\r\n\r\n'), body]);
+}
+
+function safeServiceError(error: unknown): CloudForgeServiceError {
+	if (!isRecord(error)) {
+		return new CloudForgeServiceError('SERVICE_ERROR');
+	}
+	const kind = isRecord(error.data) && typeof error.data.kind === 'string' ? error.data.kind : undefined;
+	switch (error.code) {
+		case -32001: return new CloudForgeServiceError('PROTOCOL_MISMATCH', 'PROTOCOL_MISMATCH');
+		case -32002: return new CloudForgeServiceError('SERVICE_COMMIT_MISMATCH', 'SERVICE_COMMIT_MISMATCH');
+		case -32003: return new CloudForgeServiceError('INVALID_STATE', 'INVALID_STATE');
+		case -32004: return new CloudForgeServiceError('SCOPE_DENIED', 'SCOPE_DENIED');
+		case -32005: return new CloudForgeServiceError('STALE_SOURCE', 'STALE_SOURCE');
+		case -32006: return new CloudForgeServiceError('UNSUPPORTED_FORMAT', 'UNSUPPORTED_FORMAT');
+		case -32007: return new CloudForgeServiceError('WORKSPACE_UNAVAILABLE', 'WORKSPACE_UNAVAILABLE');
+		case -32008: return new CloudForgeServiceError('LIMIT_EXCEEDED', 'LIMIT_EXCEEDED');
+		default: return new CloudForgeServiceError('SERVICE_ERROR', kind);
+	}
+}
+
+class CloudForgeResponseReader {
+	private buffer = Buffer.alloc(0);
+	private readonly waiters: { resolve: (message: Record<string, unknown>) => void; reject: (error: Error) => void }[] = [];
+	private failure: Error | undefined;
+
+	constructor(
+		private readonly stream: NodeJS.ReadableStream,
+		private readonly onFailure: (error: Error) => void
+	) {
+		stream.on('data', this.onData);
+		stream.on('end', this.onEnd);
+		stream.on('error', this.onError);
+	}
+
+	readMessage(): Promise<Record<string, unknown>> {
+		if (this.failure) {
+			return Promise.reject(this.failure);
+		}
+		return new Promise((resolve, reject) => this.waiters.push({ resolve, reject }));
+	}
+
+	dispose(): void {
+		this.stream.off('data', this.onData);
+		this.stream.off('end', this.onEnd);
+		this.stream.off('error', this.onError);
+		this.fail(new CloudForgeServiceError('SERVICE_STOPPED'));
+	}
+
+	private readonly onData = (chunk: Buffer): void => {
+		this.buffer = Buffer.concat([this.buffer, chunk]);
+		this.parseFrames();
+	};
+
+	private readonly onEnd = (): void => this.fail(new CloudForgeServiceError('SERVICE_EOF'));
+	private readonly onError = (): void => this.fail(new CloudForgeServiceError('SERVICE_STDOUT_FAILED'));
+
+	private parseFrames(): void {
+		try {
+			while (true) {
+				const delimiter = this.buffer.indexOf(headerEnd);
+				if (delimiter === -1) {
+					if (this.buffer.length >= maxHeaderBytes) {
+						throw new CloudForgeServiceError('INVALID_FRAME_HEADER');
+					}
+					return;
+				}
+				if (delimiter > maxHeaderBytes) {
+					throw new CloudForgeServiceError('INVALID_FRAME_HEADER');
+				}
+				const header = this.buffer.subarray(0, delimiter).toString('latin1');
+				const length = /^Content-Length: ([0-9]+)$/.exec(header)?.[1];
+				const bodyLength = length === undefined ? 0 : Number(length);
+				if (!Number.isSafeInteger(bodyLength) || bodyLength <= 0 || bodyLength > maxResponseBytes) {
+					throw new CloudForgeServiceError('INVALID_FRAME_LENGTH');
+				}
+				const frameLength = delimiter + headerEnd.length + bodyLength;
+				if (this.buffer.length < frameLength) {
+					return;
+				}
+				const body = this.buffer.subarray(delimiter + headerEnd.length, frameLength);
+				this.buffer = this.buffer.subarray(frameLength);
+				const message = parseObject(body);
+				const waiter = this.waiters.shift();
+				if (!waiter) {
+					throw new CloudForgeServiceError('UNEXPECTED_SERVICE_OUTPUT');
+				}
+				waiter.resolve(message);
+			}
+		} catch (error) {
+			this.fail(error instanceof Error ? error : new CloudForgeServiceError('INVALID_FRAME'));
+		}
+	}
+
+	private fail(error: Error): void {
+		if (this.failure) {
+			return;
+		}
+		this.failure = error;
+		for (const waiter of this.waiters.splice(0)) {
+			waiter.reject(error);
+		}
+		this.onFailure(error);
+	}
+}
+
 export class CloudForgeServiceProcess {
 	private child: ChildProcessWithoutNullStreams | undefined;
 	private closed: Promise<void> | undefined;
 	private stopping = false;
+	private startPromise: Promise<void> | undefined;
 	private stopPromise: Promise<void> | undefined;
+	private responseReader: CloudForgeResponseReader | undefined;
+	private requestQueue: Promise<void> = Promise.resolve();
+	private nextRequestId = 0;
+	private ready = false;
 
 	constructor(private readonly appRoot: string, private readonly logService: ILogService) { }
 
-	async start(): Promise<void> {
+	start(): Promise<void> {
+		return this.startPromise ??= this.startCore();
+	}
+
+	private async startCore(): Promise<void> {
 		const directory = join(this.appRoot, 'cloudforge-service');
 		const executable = join(directory, 'cloudforge-service.exe');
 		try {
@@ -192,7 +318,7 @@ export class CloudForgeServiceProcess {
 			child.stdin.on('error', () => { /* The reply/exit path handles a closed pipe. */ });
 			const started = new Promise<void>((resolve, reject) => {
 				child.once('spawn', resolve);
-				child.on('error', () => reject(new ServiceError('SERVICE_SPAWN_FAILED')));
+				child.on('error', () => reject(new CloudForgeServiceError('SERVICE_SPAWN_FAILED')));
 			});
 
 			await withTimeout((async () => {
@@ -200,32 +326,37 @@ export class CloudForgeServiceProcess {
 				if (this.stopping) {
 					return;
 				}
-				const body = Buffer.from(JSON.stringify({
-					jsonrpc: '2.0',
-					id: requestId,
-					method: 'initialize',
-					params: { supportedProtocolVersions: [protocolVersion], expectedServiceCommit: serviceCommit }
-				}));
-				child.stdin.write(Buffer.concat([Buffer.from('Content-Length: ' + body.length + '\r\n\r\n'), body]));
-				await readCloudForgeInitializeReply(child.stdout.iterator({ destroyOnReturn: false }), serviceCommit);
+				const reader = this.responseReader = new CloudForgeResponseReader(child.stdout, error => {
+					if (!this.stopping) {
+						this.logService.error('[CloudForge Service] ' + (error instanceof CloudForgeServiceError ? error.code : 'SERVICE_PROTOCOL_FAILED'));
+						void this.stop();
+					}
+				});
+				const replyPromise = reader.readMessage();
+				child.stdin.write(frameRequest(requestId, 'initialize', { supportedProtocolVersions: [protocolVersion], expectedServiceCommit: serviceCommit }));
+				const reply = await replyPromise;
+				if (reply.jsonrpc !== '2.0' || reply.id !== requestId || (reply.result === undefined) === (reply.error === undefined)) {
+					throw new CloudForgeServiceError('INVALID_INITIALIZE_RESPONSE');
+				}
+				if (reply.error !== undefined) {
+					const error = safeServiceError(reply.error);
+					throw new CloudForgeServiceError(error.code);
+				}
+				if (!isRecord(reply.result)) {
+					throw new CloudForgeServiceError('INVALID_INITIALIZE_RESPONSE');
+				}
+				if (reply.result.protocolVersion !== protocolVersion) {
+					throw new CloudForgeServiceError('PROTOCOL_MISMATCH');
+				}
+				if (reply.result.serviceCommit !== serviceCommit) {
+					throw new CloudForgeServiceError('SERVICE_COMMIT_MISMATCH');
+				}
 			})(), initializeTimeoutMs, 'INITIALIZE_TIMEOUT');
 			if (this.stopping) {
 				return;
 			}
 
-			child.stdout.once('data', () => {
-				if (!this.stopping) {
-					this.logService.error('[CloudForge Service] UNEXPECTED_SERVICE_OUTPUT');
-					void this.stop();
-				}
-			});
-			child.stdout.on('error', () => {
-				if (!this.stopping) {
-					this.logService.error('[CloudForge Service] SERVICE_STDOUT_FAILED');
-					void this.stop();
-				}
-			});
-			child.stdout.resume();
+			this.ready = true;
 			void this.closed.then(() => {
 				if (!this.stopping) {
 					this.logService.error('[CloudForge Service] SERVICE_EXITED');
@@ -234,10 +365,19 @@ export class CloudForgeServiceProcess {
 			this.logService.info('[CloudForge Service] Initialized protocol ' + protocolVersion + ', service ' + serviceCommit + ', PID ' + child.pid);
 		} catch (error) {
 			if (!this.stopping) {
-				this.logService.error('[CloudForge Service] ' + (error instanceof ServiceError ? error.message : 'SERVICE_START_FAILED'));
+				this.logService.error('[CloudForge Service] ' + (error instanceof CloudForgeServiceError ? error.message : 'SERVICE_START_FAILED'));
 				await this.stop();
 			}
 		}
+	}
+
+	call(method: 'openWorkspace' | 'chooseTerraformRoot' | 'selectArchitecture' | 'readArchitecture', params: Record<string, unknown>): Promise<unknown> {
+		const request = this.requestQueue.then(async () => {
+			await this.startPromise;
+			return this.performRequest(method, params);
+		});
+		this.requestQueue = request.then(() => undefined, () => undefined);
+		return request;
 	}
 
 	stop(): Promise<void> {
@@ -245,7 +385,43 @@ export class CloudForgeServiceProcess {
 		return this.stopPromise ??= this.shutdown();
 	}
 
+	private async performRequest(method: string, params: Record<string, unknown>): Promise<unknown> {
+		const child = this.child;
+		const reader = this.responseReader;
+		if (!this.ready || this.stopping || !child || !reader) {
+			throw new CloudForgeServiceError('SERVICE_UNAVAILABLE');
+		}
+		const id = 'request-' + (++this.nextRequestId);
+		const frame = frameRequest(id, method, params);
+		const responsePromise = withTimeout(reader.readMessage(), requestTimeoutMs, 'REQUEST_TIMEOUT');
+		try {
+			child.stdin.write(frame);
+		} catch {
+			await this.stop();
+			throw new CloudForgeServiceError('SERVICE_STDIN_FAILED');
+		}
+		let response: Record<string, unknown>;
+		try {
+			response = await responsePromise;
+		} catch (error) {
+			if (error instanceof CloudForgeServiceError && error.code === 'REQUEST_TIMEOUT') {
+				await this.stop();
+			}
+			throw error;
+		}
+		if (response.jsonrpc !== '2.0' || response.id !== id || (response.result === undefined) === (response.error === undefined)) {
+			await this.stop();
+			throw new CloudForgeServiceError('INVALID_RPC_RESPONSE');
+		}
+		if (response.error !== undefined) {
+			throw safeServiceError(response.error);
+		}
+		return response.result;
+	}
+
 	private async shutdown(): Promise<void> {
+		this.ready = false;
+		this.responseReader?.dispose();
 		const { child, closed } = this;
 		if (!child || !closed) {
 			return;

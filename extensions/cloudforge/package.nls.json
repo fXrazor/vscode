@@ -1,5 +1,8 @@
 {
 	"displayName": "CloudForge",
-	"description": "Built-in commands for the CloudForge desktop proof.",
-	"command.showProofStatus": "Show Proof Status"
+	"description": "Open local workspaces and inspect read-only infrastructure graphs.",
+	"command.showProofStatus": "Show Proof Status",
+	"command.openWorkspace": "Open Workspace",
+	"view.resources": "CloudForge Graph",
+	"view.resources.welcome": "Open a folder with [CloudForge: Open Workspace](command:cloudforge.openWorkspace) to inspect its resources."
 }

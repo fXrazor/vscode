@@ -24,6 +24,25 @@
 				"command": "cloudforge.showProofStatus",
 				"title": "%command.showProofStatus%",
 				"category": "%displayName%"
+			},
+			{
+				"command": "cloudforge.openWorkspace",
+				"title": "%command.openWorkspace%",
+				"category": "%displayName%"
+			}
+		],
+		"views": {
+			"explorer": [
+				{
+					"id": "cloudforge.resources",
+					"name": "%view.resources%"
+				}
+			]
+		},
+		"viewsWelcome": [
+			{
+				"view": "cloudforge.resources",
+				"contents": "%view.resources.welcome%"
 			}
 		]
 	}
