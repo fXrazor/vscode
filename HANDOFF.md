@@ -304,3 +304,39 @@ Integration changes:
 | esbuild bundle of the extension | 61,759 bytes, including the detection and selection modules. |
 
 **Not done:** no desktop build, package, or interactive run. The Welcome entry, the import offer after a clone, and the 12 acceptance criteria still need the installed smoke.
+
+## Infrastructure Studio dual-renderer preview, 2026-11-17
+
+- Repository owner: this Code OSS checkout; integration owner: current CloudForge desktop task. Rust checkout untouched.
+- Branch `codex/infrastructure-studio-preview`, isolated worktree `C:/Users/dalep/.codex/worktrees/infrastructure-studio/CloudForge-Code`, base revision `1e7eb4b935528bc1193a0da6738c21da5f3e085a`. Changes are uncommitted.
+- Files owned: `extensions/cloudforge/studio/**`, preview exclusion in `extensions/cloudforge/.vscodeignore`, and the canvas-first UI rule in root `AGENTS.md`.
+- Architecture Design and Infrastructure Configuration are projections of the same reducer model. Names, configuration, dependencies, blocks and undo remain shared. Layout/viewports remain per-mode presentation metadata. Configuration cards support inline name/settings editing, incoming dependency disclosures, local name checks and explicit unavailable cost.
+- Workspace chrome reduced to contextual disclosures and opt-in resizable side panes/code dock. SVG/PNG presentation export implemented; PDF uses browser Print / Save PDF.
+- Newly verified: standalone TypeScript check, seven model tests, standalone build; browser mode switch, inline rename and cross-view Undo; successful SVG/PNG downloads with PNG visual inspection; no captured browser console errors.
+- Not verified or complete: browser PDF save, full keyboard/accessibility sweep, all docking/resize combinations, provider schema breadth, production shadcn/Radix migration, service integration, real validation/pricing or desktop packaging. This preview is excluded from shipped extension files. No production infrastructure actions exist here.
+- Exact next integration action: mount the preview in a supported Code OSS webview, adapt its single model to the canonical sanitized graph protocol and reuse native editor tabs for real Terraform. Preserve Rust authorization and existing service changes. Preview UI review can continue independently before integration.
+- See `extensions/cloudforge/studio/README.md` for run instructions and boundaries.
+
+### Independent canvas themes and adaptive background, 2026-11-17
+
+Continued on codex/infrastructure-studio-preview at base 1e7eb4b935528bc1193a0da6738c21da5f3e085a in the same isolated worktree. Changed preview App, DesignCanvas and CSS plus README and root design guidance. Light/dark theme is separate React presentation state; both renderers use the selected theme. View disclosure contains the theme selector. Palette overrides no longer derive from the technical renderer. Default grid is faint neutral lines with world-aligned power-of-two subdivision; the live zoom subscription is isolated in CanvasBackground rather than the graph/editor component.
+
+Compared Miro's live grid at approximately 72%, 75% and 400%; observed subtle lines with subdivision at high zoom. This describes visible behaviour, not its internal implementation. Returned the reference to its 70% overview preset. In CloudForge, verified Configuration Light/Dark and Architecture Dark, renderer switching preserves theme, and graph Undo remains disabled after presentation-only changes. Measured background SVG cell widths of 64px at 10% and 100px at 2000%; no captured browser console errors. Standalone TypeScript check and build passed. Existing reducer tests were unchanged. Browser evidence saved under the current visualization directory as architecture-dark-grid.jpg and configuration-light-grid.jpg. Production desktop/service integration remains as previously documented. Next action is the existing webview integration or further visual review; no Rust files changed.
+
+### CloudLab Forge 3.0 source layout port, 2026-11-17
+
+Same isolated branch/worktree and base revision. Named UI integration owner remains this desktop task. Read-only source supplied by user: Z:/CloudLab Forge/CLOUDLAB FORGE 3.0. Adapted forge.css tokens/overview rules into preview cloudlab-layout.css; ArchitectureOverview.tsx adapts source overview markup to our existing Architecture. Header/catalogue/pane/code dock layout follows Designer.tsx/Catalog.tsx. Source provenance and CSS SHA-256 are in studio/SOURCE-PROVENANCE.md. Source checkout and Rust repository were not edited.
+
+Other changed preview files: App, VisualTopbar, ResourceCatalogue, ResourceNode, DesignCanvas, PaneResizeHandle, model, exportPresentation, preview entry, styles and documentation. Added selection-only whiteboard editing toolbar (text, font size, bold, fill, duplicate, delete), preserving shared history. Fixed resize handle class collision with inspector panel styling. Inspector now opens schema form from overview. Code dock retains the last selected resource when selecting whiteboard items. Source-style palettes remain independent of renderer. Default graph viewport is 100%; Fit remains available.
+
+Newly verified before browser disconnect: source-based shell screenshot, overview/card rendering, selection toolbar text/font/bold edits, duplicate count 1→2 and Undo 2→1. Earlier screenshot exposed summary-row markup mismatch; corrected by applying source summary-row class. TypeScript, reducer tests and build pass. Browser transport closed during the final pass, then also failed a read-only retry. Final form-click, pane resize, revised 100% initial viewport, cross-mode/theme check and stable code dock after whiteboard selection need rechecking after browser reconnect. No new final screenshots were saved. Code is uncommitted.
+
+Exact next action: reconnect browser controls, reload localhost preview, verify overview→form, keyboard pane resize, note editing with code dock retained, then review CloudLab source proportions against live reference. Production service/native editor integration remains pending. This is a source-adapted UI preview, not full feature or pixel parity.
+
+### Paused refinement checkpoint, 2026-11-17
+
+User explicitly requested stopping implementation and saving/documenting progress. No further feature work after that request. Same branch/worktree and base revision. The standalone preview now imports the source catalogue (Azure 1,110 / AWS 1,763 / GCP 1,205), source Monaco 0.52.2 and appearance controls, provider primitive fields, source-style library/overview/editor layout, Radix tabs, template insertion, source-style code resizing, and retained drafts. Shared graph/renderers and independent canvas theme are preserved. Rust/reference repositories were not edited.
+
+Resume from extensions/cloudforge/studio/REFINEMENT-CHECKPOINT.md. It lists exact files, decisions, verification coverage, browser fallback, remaining source-parity gaps and next actions. VERIFICATION-2026-11-17.json records controlled-replay step statuses. Final catalogue/editor scenarios completed without captured console errors. A provider flow ended at an ambiguous favourites locator, so its later template UI steps remain unverified. Latest source workspace screenshot is recorded in the checkpoint. Older dark capture needs retaking after recent fixes.
+
+Save-time validation: standalone check, ten tests, build and git diff --check are run before the local checkpoint commit. No push, release, service operation or desktop rebuild is requested.
