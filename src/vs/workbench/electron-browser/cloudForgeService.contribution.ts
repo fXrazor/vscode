@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { Schemas } from '../../base/common/network.js';
+import { dirname } from '../../base/common/resources.js';
 import { URI } from '../../base/common/uri.js';
 import { Range } from '../../editor/common/core/range.js';
 import { localize } from '../../nls.js';
@@ -11,6 +12,7 @@ import { CommandsRegistry } from '../../platform/commands/common/commands.js';
 import { IFileDialogService } from '../../platform/dialogs/common/dialogs.js';
 import type { ServicesAccessor } from '../../platform/instantiation/common/instantiation.js';
 import { IMainProcessService } from '../../platform/ipc/common/mainProcessService.js';
+import { IWorkspaceContextService } from '../../platform/workspace/common/workspace.js';
 import { IEditorService } from '../services/editor/common/editorService.js';
 import { ITextFileService } from '../services/textfile/common/textfiles.js';
 
@@ -26,6 +28,18 @@ interface CloudForgeCallFailure {
 
 type CloudForgeCallResult = CloudForgeCallSuccess | CloudForgeCallFailure;
 type CloudForgeServiceMethod = 'chooseTerraformRoot' | 'selectArchitecture' | 'readArchitecture';
+type CloudForgeProjectMethod = 'createProject' | 'openProject' | 'grantProject' | 'forgetProjectAccess' | 'createWorkspaceFile' | 'inspectRepository' | 'importRepository' | 'removeRepository' | 'installGit';
+
+/**
+ * Stage 2 project methods. Electron main validates their parameters and fills every path
+ * (project folder, workspace folders, repository folder, parent of a new project); this bridge
+ * only forwards them and tracks the resulting grant.
+ */
+const projectMethods: ReadonlySet<string> = new Set<CloudForgeProjectMethod>([
+	'createProject', 'openProject', 'grantProject', 'forgetProjectAccess', 'createWorkspaceFile',
+	'inspectRepository', 'importRepository', 'removeRepository', 'installGit'
+]);
+const scopedProjectMethods: ReadonlySet<string> = new Set<CloudForgeProjectMethod>(['createWorkspaceFile', 'inspectRepository', 'importRepository', 'removeRepository']);
 
 interface WorkspaceChoice {
 	readonly workspaceId: string;
@@ -40,6 +54,17 @@ let activeWorkspaceId: string | undefined;
 let activeArchitectureId: string | undefined;
 let architectureIds = new Set<string>();
 let terraformCandidateIds = new Set<string>();
+/** For a Stage 2 project grant: each available repository's index in the window's folders. */
+let repositoryFolders = new Map<string, number>();
+
+function clearActiveGrant(): void {
+	activeRoot = undefined;
+	activeWorkspaceId = undefined;
+	activeArchitectureId = undefined;
+	architectureIds = new Set();
+	terraformCandidateIds = new Set();
+	repositoryFolders = new Map();
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -97,6 +122,89 @@ function serviceChannel(accessor: ServicesAccessor) {
 	return accessor.get(IMainProcessService).getChannel('cloudforge');
 }
 
+/** The project folder: the folder of the window's workspace file, or its single folder. */
+function projectFolder(workspaceContext: IWorkspaceContextService): URI | undefined {
+	const workspace = workspaceContext.getWorkspace();
+	if (workspace.configuration?.scheme === Schemas.file) {
+		return dirname(workspace.configuration);
+	}
+	return workspace.folders.length === 1 && workspace.folders[0].uri.scheme === Schemas.file ? workspace.folders[0].uri : undefined;
+}
+
+/** Records a project result (open, grant, import, remove) as the window's active grant. */
+function applyProjectResult(workspaceContext: IWorkspaceContextService, value: unknown): boolean {
+	if (!isRecord(value) || value.kind !== 'project' || !isOpaqueId(value.workspaceId) || !Array.isArray(value.architectures) || value.architectures.length > 1024 || !Array.isArray(value.repositories) || value.repositories.length > 1024) {
+		return false;
+	}
+	const folders = new Map<string, number>();
+	for (const repository of value.repositories) {
+		if (!isRecord(repository) || !isOpaqueId(repository.repositoryId)) {
+			return false;
+		}
+		const index = repository.workspaceFolderIndex;
+		if (repository.status === 'available' && typeof index === 'number' && Number.isSafeInteger(index) && index >= 0) {
+			folders.set(repository.repositoryId, index);
+		}
+	}
+	const ids = new Set<string>();
+	for (const architecture of value.architectures) {
+		if (!isRecord(architecture) || !isOpaqueId(architecture.architectureId)) {
+			return false;
+		}
+		ids.add(architecture.architectureId);
+	}
+	const root = projectFolder(workspaceContext);
+	if (!root) {
+		return false;
+	}
+	if (activeWorkspaceId !== value.workspaceId || (activeArchitectureId !== undefined && !ids.has(activeArchitectureId))) {
+		activeArchitectureId = undefined;
+	}
+	activeRoot = root;
+	activeWorkspaceId = value.workspaceId;
+	architectureIds = ids;
+	terraformCandidateIds = new Set();
+	repositoryFolders = folders;
+	return true;
+}
+
+async function callProjectMethod(accessor: ServicesAccessor, method: CloudForgeProjectMethod, params: Record<string, unknown>): Promise<CloudForgeCallResult> {
+	if (scopedProjectMethods.has(method) && (!isOpaqueId(params.workspaceId) || params.workspaceId !== activeWorkspaceId)) {
+		return failure('SCOPE_DENIED', 'The requested CloudForge project is not active in this window.');
+	}
+	// The accessor is valid only until the first await: take the services now.
+	const channel = serviceChannel(accessor);
+	const workspaceContext = accessor.get(IWorkspaceContextService);
+	if (method === 'openProject' || method === 'grantProject') {
+		// Opening a project revokes the previous grant, as the service does.
+		clearActiveGrant();
+	}
+	let result: CloudForgeCallResult;
+	try {
+		result = await channel.call<CloudForgeCallResult>(method, params);
+	} catch {
+		return failure('SERVICE_UNAVAILABLE', 'The CloudForge service is unavailable.');
+	}
+	if (!isSuccess(result)) {
+		return result;
+	}
+	switch (method) {
+		case 'openProject':
+		case 'grantProject':
+		case 'importRepository':
+		case 'removeRepository':
+			if (!applyProjectResult(workspaceContext, result.value)) {
+				clearActiveGrant();
+				return failure('SERVICE_ERROR', 'The CloudForge service returned an invalid project.');
+			}
+			break;
+		case 'forgetProjectAccess':
+			clearActiveGrant();
+			break;
+	}
+	return result;
+}
+
 CommandsRegistry.registerCommand('_cloudforge.openWorkspace', async accessor => {
 	const channel = serviceChannel(accessor);
 	const folders = await accessor.get(IFileDialogService).showOpenDialog({
@@ -115,11 +223,7 @@ CommandsRegistry.registerCommand('_cloudforge.openWorkspace', async accessor => 
 		return { cancelled: false, result: failure('WORKSPACE_UNAVAILABLE', 'Choose a local folder.') };
 	}
 
-	activeRoot = undefined;
-	activeWorkspaceId = undefined;
-	activeArchitectureId = undefined;
-	architectureIds.clear();
-	terraformCandidateIds.clear();
+	clearActiveGrant();
 
 	let result: CloudForgeCallResult;
 	try {
@@ -146,6 +250,11 @@ CommandsRegistry.registerCommand('_cloudforge.openWorkspace', async accessor => 
 });
 
 CommandsRegistry.registerCommand('_cloudforge.callService', async (accessor, method: unknown, params: unknown): Promise<CloudForgeCallResult> => {
+	if (typeof method === 'string' && projectMethods.has(method)) {
+		return isRecord(params)
+			? callProjectMethod(accessor, method as CloudForgeProjectMethod, params)
+			: failure('INVALID_PARAMS', 'The CloudForge request is invalid.');
+	}
 	if (method !== 'chooseTerraformRoot' && method !== 'selectArchitecture' && method !== 'readArchitecture') {
 		return failure('INVALID_PARAMS', 'The CloudForge request is invalid.');
 	}
@@ -198,12 +307,13 @@ CommandsRegistry.registerCommand('_cloudforge.openSource', async (accessor, work
 	if (!isOpaqueId(workspaceId) || workspaceId !== activeWorkspaceId || !isOpaqueId(architectureId) || architectureId !== activeArchitectureId || typeof sourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(sourceRevision) || !isOpaqueId(nodeId)) {
 		return failure('SCOPE_DENIED', 'The requested source is not active in this window.');
 	}
-	const root = activeRoot;
-	if (!root || root.scheme !== Schemas.file) {
+	const projectRoot = activeRoot;
+	if (!projectRoot || projectRoot.scheme !== Schemas.file) {
 		return failure('WORKSPACE_UNAVAILABLE', 'The selected workspace is not available.');
 	}
 	const editorService = accessor.get(IEditorService);
 	const textFileService = accessor.get(ITextFileService);
+	const workspaceContext = accessor.get(IWorkspaceContextService);
 
 	const result = await serviceChannel(accessor).call<CloudForgeCallResult>('readArchitecture', {
 		workspaceId,
@@ -213,7 +323,7 @@ CommandsRegistry.registerCommand('_cloudforge.openSource', async (accessor, work
 	if (!isSuccess(result)) {
 		return result;
 	}
-	if (root !== activeRoot || workspaceId !== activeWorkspaceId || architectureId !== activeArchitectureId) {
+	if (projectRoot !== activeRoot || workspaceId !== activeWorkspaceId || architectureId !== activeArchitectureId) {
 		return failure('SCOPE_DENIED', 'The requested source is no longer active in this window.');
 	}
 	const graph = result.value;
@@ -225,8 +335,21 @@ CommandsRegistry.registerCommand('_cloudforge.openSource', async (accessor, work
 		return failure('UNSUPPORTED_FORMAT', 'This resource has no navigable source location.');
 	}
 
+	// A linked architecture's source lives in its repository's workspace folder (Stage 2).
+	let root = projectRoot;
+	if (isRecord(graph.sourceBase) && graph.sourceBase.kind === 'repository') {
+		const index = isOpaqueId(graph.sourceBase.repositoryId) ? repositoryFolders.get(graph.sourceBase.repositoryId) : undefined;
+		const folder = index === undefined ? undefined : workspaceContext.getWorkspace().folders[index];
+		if (!folder || folder.uri.scheme !== Schemas.file) {
+			return failure('WORKSPACE_UNAVAILABLE', 'The repository for this architecture is not open in this window.');
+		}
+		root = folder.uri;
+	} else if (graph.sourceBase !== undefined && !(isRecord(graph.sourceBase) && graph.sourceBase.kind === 'project')) {
+		return failure('SERVICE_ERROR', 'The CloudForge service returned an invalid source location.');
+	}
+
 	const source = node.source;
-	if (!isSourceSegment(source.file) || !Array.isArray(graph.sourceRoot) || graph.sourceRoot.length > 4 || !graph.sourceRoot.every(isSourceSegment)) {
+	if (!isSourceSegment(source.file) || !Array.isArray(graph.sourceRoot) || graph.sourceRoot.length > 8 || !graph.sourceRoot.every(isSourceSegment)) {
 		return failure('SERVICE_ERROR', 'The CloudForge service returned an invalid source location.');
 	}
 	if (typeof source.line !== 'number' || !Number.isSafeInteger(source.line) || source.line < 1 || typeof source.column !== 'number' || !Number.isSafeInteger(source.column) || source.column < 1 || typeof source.endLine !== 'number' || !Number.isSafeInteger(source.endLine) || source.endLine < source.line || typeof source.endColumn !== 'number' || !Number.isSafeInteger(source.endColumn) || source.endColumn < 1 || (source.endLine === source.line && source.endColumn < source.column)) {
