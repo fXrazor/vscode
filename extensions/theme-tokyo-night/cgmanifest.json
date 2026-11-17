@@ -1,0 +1,17 @@
+{
+	"registrations": [
+		{
+			"component": {
+				"type": "git",
+				"git": {
+					"name": "tokyo-night-vscode-theme",
+					"repositoryUrl": "https://github.com/enkia/tokyo-night-vscode-theme",
+					"commitHash": "7c0f11eaef322f293621ca7befe462214b7ea468"
+				}
+			},
+			"license": "MIT",
+			"version": "1.1.2"
+		}
+	],
+	"version": 1
+}

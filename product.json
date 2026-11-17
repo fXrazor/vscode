@@ -207,9 +207,9 @@
 	],
 	"onboardingThemes": [
 		{
-			"id": "dark-2026",
-			"label": "Dark 2026",
-			"themeId": "Dark 2026",
+			"id": "tokyo-night",
+			"label": "Tokyo Night",
+			"themeId": "Tokyo Night",
 			"type": "dark"
 		},
 		{
@@ -225,9 +225,9 @@
 			"type": "dark"
 		},
 		{
-			"id": "light-2026",
-			"label": "Light 2026",
-			"themeId": "Light 2026",
+			"id": "tokyo-night-light",
+			"label": "Tokyo Night Light",
+			"themeId": "Tokyo Night Light",
 			"type": "light"
 		},
 		{
