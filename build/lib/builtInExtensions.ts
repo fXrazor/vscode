@@ -122,8 +122,8 @@ function resolvePlatformSpecificAsset(extension: IExtensionDefinition): { assetN
 }
 
 export function getExtensionStream(extension: IExtensionDefinition) {
-	// if the extension exists on disk, use those files instead of downloading anew
-	if (isUpToDate(extension)) {
+	// Always read a configured local VSIX so packaging checks its declared digest.
+	if (!extension.vsix && isUpToDate(extension)) {
 		log('[extensions]', `${extension.name}@${extension.version} up to date`, ansiColors.green('✔︎'));
 		return vfs.src(['**'], { cwd: getExtensionPath(extension), dot: true })
 			.pipe(rename(p => p.dirname = `${extension.name}/${p.dirname}`));
