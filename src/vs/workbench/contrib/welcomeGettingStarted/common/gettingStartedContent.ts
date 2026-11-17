@@ -178,6 +178,17 @@ export const startEntries: GettingStartedStartEntryContent = [
 		}
 	},
 	{
+		id: 'topLevelCloudForgeClone',
+		title: localize('gettingStarted.topLevelCloudForgeClone.title', "Clone into a CloudForge project…"),
+		description: localize('gettingStarted.topLevelCloudForgeClone.description', "Clone a repository and add it to your project workspace"),
+		when: '!isWeb',
+		icon: Codicon.sourceControl,
+		content: {
+			type: 'startEntry',
+			command: 'command:cloudforge.cloneRepository',
+		}
+	},
+	{
 		id: 'topLevelGitOpen',
 		title: localize('gettingStarted.topLevelGitOpen.title', "Open Repository..."),
 		description: localize('gettingStarted.topLevelGitOpen.description', "Connect to a remote repository or pull request to browse, search, edit, and commit"),
