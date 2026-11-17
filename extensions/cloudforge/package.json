@@ -103,6 +103,11 @@
 				"view": "cloudforge.projects",
 				"contents": "%view.projects.welcome%",
 				"when": "!cloudforge.projectOpen"
+			},
+			{
+				"view": "cloudforge.projects",
+				"contents": "%view.projects.emptyProject%",
+				"when": "cloudforge.projectOpen"
 			}
 		],
 		"menus": {

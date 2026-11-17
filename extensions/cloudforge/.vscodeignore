@@ -2,3 +2,4 @@ src/**
 test/**
 esbuild.mts
 tsconfig.json
+*.tsbuildinfo
