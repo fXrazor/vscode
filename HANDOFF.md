@@ -210,6 +210,8 @@ A cross-session message about the split was held by the `stingaree` session and 
 
 ## Next actions
 
+The [Runner View design](docs/cloudforge/runner-view-design.md) is a documentation proposal based on desktop `main` at `c9f463818ef` in `Z:\CloudForge-Code`. This work adds the design and this handoff entry. The first slice would validate a saved Terraform revision offline and present the execution in the Workbench. The local links resolved and the documentation whitespace checks passed. Review the scope and name an integration owner before defining the service capability or starting implementation.
+
 1. **Stage 2 desktop.** The [extension slice](#stage-2-extension-slice-2026-11-17) (D2, D4–D7, D9) is merged on `main`. Until D1 lands, the automatic project connection stays quiet when the broker answers `INVALID_PARAMS`.
    - **Remaining:** the D1 broker (`stingaree`, `feature/project-repos-desktop`), then Codex's D3 and D8 branch (`codex/stage2-terraform-detection`).
    - **After those merge:** replace `hasTerraform` in `extensions/cloudforge/src/project/controller.ts` with `findTerraformImportCandidates`, and rename Codex's test to `.ts`. Then build, package, and run the installed smoke against the design's 12 acceptance criteria.
