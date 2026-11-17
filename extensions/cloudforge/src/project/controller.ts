@@ -118,7 +118,9 @@ export class ProjectController implements Disposable {
 		}
 		if (!result.ok) {
 			this.setProject(undefined);
-			if (result.code !== 'UNSUPPORTED_FORMAT' && result.code !== 'INVALID_STATE') {
+			// Stay quiet when the window is not a project, or when the broker does not offer the
+			// Stage 2 methods yet (it answers INVALID_PARAMS for methods it does not know).
+			if (result.code !== 'UNSUPPORTED_FORMAT' && result.code !== 'INVALID_STATE' && result.code !== 'INVALID_PARAMS') {
 				showProjectError(result.code);
 			}
 			return;
