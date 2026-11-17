@@ -101,6 +101,30 @@ Built from the clean detached checkout `Z:\CFStage\Code` at `6f62ece11e4ca9623c4
 
 Not rerun in this check: the firewall-blocked offline launch, the commit and protocol mismatch cases, the partial-frame EOF test, and uninstall. The user's install was left in place, and the temporary user-data and fixture folders were removed. The original [installer proof](#verified-windows-installer-proof) covers those checks for the earlier packaging path.
 
+## Sidecar handshake unit tests (2026-11-17)
+
+Worktree `E:\Orca\CloudForge-Code\stingaree`, branch `fxrazor/chore-test-verify-handoff`, based on `main` at `6f389944d1a`. This change adds tests only and stays within the handshake-only proof scope. The runtime supervisor [cloudForgeService.ts](src/vs/code/electron-main/cloudForgeService.ts) had no unit tests and is unchanged.
+
+- Added [cloudForgeService.test.ts](src/vs/code/test/electron-main/cloudForgeService.test.ts), with 23 cases in the Electron unit runner:
+  - **Initialize reply parser:** replies delivered in one chunk, one byte at a time, and with the delimiter split across chunks. Error codes `-32001`, `-32002`, and other codes. Protocol or commit identity mismatches, including a string `"1"` and an uppercase commit. Malformed JSON-RPC envelopes, non-object and invalid UTF-8 bodies, invalid `Content-Length` values and extra headers, a 4 KiB header without a delimiter, trailing output, and early EOF.
+  - **Package verification through `start()`:** a missing manifest, or a manifest path that is a directory. Manifests over 4 KiB, exactly 4 KiB, and not a JSON object. Invalid architecture, commit, and digest fields, and a different protocol. A missing executable and a digest mismatch. Stopping during verification, which must neither spawn nor log, and stopping before start.
+  - The fixture executable holds inert text, and every case fails before spawning. The tests assert that no child process exists.
+- Coordination: the `dab-ee` session (`fxrazor/collaborative-build-test-handoff`, `b2639f50659`) owns `build/cloudforge/**`, the stager test, and `docs/cloudforge/service-artifact.md`. This branch touched none of them.
+
+| Check | Result |
+| --- | --- |
+| `node build/next/index.ts transpile`, then `scripts\test.bat --run src/vs/code/test/electron-main/cloudForgeService.test.ts`. Electron was downloaded into this worktree's `.build/electron` | 24 passing: 23 new cases and the runner's clean-state check. 0 failing |
+| Mutants applied to the transpiled module, then the module was restored byte for byte: header-size bound off by one, trailing-output check removed, `-32002` mapping changed | Each mutant caused exactly 1 failing test |
+| `tsc --project ./src/tsconfig.json --noEmit --skipLibCheck` (worktree TypeScript `7.1.0-dev.20261105.1`) | Exit 0, with the new file included |
+| `node --experimental-strip-types build/hygiene.ts <test file>` (oxlint and formatting) | Passed |
+
+Observations:
+
+- When the executable is not a valid PE image, Windows `spawn` throws synchronously. The supervisor therefore logs `SERVICE_START_FAILED`, not `SERVICE_SPAWN_FAILED`. A Node probe confirmed that start and stop return within about 180 ms, so shutdown does not hang. This is diagnostic wording only and was not changed.
+- Two mutants were not completed: an inverted digest check, and ignoring a stop requested during verification. Both make the code reach `spawn` with the fixture. The first one hung the Electron runner for more than 10 minutes and was stopped. Afterwards no stray processes remained, and the module was restored.
+- The Codex worktree `feature/workspace-graph-desktop` has uncommitted changes to `cloudForgeService.ts`. Rerun this test there after it rebases onto `main`.
+- Not covered by these tests: a successful spawn and handshake against a real service, and lifecycle on quit or forced termination. The [installed package check](#installed-package-check-2026-11-17) covers those.
+
 ## Next actions
 
 1. `main` now contains the verified desktop/service proof and the reconciled stager. Preserve its protocol-1 handshake scope and the canonical [service draft](Z:/CloudForge/docs/protocol/cloudforge-service-v1.md); workspace and graph operations remain the follow-on slice. `feature/workspace-graph-desktop` is based on `0e5307e3c63` and can rebase onto `main` without conflicting files in `build/cloudforge/` or `build/win32/code.iss`.
