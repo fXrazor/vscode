@@ -22,6 +22,12 @@ const headerEnd = Buffer.from('\r\n\r\n');
 const commitPattern = /^[0-9a-f]{40}$/;
 const hashPattern = /^[0-9a-f]{64}$/;
 
+/** Methods the broker may send after `initialize`. */
+export type CloudForgeServiceMethod =
+	| 'openWorkspace' | 'chooseTerraformRoot' | 'selectArchitecture' | 'readArchitecture'
+	| 'createProject' | 'openProject' | 'grantProject' | 'forgetProjectAccess' | 'createWorkspaceFile'
+	| 'inspectRepository' | 'importRepository' | 'removeRepository' | 'installGit';
+
 export class CloudForgeServiceError extends Error {
 	constructor(readonly code: string, readonly kind?: string) {
 		super(code);
@@ -177,7 +183,8 @@ function frameRequest(id: string, method: string, params: Record<string, unknown
 	return Buffer.concat([Buffer.from('Content-Length: ' + body.length + '\r\n\r\n'), body]);
 }
 
-function safeServiceError(error: unknown): CloudForgeServiceError {
+/** Maps a JSON-RPC error object to a fixed code. Service messages are never passed on. */
+export function safeServiceError(error: unknown): CloudForgeServiceError {
 	if (!isRecord(error)) {
 		return new CloudForgeServiceError('SERVICE_ERROR');
 	}
@@ -191,6 +198,9 @@ function safeServiceError(error: unknown): CloudForgeServiceError {
 		case -32006: return new CloudForgeServiceError('UNSUPPORTED_FORMAT', 'UNSUPPORTED_FORMAT');
 		case -32007: return new CloudForgeServiceError('WORKSPACE_UNAVAILABLE', 'WORKSPACE_UNAVAILABLE');
 		case -32008: return new CloudForgeServiceError('LIMIT_EXCEEDED', 'LIMIT_EXCEEDED');
+		case -32009: return new CloudForgeServiceError('CONSENT_REQUIRED', 'CONSENT_REQUIRED');
+		case -32010: return new CloudForgeServiceError('ALREADY_EXISTS', 'ALREADY_EXISTS');
+		case -32602: return kind === 'INVALID_PARAMS' ? new CloudForgeServiceError('INVALID_PARAMS', kind) : new CloudForgeServiceError('SERVICE_ERROR', kind);
 		default: return new CloudForgeServiceError('SERVICE_ERROR', kind);
 	}
 }
@@ -371,10 +381,10 @@ export class CloudForgeServiceProcess {
 		}
 	}
 
-	call(method: 'openWorkspace' | 'chooseTerraformRoot' | 'selectArchitecture' | 'readArchitecture', params: Record<string, unknown>): Promise<unknown> {
+	call(method: CloudForgeServiceMethod, params: Record<string, unknown>, timeoutMs = requestTimeoutMs): Promise<unknown> {
 		const request = this.requestQueue.then(async () => {
 			await this.startPromise;
-			return this.performRequest(method, params);
+			return this.performRequest(method, params, timeoutMs);
 		});
 		this.requestQueue = request.then(() => undefined, () => undefined);
 		return request;
@@ -385,7 +395,7 @@ export class CloudForgeServiceProcess {
 		return this.stopPromise ??= this.shutdown();
 	}
 
-	private async performRequest(method: string, params: Record<string, unknown>): Promise<unknown> {
+	private async performRequest(method: CloudForgeServiceMethod, params: Record<string, unknown>, timeoutMs: number): Promise<unknown> {
 		const child = this.child;
 		const reader = this.responseReader;
 		if (!this.ready || this.stopping || !child || !reader) {
@@ -393,7 +403,7 @@ export class CloudForgeServiceProcess {
 		}
 		const id = 'request-' + (++this.nextRequestId);
 		const frame = frameRequest(id, method, params);
-		const responsePromise = withTimeout(reader.readMessage(), requestTimeoutMs, 'REQUEST_TIMEOUT');
+		const responsePromise = withTimeout(reader.readMessage(), timeoutMs, 'REQUEST_TIMEOUT');
 		try {
 			child.stdin.write(frame);
 		} catch {

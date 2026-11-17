@@ -11,7 +11,7 @@ import { join } from '../../../base/common/path.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../base/test/common/utils.js';
 import { getRandomTestPath } from '../../../base/test/node/testUtils.js';
 import { NullLogService } from '../../../platform/log/common/log.js';
-import { CloudForgeServiceProcess, readCloudForgeInitializeReply } from '../../electron-main/cloudForgeService.js';
+import { CloudForgeServiceProcess, readCloudForgeInitializeReply, safeServiceError } from '../../electron-main/cloudForgeService.js';
 
 const commit = 'a'.repeat(40);
 const otherCommit = 'b'.repeat(40);
@@ -147,6 +147,30 @@ suite('CloudForge service', () => {
 			assert.strictEqual(await rejection(chunks(bytes.subarray(0, 10))), 'SERVICE_EOF_BEFORE_INITIALIZE');
 			assert.strictEqual(await rejection(chunks(bytes.subarray(0, bytes.length - 1))), 'SERVICE_EOF_BEFORE_INITIALIZE');
 		});
+	});
+
+	test('maps request error objects to fixed codes', () => {
+		const errors: unknown[] = [
+			{ code: -32009, message: 'consent', data: { kind: 'CONSENT_REQUIRED' } },
+			{ code: -32010, message: 'exists', data: { kind: 'ALREADY_EXISTS' } },
+			{ code: -32602, message: 'bad name C:\secret', data: { kind: 'INVALID_PARAMS' } },
+			{ code: -32602, message: 'other', data: { kind: 'SOMETHING_ELSE' } },
+			{ code: -32004, message: 'denied' },
+			{ code: -32099, message: 'unknown' },
+			'not an object',
+		];
+		assert.deepStrictEqual(errors.map(error => {
+			const mapped = safeServiceError(error);
+			return [mapped.code, mapped.kind, mapped.message];
+		}), [
+			['CONSENT_REQUIRED', 'CONSENT_REQUIRED', 'CONSENT_REQUIRED'],
+			['ALREADY_EXISTS', 'ALREADY_EXISTS', 'ALREADY_EXISTS'],
+			['INVALID_PARAMS', 'INVALID_PARAMS', 'INVALID_PARAMS'],
+			['SERVICE_ERROR', 'SOMETHING_ELSE', 'SERVICE_ERROR'],
+			['SCOPE_DENIED', 'SCOPE_DENIED', 'SCOPE_DENIED'],
+			['SERVICE_ERROR', undefined, 'SERVICE_ERROR'],
+			['SERVICE_ERROR', undefined, 'SERVICE_ERROR'],
+		]);
 	});
 
 	suite('package verification', () => {

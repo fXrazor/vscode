@@ -155,9 +155,52 @@ Next action: when a signing step is added, run it before the pre-Inno gate, and 
 - [cloudforgeServiceArtifact.test.ts](build/lib/test/cloudforgeServiceArtifact.test.ts) passed 73 tests. The nine new cases failed against the baseline because staging accepted their matching digests. Targeted strict TypeScript checking passed. The read-only CLI accepted the binaries in `Z:\CFProof` and `Z:\CFStage` with all expected inputs pinned. A scratch staging run with the `CFProof` binary also passed the gate. A fresh installer and installed smoke remain pending.
 - The [staging guide](docs/cloudforge/service-artifact.md) describes the header checks. Before a signed release, stage the final signed bytes and run the pre-Inno verification gate on those bytes.
 
+## Stage 2 D1: Electron-main broker (2026-11-17)
+
+Worktree `E:\Orca\CloudForge-Code\stingaree`, branch `feature/project-repos-desktop`, based on `main` at `7d54bb08544`. This is task D1 of the [Stage 2 plan](Z:/CloudForge/docs/superpowers/plans/2026-11-17-project-repos-import.md#desktop-featureproject-repos-desktop). It is built against the Phase 0 contract on CloudForge `main` at `ae5785d`. No Rust code or protocol file changed.
+
+- [cloudForgeServiceChannel.ts](src/vs/code/electron-main/cloudForgeServiceChannel.ts) accepts the nine Stage 2 methods. `validateCloudForgeServiceParams` checks only the parameters the extension may send:
+  - `createProject`: `{ name }`.
+  - `openProject`, `grantProject`, `forgetProjectAccess`, `installGit`: `{}`.
+  - `inspectRepository`: `{ workspaceId, workspaceFolderIndex }`.
+  - `createWorkspaceFile`, `importRepository`, `removeRepository`: ID-only parameters.
+
+  Any `parentPath`, `projectPath`, `workspaceFolders`, or `folderPath` from the extension is rejected.
+- `resolveCloudForgeRequest` adds the parameters the broker owns. It uses the calling window only:
+  - `projectPath` is the folder containing the window's saved `.code-workspace`, or its single opened folder.
+  - `workspaceFolders` comes from `resolveLocalWorkspace`, in window order.
+  - `folderPath` is chosen by index into that list.
+  - `parentPath` comes from a native single-folder picker that Electron main opens.
+
+  The broker sends nothing to the service when:
+  - the workspace is untitled, remote, or contains a non-local or UNC folder;
+  - the window is empty;
+  - the index is out of range;
+  - the picker is cancelled.
+- Contract choices for D2 to use:
+  - A cancelled picker returns `CANCELLED`.
+  - A window without a usable project scope returns `INVALID_STATE`.
+  - A successful `createProject` result gains `workspaceFile`, a `file:` URI for the extension to open. The broker joins it only from validated single-component names, and the extension never receives the parent path any other way.
+- [cloudForgeService.ts](src/vs/code/electron-main/cloudForgeService.ts):
+  - The new errors map to fixed codes: `-32009` to `CONSENT_REQUIRED`, `-32010` to `ALREADY_EXISTS`, and `-32602` with kind `INVALID_PARAMS` to `INVALID_PARAMS`.
+  - `call` takes a per-request timeout. `installGit` waits 11 minutes, against the service's 10-minute limit; other requests keep 30 s.
+- [app.ts](src/vs/code/electron-main/app.ts) passes the workspaces and dialog main services to the broker. Its window, workspace, dialog, and service dependencies are narrow interfaces, so the tests use typed fakes and nothing is spawned.
+
+| Check | Result |
+| --- | --- |
+| `pnpm run build-fast --client-only`, then `scripts\test.bat --run …/cloudForgeServiceChannel.test.ts --run …/cloudForgeService.test.ts` | 39 passing, 0 failing. Broker tests: <ul><li>a folder outside the window's list is refused;</li><li>each of two windows gets only its own paths and service;</li><li>a cancelled picker sends nothing;</li><li>unknown windows, empty, untitled, and remote workspaces are refused;</li><li>UNC and multiple picks are refused;</li><li>unsafe names in the service's reply are refused;</li><li>`installGit` gets its longer timeout;</li><li>error messages are fixed.</li></ul> |
+| Five mutants on the compiled broker: extra keys accepted, remote check removed, cancel ignored, index ignored, folder-name check removed | Each mutant caused 1 or 2 failing tests. The module was restored. |
+| Every Stage 2 fixture request, with broker-owned keys removed, run through `validateCloudForgeServiceParams` | 49 of 50 accepted. The rejected one, `importRepository` with empty `selections`, gets the `INVALID_PARAMS` the fixture expects from the service. The broker supplies the same parameter names as the fixtures. |
+| `tsc --project ./src/tsconfig.json --noEmit --skipLibCheck` | Exit 0. |
+| `build/hygiene.ts` and `pnpm run oxlint` on the 5 changed files | Passed. |
+
+Not done in D1:
+- The renderer command `_cloudforge.callService` in [cloudForgeService.contribution.ts](src/vs/workbench/electron-browser/cloudForgeService.contribution.ts) still forwards only Stage 1 methods. D2 must add the Stage 2 methods there, or add a project-specific command, before the extension can reach them. That file is not in the plan's desktop ownership list; add it.
+- Not run in D1: the Rust service, a debug build, and the installed product.
+
 ## Next actions
 
-1. Start [Stage 2 Phase 0](Z:/CloudForge/docs/superpowers/plans/2026-11-17-project-repos-import.md#phase-0--contract-integration-owner-before-any-code). Both Stage 1 merges are on `main`, and the user accepted the installed check. Phase 0 adds the protocol changes and fixtures on CloudForge `main` before the Stage 2 code branches start.
+1. Stage 2 Phase 0 is done on CloudForge `main` (`ae5785d`). Desktop D1 (broker) is on `feature/project-repos-desktop` ([details](#stage-2-d1-electron-main-broker-2026-11-17)). Next on the desktop side is D2, the project lifecycle. Start it by forwarding the Stage 2 methods through the renderer command. The Rust agent works on `feature/project-repos-service`. Merge order: Rust first, then desktop.
 2. Before a signed release, sign the service before staging. The pre-Inno `--verify` gate checks the final signed executable against the manifest digest. See the [staging guide](docs/cloudforge/service-artifact.md#signing-and-integration).
 
 ## Stage 1 merged revisions (2026-11-17)

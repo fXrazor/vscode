@@ -1407,7 +1407,9 @@ export class CodeApplication extends Disposable {
 			const broker = this.cloudForgeServiceBroker = new CloudForgeServiceBroker(
 				this.environmentMainService.appRoot,
 				this.logService,
-				accessor.get(IWindowsMainService)
+				accessor.get(IWindowsMainService),
+				accessor.get(IWorkspacesManagementMainService),
+				accessor.get(IDialogMainService)
 			);
 			mainProcessElectronServer.registerChannel('cloudforge', broker);
 		}
