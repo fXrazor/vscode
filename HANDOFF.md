@@ -253,8 +253,12 @@ A cross-session message about the split was held by the `stingaree` session and 
 
 The [Runner View design](docs/cloudforge/runner-view-design.md) is a documentation proposal based on desktop `main` at `c9f463818ef` in `Z:\CloudForge-Code`. This work adds the design and this handoff entry. The first slice would validate a saved Terraform revision offline and present the execution in the Workbench. The local links resolved and the documentation whitespace checks passed. Review the scope and name an integration owner before defining the service capability or starting implementation.
 
-1. **Stage 2 desktop.** The [extension slice](#stage-2-extension-slice-2026-11-17) (D2, D4–D7, D9) and the [D1 broker](#stage-2-d1-electron-main-broker-2026-11-17) are on `main`. Codex's D3 and D8 work is on `fxrazor/stage2-integration`, wired into the import flow (see [Stage 2 desktop integration](#stage-2-desktop-integration-2026-11-17)).
-   - **Remaining:** merge `fxrazor/stage2-integration` into `main`. Then build, package with the Rust service from CloudForge `main` (`ca09ef6` or later), and run the installed smoke against the design's 12 acceptance criteria, including the Welcome entry.
+1. **Stage 2 desktop.** D1–D9 are on `main`. The [packaged smoke](#stage-2-packaged-smoke-2026-11-17) passed 25 of 26 checks, and the one failure (empty project view) is fixed in `10d5bb7a547`.
+   - **Remaining:**
+     - Rebuild the installer from `main` at or after `10d5bb7a547`.
+     - Install it, then check a clone from each provider entry and the Git install offer on a machine without Git.
+     - Check the reconciliation states: a repo removed from the window, deleted on disk, or replaced.
+     - Rerun `Z:\CFStage\smoke\stage2-smoke.mjs` against the new payload.
    - **Contract:** the [protocol's Stage 2 section](Z:/CloudForge/docs/protocol/cloudforge-service-v1.md#stage-2-projects-with-repositories) and [fixtures](Z:/CloudForge/docs/protocol/fixtures/stage2/README.md). Broker-supplied paths (`projectPath`, `workspaceFolders`, `folderPath`, `parentPath`) come from Electron main, never from the extension.
    - **Already done on CloudForge `main`:** Phase 0 and the Rust tasks (`ae5785d`, `ca09ef6`).
 2. Before a signed release, sign the service before staging. The pre-Inno `--verify` gate checks the final signed executable against the manifest digest. See the [staging guide](docs/cloudforge/service-artifact.md#signing-and-integration).
@@ -303,4 +307,56 @@ Integration changes:
 | `build/oxlint.ts` and `build/hygiene.ts` on all 8 changed files | Passed after the escape fix. |
 | esbuild bundle of the extension | 61,759 bytes, including the detection and selection modules. |
 
-**Not done:** no desktop build, package, or interactive run. The Welcome entry, the import offer after a clone, and the 12 acceptance criteria still need the installed smoke.
+This branch was merged into `main` as `1e7eb4b9355`. The [Stage 2 packaged smoke](#stage-2-packaged-smoke-2026-11-17) covers the desktop run.
+
+## Stage 2 packaged smoke (2026-11-17)
+
+### Build
+
+| Item | Value |
+| --- | --- |
+| Desktop | `main` at `c543c788eb3`, built in the clean detached checkout `Z:\CFStage\Code`. `corepack pnpm install --frozen-lockfile`, then `build/cloudforge/package-win32-x64.ps1`, which passed in 28 minutes. |
+| Rust service | CloudForge `main` at `ca09ef6a1a3e76f96230b69da929ebdc503fbdc6`. Built with `cargo build --release --locked --target x86_64-pc-windows-msvc`, `+crt-static`, and `CLOUDFORGE_SERVICE_COMMIT` set. Protocol 1, 1,869,824 bytes, SHA-256 `efbe7287ae244bfabb60e27bb2e2009ed963b0e4a5112e1bc89d3c3e780a36e6`. The `service/` sources were clean; that checkout's other uncommitted files are legacy frontend and docs. |
+| Installer | [CloudForgeProofSetup-x64-c543c788eb3.exe](Z:/CFStage/CloudForgeProofSetup-x64-c543c788eb3.exe), 321,543,315 bytes, SHA-256 `1f8713a4e52558cb20348d986e4864e82cfede27c2a051e0dca816718106c8ea`. JavaScript Debugger VSIX `7accf785…6abc1897`. |
+
+### Broker fix found while preparing the smoke (`c543c788eb3`)
+
+The broker started the service with only `SystemRoot` and `WINDIR`. The Stage 2 service finds its consent store, winget, and Git through `LOCALAPPDATA` and `ProgramFiles`. Remembered consent and the Git install would therefore have failed in the packaged app.
+
+The broker now passes `cloudForgeServiceEnvironment`: the same 22 non-secret Windows variables the service forwards to winget (`ENVIRONMENT` in the service's `git.rs`). `PATH`, tokens, and everything else stay out. A new main-process test pins this. `scripts\test.bat --run …/cloudForgeServiceChannel.test.ts --run …/cloudForgeService.test.ts` gave 40 passing, 0 failing. Lint, hygiene, and the TypeScript 7 core type check passed.
+
+### Smoke results
+
+The portable payload `Z:\CFStage\VSCode-win32-x64` ran with fresh `--user-data-dir`, `--extensions-dir`, and `--shared-data-dir` folders, driven over the Chrome DevTools Protocol.
+
+- **Folder dialog:** the broker's native folder dialog was answered with window messages to its own controls.
+- **Consent store:** the per-user consent store did not exist before the run. It was removed afterwards.
+- **Fixtures:**
+  - a Terraform repo with three roots, a `.tfvars` file, a state file, and a sentinel secret literal;
+  - an `origin` with credentials in the URL;
+  - a Python repo.
+
+25 of 26 checks passed. Scripts, the JSON report, and screenshots are in `Z:\CFStage\smoke`.
+
+| Area | Result |
+| --- | --- |
+| Welcome (D8) | **Clone into a CloudForge project…** is listed under Start after the stock entries. |
+| Create project | **CloudForge: Create Project…** took a name and showed the native folder dialog. It wrote the marker, `repos\`, and `SmokeProject.code-workspace`, and the window reopened on the workspace. `createProject` records consent, so the window did not ask. |
+| Remembered consent | Reopening asked nothing. **Forget Project Access** removed the record; the next open asked, and **Allow** recorded it again. |
+| 1 and 5: offer only with Terraform | `infra` was offered for import. `pyapp` (Python) was not. |
+| 4: two of three roots | Three roots were offered and two chosen. `COM1` and a name differing only in case were refused. Exactly two linked architectures were recorded, and each opened its own graph (two resources each). |
+| 6: marker and repo files | An unknown marker field survived the import write. Every repo file outside `.git` hashed the same before and after. |
+| 7: clean remote | `https://smoke-user:smoke-token-123@example.com/org/infra.git` was recorded as `https://example.com/org/infra.git`. |
+| 9: secrets | The warning said "3 place(s)" with no values. Problems listed `TFVARS_FILE`, `STATE_FILE`, and `SENSITIVE_LITERAL` with file and line only. No sentinel value appeared in the window text or the app logs. |
+| **Failed: empty project** | A new project with no repos showed an empty Project view. The clone links appeared only when no project was open. |
+
+**Empty-project fix (`10d5bb7a547`):** the view now shows the provider links and a line about importing an existing repo while an empty project is open. To verify it, the payload's two extension manifest files were patched for one run and then restored byte for byte. The same commit stops shipping `tsconfig.typecheck.tsbuildinfo`, which was in the payload. **Neither change is in the installer above.**
+
+**Not covered:**
+
+- **Criteria 2 and 10:** a provider clone and the Git install need the network or a machine without Git. The Welcome entry was seen but not clicked.
+- **Criterion 3:** no service request before **Import…** was not observable from the smoke. It rests on the D3 tests and code review.
+- **Criteria 8 and 11:** reconciliation (a removed, deleted, or replaced repo) and the Tauri fallback were not run. The Rust tests cover them.
+- **Installer:** not installed. The smoke ran against its payload, as for Stage 1.
+- **Agent host notice:** "Channel name 'agentHostManagement' timed out after 1000ms" appeared on reopen. It comes from the agent host, not CloudForge.
+- **Graph:** the Graph view is still Stage 1's resource tree. The diagram canvas is later work.
