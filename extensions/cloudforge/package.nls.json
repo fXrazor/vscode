@@ -1,0 +1,5 @@
+{
+	"displayName": "CloudForge",
+	"description": "Built-in commands for the CloudForge desktop proof.",
+	"command.showProofStatus": "Show Proof Status"
+}

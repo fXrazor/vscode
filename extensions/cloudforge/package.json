@@ -1,0 +1,30 @@
+{
+	"name": "cloudforge",
+	"displayName": "%displayName%",
+	"description": "%description%",
+	"version": "0.0.1",
+	"publisher": "cloudforge",
+	"license": "MIT",
+	"engines": {
+		"vscode": "^1.74.0"
+	},
+	"main": "./dist/extension.js",
+	"extensionKind": [
+		"ui"
+	],
+	"capabilities": {
+		"untrustedWorkspaces": {
+			"supported": true
+		},
+		"virtualWorkspaces": true
+	},
+	"contributes": {
+		"commands": [
+			{
+				"command": "cloudforge.showProofStatus",
+				"title": "%command.showProofStatus%",
+				"category": "%displayName%"
+			}
+		]
+	}
+}

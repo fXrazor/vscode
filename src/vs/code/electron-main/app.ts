@@ -158,6 +158,7 @@ import ErrorTelemetry from '../../platform/telemetry/electron-main/errorTelemetr
 import { IProtocolMainService } from '../../platform/protocol/electron-main/protocol.js';
 import { createRemoteResourceRequestHandler } from '../../platform/protocol/electron-main/remoteResourceProtocol.js';
 import { logNodeCompileCacheStatus, markNodeCompileCacheReady, waitForNodeCompileCacheReady } from '../../base/node/nodeCompileCache.js';
+import { CloudForgeServiceProcess } from './cloudForgeService.js';
 
 type OSProxyConfigEvent = {
 	readonly success: boolean;
@@ -728,9 +729,16 @@ export class CodeApplication extends Disposable {
 			this.logService.error(error);
 		}
 
+		const cloudForgeService = isWindows && process.arch === 'x64' && this.environmentMainService.isBuilt && this.productService.applicationName === 'cloudforge-proof'
+			? new CloudForgeServiceProcess(this.environmentMainService.appRoot, this.logService)
+			: undefined;
+
 		// Main process server (electron IPC based)
 		const mainProcessElectronServer = new ElectronIPCServer();
 		Event.once(this.lifecycleMainService.onWillShutdown)(e => {
+			if (cloudForgeService) {
+				e.join('cloudForgeService', cloudForgeService.stop());
+			}
 			if (e.reason === ShutdownReason.KILL) {
 				// When we go down abnormally, make sure to free up
 				// any IPC we accept from other windows to reduce
@@ -806,6 +814,9 @@ export class CodeApplication extends Disposable {
 
 		// Post Open Windows Tasks
 		this.afterWindowOpen(appInstantiationService);
+		if (windows.length) {
+			void cloudForgeService?.start();
+		}
 
 		// Restart to apply updates while the screen is locked
 		this._register(appInstantiationService.createInstance(UnattendedRestartScheduler, {

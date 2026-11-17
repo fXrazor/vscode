@@ -1,0 +1,3 @@
+src/**
+esbuild.mts
+tsconfig.json
