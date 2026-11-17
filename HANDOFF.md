@@ -157,7 +157,7 @@ Next action: when a signing step is added, run it before the pre-Inno gate, and 
 
 ## Next actions
 
-1. Start [Stage 2 Phase 0](Z:/CloudForge/docs/superpowers/plans/2026-11-17-project-repos-import.md#phase-0--contract-integration-owner-before-any-code). Both Stage 1 merges are on `main`, and the user accepted the installed check. Phase 0 adds the protocol changes and fixtures on CloudForge `main` before the Stage 2 code branches start.
+1. [Stage 2 Phase 0](Z:/CloudForge/docs/superpowers/plans/2026-11-17-project-repos-import.md#phase-0--contract-integration-owner-before-any-code) is done on CloudForge `main` at `ae5785d`. The [protocol's Stage 2 section](Z:/CloudForge/docs/protocol/cloudforge-service-v1.md#stage-2-projects-with-repositories) and the [fixtures](Z:/CloudForge/docs/protocol/fixtures/stage2/README.md) are the contract for desktop tasks D1–D9 on `feature/project-repos-desktop`. Start after the Rust tasks R1–R10 merge, or in parallel using the fixtures as canned service replies. Broker-supplied paths (`projectPath`, `workspaceFolders`, `folderPath`, `parentPath`) come from Electron main, never from the extension.
 2. Before a signed release, sign the service before staging. The pre-Inno `--verify` gate checks the final signed executable against the manifest digest. See the [staging guide](docs/cloudforge/service-artifact.md#signing-and-integration).
 
 ## Stage 1 merged revisions (2026-11-17)
