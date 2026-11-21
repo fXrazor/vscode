@@ -251,6 +251,10 @@ A cross-session message about the split was held by the `stingaree` session and 
 
 ## Next actions
 
+The user clarified that infrastructure design has two modes, **Visual Design** with the original Brainboard-style diagram and Miro-inspired features, and **Technical Design** with n8n/Blender-inspired engineering nodes. The Infrastructure Studio plan now records both presentations over shared resources, with validation, execution and deployment as associated workflows.
+
+The [Infrastructure Studio implementation plan](docs/cloudforge/infrastructure-studio-implementation-plan.md) assesses the supplied master specification and screenshots with n8n as the primary interaction reference. Documentation work used desktop `main` at `70c72e1b523c3948e3f092ec174e09ab4cda2432` in `Z:/CloudForge-Code` and read Rust source at `ca09ef6a1a3e76f96230b69da929ebdc503fbdc6`. This work owns only the new plan and this handoff entry. Research covers official application documentation, current library guidance through Context7, current source boundaries and the frontend design review. Local source links and documentation whitespace were checked. Feasibility, ordering and initial Azure authoring scope remain proposals. The next assignment is Phase 0 integration and contract decisions, followed by Phase 1 read-only canvas and focused resource inspection. Runtime and installed-product evidence remains as recorded for the existing slices.
+
 The [Runner View design](docs/cloudforge/runner-view-design.md) is a documentation proposal based on desktop `main` at `c9f463818ef` in `Z:\CloudForge-Code`. This work adds the design and this handoff entry. The first slice would validate a saved Terraform revision offline and present the execution in the Workbench. The local links resolved and the documentation whitespace checks passed. Review the scope and name an integration owner before defining the service capability or starting implementation.
 
 1. **Stage 2 desktop.** D1–D9 are on `main`. The [packaged smoke](#stage-2-packaged-smoke-2026-11-17) passed 25 of 26 checks, and the one failure (empty project view) is fixed in `10d5bb7a547`.
