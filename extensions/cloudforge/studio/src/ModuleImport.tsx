@@ -18,7 +18,13 @@ export function ModuleImport({ onClose, onImport }: { onClose: () => void; onImp
 	const [source, setSource] = useState('');
 	const [version, setVersion] = useState('');
 	const [error, setError] = useState('');
-	useEffect(() => { dialog.current?.showModal(); }, []);
+	useEffect(() => {
+		const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+		dialog.current?.showModal();
+		return () => {
+			if (previous?.isConnected) { previous.focus(); }
+		};
+	}, []);
 	function importReference() {
 		if (!/^[a-zA-Z_][a-zA-Z0-9_-]*$/.test(name) || !source.trim()) {
 			setError('Enter a module name starting with a letter or underscore and a source reference.');

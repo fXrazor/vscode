@@ -22,6 +22,7 @@ import { VisualTopbar } from './VisualTopbar.tsx';
 import { ArrowLeft, Scan, PanelsTopLeft, PanelRightClose, Code2 } from 'lucide-react';
 import { DockResizeHandle } from './DockResizeHandle.tsx';
 import { PaneResizeHandle } from './PaneResizeHandle.tsx';
+import { createPanelLayout, dockCodePanel, setSidePanelOpen, toggleSidePanel, type CodeDock } from './panelLayout.ts';
 
 export function Studio() {
 	const [history, dispatch] = useReducer(historyReducer, undefined, () => createHistory(sampleArchitecture()));
@@ -33,21 +34,20 @@ export function Studio() {
 	const [workspaceOpen, setWorkspaceOpen] = useState(false);
 	const [overview, setOverview] = useState(true);
 	const [moduleImportOpen, setModuleImportOpen] = useState(false);
-	const [libraryOpen, setLibraryOpen] = useState(true);
-	const [inspectorOpen, setInspectorOpen] = useState(true);
+	const [panels, setPanels] = useState(() => createPanelLayout());
 	const [libraryWidth, setLibraryWidth] = useState(346);
 	const [inspectorWidth, setInspectorWidth] = useState(280);
- const [codeHeight,setCodeHeight]=useState(()=>Math.round(innerHeight*0.32));
-	const [codeDock, setCodeDock] = useState<'bottom' | 'left' | 'right' | 'closed'>('bottom');
-	const autoHiddenPanel = useRef<{ side:'library'|'inspector'; wasOpen:boolean } | undefined>(undefined);
+	const [codeHeight, setCodeHeight] = useState(() => Math.round(innerHeight * 0.32));
+	const [pendingFitIds, setPendingFitIds] = useState<readonly string[] | undefined>(undefined);
 	const [checkRequested, setCheckRequested] = useState(false);
 	const [message, setMessage] = useState('Sample architecture loaded');
 	const [flow, setFlow] = useState<ReactFlowInstance<CanvasNode>>();
 	const viewport = useRef<Partial<Record<DesignMode, Viewport>>>({});
+	const { libraryOpen, inspectorOpen, codeDock } = panels;
 	const architecture = history.present;
 	const selected = architecture.resources.find(resource => resource.id === selectedId);
 	const selectedItem = architecture.items.find(item => item.id === selectedId);
-	const codeResource = selected ?? architecture.resources.find(resource => resource.id === codeResourceId);
+	const codeResource = selected ?? architecture.resources.find(resource => resource.id === codeResourceId) ?? architecture.resources[0];
 	useEffect(() => { if (selected) { setCodeResourceId(selected.id); } }, [selected?.id]);
 	const findings = checkRequested ? checkDraft(architecture) : undefined;
 	const openResource = useCallback((id: string) => {
@@ -68,17 +68,19 @@ export function Studio() {
 		return () => window.removeEventListener('keydown', handleKey);
 	}, []);
 
- function dockCode(next:'bottom'|'left'|'right'|'closed') {
-  const previous=autoHiddenPanel.current;
-  const libraryWasOpen=previous?.side==='library'?previous.wasOpen:libraryOpen;
-  const inspectorWasOpen=previous?.side==='inspector'?previous.wasOpen:inspectorOpen;
-  if(previous?.side==='library') {setLibraryOpen(previous.wasOpen);}
-  if(previous?.side==='inspector') {setInspectorOpen(previous.wasOpen);}
-  autoHiddenPanel.current=undefined;
-  if(next==='right') {autoHiddenPanel.current={side:'inspector',wasOpen:inspectorWasOpen};setInspectorOpen(false);}
-  if(next==='left') {autoHiddenPanel.current={side:'library',wasOpen:libraryWasOpen};setLibraryOpen(false);}
-  setCodeDock(next);
- }
+	const dockCode = useCallback((next: CodeDock) => {
+		setPanels(current => dockCodePanel(current, next));
+	}, []);
+
+	const setLibraryOpen = useCallback((open: boolean) => {
+		setPanels(current => setSidePanelOpen(current, 'library', open));
+	}, []);
+
+	const setInspectorOpen = useCallback((open: boolean) => {
+		setPanels(current => setSidePanelOpen(current, 'inspector', open));
+	}, []);
+
+	const clearPendingFit = useCallback(() => { setPendingFitIds(undefined); }, []);
 
 	function switchMode(next: DesignMode) {
 		if (flow) { viewport.current[mode] = flow.getViewport(); }
@@ -114,16 +116,16 @@ export function Studio() {
   setSelectedId(id); setOverview(false); setInspectorOpen(true);
  },[flow]);
 
- function addTemplate(kind:'network'|'platform') {
-  const pattern=sampleArchitecture();
-  const wanted=kind==='network' ? ['network','subnet'] : ['cluster','storage','monitor'];
-  const ids=new Map([...pattern.resources,...pattern.items].map(item=>[item.id,crypto.randomUUID()]));
-  const suffix=crypto.randomUUID().slice(0,4);
-  const resources=pattern.resources.filter(resource=>wanted.includes(resource.id)).map(resource=>({...resource,id:ids.get(resource.id)!,name:resource.name+'-'+suffix,positions:{visual:{x:resource.positions.visual.x,y:resource.positions.visual.y+600},technical:{x:resource.positions.technical.x,y:resource.positions.technical.y+600}}}));
-  dispatch({type:'insert',architecture:{name:pattern.name,resources,items:[],connections:pattern.connections.filter(edge=>wanted.includes(edge.source)&&wanted.includes(edge.target)).map(edge=>({...edge,id:crypto.randomUUID(),source:ids.get(edge.source)!,target:ids.get(edge.target)!}))}});
-  setSelectedId(resources[0].id); setOverview(true); setInspectorOpen(true);
-  void flow?.fitView({nodes:resources.map(resource=>({id:resource.id})),padding:0.2});
- }
+	function addTemplate(kind: 'network' | 'platform') {
+		const pattern = sampleArchitecture();
+		const wanted = kind === 'network' ? ['network', 'subnet'] : ['cluster', 'storage', 'monitor'];
+		const ids = new Map([...pattern.resources, ...pattern.items].map(item => [item.id, crypto.randomUUID()]));
+		const suffix = crypto.randomUUID().slice(0, 4);
+		const resources = pattern.resources.filter(resource => wanted.includes(resource.id)).map(resource => ({ ...resource, id: ids.get(resource.id)!, name: resource.name + '-' + suffix, positions: { visual: { x: resource.positions.visual.x, y: resource.positions.visual.y + 600 }, technical: { x: resource.positions.technical.x, y: resource.positions.technical.y + 600 } } }));
+		dispatch({ type: 'insert', architecture: { name: pattern.name, resources, items: [], connections: pattern.connections.filter(edge => wanted.includes(edge.source) && wanted.includes(edge.target)).map(edge => ({ ...edge, id: crypto.randomUUID(), source: ids.get(edge.source)!, target: ids.get(edge.target)! })) } });
+		setSelectedId(resources[0].id); setOverview(true); setInspectorOpen(true);
+		setPendingFitIds(resources.map(resource => resource.id));
+	}
 
 	const addItem = useCallback((kind: BoardItem['kind'], position: Position, caption?:string) => {
 		const id = crypto.randomUUID();
@@ -170,16 +172,18 @@ export function Studio() {
 		<div className={'studio ' + mode + ' theme-' + theme + (!libraryOpen ? ' library-closed' : '') + (!inspectorOpen ? ' inspector-closed' : '')}
 			style={{ '--library-width': libraryWidth + 'px', '--inspector-width': inspectorWidth + 'px', '--code-height':codeHeight+'px' } as CSSProperties}>
 			<VisualTopbar architecture={architecture} mode={mode} onMode={switchMode} name={architecture.name} revisions={history.past.length}
-     onUndo={() => dispatch({ type: 'undo' })} onRedo={() => dispatch({ type: 'redo' })} canRedo={!!history.future.length}
-     onCode={() => dockCode(codeDock === 'closed' ? 'bottom' : 'closed')}
-     theme={theme} onTheme={() => setTheme(value => value === 'light' ? 'dark' : 'light')}
+				onUndo={() => dispatch({ type: 'undo' })} onRedo={() => dispatch({ type: 'redo' })} canRedo={!!history.future.length}
+				onCode={() => dockCode(codeDock === 'closed' ? 'bottom' : 'closed')}
+				libraryOpen={libraryOpen} inspectorOpen={inspectorOpen} codeOpen={codeDock !== 'closed'}
+				theme={theme} onTheme={() => setTheme(value => value === 'light' ? 'dark' : 'light')}
 				onRename={name => dispatch({ type: 'renameArchitecture', name })}
 				onTechnical={() => switchMode('technical')} onExport={exportSample}
-				onToggleLibrary={() => setLibraryOpen(value => !value)} onToggleInspector={() => setInspectorOpen(value => !value)} />
+				onToggleLibrary={() => setPanels(current => toggleSidePanel(current, 'library'))}
+				onToggleInspector={() => setPanels(current => toggleSidePanel(current, 'inspector'))} />
 			<div className="studio-body">
 				<ResourceCatalogue architecture={architecture} onAdd={addResource} onAddCatalogue={addCatalogueResource} onTemplate={addTemplate} search={search} onSearch={setSearch} onImportModule={() => setModuleImportOpen(true)}
 					visible={libraryOpen} onClose={() => setLibraryOpen(false)}
-					onDesignAdd={(kind,caption) => {
+					onDesignAdd={(kind, caption) => {
 						const position = flow?.screenToFlowPosition({ x: innerWidth / 2, y: innerHeight / 2 });
 						if (position) { addItem(kind, position, caption); }
 					}} resizeHandle={<PaneResizeHandle side="library" width={libraryWidth} minimum={346} onCommit={setLibraryWidth} />} />
@@ -187,10 +191,11 @@ export function Studio() {
 					<div className="canvas-shell">
 						<DesignCanvas architecture={architecture} mode={mode} theme={theme} onThemeChange={setTheme} selectedId={selectedId} dispatch={dispatch}
 							onSelect={setSelectedId} onOpen={openResource} onInit={setFlow} viewports={viewport}
+							pendingFitIds={pendingFitIds} onFitComplete={clearPendingFit}
 							onAddItem={addItem} onAddResource={addResource}
-       onAddCatalogue={(type, provider, position) => {
-        void loadCatalogue(provider).then(snapshot => { const entry = snapshot.entries.find(entry => entry.type === type); if (entry) { addCatalogueResource(entry,provider,position); } }).catch(() => setMessage('Unable to load the provider catalogue.'));
-       }} />
+							onAddCatalogue={(type, provider, position) => {
+								void loadCatalogue(provider).then(snapshot => { const entry = snapshot.entries.find(entry => entry.type === type); if (entry) { addCatalogueResource(entry, provider, position); } }).catch(() => setMessage('Unable to load the provider catalogue.'));
+							}} />
 					</div>
 					{codeResource && <CodePanel resource={codeResource} resizeHandle={codeDock==='bottom'?<DockResizeHandle height={codeHeight} onCommit={setCodeHeight}/>:undefined} architecture={architecture} onFocus={id=>{setSelectedId(id);setOverview(false);setInspectorOpen(true);}} dispatch={dispatch} dock={codeDock} onDock={dockCode} />}
 				</div>

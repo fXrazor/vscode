@@ -255,7 +255,7 @@ h1 { font-size: 19px; font-weight: 650; letter-spacing: -0.4px; display: flex; a
 .technical .resource-node-heading { margin: 0 -14px 12px; padding: 10px 14px; border-bottom: 1px solid var(--border); justify-content: flex-start; gap: 8px; font-size: 11px; color: var(--muted); }
 .technical .resource-node-heading img { width: 20px; height: 20px; }
 .technical .resource-node > strong { font-size: 14px; }
-.technical .resource-node-caption { font-family: Consolas, monospace; font-size: 10px; margin-top: 6px; }
+.technical .resource-node-caption { font-family: Consolas, monospace; font-size: 10px; margin-top: 6px; overflow-wrap: anywhere; }
 .node-settings { margin-top: 14px; padding-top: 8px; border-top: 1px solid var(--border); display: grid; gap: 8px; }
 .node-settings > div { display: flex; justify-content: space-between; gap: 10px; font-size: 10px; }
 .node-settings span { color: var(--muted); }

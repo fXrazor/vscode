@@ -1,16 +1,24 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { Architecture, DesignMode } from './model.ts';
 import { exportPresentation } from './exportPresentation.ts';
-import { Download, PanelLeft, PanelRight, Pencil, Waypoints, Moon, Sun, Undo2, Redo2, Code2, Ellipsis } from 'lucide-react';
+import { Download, PanelLeft, PanelRight, Pencil, Waypoints, Moon, Sun, Undo2, Redo2, Code2 } from 'lucide-react';
 
-export function VisualTopbar({ mode, onMode, architecture, name, onRename, onTechnical, onExport, onToggleLibrary, onToggleInspector, revisions, onUndo, onRedo, canRedo, onCode, theme, onTheme }: {
+export function VisualTopbar({ mode, onMode, architecture, name, onRename, onTechnical, onExport, onToggleLibrary, onToggleInspector, libraryOpen, inspectorOpen, codeOpen, revisions, onUndo, onRedo, canRedo, onCode, theme, onTheme }: {
  mode: DesignMode; onMode: (mode: DesignMode) => void; architecture: Architecture; name: string;
  onRename: (name: string) => void; onTechnical: () => void; onExport: () => void;
- onToggleLibrary: () => void; onToggleInspector: () => void; revisions: number;
+ onToggleLibrary: () => void; onToggleInspector: () => void;
+ libraryOpen: boolean; inspectorOpen: boolean; codeOpen: boolean;
+ revisions: number;
  onUndo: () => void; onRedo: () => void; canRedo: boolean; onCode: () => void;
  theme: 'light' | 'dark'; onTheme: () => void;
 }) {
  const [environment, setEnvironment] = useState('Development');
+ const exportMenu = useRef<HTMLDetailsElement>(null);
+ function closeExport(restoreFocus: boolean) {
+  if (!exportMenu.current) { return; }
+  exportMenu.current.open = false;
+  if (restoreFocus) { exportMenu.current.querySelector('summary')?.focus(); }
+ }
  return <header className="cloudlab-topbar">
   <div className="workspace-brand"><img src="./assets/cloudforge.png" alt="" /><strong>CloudForge</strong><small>Studio</small></div>
   <span className="shell-breadcrumb">Platform <span>›</span></span>
@@ -21,19 +29,19 @@ export function VisualTopbar({ mode, onMode, architecture, name, onRename, onTec
   <div className="shell-actions">
    <button aria-label="Undo" disabled={!revisions} onClick={onUndo}><Undo2 /></button>
    <button aria-label="Redo" disabled={!canRedo} onClick={onRedo}><Redo2 /></button>
-   <button aria-label="Toggle resource library" onClick={onToggleLibrary}><PanelLeft /></button>
-   <button aria-label="Toggle resource inspector" onClick={onToggleInspector}><PanelRight /></button>
-   <button aria-label="Toggle code panel" onClick={onCode}><Code2 /></button>
+   <button aria-label="Toggle resource library" aria-pressed={libraryOpen} onClick={onToggleLibrary}><PanelLeft /></button>
+   <button aria-label="Toggle resource inspector" aria-pressed={inspectorOpen} onClick={onToggleInspector}><PanelRight /></button>
+   <button aria-label="Toggle code panel" aria-pressed={codeOpen} onClick={onCode}><Code2 /></button>
    <div className="shell-modes" role="group" aria-label="Infrastructure design mode">
     <button aria-label="Architecture" title="Architecture Design View" aria-pressed={mode === 'visual'} onClick={() => onMode('visual')}><Pencil /></button>
     <button aria-label="Configuration" title="Infrastructure Configuration View" aria-pressed={mode === 'technical'} onClick={onTechnical}><Waypoints /></button>
    </div>
    <button aria-label="Toggle light or dark theme" onClick={onTheme}>{theme === 'dark' ? <Sun /> : <Moon />}</button>
-   <details className="shell-export"><summary aria-label="Export architecture"><Download /><span>Export</span></summary><div>
-    <button onClick={onExport}>Graph JSON</button>
-    <button onClick={() => { void exportPresentation(architecture, 'svg'); }}>SVG image</button>
-    <button onClick={() => { void exportPresentation(architecture, 'png'); }}>PNG image</button>
-    <button onClick={() => { void exportPresentation(architecture, 'pdf'); }}>Print / Save PDF</button>
+   <details ref={exportMenu} className="shell-export" onKeyDown={event => { if (event.key === 'Escape' && exportMenu.current?.open) { event.preventDefault(); closeExport(true); } }}><summary aria-label="Export architecture"><Download /><span>Export</span></summary><div>
+    <button onClick={() => { onExport(); closeExport(true); }}>Graph JSON</button>
+    <button onClick={() => { void exportPresentation(architecture, 'svg'); closeExport(true); }}>SVG image</button>
+    <button onClick={() => { void exportPresentation(architecture, 'png'); closeExport(true); }}>PNG image</button>
+    <button onClick={() => { void exportPresentation(architecture, 'pdf'); closeExport(true); }}>Print / Save PDF</button>
    </div></details>
   </div>
  </header>;

@@ -459,4 +459,21 @@ Built from the clean detached checkout `Z:\CFStage\Code` at `507c1e8eec3b3280cc3
 
 - Live clones against external GitHub/GitLab/Bitbucket hosts and the `installGit` winget offer on a machine without Git remain unverified on this host (Git is installed here).
 - Authenticode signing before the pre-Inno `--verify` gate remains open for signed releases.
-- Next action: reconcile/commit or stash the uncommitted doc edits in `Z:\CloudForge-Code` if desired, merge `fxrazor/continue-project-handoff-review` into `main`, and decide on the R1 Infrastructure Studio / Runner View contract before starting the next implementation slice.
+
+### Infrastructure Studio refinement continuation (2026-11-21)
+
+Continued on `fxrazor/continue-project-handoff-review` in `E:\Orca\CloudForge-Code\dace` after committing [infrastructure-studio-implementation-plan.md](docs/cloudforge/infrastructure-studio-implementation-plan.md) on `main` (`6e2f6e2dfd6`) and merging `fxrazor/continue-project-handoff-review` into `main` (`0d500f91a7e`). Changes are scoped strictly to `extensions/cloudforge/studio/**` and `HANDOFF.md`; no shipped Code OSS runtime, broker, or Rust files changed.
+
+- **Pure panel/dock state machine ([panelLayout.ts](extensions/cloudforge/studio/src/panelLayout.ts)):** extracted `createPanelLayout`, `dockCodePanel`, `setSidePanelOpen`, and `toggleSidePanel` with 4 new unit tests ([panelLayout.test.ts](extensions/cloudforge/studio/src/panelLayout.test.ts)). Manually opening an auto-hidden side panel now clears stale auto-hide memory and moves a competing side-docked code panel to `bottom` instead of colliding or reverting later.
+- **Template auto-fit timing ([App.tsx](extensions/cloudforge/studio/src/App.tsx), [DesignCanvas.tsx](extensions/cloudforge/studio/src/DesignCanvas.tsx)):** replaced synchronous `flow.fitView()` after template dispatch with `pendingFitIds` fitting only after React Flow mounts and measures the newly inserted nodes.
+- **Code panel retention on undo/delete ([App.tsx](extensions/cloudforge/studio/src/App.tsx)):** live verification caught that undoing a newly inserted template (or deleting the active resource) left `codeResource` undefined and unmounted `<CodePanel>`. Added fallback to `architecture.resources[0]`.
+- **Keyboard, focus preservation, and section scoping ([ModuleImport.tsx](extensions/cloudforge/studio/src/ModuleImport.tsx), [ResourceWorkspace.tsx](extensions/cloudforge/studio/src/ResourceWorkspace.tsx), [VisualTopbar.tsx](extensions/cloudforge/studio/src/VisualTopbar.tsx), [DesignCanvas.tsx](extensions/cloudforge/studio/src/DesignCanvas.tsx), [ResourceCatalogue.tsx](extensions/cloudforge/studio/src/ResourceCatalogue.tsx), [styles.css](extensions/cloudforge/studio/src/styles.css)):** restored focus to triggering controls when `ResourceWorkspace` or `ModuleImport` closes; added Escape-to-close + focus-restore on Export and View `<details>` disclosures and `aria-pressed` on topbar panel toggles; added `data-section` scoping to catalogue sections (resolving the Favourites/Recent ambiguity); wrapped long Terraform type captions in Technical Design cards with `overflow-wrap: anywhere`.
+
+| Check (newly run in `extensions/cloudforge/studio`) | Result |
+| --- | --- |
+| `corepack pnpm check` (`tsc --noEmit`) | Passed. |
+| `corepack pnpm test` (`model.test.ts`, `catalogue.test.ts`, `panelLayout.test.ts`) | **14/14 passed**, 0 skipped. |
+| `corepack pnpm build` | Passed. |
+| Live Edge Playwright verification against `node build.ts --serve` | **14/14 passed** with **0 console errors** and **0 page errors**: fresh light Architecture and dark Configuration screenshots inspected visually; Overview→Form→ResourceWorkspace Escape focus restore; ModuleImport Escape focus restore; Export disclosure Escape focus restore; Favourites (`data-section="fav"`) + Application platform template insertion + post-measure `fitView` + single UI Undo; narrow `1024×720` keyboard library/inspector resize and side-dock right/left + manual toggle reconciliation; sticky note creation retaining last selected resource in code dock; independent dark theme across Configuration and Architecture renderers. |
+
+**Next action:** review and approve the R1 domain/selection/schema/source contract (or Phase 1 Webview mount in `extensions/cloudforge`) before connecting the Studio preview to the canonical Rust graph service and native Code OSS Terraform editors.

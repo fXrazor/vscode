@@ -17,7 +17,13 @@ export function ResourceWorkspace({ resource, architecture, findings, dispatch, 
 }) {
 	const dialog = useRef<HTMLDialogElement>(null);
 	const [resultTab, setResultTab] = useState<'findings' | 'draft'>('findings');
-	useEffect(() => { dialog.current?.showModal(); }, []);
+	useEffect(() => {
+		const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+		dialog.current?.showModal();
+		return () => {
+			if (previous?.isConnected) { previous.focus(); }
+		};
+	}, []);
 	const metadata = resourceDefinition(resource);
 	const upstream = architecture.connections
 		.filter(connection => connection.target === resource.id)

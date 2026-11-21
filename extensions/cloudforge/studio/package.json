@@ -8,7 +8,7 @@
     "dev": "node build.ts --serve",
     "build": "node build.ts",
     "check": "tsc --noEmit",
-    "test": "node --test src/model.test.ts src/catalogue.test.ts"
+    "test": "node --test src/model.test.ts src/catalogue.test.ts src/panelLayout.test.ts"
   },
   "dependencies": {
     "@radix-ui/react-context-menu": "2.4.1",

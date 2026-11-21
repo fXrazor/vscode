@@ -36,7 +36,7 @@ export const ResourceCatalogue = memo(function ResourceCatalogue({ architecture,
  function add(entry: CatalogueEntry) { setRecent(values => [prefix+entry.type,...values.filter(value => value !== prefix+entry.type)].slice(0,12)); onAddCatalogue(entry,provider); }
  function favourite(entry: CatalogueEntry) { const key=prefix+entry.type; setFavourites(values => values.includes(key) ? values.filter(value => value !== key) : [...values,key]); }
  function section(id:string,title:ReactNode,children:ReactNode,count?:number) {
-  return <details className="lab-category" key={id} open><summary>{title}<span className="spacer" />{count !== undefined && <span className="faint">{count}</span>}<ChevronDown size={12}/></summary>{children}</details>;
+  return <details className="lab-category" data-section={id} key={id} open><summary>{title}<span className="spacer" />{count !== undefined && <span className="faint">{count}</span>}<ChevronDown size={12}/></summary>{children}</details>;
  }
  function tile(entry:CatalogueEntry) {
   return <div className="resource-tile" key={entry.type}>

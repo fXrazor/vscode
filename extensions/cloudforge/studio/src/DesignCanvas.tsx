@@ -28,7 +28,7 @@ const zoomPresets = [0.1, 0.25, 0.5, 0.7, 1, 2, 4, 12, 20];
 
 /** Keep pointer/viewport state here so dragging never rerenders the parameter editor. */
 export const DesignCanvas = memo(function DesignCanvas({
-	architecture, mode, theme, onThemeChange, selectedId, dispatch, onSelect, onOpen, onInit, viewports, onAddItem, onAddResource, onAddCatalogue
+	architecture, mode, theme, onThemeChange, selectedId, dispatch, onSelect, onOpen, onInit, viewports, onAddItem, onAddResource, onAddCatalogue, pendingFitIds, onFitComplete
 }: {
 	architecture: Architecture;
 	mode: DesignMode;
@@ -42,7 +42,9 @@ export const DesignCanvas = memo(function DesignCanvas({
 	viewports: RefObject<Partial<Record<DesignMode, Viewport>>>;
 	onAddItem: (kind: BoardItem['kind'], position: { x: number; y: number }) => void;
 	onAddResource: (kind: ResourceKind, provider: Provider, position?: Position) => void;
- onAddCatalogue: (type:string, provider:Provider, position:Position) => void;
+	onAddCatalogue: (type: string, provider: Provider, position: Position) => void;
+	pendingFitIds?: readonly string[];
+	onFitComplete?: () => void;
 }) {
 	const [nodes, setNodes, onNodesChange] = useNodesState<CanvasNode>([]);
 	const [flow, setFlow] = useState<ReactFlowInstance<CanvasNode>>();
@@ -52,6 +54,7 @@ export const DesignCanvas = memo(function DesignCanvas({
 	const [minimap, setMinimap] = useState(false);
 	const [zoom, setZoom] = useState(1);
 	const bounds = useRef<HTMLDivElement>(null);
+	const viewMenu = useRef<HTMLDetailsElement>(null);
 
 	const resourceNodes = useMemo<CanvasNode[]>(() => architecture.resources.map(resource => {
 		const parent = architecture.items.find(item => item.kind === 'frame' && item.members.includes(resource.id));
@@ -80,6 +83,23 @@ export const DesignCanvas = memo(function DesignCanvas({
 
 	// Synchronise committed edits while React Flow owns transient drag positions.
 	useEffect(() => { setNodes(displayNodes); }, [displayNodes, setNodes]);
+	// Fit newly inserted template nodes only after React Flow mounts and measures them.
+	useEffect(() => {
+		if (!flow || !pendingFitIds?.length) { return; }
+		const mounted = pendingFitIds.every(id => nodes.some(node => node.id === id));
+		if (!mounted) { return; }
+		let innerFrame = 0;
+		const outerFrame = requestAnimationFrame(() => {
+			innerFrame = requestAnimationFrame(() => {
+				void flow.fitView({ nodes: pendingFitIds.map(id => ({ id })), padding: 0.2 });
+				onFitComplete?.();
+			});
+		});
+		return () => {
+			cancelAnimationFrame(outerFrame);
+			if (innerFrame) { cancelAnimationFrame(innerFrame); }
+		};
+	}, [flow, nodes, pendingFitIds, onFitComplete]);
 	useEffect(() => {
 		if (!flow) { return; }
 		const frame = requestAnimationFrame(() => {
@@ -157,7 +177,7 @@ export const DesignCanvas = memo(function DesignCanvas({
 				<CanvasBackground grid={grid} />
 				{minimap && <MiniMap<CanvasNode> pannable zoomable nodeColor={node => node.type === 'board' && node.data.item.kind === 'frame' ? 'transparent' : '#8e79d9'} />}
 			</ReactFlow>
-			<details className="canvas-options"><summary>View</summary><div className="view-options-content">
+			<details ref={viewMenu} className="canvas-options" onKeyDown={event => { if (event.key === 'Escape' && viewMenu.current?.open) { event.preventDefault(); viewMenu.current.open = false; viewMenu.current.querySelector('summary')?.focus(); } }}><summary>View</summary><div className="view-options-content">
 				<label>Theme<select aria-label="Canvas theme" value={theme} onChange={event => onThemeChange(event.target.value as 'light' | 'dark')}><option value="light">Light</option><option value="dark">Dark</option></select></label>
 				<label>Grid<select aria-label="Canvas grid" value={grid} onChange={event => setGrid(event.target.value as typeof grid)}><option value="dots">Dots</option><option value="lines">Lines</option><option value="none">None</option></select></label>
 				<label><input type="checkbox" checked={snap} onChange={event => setSnap(event.target.checked)} />Snap</label>
