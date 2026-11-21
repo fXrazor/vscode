@@ -80,6 +80,12 @@
 				"title": "%command.cloneRepositoryAgain%",
 				"category": "%displayName%",
 				"icon": "$(repo-clone)"
+			},
+			{
+				"command": "cloudforge.openCanvas",
+				"title": "%command.openCanvas%",
+				"category": "%displayName%",
+				"icon": "$(type-hierarchy)"
 			}
 		],
 		"views": {
@@ -148,6 +154,11 @@
 					"command": "cloudforge.forgetProjectAccess",
 					"when": "view == cloudforge.projects && cloudforge.projectOpen",
 					"group": "project@1"
+				},
+				{
+					"command": "cloudforge.openCanvas",
+					"when": "view == cloudforge.resources",
+					"group": "navigation@1"
 				}
 			],
 			"view/item/context": [

@@ -40,9 +40,9 @@ const IGNORED_FOLDERS_KEY = 'cloudforge.ignoredImportFolders';
 const PENDING_CLONE_KEY = 'cloudforge.pendingClone';
 const PENDING_CLONE_LIFETIME_MS = 15 * 60 * 1000;
 
-/** Shows an architecture's graph in the Stage 1 graph view. */
+/** Shows an architecture's graph in the Stage 1 graph view and read-only canvas. */
 export interface GraphHost {
-	show(workspaceId: string, architectureId: string): Promise<void>;
+	show(workspaceId: string, architectureId: string, architectureName?: string): Promise<void>;
 }
 
 interface PendingClone {
@@ -159,8 +159,9 @@ export class ProjectController implements Disposable {
 	}
 
 	async openArchitecture(architectureId: string): Promise<void> {
-		if (this.project?.architectures.some(architecture => architecture.architectureId === architectureId)) {
-			await this.graph.show(this.project.workspaceId, architectureId);
+		const architecture = this.project?.architectures.find(item => item.architectureId === architectureId);
+		if (this.project && architecture) {
+			await this.graph.show(this.project.workspaceId, architecture.architectureId, architecture.displayName);
 		}
 	}
 
@@ -261,7 +262,8 @@ export class ProjectController implements Disposable {
 		const updated = this.handleProjectChange(imported);
 		const first = updated?.importedArchitectureIds[0];
 		if (updated && first) {
-			await this.graph.show(updated.workspaceId, first);
+			const architecture = updated.architectures.find(item => item.architectureId === first);
+			await this.graph.show(updated.workspaceId, first, architecture?.displayName);
 		}
 	}
 

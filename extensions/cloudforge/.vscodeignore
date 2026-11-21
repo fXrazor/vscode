@@ -1,6 +1,8 @@
 src/**
+canvas-src/**
 test/**
 esbuild.mts
+esbuild.webview.mts
 tsconfig.json
 *.tsbuildinfo
 

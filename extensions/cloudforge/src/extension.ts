@@ -16,6 +16,8 @@ import {
 	type TreeView
 } from 'vscode';
 import { activateProjects } from './project/index';
+import { CloudForgeCanvasPanel } from './canvas/canvasPanel';
+import type { CanvasGraphSnapshot } from './canvas/protocol';
 
 interface WorkspaceArchitecture {
 	readonly architectureId: string;
@@ -42,6 +44,7 @@ interface GraphNode {
 	readonly resourceType: string | null;
 	readonly name: string;
 	readonly label: string;
+	readonly hasSource: boolean;
 }
 
 interface GraphEdge {
@@ -252,7 +255,7 @@ function parseGraph(value: unknown, workspaceId: string, architectureId: string)
 			return undefined;
 		}
 		nodeIds.add(node.id);
-		nodes.push({ id: node.id, kind: node.kind, resourceType: node.resourceType, name: node.name, label: node.label });
+		nodes.push({ id: node.id, kind: node.kind, resourceType: node.resourceType, name: node.name, label: node.label, hasSource: isRecord(node.source) });
 	}
 	const edges: GraphEdge[] = [];
 	for (const edge of value.edges) {
@@ -336,7 +339,11 @@ async function choose<T extends { readonly displayName: string; readonly id: str
 	return selected?.item;
 }
 
-async function openWorkspace(provider: CloudForgeGraphProvider, treeView: TreeView<GraphTreeItem>): Promise<void> {
+async function openWorkspace(
+	provider: CloudForgeGraphProvider,
+	treeView: TreeView<GraphTreeItem>,
+	onGraphLoaded: (graph: ArchitectureGraph, architectureName: string) => void
+): Promise<void> {
 	let response: OpenWorkspaceCommandResult | undefined;
 	try {
 		response = await commands.executeCommand<OpenWorkspaceCommandResult>('_cloudforge.openWorkspace');
@@ -424,14 +431,17 @@ async function openWorkspace(provider: CloudForgeGraphProvider, treeView: TreeVi
 		return;
 	}
 
-	await showGraph(provider, treeView, choice.workspaceId, architecture.architectureId);
+	const loaded = await showGraph(provider, treeView, choice.workspaceId, architecture.architectureId);
+	if (loaded) {
+		onGraphLoaded(loaded, architecture.displayName);
+	}
 }
 
 /** Reads an architecture that is already selected and shows it in the graph view. */
-async function showGraph(provider: CloudForgeGraphProvider, treeView: TreeView<GraphTreeItem>, workspaceId: string, architectureId: string): Promise<void> {
+async function showGraph(provider: CloudForgeGraphProvider, treeView: TreeView<GraphTreeItem>, workspaceId: string, architectureId: string): Promise<ArchitectureGraph | undefined> {
 	const graph = await readArchitecture(workspaceId, architectureId);
 	if (!graph) {
-		return;
+		return undefined;
 	}
 	provider.setGraph(graph);
 	if (graph.status === 'partial') {
@@ -441,48 +451,95 @@ async function showGraph(provider: CloudForgeGraphProvider, treeView: TreeView<G
 	} else {
 		treeView.message = undefined;
 	}
+	return graph;
+}
+
+function toCanvasSnapshot(graph: ArchitectureGraph, architectureName: string): CanvasGraphSnapshot {
+	return {
+		workspaceId: graph.workspaceId,
+		architectureId: graph.architectureId,
+		architectureName,
+		sourceRevision: graph.sourceRevision,
+		status: graph.status,
+		nodes: graph.nodes,
+		edges: graph.edges,
+		diagnostics: graph.diagnostics,
+	};
 }
 
 export function activate(context: ExtensionContext): void {
 	const provider = new CloudForgeGraphProvider();
 	const treeView = window.createTreeView('cloudforge.resources', { treeDataProvider: provider });
-	context.subscriptions.push(provider, treeView);
+	let currentArchitectureName = l10n.t('Architecture');
+
+	async function openNodeSource(workspaceId: string, architectureId: string, sourceRevision: string, nodeId: string): Promise<string | undefined> {
+		try {
+			const result = await commands.executeCommand<unknown>('_cloudforge.openSource', workspaceId, architectureId, sourceRevision, nodeId);
+			if (isRecord(result) && result.ok === false) {
+				const code = isRecord(result.error) && typeof result.error.code === 'string' ? result.error.code : 'SERVICE_ERROR';
+				showServiceError({ code });
+				return code;
+			}
+			return undefined;
+		} catch {
+			void window.showErrorMessage(l10n.t('The source location could not be opened.'));
+			return 'SERVICE_ERROR';
+		}
+	}
+
+	const canvas = new CloudForgeCanvasPanel(context, {
+		onSelectNode() {
+			// Selection is preserved inside the canvas state; native tree selection stays non-destructive.
+		},
+		onOpenSource: openNodeSource,
+		async onRefresh(workspaceId, architectureId) {
+			const refreshed = await showGraph(provider, treeView, workspaceId, architectureId);
+			if (refreshed) {
+				canvas.updateIfOpen(toCanvasSnapshot(refreshed, currentArchitectureName));
+			}
+		}
+	});
+
+	context.subscriptions.push(provider, treeView, canvas);
 	context.subscriptions.push(treeView.onDidChangeSelection(event => {
 		const resource = event.selection.find(item => item.type === 'resource');
 		const graph = provider.getGraph();
 		if (!resource || !graph) {
 			return;
 		}
-		void (async () => {
-			try {
-				const result = await commands.executeCommand<unknown>('_cloudforge.openSource', graph.workspaceId, graph.architectureId, graph.sourceRevision, resource.node.id);
-				if (isRecord(result) && result.ok === false) {
-					showServiceError({ code: isRecord(result.error) && typeof result.error.code === 'string' ? result.error.code : 'SERVICE_ERROR' });
-				}
-			} catch {
-				void window.showErrorMessage(l10n.t('The source location could not be opened.'));
-			}
-		})();
+		canvas.selectNode(resource.node.id);
+		void openNodeSource(graph.workspaceId, graph.architectureId, graph.sourceRevision, resource.node.id);
 	}));
 	context.subscriptions.push(commands.registerCommand('cloudforge.showProofStatus', () => {
 		return window.showInformationMessage(l10n.t('The CloudForge built-in extension is active.'));
 	}));
+	context.subscriptions.push(commands.registerCommand('cloudforge.openCanvas', () => {
+		const graph = provider.getGraph();
+		canvas.show(graph ? toCanvasSnapshot(graph, currentArchitectureName) : undefined, false);
+	}));
 	let opening: Promise<void> | undefined;
 	context.subscriptions.push(commands.registerCommand('cloudforge.openWorkspace', () => {
-		return opening ??= openWorkspace(provider, treeView).finally(() => { opening = undefined; });
+		return opening ??= openWorkspace(provider, treeView, (loaded, architectureName) => {
+			currentArchitectureName = architectureName;
+			canvas.show(toCanvasSnapshot(loaded, architectureName), true);
+		}).finally(() => { opening = undefined; });
 	}));
 
 	// Stage 2: projects with repositories. Architectures chosen in the Projects view, including
-	// those that live in imported repositories, show in the same graph view.
+	// those that live in imported repositories, show in both the native graph tree and the canvas.
 	activateProjects(context, {
-		async show(workspaceId, architectureId) {
+		async show(workspaceId, architectureId, architectureName) {
 			provider.setGraph(undefined);
 			const selected = await callService<unknown>('selectArchitecture', { workspaceId, architectureId });
 			if (!selected.ok) {
 				showServiceError(selected.error);
 				return;
 			}
-			await showGraph(provider, treeView, workspaceId, architectureId);
+			const loaded = await showGraph(provider, treeView, workspaceId, architectureId);
+			if (loaded) {
+				currentArchitectureName = architectureName || l10n.t('Architecture');
+				canvas.show(toCanvasSnapshot(loaded, currentArchitectureName), true);
+			}
 			await commands.executeCommand('cloudforge.resources.focus');
 		}
 	});

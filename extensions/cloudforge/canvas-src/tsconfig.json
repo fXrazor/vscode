@@ -1,0 +1,18 @@
+{
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		"rootDir": "..",
+		"outDir": "./dist/",
+		"lib": [
+			"ES2024",
+			"DOM",
+			"DOM.Iterable"
+		],
+		"types": []
+	},
+	"include": [
+		"./**/*",
+		"../src/canvas/protocol.ts",
+		"../src/canvas/layout.ts"
+	]
+}
