@@ -3,3 +3,6 @@ test/**
 esbuild.mts
 tsconfig.json
 *.tsbuildinfo
+
+# Standalone visual preview is packaged separately.
+studio/**

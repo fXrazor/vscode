@@ -1,0 +1,17 @@
+{
+  "azure": {
+    "version": "5.14.0",
+    "entries": 1110,
+    "indexSha256": "16afa8f762e0ccd973026eb02c51a3c12faa4804a921ecd5cf8e8ab7de06915b"
+  },
+  "aws": {
+    "version": "6.73.1",
+    "entries": 1763,
+    "indexSha256": "5ae16aaa661279f8d99ca401d8ef58334581e4eba003ed118ab68c82e80671e0"
+  },
+  "gcp": {
+    "version": "8.10.0",
+    "entries": 1205,
+    "indexSha256": "13ef21142faa7b6265c28bc9aa23403122fc98538f180815f91711c359322517"
+  }
+}

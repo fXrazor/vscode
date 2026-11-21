@@ -1,0 +1,70 @@
+{
+  "date": "2026-11-18",
+  "scope": "documentation only",
+  "local_links_checked": 118,
+  "cited_line_bounds_checked": 88,
+  "link_issues": [],
+  "source_snapshot_hashes": {
+    "lib/model.ts": {
+      "sha256": "b80b711e038831a5163619cf95b82a4865adc9c06285e6fb79ec96af0ff83667",
+      "matches_recorded": true
+    },
+    "components/forge/Designer.tsx": {
+      "sha256": "cc7bc5e380a92d1199963b276dbcd012a3b7244d64cbc4339a305cf4a185fd6c",
+      "matches_recorded": true
+    },
+    "components/forge/Canvas.tsx": {
+      "sha256": "b775a516e3afc48cce2f979eb6175b1dd8c76386400de0930f3d67ee51db3c5a",
+      "matches_recorded": true
+    },
+    "lib/storage.ts": {
+      "sha256": "019e3c127bf4d7bb5f588eb6653b8acac21fc2d62e76dd888661d015e4036a7f",
+      "matches_recorded": true
+    },
+    "server/server.mjs": {
+      "sha256": "242dc89326c3b0f0406d788103ad4a8a98b8c1032aeddd1c5233c54cc93a889a",
+      "matches_recorded": true
+    }
+  },
+  "normalized_windows_links": [
+    "provider-contract-map.md"
+  ],
+  "tests_and_build": "not run: no product source changes; prior checkpoint results inherited",
+  "browser_limits": "see browser-evidence.md; connection closed before full coverage",
+  "deliverables": 10,
+  "latest_user_annotations": 27,
+  "annotation_ids_mapped": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27
+  ],
+  "missing_annotation_ids": [],
+  "rust_head_at_final_read": "5d0c076e13b545b1b55814569bb3e22bbefc5e1e",
+  "canonical_protocol_sha256": "13fe8e3fa78981f0cfb0d9c634b3c74543c6a46acc2fbab48d0152e6ecc10212",
+  "line_check_limit": "existence and one-based line bounds, not automated semantic proof",
+  "staged_whitespace_check": "passed; documentation-only staged diff"
+}
