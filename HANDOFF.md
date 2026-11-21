@@ -253,15 +253,14 @@ A cross-session message about the split was held by the `stingaree` session and 
 
 The [Runner View design](docs/cloudforge/runner-view-design.md) is a documentation proposal based on desktop `main` at `c9f463818ef` in `Z:\CloudForge-Code`. This work adds the design and this handoff entry. The first slice would validate a saved Terraform revision offline and present the execution in the Workbench. The local links resolved and the documentation whitespace checks passed. Review the scope and name an integration owner before defining the service capability or starting implementation.
 
-1. **Stage 2 desktop.** D1–D9 are on `main`. The [packaged smoke](#stage-2-packaged-smoke-2026-11-17) passed 25 of 26 checks, and the one failure (empty project view) is fixed in `10d5bb7a547`.
+1. **Stage 2 desktop.** D1–D9 and the empty-project fix (`10d5bb7a547`) are on `main` (`507c1e8eec3`). Rebuilt as [CloudForgeProofSetup-x64-507c1e8eec3.exe](Z:/CFStage/CloudForgeProofSetup-x64-507c1e8eec3.exe), installed, verified with `serviceArtifact.ts --verify`, and passed 26/26 checks in `stage2-smoke.mjs` plus 18/18 checks in `stage2-extra-smoke.mjs` (Welcome clone entry, all four provider entries, real local HTTP clone into `repos\`, `notInWorkspace`/`changed`/`missing` reconciliation, `Clone Again`, `Remove from Project`, and no orphan sidecar). See [Stage 2 rebuilt installer and studio merge (2026-11-21)](#stage-2-rebuilt-installer-installed-verification-and-studio-preview-merge-2026-11-21).
    - **Remaining:**
-     - Rebuild the installer from `main` at or after `10d5bb7a547`.
-     - Install it, then check a clone from each provider entry and the Git install offer on a machine without Git.
-     - Check the reconciliation states: a repo removed from the window, deleted on disk, or replaced.
-     - Rerun `Z:\CFStage\smoke\stage2-smoke.mjs` against the new payload.
+     - Check live remote clones against public GitHub/GitLab/Bitbucket hosts and the `installGit` winget offer on a machine without Git (this workstation has Git installed).
+     - Merge `fxrazor/continue-project-handoff-review` (`e89b441716b` plus this handoff commit) into `main` once ready (the main checkout `Z:\CloudForge-Code` currently has uncommitted `HANDOFF.md` and `docs/cloudforge/infrastructure-studio-implementation-plan.md`).
    - **Contract:** the [protocol's Stage 2 section](Z:/CloudForge/docs/protocol/cloudforge-service-v1.md#stage-2-projects-with-repositories) and [fixtures](Z:/CloudForge/docs/protocol/fixtures/stage2/README.md). Broker-supplied paths (`projectPath`, `workspaceFolders`, `folderPath`, `parentPath`) come from Electron main, never from the extension.
    - **Already done on CloudForge `main`:** Phase 0 and the Rust tasks (`ae5785d`, `ca09ef6`).
-2. Before a signed release, sign the service before staging. The pre-Inno `--verify` gate checks the final signed executable against the manifest digest. See the [staging guide](docs/cloudforge/service-artifact.md#signing-and-integration).
+2. **Infrastructure Studio preview.** `codex/infrastructure-studio-preview` (`1767da9b534`) is merged into `fxrazor/continue-project-handoff-review` with standalone `check`, 10/10 tests, and `build` passing, excluded from extension packaging via `.vscodeignore`. Next: review the R1 domain/schema/source contract and approve Phase 1/webview integration before mounting in Code OSS.
+3. Before a signed release, sign the service before staging. The pre-Inno `--verify` gate checks the final signed executable against the manifest digest. See the [staging guide](docs/cloudforge/service-artifact.md#signing-and-integration).
 
 ## Stage 1 merged revisions (2026-11-17)
 
@@ -420,3 +419,40 @@ Fresh verification on 21 November, using pinned Node `24.22.1` and pnpm `12.16.0
 Start the next session with [REFINEMENT-CHECKPOINT.md](extensions/cloudforge/studio/REFINEMENT-CHECKPOINT.md), then the [investigation index](extensions/cloudforge/studio/investigation-2026-11-18/README.md), [roadmap](extensions/cloudforge/studio/investigation-2026-11-18/roadmap.md) and [Impeccable board direction](extensions/cloudforge/studio/investigation-2026-11-18/board-design-direction.md). Preview ownership is `extensions/cloudforge/studio/**`, its packaging exclusion and root design guidance. Do not replace Rust workspace/file/process authority or edit the legacy Tauri shell expecting it to appear in Code OSS.
 
 Exact next action: reconnect reference browser controls and run the preview from its directory with `corepack pnpm dev`. Check current form navigation, panel resizing/docking, focused resource editing, template Undo and independent renderer/theme behavior. Finish the documented Brainboard settings/pane observations, then review the typed domain/schema/source adapter before richer configuration or production mounting. Preserve one architecture and one semantic history; the JSON dock, reference-only module import, primitive schema coverage and in-memory persistence are still preview limitations. Native Code OSS source editing and a supported Webview/service adapter remain integration work.
+
+## Stage 2 rebuilt installer, installed verification, and studio preview merge (2026-11-21)
+
+Worktree `E:\Orca\CloudForge-Code\dace`, branch `fxrazor/continue-project-handoff-review`, started at `main` (`507c1e8eec3`) and merged `codex/infrastructure-studio-preview` (`1767da9b534`) as `e89b441716b`. Rust repository `Z:\CloudForge` and the main checkout `Z:\CloudForge-Code` (which holds uncommitted `HANDOFF.md` and `docs/cloudforge/infrastructure-studio-implementation-plan.md`) were left untouched.
+
+### Merged tree changes and checks
+
+- Resolved merge conflicts in `extensions/cloudforge/.vscodeignore` (retaining both `*.tsbuildinfo` and `studio/**`) and `HANDOFF.md`. No Stage 2 runtime, broker, or extension source files changed.
+- `CLOUDFORGE_REPO=Z:\CloudForge node --test extensions/cloudforge/test/*.test.ts`: 13 passed, 0 skipped.
+- `node --test build/lib/test/cloudforgeServiceArtifact.test.ts`: 73 passed, 0 skipped.
+- Standalone `extensions/cloudforge/studio`: `corepack pnpm install --frozen-lockfile`, `corepack pnpm check`, `corepack pnpm test` (10 passed, 0 skipped), and `corepack pnpm build` all passed.
+
+### Rebuilt Stage 2 installer and installed smoke
+
+Built from the clean detached checkout `Z:\CFStage\Code` at `507c1e8eec3b3280cc3eb74505111140af19ee9c` with `build/cloudforge/package-win32-x64.ps1`.
+
+| Item | Verified value |
+| --- | --- |
+| Desktop revision | `507c1e8eec3b3280cc3eb74505111140af19ee9c` (includes empty-project view fix and `*.tsbuildinfo` exclusion from `10d5bb7a547`) |
+| Rust service | `ca09ef6a1a3e76f96230b69da929ebdc503fbdc6`, protocol `1`, `x64`, 1,869,824 bytes, SHA-256 `efbe7287ae244bfabb60e27bb2e2009ed963b0e4a5112e1bc89d3c3e780a36e6` |
+| Bundled VSIX sample | `ms-vscode.js-debug` `1.140.1`, SHA-256 `7accf7857ea4f4717b6211a2b75f5b434faf477033203a8919b6d26b6abc1897` |
+| Installer | [CloudForgeProofSetup-x64-507c1e8eec3.exe](Z:/CFStage/CloudForgeProofSetup-x64-507c1e8eec3.exe), unsigned, 321,558,745 bytes, SHA-256 `50cd411c2904a106223a0796d53bbae0eafce665a49a9465db0911542bb7bea7` |
+
+| Check | Result |
+| --- | --- |
+| Built payload `tsconfig.typecheck.tsbuildinfo` check | Absent (`False`). |
+| `node build/cloudforge/serviceArtifact.ts --verify` on built payload `Z:\CFStage\VSCode-win32-x64\resources\app` (all flags pinned) | Passed. |
+| `node Z:\CFStage\smoke\stage2-smoke.mjs` against rebuilt `507c1e8eec3` payload | **26/26 passed** (empty-project view now shows all four provider clone links and existing-repo hint; report saved at `Z:\CFStage\smoke\report-507c1e8eec3.json`). |
+| Silent per-user upgrade install (`CloudForgeProofSetup-x64-507c1e8eec3.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /MERGETASKS=!runcode`) | Exit code `0`; installed to `%LOCALAPPDATA%\Programs\CloudForge Proof`. |
+| Installed `tsconfig.typecheck.tsbuildinfo` check and `serviceArtifact.ts --verify` on `%LOCALAPPDATA%\Programs\CloudForge Proof\resources\app` (all flags pinned) | Absent (`False`); `--verify` passed. |
+| `node Z:\CFStage\smoke\stage2-extra-smoke.mjs` against installed `CloudForge Proof.exe` (isolated profile, real local HTTP Git server on `127.0.0.1`) | **18/18 passed** (report saved at `Z:\CFStage\smoke\report-extra-507c1e8eec3.json`): Welcome clone entry lists all 4 providers and prompts Create/Open Project without a project; empty project view shows all 4 provider links; GitLab (`https://gitlab.com/`), Bitbucket (`https://bitbucket.org/`), GitHub (built-in Git clone picker), and Any Git URL (`https://`) entries verified; real local HTTP clone into `<project>\repos\infra` imported with graph opened and repo files hashed unchanged; reconciliation states `notInWorkspace` ("not in this window"), `changed` ("folder replaced; import again"), and `missing` ("missing on disk") verified with architectures marked `unavailable`; inline `Clone Again` re-cloned from recorded remote; `Remove from Project` cleared marker while keeping files on disk; 0 `cloudforge-service.exe` processes remained after quit. Visual screenshots (`01-empty-project.png`, `04-changed.png`, `05-missing.png`) inspected. |
+
+### Remaining gaps and next action
+
+- Live clones against external GitHub/GitLab/Bitbucket hosts and the `installGit` winget offer on a machine without Git remain unverified on this host (Git is installed here).
+- Authenticode signing before the pre-Inno `--verify` gate remains open for signed releases.
+- Next action: reconcile/commit or stash the uncommitted doc edits in `Z:\CloudForge-Code` if desired, merge `fxrazor/continue-project-handoff-review` into `main`, and decide on the R1 Infrastructure Studio / Runner View contract before starting the next implementation slice.
