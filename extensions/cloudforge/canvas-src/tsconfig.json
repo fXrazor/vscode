@@ -13,6 +13,7 @@
 	"include": [
 		"./**/*",
 		"../src/canvas/protocol.ts",
-		"../src/canvas/layout.ts"
+		"../src/canvas/layout.ts",
+		"../src/canvas/schemaForm.ts"
 	]
 }

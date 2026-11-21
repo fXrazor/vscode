@@ -496,3 +496,20 @@ Implemented on `fxrazor/continue-project-handoff-review` in `E:\Orca\CloudForge-
 | Live Edge Playwright verification of compiled `media/canvas.js` + `canvas-style.css` | **11/11 passed**, **0 console errors**, **0 page errors**; visual screenshots inspected for dark Visual Design, light Technical Design, and 3-pane Focused Resource Workspace. |
 
 **Remaining for Phase 1 exit evidence:** rebuild the Windows x64 package from this commit and run an end-to-end packaged/installed desktop smoke verifying the live Architecture Canvas Webview against a real Rust service read (including live `_cloudforge.openSource` navigation, stale edit detection, and high-contrast theme).
+
+### Phase 2 (Desktop): Schema-backed configuration forms, typed reference picker & draft HCL preview (2026-11-21)
+
+Implemented on `fxrazor/continue-project-handoff-review` in `E:\Orca\CloudForge-Code\dace` (on top of `eeeb5a1d2c5`) with zero edits to `extensions/cloudforge/studio/**` or `Z:\CloudForge`. Types mirror the canonical Rust catalogue modules (`Z:\CloudForge\src-tauri\src\catalogue\{form,draft,coverage}.rs`).
+
+- **Schema & draft renderer ([schemaForm.ts](extensions/cloudforge/src/canvas/schemaForm.ts)):** bundles offline version-pinned (`hashicorp/azurerm 5.14.0`) schemas, field help, official Registry doc links, and HCL examples for the initial Azure networking set (`azurerm_resource_group`, `azurerm_virtual_network`, `azurerm_subnet`, `azurerm_network_security_group` with nested `security_rule` blocks, `azurerm_public_ip`, `azurerm_route_table` with nested `route` blocks); renders aligned, clearly labelled `# Unsaved draft preview` HCL with path-level diagnostics; rejects computed-only writes; preserves raw HCL expressions; builds typed reference candidates (`buildReferenceCandidates`) marking apply-time outputs honestly; falls back explicitly for unsupported/schema-absent resource types.
+- **Focused Resource Workspace UI ([canvas-src/index.ts](extensions/cloudforge/canvas-src/index.ts), [canvas-src/canvas.css](extensions/cloudforge/canvas-src/canvas.css)):** upgrades the 3-pane workspace with **Inputs** (upstream resources + clickable typed reference chips), **Parameters (Unsaved Draft Preview)** (Required/Optional/Nested Blocks, per-field Value|Expr toggle, inline validation, stale-revision draft banner with Reset Draft, and `Advanced (Open Source)` native HCL route), and **Results** (`HCL Preview | Findings | Outputs` tabs). Drafts stay strictly in memory and never touch Terraform files on disk.
+
+| Check (newly run in `E:\Orca\CloudForge-Code\dace`) | Result |
+| --- | --- |
+| `CLOUDFORGE_REPO=Z:\CloudForge node --test extensions/cloudforge/test/*.test.ts` | **25/25 passed**, 0 skipped (includes 4 new [schemaForm.test.ts](extensions/cloudforge/test/schemaForm.test.ts) suites). |
+| `tsc --noEmit` (TS 7) & `tsc6 --noEmit` (TS 6) on `extensions/cloudforge/tsconfig.json` and `extensions/cloudforge/canvas-src/tsconfig.json` | Passed with 0 errors. |
+| `node extensions/cloudforge/esbuild.mts` & `node extensions/cloudforge/esbuild.webview.mts` | Built cleanly (`media/canvas.js` + `media/canvas-style.css`). |
+| `node build/oxlint.ts` & `node --experimental-strip-types build/hygiene.ts` on all Phase 2 files | Passed with 0 errors. |
+| Live Edge Playwright verification of compiled Webview bundle | **13/13 passed**, **0 console errors**, **0 page errors**; visually inspected updated [canvas-focused-workspace.png](file:///C:/Users/dalep/.gemini/antigravity-cli/brain/b485a25a-5b7f-463d-a740-47981a091ce1/scratch/canvas-verify-out/canvas-focused-workspace.png). |
+
+**Remaining for Phase 2 cross-repo completion:** Rust owner exposes the scoped `catalogue` schema lookup and `draft::render` service capabilities in `Z:\CloudForge` so live provider snapshots replace/augment the bundled offline Azure networking set.

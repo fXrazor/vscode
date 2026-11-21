@@ -19,6 +19,18 @@ import {
 	type PositionedNode
 } from '../src/canvas/layout';
 import {
+	buildReferenceCandidates,
+	createInitialDraft,
+	lookupBundledSchema,
+	renderDraftPreview,
+	type DraftBlock,
+	type DraftValue,
+	type FormAttribute,
+	type FormBlockType,
+	type FormSchema,
+	type ResourceDraft
+} from '../src/canvas/schemaForm';
+import {
 	defaultCanvasViewState,
 	type CanvasGraphSnapshot,
 	type CanvasGridMode,
@@ -52,6 +64,10 @@ let viewport: CanvasViewport = { x: 40, y: 40, zoom: 1 };
 let dragging: { startX: number; startY: number; originX: number; originY: number } | undefined;
 let persistTimer: number | undefined;
 let lastFocusBeforeWorkspace: HTMLElement | null = null;
+const draftsByNodeId = new Map<string, ResourceDraft>();
+let activeFieldKey: { readonly blockId?: string; readonly attrName: string } | undefined;
+let workspaceResultsTab: 'findings' | 'preview' | 'outputs' = 'preview';
+let nextDraftBlockId = 1;
 
 const root = document.getElementById('app')!;
 
@@ -811,6 +827,232 @@ function renderDiagnosticsSection(current: CanvasGraphSnapshot): HTMLElement {
 	return section;
 }
 
+function getOrCreateDraft(node: CanvasNodeSummary, schema: FormSchema): ResourceDraft {
+	const existing = draftsByNodeId.get(node.id);
+	if (existing && existing.typeName === schema.typeName) {
+		return existing;
+	}
+	const created = createInitialDraft(node, schema, graph?.sourceRevision ?? '0'.repeat(64));
+	draftsByNodeId.set(node.id, created);
+	return created;
+}
+
+function updateDraft(nodeId: string, updater: (draft: ResourceDraft) => ResourceDraft): void {
+	const current = draftsByNodeId.get(nodeId);
+	if (!current) {
+		return;
+	}
+	draftsByNodeId.set(nodeId, updater(current));
+	render();
+}
+
+function setAttrInDraft(draft: ResourceDraft, attrName: string, value: DraftValue | undefined, blockId?: string): ResourceDraft {
+	if (blockId) {
+		return {
+			...draft,
+			blocks: draft.blocks.map(block => {
+				if (block.id !== blockId) {
+					return block;
+				}
+				const nextAttrs = { ...block.attributes };
+				if (value === undefined) {
+					delete nextAttrs[attrName];
+				} else {
+					nextAttrs[attrName] = value;
+				}
+				return { ...block, attributes: nextAttrs };
+			}),
+		};
+	}
+	const nextAttrs = { ...draft.attributes };
+	if (value === undefined) {
+		delete nextAttrs[attrName];
+	} else {
+		nextAttrs[attrName] = value;
+	}
+	return { ...draft, attributes: nextAttrs };
+}
+
+function renderSchemaFieldRow(
+	nodeId: string,
+	attr: FormAttribute,
+	current: DraftValue | undefined,
+	diagMessage: string | undefined,
+	blockId?: string
+): HTMLElement {
+	const row = el('div', `cf-schema-field${diagMessage ? ' has-error' : ''}`);
+	const top = el('div', 'cf-schema-field-head');
+	const label = el('span', 'cf-schema-field-name cf-mono', attr.name);
+	if (attr.access === 'required') {
+		label.append(el('span', 'cf-req-star', ' *'));
+	}
+	top.append(label);
+
+	const modeToggle = el('div', 'cf-segmented cf-segmented-sm');
+	const isExpr = current?.kind === 'expression';
+	const valBtn = el('button', 'cf-seg-btn', 'Value');
+	valBtn.type = 'button';
+	valBtn.setAttribute('aria-pressed', String(!isExpr));
+	valBtn.addEventListener('click', () => {
+		const fallback: DraftValue = attr.valueType === 'bool'
+			? { kind: 'literal', value: false }
+			: attr.valueType === 'listString'
+				? { kind: 'literal', value: [] }
+				: attr.valueType === 'mapString'
+					? { kind: 'literal', value: {} }
+					: { kind: 'literal', value: '' };
+		updateDraft(nodeId, d => setAttrInDraft(d, attr.name, fallback, blockId));
+	});
+	const exprBtn = el('button', 'cf-seg-btn', 'Expr');
+	exprBtn.type = 'button';
+	exprBtn.setAttribute('aria-pressed', String(isExpr));
+	exprBtn.addEventListener('click', () => {
+		const text = current?.kind === 'expression' ? current.text : '';
+		updateDraft(nodeId, d => setAttrInDraft(d, attr.name, { kind: 'expression', text }, blockId));
+	});
+	modeToggle.append(valBtn, exprBtn);
+	top.append(modeToggle);
+	row.append(top);
+
+	const markActive = () => { activeFieldKey = { blockId, attrName: attr.name }; };
+
+	if (isExpr) {
+		const input = el('input', 'cf-input cf-mono');
+		input.type = 'text';
+		input.placeholder = 'e.g. azurerm_resource_group.hub.name';
+		input.setAttribute('aria-label', `${attr.name} HCL expression`);
+		input.value = current.text;
+		input.addEventListener('focus', markActive);
+		input.addEventListener('input', () => {
+			updateDraft(nodeId, d => setAttrInDraft(d, attr.name, { kind: 'expression', text: input.value }, blockId));
+		});
+		row.append(input);
+	} else if (attr.valueType === 'bool') {
+		const checkLabel = el('label', 'cf-bool-row');
+		const cb = el('input');
+		cb.type = 'checkbox';
+		cb.checked = current?.kind === 'literal' && current.value === true;
+		cb.addEventListener('focus', markActive);
+		cb.addEventListener('change', () => {
+			updateDraft(nodeId, d => setAttrInDraft(d, attr.name, { kind: 'literal', value: cb.checked }, blockId));
+		});
+		checkLabel.append(cb, el('span', undefined, cb.checked ? 'true' : 'false'));
+		row.append(checkLabel);
+	} else if (attr.valueType === 'string' && attr.options && attr.options.length > 0) {
+		const select = el('select', 'cf-input');
+		select.setAttribute('aria-label', attr.name);
+		const emptyOpt = el('option', undefined, '— Select —');
+		emptyOpt.value = '';
+		select.append(emptyOpt);
+		const currentStr = current?.kind === 'literal' && typeof current.value === 'string' ? current.value : '';
+		for (const optVal of attr.options) {
+			const opt = el('option', undefined, optVal);
+			opt.value = optVal;
+			opt.selected = currentStr === optVal;
+			select.append(opt);
+		}
+		select.addEventListener('focus', markActive);
+		select.addEventListener('change', () => {
+			updateDraft(nodeId, d => setAttrInDraft(d, attr.name, select.value ? { kind: 'literal', value: select.value } : undefined, blockId));
+		});
+		row.append(select);
+	} else if (attr.valueType === 'listString') {
+		const input = el('input', 'cf-input cf-mono');
+		input.type = 'text';
+		input.placeholder = attr.placeholder ?? 'Comma-separated values (e.g. 10.0.0.0/16)';
+		input.setAttribute('aria-label', attr.name);
+		input.value = current?.kind === 'literal' && Array.isArray(current.value) ? current.value.join(', ') : '';
+		input.addEventListener('focus', markActive);
+		input.addEventListener('change', () => {
+			const parts = input.value.split(',').map(s => s.trim()).filter(Boolean);
+			updateDraft(nodeId, d => setAttrInDraft(d, attr.name, parts.length > 0 ? { kind: 'literal', value: parts } : undefined, blockId));
+		});
+		row.append(input);
+	} else if (attr.valueType === 'mapString') {
+		const textarea = el('textarea', 'cf-input cf-mono cf-textarea');
+		textarea.rows = 2;
+		textarea.placeholder = 'environment=prod';
+		textarea.setAttribute('aria-label', attr.name);
+		if (current?.kind === 'literal' && current.value && typeof current.value === 'object' && !Array.isArray(current.value)) {
+			textarea.value = Object.entries(current.value).map(([k, v]) => `${k}=${v}`).join('\n');
+		}
+		textarea.addEventListener('focus', markActive);
+		textarea.addEventListener('change', () => {
+			const map: Record<string, string> = {};
+			for (const line of textarea.value.split(/\r?\n/)) {
+				const idx = line.indexOf('=');
+				if (idx > 0) {
+					map[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
+				}
+			}
+			updateDraft(nodeId, d => setAttrInDraft(d, attr.name, Object.keys(map).length > 0 ? { kind: 'literal', value: map } : undefined, blockId));
+		});
+		row.append(textarea);
+	} else {
+		const input = el('input', 'cf-input');
+		input.type = attr.sensitive ? 'password' : attr.valueType === 'number' ? 'number' : 'text';
+		input.placeholder = attr.placeholder ?? '';
+		input.setAttribute('aria-label', attr.name);
+		input.value = current?.kind === 'literal' && (typeof current.value === 'string' || typeof current.value === 'number') ? String(current.value) : '';
+		input.addEventListener('focus', markActive);
+		input.addEventListener('change', () => {
+			if (input.value === '') {
+				updateDraft(nodeId, d => setAttrInDraft(d, attr.name, undefined, blockId));
+			} else if (attr.valueType === 'number') {
+				updateDraft(nodeId, d => setAttrInDraft(d, attr.name, { kind: 'literal', value: Number(input.value) }, blockId));
+			} else {
+				updateDraft(nodeId, d => setAttrInDraft(d, attr.name, { kind: 'literal', value: input.value }, blockId));
+			}
+		});
+		row.append(input);
+	}
+
+	row.append(el('div', 'cf-field-help', attr.description));
+	if (diagMessage) {
+		row.append(el('div', 'cf-field-error', diagMessage));
+	}
+	return row;
+}
+
+function renderNestedBlocksSection(nodeId: string, blockTypes: readonly FormBlockType[], draft: ResourceDraft, diagByPath: ReadonlyMap<string, string>): HTMLElement {
+	const wrap = el('div', 'cf-blocks-wrap');
+	for (const bt of blockTypes) {
+		const section = el('div', 'cf-inspector-section');
+		const headerRow = el('div', 'cf-block-header');
+		headerRow.append(el('h3', 'cf-section-title', `Nested block: ${bt.name}`));
+		const addBtn = el('button', 'cf-btn', `+ Add ${bt.name}`);
+		addBtn.type = 'button';
+		addBtn.addEventListener('click', () => {
+			const nextBlock: DraftBlock = { id: `blk-${nextDraftBlockId++}`, name: bt.name, attributes: {} };
+			updateDraft(nodeId, d => ({ ...d, blocks: [...d.blocks, nextBlock] }));
+		});
+		headerRow.append(addBtn);
+		section.append(headerRow);
+		section.append(el('p', 'cf-muted', bt.description));
+
+		const instances = draft.blocks.filter(b => b.name === bt.name);
+		instances.forEach((inst, idx) => {
+			const card = el('div', 'cf-block-card');
+			const cardHead = el('div', 'cf-block-header');
+			cardHead.append(el('strong', 'cf-mono', `${bt.name}[${idx}]`));
+			const rmBtn = el('button', 'cf-btn', 'Remove');
+			rmBtn.type = 'button';
+			rmBtn.addEventListener('click', () => {
+				updateDraft(nodeId, d => ({ ...d, blocks: d.blocks.filter(b => b.id !== inst.id) }));
+			});
+			cardHead.append(rmBtn);
+			card.append(cardHead);
+			for (const attr of bt.attributes) {
+				const path = `${bt.path}[${idx}].${attr.name}`;
+				card.append(renderSchemaFieldRow(nodeId, attr, inst.attributes[attr.name], diagByPath.get(path), inst.id));
+			}
+			section.append(card);
+		});
+		wrap.append(section);
+	}
+	return wrap;
+}
+
 function renderFocusedWorkspace(selected: CanvasNodeSummary): HTMLElement {
 	const overlay = el('section', 'cf-workspace');
 	overlay.setAttribute('aria-label', `Focused resource workspace: ${selected.name}`);
@@ -818,6 +1060,12 @@ function renderFocusedWorkspace(selected: CanvasNodeSummary): HTMLElement {
 	const provider = inferProvider(selected);
 	const isStale = notice?.kind === 'stale';
 	const { upstream, downstream } = relatedEdges(selected.id);
+	const schema = lookupBundledSchema(selected);
+	const draft = schema ? getOrCreateDraft(selected, schema) : undefined;
+	const draftStale = !!draft && !!graph && draft.baseSourceRevision !== graph.sourceRevision;
+	const rendered = schema && draft ? renderDraftPreview(schema, draft) : undefined;
+	const diagByPath = new Map((rendered?.diagnostics ?? []).map(d => [d.path, d.message]));
+	const references = graph ? buildReferenceCandidates(graph, selected.id) : [];
 
 	const top = el('header', 'cf-workspace-header');
 	const backBtn = el('button', 'cf-btn cf-back-btn', '← Back to Canvas');
@@ -831,10 +1079,13 @@ function renderFocusedWorkspace(selected: CanvasNodeSummary): HTMLElement {
 	);
 
 	const actions = el('div', 'cf-header-group');
+	if (schema) {
+		actions.append(el('span', 'cf-pill', `${schema.providerSource} ${schema.providerVersion}`));
+	}
 	if (graph) {
 		actions.append(el('span', 'cf-pill cf-mono', `rev ${graph.sourceRevision.slice(0, 8)}`));
 	}
-	const openSrc = el('button', 'cf-btn cf-btn-primary', 'Open Source');
+	const openSrc = el('button', 'cf-btn cf-btn-primary', 'Advanced (Open Source)');
 	openSrc.type = 'button';
 	openSrc.disabled = !selected.hasSource || isStale;
 	openSrc.addEventListener('click', () => post({ type: 'openSource', nodeId: selected.id }));
@@ -843,48 +1094,183 @@ function renderFocusedWorkspace(selected: CanvasNodeSummary): HTMLElement {
 	top.append(backBtn, heading, actions);
 	overlay.append(top);
 
+	if (draftStale) {
+		const staleBar = el('div', 'cf-banner cf-banner-stale');
+		staleBar.setAttribute('role', 'alert');
+		staleBar.append(el('span', undefined, 'Architecture source revision changed since this draft started. Reset the draft to align with the latest revision.'));
+		const resetBtn = el('button', 'cf-btn', 'Reset Draft');
+		resetBtn.type = 'button';
+		resetBtn.addEventListener('click', () => {
+			draftsByNodeId.delete(selected.id);
+			render();
+		});
+		staleBar.append(resetBtn);
+		overlay.append(staleBar);
+	}
+
 	const columns = el('div', 'cf-workspace-columns');
 
-	// Left pane — Inputs (n8n pattern)
+	// Left pane — Inputs & Typed Reference Picker (n8n pattern)
 	const leftPane = el('aside', 'cf-ws-pane');
 	leftPane.append(el('h2', 'cf-ws-pane-title', 'Inputs'));
 	leftPane.append(renderDepListSection('Upstream resources', upstream, true));
+
+	const refSection = el('div', 'cf-inspector-section');
+	refSection.append(el('h3', 'cf-section-title', `Typed references (${references.length})`));
+	if (references.length === 0) {
+		refSection.append(el('p', 'cf-muted', 'No other resources in this architecture to reference.'));
+	} else {
+		refSection.append(el('p', 'cf-muted', schema
+			? 'Focus a field in Parameters, then click a chip to insert it as an HCL expression.'
+			: 'Available resource references in this architecture.'));
+		const chipWrap = el('div', 'cf-ref-chips');
+		for (const ref of references) {
+			const chip = el('button', 'cf-ref-chip');
+			chip.type = 'button';
+			chip.title = `${ref.description} (${ref.valueType})`;
+			chip.append(
+				el('span', 'cf-mono cf-ref-expr', ref.expression),
+				el('span', 'cf-ref-badge', ref.knownAtApply ? `${ref.valueType} · apply-time` : ref.valueType)
+			);
+			chip.disabled = !schema;
+			chip.addEventListener('click', () => {
+				if (!schema) {
+					return;
+				}
+				const targetAttr = activeFieldKey?.attrName ?? schema.attributes.find(a => a.access === 'required' && a.name !== 'name')?.name ?? 'name';
+				updateDraft(selected.id, d => setAttrInDraft(d, targetAttr, { kind: 'expression', text: ref.expression }, activeFieldKey?.blockId));
+			});
+			chipWrap.append(chip);
+		}
+		refSection.append(chipWrap);
+	}
+	leftPane.append(refSection);
 	columns.append(leftPane);
 
-	// Center pane — Resource metadata & source authority
+	// Center pane — Schema-backed Parameters form (or explicit schema-absent fallback)
 	const centerPane = el('div', 'cf-ws-pane cf-ws-center');
-	centerPane.append(el('h2', 'cf-ws-pane-title', 'Resource'));
-	const dl = el('dl', 'cf-meta-grid');
-	const rows: [string, string][] = [
-		['Provider', providerDisplayName(provider)],
-		['Declaration kind', selected.kind],
-		['Terraform type', selected.resourceType ?? '—'],
-		['Name', selected.name],
-		['Display label', selected.label],
-		['Source authority', 'Read-only Terraform source (verified by CloudForge Rust service)'],
-	];
-	for (const [k, v] of rows) {
-		dl.append(el('dt', undefined, k), el('dd', k === 'Terraform type' || k === 'Display label' ? 'cf-mono' : undefined, v));
+	centerPane.append(el('h2', 'cf-ws-pane-title', 'Parameters (Unsaved Draft Preview)'));
+
+	if (schema && draft) {
+		centerPane.append(el('p', 'cf-muted', `${schema.description} Offline guidance pinned to ${schema.providerSource} ${schema.providerVersion}. Draft edits stay in memory and never modify Terraform files on disk.`));
+
+		const reqAttrs = schema.attributes.filter(a => a.access === 'required');
+		const optAttrs = schema.attributes.filter(a => a.access === 'optional');
+
+		if (reqAttrs.length > 0) {
+			const reqSec = el('div', 'cf-inspector-section');
+			reqSec.append(el('h3', 'cf-section-title', 'Required'));
+			for (const attr of reqAttrs) {
+				reqSec.append(renderSchemaFieldRow(selected.id, attr, draft.attributes[attr.name], diagByPath.get(attr.path)));
+			}
+			centerPane.append(reqSec);
+		}
+		if (optAttrs.length > 0) {
+			const optDetails = el('details', 'cf-opt-details');
+			optDetails.open = optAttrs.some(a => draft.attributes[a.name] !== undefined);
+			optDetails.append(el('summary', 'cf-section-title', `Optional (${optAttrs.length})`));
+			for (const attr of optAttrs) {
+				optDetails.append(renderSchemaFieldRow(selected.id, attr, draft.attributes[attr.name], diagByPath.get(attr.path)));
+			}
+			centerPane.append(optDetails);
+		}
+		if (schema.blocks.length > 0) {
+			centerPane.append(renderNestedBlocksSection(selected.id, schema.blocks, draft, diagByPath));
+		}
+
+		const helpDetails = el('details', 'cf-opt-details');
+		helpDetails.append(el('summary', 'cf-section-title', 'Offline example & provider docs'));
+		helpDetails.append(el('pre', 'cf-hcl-preview cf-mono', schema.exampleHcl));
+		helpDetails.append(el('p', 'cf-muted cf-mono', `Official reference: ${schema.docsUrl}`));
+		centerPane.append(helpDetails);
+	} else {
+		const dl = el('dl', 'cf-meta-grid');
+		const rows: [string, string][] = [
+			['Provider', providerDisplayName(provider)],
+			['Declaration kind', selected.kind],
+			['Terraform type', selected.resourceType ?? '—'],
+			['Name', selected.name],
+			['Schema status', 'Schema not bundled for this resource type'],
+			['Source authority', 'Read-only Terraform source (verified by CloudForge Rust service)'],
+		];
+		for (const [k, v] of rows) {
+			dl.append(el('dt', undefined, k), el('dd', k === 'Terraform type' ? 'cf-mono' : undefined, v));
+		}
+		centerPane.append(dl);
+		centerPane.append(el('p', 'cf-muted', 'No offline form schema is bundled for this declaration type yet. Unsupported content survives inspection untouched; use Advanced (Open Source) to edit it in the native Terraform editor.'));
 	}
-	centerPane.append(dl);
-	centerPane.append(el('p', 'cf-muted', 'In Phase 1, resource configuration values and edits stay in native Terraform editor tabs. Use Open Source to jump directly to this declaration with revision verification.'));
 	columns.append(centerPane);
 
-	// Right pane — Results & Downstream
+	// Right pane — Results (Findings | HCL Preview | Outputs)
 	const rightPane = el('aside', 'cf-ws-pane');
-	rightPane.append(el('h2', 'cf-ws-pane-title', 'Results & Impact'));
-	rightPane.append(renderDepListSection('Downstream dependents', downstream, true));
-	if (graph) {
-		const coverage = el('div', 'cf-inspector-section');
-		coverage.append(
-			el('h3', 'cf-section-title', 'Coverage'),
-			el('p', 'cf-muted', graph.status === 'partial'
-				? 'Partial static graph: inspect Diagnostics for unresolved references or unsupported syntax.'
-				: 'Complete static graph for the captured Terraform revision.')
-		);
-		rightPane.append(coverage);
-		if (graph.diagnostics.length > 0) {
+	rightPane.append(el('h2', 'cf-ws-pane-title', 'Results'));
+
+	const tabs = el('div', 'cf-segmented');
+	tabs.setAttribute('role', 'tablist');
+	for (const [tabId, label] of [['preview', 'HCL Preview'], ['findings', `Findings (${(rendered?.diagnostics.length ?? 0) + (graph?.diagnostics.length ?? 0)})`], ['outputs', 'Outputs']] as const) {
+		const btn = el('button', 'cf-seg-btn', label);
+		btn.type = 'button';
+		btn.setAttribute('role', 'tab');
+		btn.setAttribute('aria-selected', String(workspaceResultsTab === tabId));
+		btn.setAttribute('aria-pressed', String(workspaceResultsTab === tabId));
+		btn.addEventListener('click', () => {
+			workspaceResultsTab = tabId;
+			render();
+		});
+		tabs.append(btn);
+	}
+	rightPane.append(tabs);
+
+	if (workspaceResultsTab === 'preview') {
+		if (rendered && draft) {
+			const headRow = el('div', 'cf-block-header');
+			headRow.append(el('span', 'cf-pill cf-pill-warn', 'Unsaved draft'));
+			const resetBtn = el('button', 'cf-btn', 'Reset Draft');
+			resetBtn.type = 'button';
+			resetBtn.addEventListener('click', () => {
+				draftsByNodeId.delete(selected.id);
+				render();
+			});
+			headRow.append(resetBtn);
+			rightPane.append(headRow);
+			rightPane.append(el('pre', 'cf-hcl-preview cf-mono', rendered.hcl));
+			rightPane.append(el('p', 'cf-muted', 'Preview only. Project Terraform files remain unchanged on disk until guarded save arrives in Phase 4.'));
+		} else {
+			rightPane.append(el('p', 'cf-muted', 'HCL draft preview is available for schema-backed Azure networking resources. Use Advanced (Open Source) for native Terraform source.'));
+		}
+	} else if (workspaceResultsTab === 'findings') {
+		if (rendered && rendered.diagnostics.length > 0) {
+			const diagSec = el('div', 'cf-inspector-section');
+			diagSec.append(el('h3', 'cf-section-title', `Draft schema checks (${rendered.diagnostics.length})`));
+			for (const d of rendered.diagnostics) {
+				const item = el('div', `cf-diag cf-diag-${d.severity}`);
+				item.append(
+					el('div', 'cf-diag-head cf-mono', `${d.path || 'resource'} · ${d.severity}`),
+					el('div', 'cf-diag-msg', d.message)
+				);
+				diagSec.append(item);
+			}
+			rightPane.append(diagSec);
+		} else if (rendered) {
+			rightPane.append(el('p', 'cf-muted', 'All required fields in this draft pass local schema checks.'));
+		}
+		if (graph && graph.diagnostics.length > 0) {
 			rightPane.append(renderDiagnosticsSection(graph));
+		}
+	} else {
+		rightPane.append(renderDepListSection('Downstream dependents', downstream, true));
+		if (schema && schema.outputs.length > 0) {
+			const outSec = el('div', 'cf-inspector-section');
+			outSec.append(el('h3', 'cf-section-title', 'Known resource outputs'));
+			for (const out of schema.outputs) {
+				const card = el('div', 'cf-diag');
+				card.append(
+					el('div', 'cf-mono', `${selected.resourceType}.${selected.name}.${out.name}`),
+					el('div', 'cf-muted', `${out.description} — ${out.knownAtApply ? 'Known after apply (not fabricated)' : 'Known from configuration'}`)
+				);
+				outSec.append(card);
+			}
+			rightPane.append(outSec);
 		}
 	}
 	columns.append(rightPane);

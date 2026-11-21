@@ -695,6 +695,150 @@ html, body {
 	font-size: 12px;
 }
 
+.cf-schema-field {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding: 8px;
+	border-radius: 6px;
+	border: 1px solid var(--cf-border);
+	background: var(--cf-card);
+}
+
+.cf-schema-field.has-error {
+	border-color: color-mix(in srgb, var(--cf-err) 65%, transparent);
+}
+
+.cf-schema-field-head, .cf-block-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+}
+
+.cf-schema-field-name {
+	font-size: 12px;
+	font-weight: 600;
+}
+
+.cf-req-star {
+	color: var(--cf-err);
+}
+
+.cf-segmented-sm .cf-seg-btn {
+	padding: 2px 7px;
+	font-size: 11px;
+}
+
+.cf-input {
+	width: 100%;
+	padding: 5px 8px;
+	border-radius: 5px;
+	border: 1px solid var(--cf-border);
+	background: var(--cf-bg);
+	color: var(--cf-fg);
+	font-size: 12px;
+}
+
+.cf-textarea {
+	resize: vertical;
+}
+
+.cf-bool-row {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 12px;
+}
+
+.cf-field-help {
+	font-size: 11px;
+	color: var(--cf-muted);
+	line-height: 1.35;
+}
+
+.cf-field-error {
+	font-size: 11px;
+	color: var(--cf-err);
+}
+
+.cf-opt-details {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.cf-opt-details > summary {
+	cursor: pointer;
+	padding: 4px 0;
+}
+
+.cf-blocks-wrap {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+
+.cf-block-card {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding: 10px;
+	border-radius: 8px;
+	border: 1px dashed var(--cf-border);
+	background: var(--cf-surface);
+}
+
+.cf-ref-chips {
+	display: flex;
+	flex-direction: column;
+	gap: 5px;
+}
+
+.cf-ref-chip {
+	text-align: left;
+	padding: 6px 8px;
+	border-radius: 6px;
+	border: 1px solid var(--cf-border);
+	background: var(--cf-card);
+	color: var(--cf-fg);
+	cursor: pointer;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.cf-ref-chip:hover:not(:disabled) {
+	border-color: var(--cf-accent);
+}
+
+.cf-ref-chip:disabled {
+	opacity: 0.6;
+	cursor: default;
+}
+
+.cf-ref-expr {
+	font-size: 11px;
+	overflow-wrap: anywhere;
+}
+
+.cf-ref-badge {
+	font-size: 10px;
+	color: var(--cf-muted);
+}
+
+.cf-hcl-preview {
+	margin: 0;
+	padding: 10px;
+	border-radius: 6px;
+	border: 1px solid var(--cf-border);
+	background: var(--cf-card);
+	font-size: 11.5px;
+	line-height: 1.5;
+	overflow: auto;
+	white-space: pre;
+}
+
 button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible, .cf-stage:focus-visible {
 	outline: 2px solid var(--cf-accent);
 	outline-offset: 1px;
