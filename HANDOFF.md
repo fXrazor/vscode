@@ -257,15 +257,14 @@ The [Infrastructure Studio implementation plan](docs/cloudforge/infrastructure-s
 
 The [Runner View design](docs/cloudforge/runner-view-design.md) is a documentation proposal based on desktop `main` at `c9f463818ef` in `Z:\CloudForge-Code`. This work adds the design and this handoff entry. The first slice would validate a saved Terraform revision offline and present the execution in the Workbench. The local links resolved and the documentation whitespace checks passed. Review the scope and name an integration owner before defining the service capability or starting implementation.
 
-1. **Stage 2 desktop.** D1–D9 are on `main`. The [packaged smoke](#stage-2-packaged-smoke-2026-11-17) passed 25 of 26 checks, and the one failure (empty project view) is fixed in `10d5bb7a547`.
+1. **Stage 2 desktop.** D1–D9 and the empty-project fix (`10d5bb7a547`) are on `main` (`507c1e8eec3`). Rebuilt as [CloudForgeProofSetup-x64-507c1e8eec3.exe](Z:/CFStage/CloudForgeProofSetup-x64-507c1e8eec3.exe), installed, verified with `serviceArtifact.ts --verify`, and passed 26/26 checks in `stage2-smoke.mjs` plus 18/18 checks in `stage2-extra-smoke.mjs` (Welcome clone entry, all four provider entries, real local HTTP clone into `repos\`, `notInWorkspace`/`changed`/`missing` reconciliation, `Clone Again`, `Remove from Project`, and no orphan sidecar). See [Stage 2 rebuilt installer and studio merge (2026-11-21)](#stage-2-rebuilt-installer-installed-verification-and-studio-preview-merge-2026-11-21).
    - **Remaining:**
-     - Rebuild the installer from `main` at or after `10d5bb7a547`.
-     - Install it, then check a clone from each provider entry and the Git install offer on a machine without Git.
-     - Check the reconciliation states: a repo removed from the window, deleted on disk, or replaced.
-     - Rerun `Z:\CFStage\smoke\stage2-smoke.mjs` against the new payload.
+     - Check live remote clones against public GitHub/GitLab/Bitbucket hosts and the `installGit` winget offer on a machine without Git (this workstation has Git installed).
+     - Merge `fxrazor/continue-project-handoff-review` (`e89b441716b` plus this handoff commit) into `main` once ready (the main checkout `Z:\CloudForge-Code` currently has uncommitted `HANDOFF.md` and `docs/cloudforge/infrastructure-studio-implementation-plan.md`).
    - **Contract:** the [protocol's Stage 2 section](Z:/CloudForge/docs/protocol/cloudforge-service-v1.md#stage-2-projects-with-repositories) and [fixtures](Z:/CloudForge/docs/protocol/fixtures/stage2/README.md). Broker-supplied paths (`projectPath`, `workspaceFolders`, `folderPath`, `parentPath`) come from Electron main, never from the extension.
    - **Already done on CloudForge `main`:** Phase 0 and the Rust tasks (`ae5785d`, `ca09ef6`).
-2. Before a signed release, sign the service before staging. The pre-Inno `--verify` gate checks the final signed executable against the manifest digest. See the [staging guide](docs/cloudforge/service-artifact.md#signing-and-integration).
+2. **Infrastructure Studio preview.** `codex/infrastructure-studio-preview` (`1767da9b534`) is merged into `fxrazor/continue-project-handoff-review` with standalone `check`, 10/10 tests, and `build` passing, excluded from extension packaging via `.vscodeignore`. Next: review the R1 domain/schema/source contract and approve Phase 1/webview integration before mounting in Code OSS.
+3. Before a signed release, sign the service before staging. The pre-Inno `--verify` gate checks the final signed executable against the manifest digest. See the [staging guide](docs/cloudforge/service-artifact.md#signing-and-integration).
 
 ## Stage 1 merged revisions (2026-11-17)
 
@@ -364,3 +363,100 @@ The portable payload `Z:\CFStage\VSCode-win32-x64` ran with fresh `--user-data-d
 - **Installer:** not installed. The smoke ran against its payload, as for Stage 1.
 - **Agent host notice:** "Channel name 'agentHostManagement' timed out after 1000ms" appeared on reopen. It comes from the agent host, not CloudForge.
 - **Graph:** the Graph view is still Stage 1's resource tree. The diagram canvas is later work.
+
+## Infrastructure Studio dual-renderer preview, 2026-11-17
+
+- Repository owner: this Code OSS checkout; integration owner: current CloudForge desktop task. Rust checkout untouched.
+- Branch `codex/infrastructure-studio-preview`, isolated worktree `C:/Users/dalep/.codex/worktrees/infrastructure-studio/CloudForge-Code`, base revision `1e7eb4b935528bc1193a0da6738c21da5f3e085a`. Changes are uncommitted.
+- Files owned: `extensions/cloudforge/studio/**`, preview exclusion in `extensions/cloudforge/.vscodeignore`, and the canvas-first UI rule in root `AGENTS.md`.
+- Architecture Design and Infrastructure Configuration are projections of the same reducer model. Names, configuration, dependencies, blocks and undo remain shared. Layout/viewports remain per-mode presentation metadata. Configuration cards support inline name/settings editing, incoming dependency disclosures, local name checks and explicit unavailable cost.
+- Workspace chrome reduced to contextual disclosures and opt-in resizable side panes/code dock. SVG/PNG presentation export implemented; PDF uses browser Print / Save PDF.
+- Newly verified: standalone TypeScript check, seven model tests, standalone build; browser mode switch, inline rename and cross-view Undo; successful SVG/PNG downloads with PNG visual inspection; no captured browser console errors.
+- Not verified or complete: browser PDF save, full keyboard/accessibility sweep, all docking/resize combinations, provider schema breadth, production shadcn/Radix migration, service integration, real validation/pricing or desktop packaging. This preview is excluded from shipped extension files. No production infrastructure actions exist here.
+- Exact next integration action: mount the preview in a supported Code OSS webview, adapt its single model to the canonical sanitized graph protocol and reuse native editor tabs for real Terraform. Preserve Rust authorization and existing service changes. Preview UI review can continue independently before integration.
+- See `extensions/cloudforge/studio/README.md` for run instructions and boundaries.
+
+### Independent canvas themes and adaptive background, 2026-11-17
+
+Continued on codex/infrastructure-studio-preview at base 1e7eb4b935528bc1193a0da6738c21da5f3e085a in the same isolated worktree. Changed preview App, DesignCanvas and CSS plus README and root design guidance. Light/dark theme is separate React presentation state; both renderers use the selected theme. View disclosure contains the theme selector. Palette overrides no longer derive from the technical renderer. Default grid is faint neutral lines with world-aligned power-of-two subdivision; the live zoom subscription is isolated in CanvasBackground rather than the graph/editor component.
+
+Compared Miro's live grid at approximately 72%, 75% and 400%; observed subtle lines with subdivision at high zoom. This describes visible behaviour, not its internal implementation. Returned the reference to its 70% overview preset. In CloudForge, verified Configuration Light/Dark and Architecture Dark, renderer switching preserves theme, and graph Undo remains disabled after presentation-only changes. Measured background SVG cell widths of 64px at 10% and 100px at 2000%; no captured browser console errors. Standalone TypeScript check and build passed. Existing reducer tests were unchanged. Browser evidence saved under the current visualization directory as architecture-dark-grid.jpg and configuration-light-grid.jpg. Production desktop/service integration remains as previously documented. Next action is the existing webview integration or further visual review; no Rust files changed.
+
+### CloudLab Forge 3.0 source layout port, 2026-11-17
+
+Same isolated branch/worktree and base revision. Named UI integration owner remains this desktop task. Read-only source supplied by user: Z:/CloudLab Forge/CLOUDLAB FORGE 3.0. Adapted forge.css tokens/overview rules into preview cloudlab-layout.css; ArchitectureOverview.tsx adapts source overview markup to our existing Architecture. Header/catalogue/pane/code dock layout follows Designer.tsx/Catalog.tsx. Source provenance and CSS SHA-256 are in studio/SOURCE-PROVENANCE.md. Source checkout and Rust repository were not edited.
+
+Other changed preview files: App, VisualTopbar, ResourceCatalogue, ResourceNode, DesignCanvas, PaneResizeHandle, model, exportPresentation, preview entry, styles and documentation. Added selection-only whiteboard editing toolbar (text, font size, bold, fill, duplicate, delete), preserving shared history. Fixed resize handle class collision with inspector panel styling. Inspector now opens schema form from overview. Code dock retains the last selected resource when selecting whiteboard items. Source-style palettes remain independent of renderer. Default graph viewport is 100%; Fit remains available.
+
+Newly verified before browser disconnect: source-based shell screenshot, overview/card rendering, selection toolbar text/font/bold edits, duplicate count 1→2 and Undo 2→1. Earlier screenshot exposed summary-row markup mismatch; corrected by applying source summary-row class. TypeScript, reducer tests and build pass. Browser transport closed during the final pass, then also failed a read-only retry. Final form-click, pane resize, revised 100% initial viewport, cross-mode/theme check and stable code dock after whiteboard selection need rechecking after browser reconnect. No new final screenshots were saved. Code is uncommitted.
+
+Exact next action: reconnect browser controls, reload localhost preview, verify overview→form, keyboard pane resize, note editing with code dock retained, then review CloudLab source proportions against live reference. Production service/native editor integration remains pending. This is a source-adapted UI preview, not full feature or pixel parity.
+
+### Paused refinement checkpoint, 2026-11-17
+
+User explicitly requested stopping implementation and saving/documenting progress. No further feature work after that request. Same branch/worktree and base revision. The standalone preview now imports the source catalogue (Azure 1,110 / AWS 1,763 / GCP 1,205), source Monaco 0.52.2 and appearance controls, provider primitive fields, source-style library/overview/editor layout, Radix tabs, template insertion, source-style code resizing, and retained drafts. Shared graph/renderers and independent canvas theme are preserved. Rust/reference repositories were not edited.
+
+Resume from extensions/cloudforge/studio/REFINEMENT-CHECKPOINT.md. It lists exact files, decisions, verification coverage, browser fallback, remaining source-parity gaps and next actions. VERIFICATION-2026-11-17.json records controlled-replay step statuses. Final catalogue/editor scenarios completed without captured console errors. A provider flow ended at an ambiguous favourites locator, so its later template UI steps remain unverified. Latest source workspace screenshot is recorded in the checkpoint. Older dark capture needs retaking after recent fixes.
+
+Save-time validation: standalone check, ten tests, build and git diff --check are run before the local checkpoint commit. No push, release, service operation or desktop rebuild is requested.
+
+Checkpoint implementation saved locally as e780e4d3b7a; not pushed. Save-time TypeScript check, all ten tests and standalone build passed. The full staged whitespace check flags whitespace in preserved imported vendor distributions/assets; the scoped authored-source/docs/scripts/package check passed. Do not report the vendor-inclusive whitespace check as clean. node_modules and dist are ignored. See REFINEMENT-CHECKPOINT.md for continuation.
+
+### Reference investigation and Impeccable board direction, 2026-11-18
+
+Same isolated worktree/branch, source revision at start `b8c281808ac28f17942b498c7d513cd94df1ed49`. This continuation is investigation/documentation, not feature implementation. [Investigation index](extensions/cloudforge/studio/investigation-2026-11-18/README.md) links all ten requested reports, all 27 latest annotations, source ownership/hashes, browser evidence, proposed contracts and an acceptance-based roadmap. CloudLab reference source and Rust repository remain read only; no push or main merge was performed.
+
+New browser observations: Brainboard SVG scene, selected subnet configuration and Shapes drawer; Miro canvas/DOM overlay layers, shape library/search/pack management, connector routing edit with Undo, unsent comment composer, nested diagram Edit context and resize. Miro socket frames were observed only as direction/length, not decoded protocol. Nested resize did not use the outer board Undo and was manually restored approximately; exact restoration is not claimed. No comment/message or infrastructure/settings operation was submitted. Browser transport later closed and two read-only reconnect attempts failed. Live settings/panel-resize/persistence/multiplayer coverage remains incomplete; preview server was unavailable.
+
+Impeccable's Operate guidance is recorded in [board design direction](extensions/cloudforge/studio/investigation-2026-11-18/board-design-direction.md): preserve CloudLab-derived identity, contextual chrome, typed shared forms, clear hierarchy and independent canvas themes. No UI source changed. Existing builds/tests remain inherited checkpoint evidence. Current canonical protocol now includes Stage 1 graph and Stage 2 project work, while schema/config writes/plans remain excluded; proposals here do not expand that authority.
+
+Next: reconnect existing tabs and finish bounded pane-resize/settings observations, then review the typed domain/selection/schema/source adapter contract before the next visual increment. Documentation verification is recorded in the investigation folder; no desktop rebuild is needed for these files.
+
+### Publication and continuation handoff, 2026-11-21
+
+Requested by the user: push the saved changes and hand off. Publish this branch to `origin/codex/infrastructure-studio-preview` in [fXrazor/vscode](https://github.com/fXrazor/vscode). Worktree: `C:/Users/dalep/.codex/worktrees/infrastructure-studio/CloudForge-Code`. The saved work comprises implementation `e780e4d3b7a`, checkpoint documentation `b8c281808ac`, investigation/design guidance `5de0d1dd606`, and this publication note. No new feature implementation was performed for publication.
+
+At the pre-publication fetch, `origin/main` was `507c1e8eec3`; the preview branch was three commits ahead and three behind it. Publication targets the feature branch, not `main`. A later integration owner must reconcile current main before merging; no force push or alteration of another worktree is needed here. Desktop UI integration remains owned by the CloudForge desktop task; Rust and user-owned CloudLab reference source are unchanged by this task.
+
+Fresh verification on 21 November, using pinned Node `24.22.1` and pnpm `12.16.0`: standalone `corepack pnpm check` passed; all ten tests passed with no skips; `corepack pnpm build` passed. These checks cover the standalone studio, not an installed Code OSS product or backend integration. Earlier browser evidence remains historical; no new visual, PDF, collaboration or service smoke was run for publication. Imported vendor whitespace findings remain documented in the checkpoint and are not being reformatted.
+
+Start the next session with [REFINEMENT-CHECKPOINT.md](extensions/cloudforge/studio/REFINEMENT-CHECKPOINT.md), then the [investigation index](extensions/cloudforge/studio/investigation-2026-11-18/README.md), [roadmap](extensions/cloudforge/studio/investigation-2026-11-18/roadmap.md) and [Impeccable board direction](extensions/cloudforge/studio/investigation-2026-11-18/board-design-direction.md). Preview ownership is `extensions/cloudforge/studio/**`, its packaging exclusion and root design guidance. Do not replace Rust workspace/file/process authority or edit the legacy Tauri shell expecting it to appear in Code OSS.
+
+Exact next action: reconnect reference browser controls and run the preview from its directory with `corepack pnpm dev`. Check current form navigation, panel resizing/docking, focused resource editing, template Undo and independent renderer/theme behavior. Finish the documented Brainboard settings/pane observations, then review the typed domain/schema/source adapter before richer configuration or production mounting. Preserve one architecture and one semantic history; the JSON dock, reference-only module import, primitive schema coverage and in-memory persistence are still preview limitations. Native Code OSS source editing and a supported Webview/service adapter remain integration work.
+
+## Stage 2 rebuilt installer, installed verification, and studio preview merge (2026-11-21)
+
+Worktree `E:\Orca\CloudForge-Code\dace`, branch `fxrazor/continue-project-handoff-review`, started at `main` (`507c1e8eec3`) and merged `codex/infrastructure-studio-preview` (`1767da9b534`) as `e89b441716b`. Rust repository `Z:\CloudForge` and the main checkout `Z:\CloudForge-Code` (which holds uncommitted `HANDOFF.md` and `docs/cloudforge/infrastructure-studio-implementation-plan.md`) were left untouched.
+
+### Merged tree changes and checks
+
+- Resolved merge conflicts in `extensions/cloudforge/.vscodeignore` (retaining both `*.tsbuildinfo` and `studio/**`) and `HANDOFF.md`. No Stage 2 runtime, broker, or extension source files changed.
+- `CLOUDFORGE_REPO=Z:\CloudForge node --test extensions/cloudforge/test/*.test.ts`: 13 passed, 0 skipped.
+- `node --test build/lib/test/cloudforgeServiceArtifact.test.ts`: 73 passed, 0 skipped.
+- Standalone `extensions/cloudforge/studio`: `corepack pnpm install --frozen-lockfile`, `corepack pnpm check`, `corepack pnpm test` (10 passed, 0 skipped), and `corepack pnpm build` all passed.
+
+### Rebuilt Stage 2 installer and installed smoke
+
+Built from the clean detached checkout `Z:\CFStage\Code` at `507c1e8eec3b3280cc3eb74505111140af19ee9c` with `build/cloudforge/package-win32-x64.ps1`.
+
+| Item | Verified value |
+| --- | --- |
+| Desktop revision | `507c1e8eec3b3280cc3eb74505111140af19ee9c` (includes empty-project view fix and `*.tsbuildinfo` exclusion from `10d5bb7a547`) |
+| Rust service | `ca09ef6a1a3e76f96230b69da929ebdc503fbdc6`, protocol `1`, `x64`, 1,869,824 bytes, SHA-256 `efbe7287ae244bfabb60e27bb2e2009ed963b0e4a5112e1bc89d3c3e780a36e6` |
+| Bundled VSIX sample | `ms-vscode.js-debug` `1.140.1`, SHA-256 `7accf7857ea4f4717b6211a2b75f5b434faf477033203a8919b6d26b6abc1897` |
+| Installer | [CloudForgeProofSetup-x64-507c1e8eec3.exe](Z:/CFStage/CloudForgeProofSetup-x64-507c1e8eec3.exe), unsigned, 321,558,745 bytes, SHA-256 `50cd411c2904a106223a0796d53bbae0eafce665a49a9465db0911542bb7bea7` |
+
+| Check | Result |
+| --- | --- |
+| Built payload `tsconfig.typecheck.tsbuildinfo` check | Absent (`False`). |
+| `node build/cloudforge/serviceArtifact.ts --verify` on built payload `Z:\CFStage\VSCode-win32-x64\resources\app` (all flags pinned) | Passed. |
+| `node Z:\CFStage\smoke\stage2-smoke.mjs` against rebuilt `507c1e8eec3` payload | **26/26 passed** (empty-project view now shows all four provider clone links and existing-repo hint; report saved at `Z:\CFStage\smoke\report-507c1e8eec3.json`). |
+| Silent per-user upgrade install (`CloudForgeProofSetup-x64-507c1e8eec3.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /MERGETASKS=!runcode`) | Exit code `0`; installed to `%LOCALAPPDATA%\Programs\CloudForge Proof`. |
+| Installed `tsconfig.typecheck.tsbuildinfo` check and `serviceArtifact.ts --verify` on `%LOCALAPPDATA%\Programs\CloudForge Proof\resources\app` (all flags pinned) | Absent (`False`); `--verify` passed. |
+| `node Z:\CFStage\smoke\stage2-extra-smoke.mjs` against installed `CloudForge Proof.exe` (isolated profile, real local HTTP Git server on `127.0.0.1`) | **18/18 passed** (report saved at `Z:\CFStage\smoke\report-extra-507c1e8eec3.json`): Welcome clone entry lists all 4 providers and prompts Create/Open Project without a project; empty project view shows all 4 provider links; GitLab (`https://gitlab.com/`), Bitbucket (`https://bitbucket.org/`), GitHub (built-in Git clone picker), and Any Git URL (`https://`) entries verified; real local HTTP clone into `<project>\repos\infra` imported with graph opened and repo files hashed unchanged; reconciliation states `notInWorkspace` ("not in this window"), `changed` ("folder replaced; import again"), and `missing` ("missing on disk") verified with architectures marked `unavailable`; inline `Clone Again` re-cloned from recorded remote; `Remove from Project` cleared marker while keeping files on disk; 0 `cloudforge-service.exe` processes remained after quit. Visual screenshots (`01-empty-project.png`, `04-changed.png`, `05-missing.png`) inspected. |
+
+### Remaining gaps and next action
+
+- Live clones against external GitHub/GitLab/Bitbucket hosts and the `installGit` winget offer on a machine without Git remain unverified on this host (Git is installed here).
+- Authenticode signing before the pre-Inno `--verify` gate remains open for signed releases.
+- Next action: reconcile/commit or stash the uncommitted doc edits in `Z:\CloudForge-Code` if desired, merge `fxrazor/continue-project-handoff-review` into `main`, and decide on the R1 Infrastructure Studio / Runner View contract before starting the next implementation slice.

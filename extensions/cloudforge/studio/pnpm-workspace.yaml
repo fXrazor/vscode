@@ -1,0 +1,9 @@
+packages:
+  - .
+allowBuilds:
+  esbuild: true
+minimumReleaseAgeExclude:
+  - '@xyflow/react@13.0.2'
+  - lucide-react@1.74.0
+nodeLinker: isolated
+strictPeerDependencies: false

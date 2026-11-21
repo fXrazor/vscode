@@ -1,0 +1,305 @@
+{
+  "date": "2026-11-17",
+  "branch": "codex/infrastructure-studio-preview",
+  "baseRevision": "1e7eb4b935528bc1193a0da6738c21da5f3e085a",
+  "captures": {
+    "finalWorkspaceCapture": {
+      "evidenceId": "ev_ead556883869fffc3b986b9be5c8ba089eedfc91942616c2095d6de0bc3d5cd0",
+      "cleanup": "terminated-owned-process",
+      "steps": [
+        {
+          "id": "scenario_start",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "editor_ready",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "resize_code",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "resize_inspector",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "fit",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "checks",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "deps",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "code",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "editor_returned",
+          "status": "completed",
+          "error": null
+        }
+      ],
+      "consoleErrors": []
+    },
+    "interactionCapture": {
+      "evidenceId": "ev_ca63616d351f78cd62c5b67c139e22d678ea869d9c96c6a89548dbcd813fa61d",
+      "cleanup": "terminated-owned-process",
+      "steps": [
+        {
+          "id": "scenario_start",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "loaded",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "search",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "add_resource",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "rename",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "configuration",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "shared_name",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "dark",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "independent_theme",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "dock_right",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "inspector_hidden",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "dock_bottom",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "inspector_restored",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "editor_ready",
+          "status": "completed",
+          "error": null
+        }
+      ],
+      "consoleErrors": []
+    },
+    "editorFlowCapture": {
+      "evidenceId": "ev_0e20cf824528c26a949b9f0cf5957dfd334003e6855a00d23a4ebc13c0179480",
+      "cleanup": "terminated-owned-process",
+      "steps": [
+        {
+          "id": "scenario_start",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "editor_ready",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "focus_editor",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "select_text",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "delete_text",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "type_draft",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "dirty_visible",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "close",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "reopen",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "draft_preserved",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "reject_invalid",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "error_shown",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "discard",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "clean_restored",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "find",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "find_open",
+          "status": "completed",
+          "error": null
+        }
+      ],
+      "consoleErrors": []
+    },
+    "providerFlowCapture": {
+      "evidenceId": "ev_b39f7b986604319ae5bf4eab1c76afff369dc9fefc89e4ced107b357dcbab415",
+      "cleanup": "terminated-owned-process",
+      "steps": [
+        {
+          "id": "scenario_start",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "azure_loaded",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "aws",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "aws_search",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "add_bucket",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "gcp",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "gcp_search",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "add_network",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "clear_search",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "favourite",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "favourite_enabled",
+          "status": "failed",
+          "error": "locator.waitFor: Error: strict mode violation: locator('[aria-label=\"Favourite VPC network\"][aria-pressed=\"true\"]') resolved to 2 elements:\n    1) <button class=\"fav on\" aria-pressed=\"true\" aria-label=\"Favourite VPC network\">…</button> aka getByRole('group').filter({ hasText: 'FavouritesVPC network' }).getByLabel('Favourite VPC network')\n    2) <button class=\"fav on\" aria-pressed=\"true\" aria-label=\"Favourite VPC network\">…</button> aka getByRole('group').filter({ hasText: 'Recently usedVPC network' }).getByLabel('Favourite VPC network')\n\nCall log:\n\u001b[2m  - waiting for locator('[aria-label=\"Favourite VPC network\"][aria-pressed=\"true\"]') to be visible\u001b[22m\n"
+        },
+        {
+          "id": "templates",
+          "status": "cancelled",
+          "error": "not executed after an earlier action failure"
+        },
+        {
+          "id": "insert_pattern",
+          "status": "cancelled",
+          "error": "not executed after an earlier action failure"
+        },
+        {
+          "id": "undo_pattern",
+          "status": "cancelled",
+          "error": "not executed after an earlier action failure"
+        },
+        {
+          "id": "restore",
+          "status": "cancelled",
+          "error": "not executed after an earlier action failure"
+        }
+      ],
+      "consoleErrors": []
+    }
+  }
+}

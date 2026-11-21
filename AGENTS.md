@@ -33,3 +33,12 @@ Read the [repository map](docs/cloudforge/repository-map.md) and [service artifa
 - Use Context7 for current library, framework, SDK, API, and CLI documentation: resolve the library ID first, then query the specific concept. Source-only review of this fork can use the pinned implementation directly.
 - Follow the upstream validation guidance below. Run the smallest checks appropriate to the change; documentation work does not require rebuilding Code OSS. Distinguish newly verified results from results inherited from another handoff.
 - Update `HANDOFF.md` with the branch/worktree, source revision, files changed, checks, remaining gaps, and exact next action. Product releases also record the Rust commit, protocol version, extension inventory, and installer checksum.
+
+
+## CloudForge canvas-first design rule
+
+Continuously challenge persistent UI across every CloudForge workflow. A header, toolbar, panel, notification area or navigation section must directly support the current task. Otherwise make it contextual, collapsible, auto-hidden or removable. Prioritise canvas space and workflow efficiency over feature visibility. Keep essential actions keyboard discoverable and preserve focus when surfaces close.
+
+Architecture Design View and Infrastructure Configuration View are projections of one architecture model and one semantic undo history. Renderer choice, viewport, selection and panel arrangement are presentation state. Never copy resource, configuration, dependency, validation or cost data into a second architecture for a different mode.
+
+Canvas light/dark theme is independent of Architecture Design and Infrastructure Configuration rendering. Changing renderer must preserve the selected theme; theme and grid controls belong to presentation state and must not enter architecture undo history. Keep background grids subtle and adapt their spacing to zoom so they support orientation without competing with content.
