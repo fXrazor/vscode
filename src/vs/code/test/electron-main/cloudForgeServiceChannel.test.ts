@@ -5,11 +5,12 @@
 
 import assert from 'assert';
 import type * as electron from 'electron';
-import { Event } from '../../../base/common/event.js';
+import { Emitter, Event } from '../../../base/common/event.js';
+import { DisposableStore } from '../../../base/common/lifecycle.js';
 import { URI } from '../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../base/test/common/utils.js';
 import { NullLogService } from '../../../platform/log/common/log.js';
-import type { ICodeWindow } from '../../../platform/window/electron-main/window.js';
+import { LoadReason, type ICodeWindow } from '../../../platform/window/electron-main/window.js';
 import { toWorkspaceFolder, type IResolvedWorkspace } from '../../../platform/workspace/common/workspace.js';
 import { CloudForgeServiceError, type CloudForgeServiceMethod } from '../../electron-main/cloudForgeService.js';
 import { CloudForgeServiceBroker, resolveCloudForgeWindowScope, validateCloudForgeServiceParams, type CloudForgeCallResult, type ICloudForgeServiceConnection } from '../../electron-main/cloudForgeServiceChannel.js';
@@ -40,9 +41,10 @@ interface ServiceCall {
 
 class FakeService implements ICloudForgeServiceConnection {
 	readonly calls: ServiceCall[] = [];
+	state: 'created' | 'started' | 'stopped' = 'created';
 	constructor(private readonly reply: Reply) { }
-	async start(): Promise<void> { }
-	async stop(): Promise<void> { }
+	async start(): Promise<void> { this.state = 'started'; }
+	async stop(): Promise<void> { this.state = 'stopped'; }
 	async call(method: CloudForgeServiceMethod, params: Record<string, unknown>, timeoutMs?: number): Promise<unknown> {
 		this.calls.push(timeoutMs === undefined ? { method, params } : { method, params, timeoutMs });
 		return this.reply(method, params);
@@ -71,8 +73,11 @@ const fabrikamWindow: FakeWindow = {
 	resolved: resolved(fabrikamWorkspace, [URI.file('D:\\Work\\Fabrikam'), URI.file('D:\\Work\\fabrikam-network')])
 };
 
-function createBroker(windows: readonly FakeWindow[], options: { readonly reply?: Reply; readonly picked?: readonly string[] } = {}) {
+type WindowLoad = { readonly window: { readonly id: number }; readonly reason: LoadReason };
+
+function createBroker(windows: readonly FakeWindow[], options: { readonly reply?: Reply; readonly picked?: readonly string[]; readonly onWillLoadWindow?: Event<WindowLoad> } = {}) {
 	const services = new Map<number, FakeService>();
+	const created: FakeService[] = [];
 	const dialogs: electron.OpenDialogOptions[] = [];
 	const pending = [...windows];
 	const broker = new CloudForgeServiceBroker(
@@ -96,16 +101,20 @@ function createBroker(windows: readonly FakeWindow[], options: { readonly reply?
 				return options.picked ? { canceled: false, filePaths: [...options.picked] } : { canceled: true, filePaths: [] };
 			}
 		},
+		{ onWillLoadWindow: options.onWillLoadWindow ?? Event.None },
 		() => {
-			const window = pending.shift()!;
 			const service = new FakeService(options.reply ?? (() => ({})));
-			services.set(window.id, service);
+			created.push(service);
+			const window = pending.shift();
+			if (window) {
+				services.set(window.id, service);
+			}
 			return service;
 		}
 	);
 	const call = (windowId: number, method: string, params: unknown) => broker.call<CloudForgeCallResult>(`window:${windowId}`, method, params);
 	const callsByWindow = () => Object.fromEntries([...services].map(([id, service]) => [id, service.calls]));
-	return { broker, call, callsByWindow, dialogs };
+	return { broker, call, callsByWindow, dialogs, created };
 }
 
 suite('CloudForgeServiceChannel', () => {
@@ -344,5 +353,37 @@ suite('CloudForgeServiceChannel', () => {
 			{ ok: false, error: { code: 'STALE_SOURCE', message: 'The workspace source changed. Reopen it to refresh the graph.' } },
 			{ ok: false, error: { code: 'SERVICE_ERROR', message: 'The CloudForge service could not complete the request.' } },
 		]);
+	});
+	test('gives a window a fresh service when it loads another workspace or reloads', async () => {
+		const disposables = new DisposableStore();
+		const loads = disposables.add(new Emitter<WindowLoad>());
+		const { broker, call, created } = createBroker([contosoWindow, fabrikamWindow], { onWillLoadWindow: loads.event });
+		await call(1, 'openProject', {});
+		loads.fire({ window: { id: 1 }, reason: LoadReason.LOAD });
+		await call(1, 'openProject', {});
+		loads.fire({ window: { id: 2 }, reason: LoadReason.RELOAD });
+		loads.fire({ window: { id: 1 }, reason: LoadReason.INITIAL });
+		await call(2, 'grantProject', {});
+		assert.deepStrictEqual(created.map(service => [service.state, service.calls.map(item => item.method)]), [
+			['stopped', ['openProject']],
+			['stopped', []],
+			['started', ['openProject']],
+			['started', ['grantProject']],
+		]);
+		await broker.stop();
+		assert.deepStrictEqual(created.map(service => service.state), ['stopped', 'stopped', 'stopped', 'stopped']);
+		loads.fire({ window: { id: 1 }, reason: LoadReason.RELOAD });
+		assert.strictEqual(created.length, 4, 'A stopped broker starts no service.');
+		disposables.dispose();
+	});
+
+	test('keeps the service started on the initial window load', async () => {
+		const disposables = new DisposableStore();
+		const loads = disposables.add(new Emitter<WindowLoad>());
+		const { broker, created } = createBroker([contosoWindow], { onWillLoadWindow: loads.event });
+		loads.fire({ window: { id: 1 }, reason: LoadReason.INITIAL });
+		assert.deepStrictEqual(created.map(service => service.state), ['started']);
+		await broker.stop();
+		disposables.dispose();
 	});
 });

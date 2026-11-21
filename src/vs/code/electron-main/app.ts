@@ -1409,7 +1409,8 @@ export class CodeApplication extends Disposable {
 				this.logService,
 				accessor.get(IWindowsMainService),
 				accessor.get(IWorkspacesManagementMainService),
-				accessor.get(IDialogMainService)
+				accessor.get(IDialogMainService),
+				this.lifecycleMainService
 			);
 			mainProcessElectronServer.registerChannel('cloudforge', broker);
 		}

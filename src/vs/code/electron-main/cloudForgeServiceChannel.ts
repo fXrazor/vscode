@@ -11,7 +11,7 @@ import { URI } from '../../base/common/uri.js';
 import type { IServerChannel } from '../../base/parts/ipc/common/ipc.js';
 import { localize } from '../../nls.js';
 import type { ILogService } from '../../platform/log/common/log.js';
-import type { ICodeWindow } from '../../platform/window/electron-main/window.js';
+import { LoadReason, type ICodeWindow } from '../../platform/window/electron-main/window.js';
 import { hasWorkspaceFileExtension, isSingleFolderWorkspaceIdentifier, isWorkspaceIdentifier, type IResolvedWorkspace } from '../../platform/workspace/common/workspace.js';
 import { CloudForgeServiceError, CloudForgeServiceProcess, type CloudForgeServiceMethod } from './cloudForgeService.js';
 
@@ -328,10 +328,16 @@ export interface ICloudForgeDialogs {
 	showOpenDialog(options: electron.OpenDialogOptions, window?: electron.BrowserWindow): Promise<electron.OpenDialogReturnValue>;
 }
 
+/** The part of the lifecycle main service the broker uses. */
+export interface ICloudForgeWindowLoads {
+	readonly onWillLoadWindow: Event<{ readonly window: { readonly id: number }; readonly reason: LoadReason }>;
+}
+
 export class CloudForgeServiceBroker implements IServerChannel<string> {
 	private readonly services = new Map<number, ICloudForgeServiceConnection>();
 	private readonly openListener: { dispose(): void };
 	private readonly destroyListener: { dispose(): void };
+	private readonly loadListener: { dispose(): void };
 	private stopped = false;
 
 	constructor(
@@ -340,10 +346,19 @@ export class CloudForgeServiceBroker implements IServerChannel<string> {
 		private readonly windowsMainService: ICloudForgeWindows,
 		private readonly workspacesManagementMainService: ICloudForgeWorkspaces,
 		private readonly dialogMainService: ICloudForgeDialogs,
+		lifecycleMainService: ICloudForgeWindowLoads,
 		private readonly createService: (appRoot: string, logService: ILogService) => ICloudForgeServiceConnection = (appRoot, logService) => new CloudForgeServiceProcess(appRoot, logService)
 	) {
 		this.openListener = windowsMainService.onDidOpenWindow(window => this.startWindow(window.id));
 		this.destroyListener = windowsMainService.onDidDestroyWindow(window => this.stopWindow(window.id));
+		// A window that loads another workspace, or reloads, gets a fresh service with no grant.
+		// The old process is stopped, so it releases the previous workspace's folder handles.
+		this.loadListener = lifecycleMainService.onWillLoadWindow(event => {
+			if (event.reason === LoadReason.LOAD || event.reason === LoadReason.RELOAD) {
+				this.stopWindow(event.window.id);
+				this.startWindow(event.window.id);
+			}
+		});
 		for (const window of windowsMainService.getWindows()) {
 			this.startWindow(window.id);
 		}
@@ -392,6 +407,7 @@ export class CloudForgeServiceBroker implements IServerChannel<string> {
 		this.stopped = true;
 		this.openListener.dispose();
 		this.destroyListener.dispose();
+		this.loadListener.dispose();
 		const services = [...this.services.values()];
 		this.services.clear();
 		await Promise.all(services.map(service => service.stop()));
