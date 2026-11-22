@@ -17,7 +17,20 @@ import {
 } from 'vscode';
 import { activateProjects } from './project/index';
 import { CloudForgeCanvasPanel } from './canvas/canvasPanel';
-import type { CanvasGraphSnapshot } from './canvas/protocol';
+import type { CanvasCatalogueSnapshot, CanvasGraphSnapshot } from './canvas/protocol';
+import { lookupBundledSchema, type FormSchema } from './canvas/schemaForm';
+import {
+	draftSaveErrorMessage,
+	mapRustFormSchemaToCanvasFormSchema,
+	mapServiceValidationPollToRun,
+	parseCatalogueSnapshots,
+	parseDraftSaveApply,
+	parseDraftSavePreview,
+	parseValidationPoll,
+	parseValidationStart,
+	selectBestSnapshotForType,
+	type ServicePollEvent
+} from './canvas/serviceAdapters';
 
 interface WorkspaceArchitecture {
 	readonly architectureId: string;
@@ -487,17 +500,208 @@ export function activate(context: ExtensionContext): void {
 		}
 	}
 
+	let activeValidation: { readonly workspaceId: string; readonly runId: string; cancelled: boolean } | undefined;
+	let validationAttempt = 0;
+	let lastValidationRunId: string | null = null;
+	let cachedCatalogueSnapshots: readonly CanvasCatalogueSnapshot[] | undefined;
+	const cachedLiveSchemas = new Map<string, FormSchema | null>();
+
+	async function cancelServiceValidation(): Promise<void> {
+		const active = activeValidation;
+		if (!active) {
+			return;
+		}
+		active.cancelled = true;
+		activeValidation = undefined;
+		await callService<unknown>('cancelValidationRun', {
+			workspaceId: active.workspaceId,
+			runId: active.runId,
+		});
+	}
+
+	async function loadCatalogueSnapshots(): Promise<readonly CanvasCatalogueSnapshot[]> {
+		if (cachedCatalogueSnapshots !== undefined) {
+			return cachedCatalogueSnapshots;
+		}
+		const result = await callService<unknown>('listCatalogueSnapshots', {});
+		if (!result.ok) {
+			return [];
+		}
+		cachedCatalogueSnapshots = parseCatalogueSnapshots(result.value);
+		return cachedCatalogueSnapshots;
+	}
+
+	async function loadResourceSchema(kind: 'resource' | 'dataSource', typeName: string): Promise<FormSchema | null> {
+		const cacheKey = `${kind}:${typeName}`;
+		const cached = cachedLiveSchemas.get(cacheKey);
+		if (cached !== undefined) {
+			return cached;
+		}
+		const snapshots = await loadCatalogueSnapshots();
+		const snap = selectBestSnapshotForType(snapshots, typeName);
+		if (!snap) {
+			cachedLiveSchemas.set(cacheKey, null);
+			return null;
+		}
+		const result = await callService<unknown>('getResourceFormSchema', {
+			key: {
+				address: snap.address,
+				version: snap.version,
+				formatVersion: snap.formatVersion,
+				sha256: snap.sha256,
+			},
+			kind,
+			typeName,
+		});
+		if (!result.ok) {
+			cachedLiveSchemas.set(cacheKey, null);
+			return null;
+		}
+		const bundled = lookupBundledSchema({ kind: kind === 'dataSource' ? 'data' : 'resource', resourceType: typeName });
+		const adapted = mapRustFormSchemaToCanvasFormSchema(result.value, bundled) ?? null;
+		cachedLiveSchemas.set(cacheKey, adapted);
+		return adapted;
+	}
+
 	const canvas = new CloudForgeCanvasPanel(context, {
 		onSelectNode() {
 			// Selection is preserved inside the canvas state; native tree selection stays non-destructive.
 		},
 		onOpenSource: openNodeSource,
 		async onRefresh(workspaceId, architectureId) {
+			await cancelServiceValidation();
 			const refreshed = await showGraph(provider, treeView, workspaceId, architectureId);
 			if (refreshed) {
 				canvas.updateIfOpen(toCanvasSnapshot(refreshed, currentArchitectureName));
 			}
-		}
+		},
+		async onRequestValidation(graph, scope, nodeId, onUpdate) {
+			await cancelServiceValidation();
+			const started = await callService<unknown>('startValidationRun', {
+				workspaceId: graph.workspaceId,
+				architectureId: graph.architectureId,
+				expectedSourceRevision: graph.sourceRevision,
+			});
+			if (!started.ok) {
+				if (started.error.code === 'STALE_SOURCE' || started.error.code === 'SCOPE_DENIED' || started.error.code === 'WORKSPACE_UNAVAILABLE') {
+					return { handled: true, errorCode: started.error.code };
+				}
+				return { handled: false, errorCode: started.error.code };
+			}
+			const startInfo = parseValidationStart(started.value);
+			if (!startInfo) {
+				return { handled: false };
+			}
+
+			const attempt = ++validationAttempt;
+			const previousRunId = lastValidationRunId;
+			lastValidationRunId = startInfo.runId;
+			const startedAtMs = Date.now();
+			const handle = { workspaceId: graph.workspaceId, runId: startInfo.runId, cancelled: false };
+			activeValidation = handle;
+
+			const accumulatedEvents: ServicePollEvent[] = [];
+			let cursor = 0;
+
+			for (let pollIdx = 0; pollIdx < 240; pollIdx++) {
+				if (handle.cancelled || activeValidation !== handle) {
+					break;
+				}
+				const polled = await callService<unknown>('pollValidationRun', {
+					workspaceId: graph.workspaceId,
+					runId: startInfo.runId,
+					cursor,
+					maxEvents: 256,
+					includeSnapshot: true,
+				});
+				if (!polled.ok) {
+					if (activeValidation === handle) {
+						activeValidation = undefined;
+					}
+					if (polled.error.code === 'SCOPE_DENIED') {
+						return { handled: true, errorCode: 'SCOPE_DENIED' };
+					}
+					return { handled: pollIdx > 0, errorCode: polled.error.code };
+				}
+				const parsed = parseValidationPoll(polled.value);
+				if (!parsed) {
+					break;
+				}
+				cursor = parsed.nextCursor;
+				for (const ev of parsed.events) {
+					accumulatedEvents.push(ev);
+				}
+				const runView = mapServiceValidationPollToRun(parsed, {
+					graph,
+					scope,
+					targetNodeId: scope === 'resource' ? (nodeId ?? null) : null,
+					attempt,
+					previousRunId,
+					startedAtMs,
+					accumulatedEvents,
+				});
+				onUpdate(runView);
+
+				if (parsed.state !== 'running' && !parsed.hasMore) {
+					break;
+				}
+				if (!parsed.hasMore) {
+					await new Promise<void>(resolve => setTimeout(resolve, 40));
+				}
+			}
+			if (activeValidation === handle) {
+				activeValidation = undefined;
+			}
+			return { handled: true };
+		},
+		onCancelValidation: cancelServiceValidation,
+		async onPreviewDraftSave(workspaceId, architectureId, expectedSourceRevision, fileName, contents) {
+			const result = await callService<unknown>('previewDraftSave', {
+				workspaceId,
+				architectureId,
+				expectedSourceRevision,
+				fileName,
+				contents,
+			});
+			if (!result.ok) {
+				return { ok: false, error: draftSaveErrorMessage(result.error.code) };
+			}
+			const preview = parseDraftSavePreview(result.value);
+			if (!preview) {
+				return { ok: false, error: draftSaveErrorMessage('SERVICE_ERROR') };
+			}
+			return { ok: true, preview };
+		},
+		async onApplyDraftSave(workspaceId, architectureId, expectedSourceRevision, fileName, contents, previewToken) {
+			const result = await callService<unknown>('applyDraftSave', {
+				workspaceId,
+				architectureId,
+				expectedSourceRevision,
+				fileName,
+				contents,
+				previewToken,
+			});
+			if (!result.ok) {
+				return { ok: false, error: draftSaveErrorMessage(result.error.code) };
+			}
+			const applied = parseDraftSaveApply(result.value);
+			if (!applied) {
+				return { ok: false, error: draftSaveErrorMessage('SERVICE_ERROR') };
+			}
+			// Re-read the architecture so both the native CloudForge Graph tree and Canvas reflect
+			// the newly saved file and updated sourceRevision.
+			const refreshed = await showGraph(provider, treeView, workspaceId, architectureId);
+			if (refreshed) {
+				canvas.updateIfOpen(toCanvasSnapshot(refreshed, currentArchitectureName));
+				canvas.setNotice({
+					kind: 'info',
+					message: l10n.t('Saved {0} ({1} bytes) and refreshed architecture to revision {2}.', applied.fileName, applied.bytesWritten, applied.newSourceRevision.slice(0, 8)),
+				});
+			}
+			return { ok: true, applied };
+		},
+		onLoadCatalogueSnapshots: loadCatalogueSnapshots,
+		onLoadResourceSchema: loadResourceSchema,
 	});
 
 	context.subscriptions.push(provider, treeView, canvas);

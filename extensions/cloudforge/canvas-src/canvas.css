@@ -1048,6 +1048,69 @@ html, body {
 	gap: 10px;
 }
 
+.cf-save-bar {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+	padding: 10px 12px;
+	border-radius: 7px;
+	border: 1px solid var(--cf-border);
+	background: var(--cf-card);
+}
+
+.cf-save-field {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex: 1;
+	min-width: 220px;
+	font-size: 12px;
+}
+
+.cf-save-field .cf-input {
+	flex: 1;
+	min-width: 140px;
+}
+
+.cf-save-preview-card {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding: 10px 12px;
+	border-radius: 7px;
+	border: 1px solid color-mix(in srgb, var(--cf-accent) 45%, var(--cf-border));
+	background: color-mix(in srgb, var(--cf-accent-soft) 45%, var(--cf-card));
+}
+
+.cf-save-preview-meta {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
+.cf-save-error {
+	padding: 8px 10px;
+	border-radius: 6px;
+	border: 1px solid color-mix(in srgb, var(--cf-err) 55%, transparent);
+	background: color-mix(in srgb, var(--cf-err) 12%, var(--cf-card));
+	color: var(--cf-fg);
+	font-size: 12px;
+}
+
+.cf-save-warnings {
+	padding: 8px 10px;
+	border-radius: 6px;
+	border: 1px solid color-mix(in srgb, var(--cf-warn) 55%, transparent);
+	background: color-mix(in srgb, var(--cf-warn) 12%, var(--cf-card));
+	font-size: 12px;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
 button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible, .cf-stage:focus-visible {
 	outline: 2px solid var(--cf-accent);
 	outline-offset: 1px;

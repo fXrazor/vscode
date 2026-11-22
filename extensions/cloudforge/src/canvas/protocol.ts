@@ -7,9 +7,51 @@
 // Canvas Webview. Pure TypeScript with zero runtime `vscode` or DOM imports.
 // Trust boundary: Webviews never receive or send filesystem paths or process commands.
 
+import type { FormSchema } from './schemaForm';
+import type { ValidationRun } from './validationRunner';
+
 export type CanvasViewMode = 'visual' | 'technical';
 export type CanvasTheme = 'workbench' | 'light' | 'dark';
 export type CanvasGridMode = 'lines' | 'dots' | 'none';
+
+export interface CanvasCatalogueSnapshot {
+	readonly address: string;
+	readonly version: string;
+	readonly formatVersion: string;
+	readonly sha256: string;
+	readonly resourceCount: number;
+	readonly dataSourceCount: number;
+}
+
+export interface DraftSaveFinding {
+	readonly code: string;
+	readonly file: string;
+	readonly line?: number;
+}
+
+export interface DraftSavePreviewResult {
+	readonly fileName: string;
+	readonly created: boolean;
+	readonly sourceRevision: string;
+	readonly beforeSha256?: string;
+	readonly afterSha256: string;
+	readonly addedLines: number;
+	readonly removedLines: number;
+	readonly findings: readonly DraftSaveFinding[];
+	readonly previewToken: string;
+}
+
+export interface DraftSaveApplyResult {
+	readonly fileName: string;
+	readonly created: boolean;
+	readonly newSourceRevision: string;
+	readonly bytesWritten: number;
+}
+
+export interface DraftSaveError {
+	readonly code: string;
+	readonly message: string;
+}
 
 export interface CanvasViewport {
 	readonly x: number;
@@ -91,9 +133,35 @@ export type ExtensionToWebviewMessage =
 		readonly type: 'runValidation';
 		readonly scope: 'architecture' | 'resource';
 		readonly nodeId?: string;
+		readonly localOnly?: boolean;
 	}
 	| {
 		readonly type: 'cancelValidation';
+	}
+	| {
+		readonly type: 'validationRunUpdate';
+		readonly run: ValidationRun;
+	}
+	| {
+		readonly type: 'draftSavePreview';
+		readonly result:
+		| { readonly ok: true; readonly preview: DraftSavePreviewResult }
+		| { readonly ok: false; readonly error: DraftSaveError };
+	}
+	| {
+		readonly type: 'draftSaveApplied';
+		readonly result:
+		| { readonly ok: true; readonly applied: DraftSaveApplyResult }
+		| { readonly ok: false; readonly error: DraftSaveError };
+	}
+	| {
+		readonly type: 'catalogueSnapshots';
+		readonly snapshots: readonly CanvasCatalogueSnapshot[];
+	}
+	| {
+		readonly type: 'liveSchema';
+		readonly typeName: string;
+		readonly schema: FormSchema | null;
 	};
 
 export type WebviewToExtensionMessage =
@@ -101,9 +169,28 @@ export type WebviewToExtensionMessage =
 	| { readonly type: 'selectNode'; readonly nodeId: string | null }
 	| { readonly type: 'openSource'; readonly nodeId: string }
 	| { readonly type: 'refresh' }
-	| { readonly type: 'viewState'; readonly state: CanvasViewState };
+	| { readonly type: 'viewState'; readonly state: CanvasViewState }
+	| { readonly type: 'requestValidation'; readonly scope: 'architecture' | 'resource'; readonly nodeId?: string }
+	| { readonly type: 'cancelValidation' }
+	| { readonly type: 'requestDraftSavePreview'; readonly fileName: string; readonly contents: string }
+	| { readonly type: 'applyDraftSave'; readonly fileName: string; readonly contents: string; readonly previewToken: string }
+	| { readonly type: 'requestSchema'; readonly kind: 'resource' | 'dataSource'; readonly typeName: string };
 
 const MAX_COLLAPSED_GROUPS = 256;
+const MAX_DRAFT_SAVE_CHARS = 512 * 1024;
+
+export function isValidTfFileName(value: unknown): value is string {
+	return typeof value === 'string'
+		&& value.length > 3
+		&& value.length <= 255
+		&& !value.startsWith('.')
+		&& !/[<>:"/\\|?*\u0000-\u001f\u007f]/.test(value)
+		&& value.toLowerCase().endsWith('.tf');
+}
+
+function isTypeName(value: unknown): value is string {
+	return typeof value === 'string' && value.length > 0 && value.length <= 256 && /^[A-Za-z0-9_-]+$/.test(value);
+}
 
 export function defaultCanvasViewState(): CanvasViewState {
 	return {
@@ -205,6 +292,46 @@ export function parseWebviewMessage(value: unknown): WebviewToExtensionMessage |
 			return isOpaqueId(value.nodeId) ? { type: 'openSource', nodeId: value.nodeId } : undefined;
 		case 'viewState':
 			return isRecord(value.state) ? { type: 'viewState', state: sanitizeViewState(value.state) } : undefined;
+		case 'requestValidation': {
+			if (value.scope !== 'architecture' && value.scope !== 'resource') {
+				return undefined;
+			}
+			if (value.nodeId !== undefined && !isOpaqueId(value.nodeId)) {
+				return undefined;
+			}
+			return {
+				type: 'requestValidation',
+				scope: value.scope,
+				...(value.nodeId ? { nodeId: value.nodeId } : {}),
+			};
+		}
+		case 'cancelValidation':
+			return { type: 'cancelValidation' };
+		case 'requestDraftSavePreview':
+			if (!isValidTfFileName(value.fileName) || typeof value.contents !== 'string' || value.contents.length > MAX_DRAFT_SAVE_CHARS) {
+				return undefined;
+			}
+			return { type: 'requestDraftSavePreview', fileName: value.fileName, contents: value.contents };
+		case 'applyDraftSave':
+			if (
+				!isValidTfFileName(value.fileName)
+				|| typeof value.contents !== 'string'
+				|| value.contents.length > MAX_DRAFT_SAVE_CHARS
+				|| !isOpaqueId(value.previewToken)
+			) {
+				return undefined;
+			}
+			return {
+				type: 'applyDraftSave',
+				fileName: value.fileName,
+				contents: value.contents,
+				previewToken: value.previewToken,
+			};
+		case 'requestSchema':
+			if ((value.kind !== 'resource' && value.kind !== 'dataSource') || !isTypeName(value.typeName)) {
+				return undefined;
+			}
+			return { type: 'requestSchema', kind: value.kind, typeName: value.typeName };
 		default:
 			return undefined;
 	}

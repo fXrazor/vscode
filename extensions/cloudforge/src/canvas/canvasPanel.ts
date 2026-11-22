@@ -9,11 +9,17 @@ import {
 	defaultCanvasViewState,
 	parseWebviewMessage,
 	sanitizeViewState,
+	type CanvasCatalogueSnapshot,
 	type CanvasGraphSnapshot,
 	type CanvasNotice,
 	type CanvasViewState,
+	type DraftSaveApplyResult,
+	type DraftSaveError,
+	type DraftSavePreviewResult,
 	type ExtensionToWebviewMessage
 } from './protocol';
+import type { FormSchema } from './schemaForm';
+import type { ValidationRun } from './validationRunner';
 
 const VIEW_STATE_KEY = 'cloudforge.canvasViewStates';
 const MAX_STORED_ARCHITECTURES = 32;
@@ -22,6 +28,30 @@ export interface CanvasPanelHost {
 	onSelectNode(nodeId: string | null): void;
 	onOpenSource(workspaceId: string, architectureId: string, sourceRevision: string, nodeId: string): Promise<string | undefined>;
 	onRefresh(workspaceId: string, architectureId: string): Promise<void>;
+	onRequestValidation?(
+		graph: CanvasGraphSnapshot,
+		scope: 'architecture' | 'resource',
+		nodeId: string | undefined,
+		onUpdate: (run: ValidationRun) => void
+	): Promise<{ readonly handled: boolean; readonly errorCode?: string }>;
+	onCancelValidation?(): Promise<void>;
+	onPreviewDraftSave?(
+		workspaceId: string,
+		architectureId: string,
+		expectedSourceRevision: string,
+		fileName: string,
+		contents: string
+	): Promise<{ readonly ok: true; readonly preview: DraftSavePreviewResult } | { readonly ok: false; readonly error: DraftSaveError }>;
+	onApplyDraftSave?(
+		workspaceId: string,
+		architectureId: string,
+		expectedSourceRevision: string,
+		fileName: string,
+		contents: string,
+		previewToken: string
+	): Promise<{ readonly ok: true; readonly applied: DraftSaveApplyResult } | { readonly ok: false; readonly error: DraftSaveError }>;
+	onLoadCatalogueSnapshots?(): Promise<readonly CanvasCatalogueSnapshot[]>;
+	onLoadResourceSchema?(kind: 'resource' | 'dataSource', typeName: string): Promise<FormSchema | null>;
 }
 
 /**
@@ -34,6 +64,7 @@ export class CloudForgeCanvasPanel implements Disposable {
 	private ready = false;
 	private graph: CanvasGraphSnapshot | undefined;
 	private notice: CanvasNotice | null = null;
+	private pendingValidation: { readonly scope: 'architecture' | 'resource'; readonly nodeId?: string } | undefined;
 	private readonly disposables: Disposable[] = [];
 
 	constructor(
@@ -95,11 +126,15 @@ export class CloudForgeCanvasPanel implements Disposable {
 		}
 		if (this.ready) {
 			this.post({ type: 'runValidation', scope, ...(nodeId ? { nodeId } : {}) });
+		} else {
+			this.pendingValidation = { scope, ...(nodeId ? { nodeId } : {}) };
 		}
 	}
 
-	/** Cancels the active validation run in the Architecture Canvas Webview. */
+	/** Cancels the active validation run in both the Rust service and the Architecture Canvas Webview. */
 	cancelValidation(): void {
+		this.pendingValidation = undefined;
+		void this.host.onCancelValidation?.();
 		if (!this.panel || !this.ready) {
 			return;
 		}
@@ -135,6 +170,8 @@ export class CloudForgeCanvasPanel implements Disposable {
 			if (this.panel === panel) {
 				this.panel = undefined;
 				this.ready = false;
+				this.pendingValidation = undefined;
+				void this.host.onCancelValidation?.();
 			}
 		});
 		return panel;
@@ -149,6 +186,18 @@ export class CloudForgeCanvasPanel implements Disposable {
 			case 'ready':
 				this.ready = true;
 				this.postCurrentState();
+				if (this.host.onLoadCatalogueSnapshots) {
+					void this.host.onLoadCatalogueSnapshots().then(snapshots => {
+						if (this.ready && snapshots.length > 0) {
+							this.post({ type: 'catalogueSnapshots', snapshots });
+						}
+					});
+				}
+				if (this.pendingValidation) {
+					const pending = this.pendingValidation;
+					this.pendingValidation = undefined;
+					this.post({ type: 'runValidation', scope: pending.scope, ...(pending.nodeId ? { nodeId: pending.nodeId } : {}) });
+				}
 				return;
 			case 'selectNode':
 				this.host.onSelectNode(message.nodeId);
@@ -163,6 +212,100 @@ export class CloudForgeCanvasPanel implements Disposable {
 					await this.host.onRefresh(this.graph.workspaceId, this.graph.architectureId);
 				}
 				return;
+			case 'requestValidation': {
+				const graph = this.graph;
+				if (!graph) {
+					return;
+				}
+				if (!this.host.onRequestValidation) {
+					this.post({ type: 'runValidation', scope: message.scope, ...(message.nodeId ? { nodeId: message.nodeId } : {}), localOnly: true });
+					return;
+				}
+				const outcome = await this.host.onRequestValidation(graph, message.scope, message.nodeId, run => {
+					if (this.panel && this.ready) {
+						this.post({ type: 'validationRunUpdate', run });
+					}
+				});
+				if (outcome.errorCode === 'STALE_SOURCE') {
+					this.setNotice({
+						kind: 'stale',
+						message: l10n.t('The Terraform source changed on disk. Refresh the graph before running validation.'),
+					});
+				} else if (outcome.errorCode === 'WORKSPACE_UNAVAILABLE' || outcome.errorCode === 'SCOPE_DENIED') {
+					this.setNotice({
+						kind: 'unavailable',
+						message: l10n.t('This architecture scope is no longer active. Reopen or refresh the project to validate it.'),
+					});
+				} else if (!outcome.handled) {
+					this.post({ type: 'runValidation', scope: message.scope, ...(message.nodeId ? { nodeId: message.nodeId } : {}), localOnly: true });
+				}
+				return;
+			}
+			case 'cancelValidation':
+				await this.host.onCancelValidation?.();
+				return;
+			case 'requestDraftSavePreview': {
+				const graph = this.graph;
+				if (!graph || !this.host.onPreviewDraftSave) {
+					this.post({
+						type: 'draftSavePreview',
+						result: { ok: false, error: { code: 'SERVICE_UNAVAILABLE', message: l10n.t('Guarded draft save is not available in this window.') } },
+					});
+					return;
+				}
+				const result = await this.host.onPreviewDraftSave(
+					graph.workspaceId,
+					graph.architectureId,
+					graph.sourceRevision,
+					message.fileName,
+					message.contents
+				);
+				if (!result.ok && result.error.code === 'STALE_SOURCE') {
+					this.setNotice({
+						kind: 'stale',
+						message: l10n.t('The Terraform source changed on disk. Refresh the graph before previewing or saving.'),
+					});
+				}
+				this.post({ type: 'draftSavePreview', result });
+				return;
+			}
+			case 'applyDraftSave': {
+				const graph = this.graph;
+				if (!graph || !this.host.onApplyDraftSave) {
+					this.post({
+						type: 'draftSaveApplied',
+						result: { ok: false, error: { code: 'SERVICE_UNAVAILABLE', message: l10n.t('Guarded draft save is not available in this window.') } },
+					});
+					return;
+				}
+				const result = await this.host.onApplyDraftSave(
+					graph.workspaceId,
+					graph.architectureId,
+					graph.sourceRevision,
+					message.fileName,
+					message.contents,
+					message.previewToken
+				);
+				if (!result.ok && result.error.code === 'STALE_SOURCE') {
+					this.setNotice({
+						kind: 'stale',
+						message: l10n.t('The Terraform source changed on disk. Refresh the graph before applying changes.'),
+					});
+				}
+				this.post({ type: 'draftSaveApplied', result });
+				return;
+			}
+			case 'requestSchema': {
+				if (!this.host.onLoadResourceSchema) {
+					this.post({ type: 'liveSchema', typeName: message.typeName, schema: null });
+					return;
+				}
+				const schema = await this.host.onLoadResourceSchema(message.kind, message.typeName);
+				if (this.panel && this.ready) {
+					this.post({ type: 'liveSchema', typeName: message.typeName, schema });
+				}
+				return;
+			}
 			case 'openSource': {
 				const graph = this.graph;
 				if (!graph) {

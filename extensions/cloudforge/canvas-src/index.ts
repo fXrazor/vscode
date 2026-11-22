@@ -53,6 +53,8 @@ import {
 } from '../src/canvas/draftDocument';
 import {
 	defaultCanvasViewState,
+	isValidTfFileName,
+	type CanvasCatalogueSnapshot,
 	type CanvasGraphSnapshot,
 	type CanvasGridMode,
 	type CanvasNodeSummary,
@@ -61,6 +63,8 @@ import {
 	type CanvasViewMode,
 	type CanvasViewport,
 	type CanvasViewState,
+	type DraftSaveError,
+	type DraftSavePreviewResult,
 	type ExtensionToWebviewMessage,
 	type WebviewToExtensionMessage
 } from '../src/canvas/protocol';
@@ -100,9 +104,55 @@ let workspaceResultsTab: 'findings' | 'preview' | 'outputs' = 'preview';
 let nextDraftBlockId = 1;
 let nextDraftNodeSeq = 1;
 let currentRun: ValidationRun | undefined;
+let validationInFlight = false;
 let timelineOpen = false;
 let hclReviewOpen = false;
 let connectFeedback: string | undefined;
+let catalogueSnapshots: readonly CanvasCatalogueSnapshot[] = [];
+const liveSchemas = new Map<string, FormSchema | null>();
+const pendingSchemaRequests = new Set<string>();
+let saveFileName = 'cloudforge_draft.tf';
+let savePhase: 'idle' | 'previewing' | 'previewReady' | 'applying' = 'idle';
+let savePreview: DraftSavePreviewResult | undefined;
+let savePreviewHcl: string | undefined;
+let saveError: DraftSaveError | undefined;
+
+function resetSavePreviewState(): void {
+	savePhase = 'idle';
+	savePreview = undefined;
+	savePreviewHcl = undefined;
+	saveError = undefined;
+}
+
+function lookupEffectiveSchema(node: Pick<CanvasNodeSummary, 'kind' | 'resourceType'>): FormSchema | undefined {
+	if (node.resourceType) {
+		const live = liveSchemas.get(node.resourceType);
+		if (live) {
+			return live;
+		}
+	}
+	return lookupBundledSchema(node);
+}
+
+function maybeRequestLiveSchema(node: CanvasNodeSummary): void {
+	if (!node.resourceType) {
+		return;
+	}
+	const normalizedKind = node.kind.toLowerCase();
+	const kind: 'resource' | 'dataSource' | undefined = normalizedKind === 'resource'
+		? 'resource'
+		: normalizedKind === 'data' || normalizedKind === 'datasource'
+			? 'dataSource'
+			: undefined;
+	if (!kind) {
+		return;
+	}
+	if (liveSchemas.has(node.resourceType) || pendingSchemaRequests.has(node.resourceType)) {
+		return;
+	}
+	pendingSchemaRequests.add(node.resourceType);
+	post({ type: 'requestSchema', kind, typeName: node.resourceType });
+}
 
 function activeGraph(): CanvasGraphSnapshot | undefined {
 	return draftDoc ? projectDraftGraph(draftDoc) : undefined;
@@ -287,6 +337,10 @@ function openFocusedWorkspace(nodeId: string): void {
 	lastFocusBeforeWorkspace = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 	state = { ...state, selectedId: nodeId, focusedWorkspaceOpen: true };
 	post({ type: 'selectNode', nodeId });
+	const node = nodeById(nodeId);
+	if (node) {
+		maybeRequestLiveSchema(node);
+	}
 	render();
 	schedulePersistViewState();
 	const backBtn = root.querySelector<HTMLButtonElement>('.cf-back-btn');
@@ -333,6 +387,7 @@ function commitDraftEdit(edit: DraftEdit, options?: { readonly selectId?: string
 	}
 	draftDoc = next;
 	connectFeedback = undefined;
+	resetSavePreviewState();
 	if (options?.selectId !== undefined) {
 		state = {
 			...state,
@@ -368,7 +423,7 @@ function addNewResource(typeName: string, defaultName: string): void {
 		label: `${typeName}.${name}`,
 		hasSource: false,
 	};
-	const schema = lookupBundledSchema(node);
+	const schema = lookupEffectiveSchema(node);
 	const initialDraft = schema ? createInitialDraft(node, schema, draftDoc.baseSourceRevision) : undefined;
 	commitDraftEdit({ type: 'addResource', node, initialDraft }, { selectId: nodeId, focusInCanvas: true });
 }
@@ -395,6 +450,7 @@ function performUndo(): void {
 	}
 	draftDoc = undoDraftEdit(draftDoc);
 	connectFeedback = undefined;
+	resetSavePreviewState();
 	if (state.selectedId && !draftDoc.present.nodes.some(n => n.id === state.selectedId)) {
 		state = { ...state, selectedId: null, focusedWorkspaceOpen: false };
 	}
@@ -409,6 +465,7 @@ function performRedo(): void {
 	}
 	draftDoc = redoDraftEdit(draftDoc);
 	connectFeedback = undefined;
+	resetSavePreviewState();
 	if (state.selectedId && !draftDoc.present.nodes.some(n => n.id === state.selectedId)) {
 		state = { ...state, selectedId: null, focusedWorkspaceOpen: false };
 	}
@@ -423,6 +480,7 @@ function performRevertDraft(): void {
 	}
 	draftDoc = revertDraftDocument(draftDoc);
 	connectFeedback = undefined;
+	resetSavePreviewState();
 	hclReviewOpen = false;
 	if (state.selectedId && !draftDoc.present.nodes.some(n => n.id === state.selectedId)) {
 		state = { ...state, selectedId: null, focusedWorkspaceOpen: false };
@@ -506,17 +564,30 @@ function statusLabel(status: RunnerNodeStatus): { readonly icon: string; readonl
 	}
 }
 
-function startValidation(scope: 'architecture' | 'resource', nodeId?: string): void {
+function startValidation(scope: 'architecture' | 'resource', nodeId?: string, localOnly = false): void {
 	const current = activeGraph();
 	if (!current) {
 		return;
 	}
+	const summary = draftDoc ? computeDraftChangeSummary(draftDoc) : undefined;
+	if (!localOnly && !summary?.dirty) {
+		validationInFlight = true;
+		timelineOpen = true;
+		if (scope === 'resource') {
+			workspaceResultsTab = 'findings';
+		}
+		post({ type: 'requestValidation', scope, ...(nodeId ? { nodeId } : {}) });
+		render();
+		applyViewportTransform();
+		return;
+	}
+	validationInFlight = false;
 	const previousRun = currentRun && currentRun.architectureId === current.architectureId ? currentRun : undefined;
 	currentRun = runOfflineValidation(current, {
 		scope,
 		targetNodeId: nodeId,
 		drafts: draftsAsMap(),
-		lookupSchema: lookupBundledSchema,
+		lookupSchema: lookupEffectiveSchema,
 		renderDraft: renderDraftPreview,
 		previousRun,
 	});
@@ -529,7 +600,13 @@ function startValidation(scope: 'architecture' | 'resource', nodeId?: string): v
 }
 
 function cancelActiveRun(): void {
+	if (validationInFlight) {
+		validationInFlight = false;
+		post({ type: 'cancelValidation' });
+	}
 	if (!currentRun) {
+		render();
+		applyViewportTransform();
 		return;
 	}
 	currentRun = cancelValidationRun(currentRun);
@@ -571,7 +648,9 @@ function renderHeader(): HTMLElement {
 		if (current.diagnostics.length > 0) {
 			left.append(el('span', 'cf-pill cf-pill-warn', `${current.diagnostics.length} diagnostic${current.diagnostics.length === 1 ? '' : 's'}`));
 		}
-		if (currentRun) {
+		if (validationInFlight) {
+			left.append(el('span', 'cf-pill cf-pill-warn', 'Validating (Rust)…'));
+		} else if (currentRun) {
 			const outcomeCls = currentRun.outcome === 'failed'
 				? 'cf-pill-err'
 				: currentRun.outcome === 'completed'
@@ -579,6 +658,9 @@ function renderHeader(): HTMLElement {
 					: 'cf-pill-warn';
 			const runText = `Run #${currentRun.attempt}: ${currentRun.outcome.replace(/_/g, ' ')} (${currentRun.coverage} coverage${currentRun.stale ? ', stale' : ''})`;
 			left.append(el('span', `cf-pill ${outcomeCls}`, runText));
+		}
+		if (catalogueSnapshots.length > 0) {
+			left.append(el('span', 'cf-pill', `${catalogueSnapshots.length} verified catalogue${catalogueSnapshots.length === 1 ? '' : 's'}`));
 		}
 	}
 	header.append(left);
@@ -1254,7 +1336,7 @@ function updateDraft(nodeId: string, updater: (draft: ResourceDraft) => Resource
 	if (!node) {
 		return;
 	}
-	const schema = lookupBundledSchema(node);
+	const schema = lookupEffectiveSchema(node);
 	const current = draftDoc.present.drafts[nodeId] ?? (schema ? createInitialDraft(node, schema, draftDoc.baseSourceRevision) : undefined);
 	if (!current) {
 		return;
@@ -1477,7 +1559,8 @@ function renderFocusedWorkspace(selected: CanvasNodeSummary): HTMLElement {
 	const provider = inferProvider(selected);
 	const isStale = notice?.kind === 'stale';
 	const { upstream, downstream } = relatedEdges(selected.id);
-	const schema = lookupBundledSchema(selected);
+	const schema = lookupEffectiveSchema(selected);
+	const schemaLoading = !!selected.resourceType && pendingSchemaRequests.has(selected.resourceType);
 	const draft = schema ? getOrCreateDraft(selected, schema) : undefined;
 	const draftStale = !!draft && !!current && draft.baseSourceRevision !== current.sourceRevision;
 	const rendered = schema && draft ? renderDraftPreview(schema, draft) : undefined;
@@ -1614,15 +1697,16 @@ function renderFocusedWorkspace(selected: CanvasNodeSummary): HTMLElement {
 			['Provider', providerDisplayName(provider)],
 			['Declaration kind', selected.kind],
 			['Terraform type', selected.resourceType ?? '—'],
-			['Name', selected.name],
-			['Schema status', 'Schema not bundled for this resource type'],
+			['Schema status', schemaLoading ? 'Checking verified provider catalogue…' : 'Schema not available in bundled or local verified catalogue'],
 			['Source authority', 'Read-only Terraform source (verified by CloudForge Rust service)'],
 		];
 		for (const [k, v] of rows) {
 			dl.append(el('dt', undefined, k), el('dd', k === 'Terraform type' ? 'cf-mono' : undefined, v));
 		}
 		centerPane.append(dl);
-		centerPane.append(el('p', 'cf-muted', 'No offline form schema is bundled for this declaration type yet. Unsupported content survives inspection untouched; use Advanced (Open Source) to edit it in the native Terraform editor.'));
+		centerPane.append(el('p', 'cf-muted', schemaLoading
+			? 'Querying the verified local provider catalogue snapshot for this resource type.'
+			: 'No form schema is installed for this declaration type yet. Unsupported content survives inspection untouched; use Advanced (Open Source) to edit it in the native Terraform editor.'));
 	}
 	columns.append(centerPane);
 
@@ -1660,7 +1744,7 @@ function renderFocusedWorkspace(selected: CanvasNodeSummary): HTMLElement {
 			headRow.append(resetBtn);
 			rightPane.append(headRow);
 			rightPane.append(el('pre', 'cf-hcl-preview cf-mono', rendered.hcl));
-			rightPane.append(el('p', 'cf-muted', 'Preview only. Project Terraform files remain unchanged on disk until Rust guarded save is connected.'));
+			rightPane.append(el('p', 'cf-muted', 'Preview only until applied. Open Review HCL in the header to preview and apply a guarded save to a local .tf file.'));
 		} else {
 			rightPane.append(el('p', 'cf-muted', 'HCL draft preview is available for schema-backed Azure networking resources. Use Advanced (Open Source) for native Terraform source.'));
 		}
@@ -1817,11 +1901,17 @@ function renderHclReviewModal(): HTMLElement | null {
 		return null;
 	}
 	const summary = computeDraftChangeSummary(draftDoc);
-	const preview = generateTerraformPreview(draftDoc, lookupBundledSchema, renderDraftPreview);
+	const preview = generateTerraformPreview(draftDoc, lookupEffectiveSchema, renderDraftPreview);
+	const trimmedFileName = saveFileName.trim();
+	const validFileName = isValidTfFileName(trimmedFileName);
+	const activePreview = savePreview && savePreviewHcl === preview.hcl && savePreview.fileName === trimmedFileName
+		? savePreview
+		: undefined;
+	const busy = savePhase === 'previewing' || savePhase === 'applying';
 
 	const backdrop = el('div', 'cf-modal-backdrop');
 	backdrop.addEventListener('click', event => {
-		if (event.target === backdrop) {
+		if (event.target === backdrop && !busy) {
 			closeHclReviewModal();
 		}
 	});
@@ -1841,9 +1931,11 @@ function renderHclReviewModal(): HTMLElement | null {
 	const headActions = el('div', 'cf-header-group');
 	const revertBtn = el('button', 'cf-btn cf-btn-danger', 'Revert Draft');
 	revertBtn.type = 'button';
+	revertBtn.disabled = busy;
 	revertBtn.addEventListener('click', () => performRevertDraft());
 	const closeBtn = el('button', 'cf-btn cf-modal-close', 'Close');
 	closeBtn.type = 'button';
+	closeBtn.disabled = busy;
 	closeBtn.addEventListener('click', () => closeHclReviewModal());
 	headActions.append(revertBtn, closeBtn);
 	head.append(titleGroup, headActions);
@@ -1853,8 +1945,116 @@ function renderHclReviewModal(): HTMLElement | null {
 	body.append(el(
 		'p',
 		'cf-muted',
-		`Unsaved draft summary: +${summary.added.length} added, ~${summary.modified.length} modified, -${summary.deleted.length} removed, +${summary.addedEdges}/-${summary.removedEdges} edge(s). Read-only preview: no files on disk are modified until Rust guarded save is connected.`
+		`Unsaved draft: +${summary.added.length} added, ~${summary.modified.length} modified, -${summary.deleted.length} removed, +${summary.addedEdges}/-${summary.removedEdges} edge(s). Preview Save checks HCL syntax, live revision, and secret literals without touching disk; Apply writes atomically with a one-shot token.`
 	));
+
+	const saveBar = el('div', 'cf-save-bar');
+	const fileLabel = el('label', 'cf-save-field');
+	fileLabel.append(el('span', undefined, 'Target .tf file'));
+	const fileInput = el('input', 'cf-input cf-mono');
+	fileInput.type = 'text';
+	fileInput.value = saveFileName;
+	fileInput.placeholder = 'cloudforge_draft.tf';
+	fileInput.disabled = busy;
+	fileInput.setAttribute('aria-label', 'Target Terraform filename');
+	fileInput.addEventListener('input', () => {
+		saveFileName = fileInput.value;
+		if (savePreview || saveError) {
+			savePreview = undefined;
+			savePreviewHcl = undefined;
+			saveError = undefined;
+			savePhase = 'idle';
+		}
+		const previewBtnEl = dialog.querySelector<HTMLButtonElement>('.cf-save-preview-btn');
+		if (previewBtnEl) {
+			previewBtnEl.disabled = preview.hasErrors || !isValidTfFileName(saveFileName.trim()) || busy;
+		}
+	});
+	fileLabel.append(fileInput);
+
+	const previewBtn = el(
+		'button',
+		`cf-btn cf-save-preview-btn${activePreview ? '' : ' cf-btn-primary'}`,
+		savePhase === 'previewing' ? 'Checking HCL…' : 'Preview Save'
+	);
+	previewBtn.type = 'button';
+	previewBtn.disabled = preview.hasErrors || !validFileName || busy;
+	previewBtn.title = preview.hasErrors
+		? 'Fix schema errors before previewing save'
+		: !validFileName
+			? 'Enter a single top-level .tf filename (not starting with a dot)'
+			: 'Validate HCL syntax, revision, and secret literals before writing';
+	previewBtn.addEventListener('click', () => {
+		const target = saveFileName.trim();
+		if (!isValidTfFileName(target) || preview.hasErrors) {
+			return;
+		}
+		savePhase = 'previewing';
+		saveError = undefined;
+		savePreview = undefined;
+		savePreviewHcl = preview.hcl;
+		post({ type: 'requestDraftSavePreview', fileName: target, contents: preview.hcl });
+		render();
+	});
+
+	saveBar.append(fileLabel, previewBtn);
+	body.append(saveBar);
+
+	if (saveError) {
+		const errBox = el('div', 'cf-save-error');
+		errBox.setAttribute('role', 'alert');
+		errBox.append(el('strong', undefined, `${saveError.code}: `), el('span', undefined, saveError.message));
+		body.append(errBox);
+	}
+
+	if (activePreview) {
+		const card = el('div', 'cf-save-preview-card');
+		const meta = el('div', 'cf-save-preview-meta');
+		const metaLeft = el('div', 'cf-header-group');
+		metaLeft.append(
+			el('strong', undefined, activePreview.created ? `Create ${activePreview.fileName}` : `Replace ${activePreview.fileName}`),
+			el('span', 'cf-pill cf-mono', `+${activePreview.addedLines} / -${activePreview.removedLines} lines`),
+			el('span', 'cf-pill cf-mono', `sha256 ${activePreview.afterSha256.slice(0, 10)}`)
+		);
+		const metaActions = el('div', 'cf-header-group');
+		const applyBtn = el('button', 'cf-btn cf-btn-primary', savePhase === 'applying' ? 'Applying…' : 'Apply Saved Changes');
+		applyBtn.type = 'button';
+		applyBtn.disabled = busy;
+		applyBtn.addEventListener('click', () => {
+			savePhase = 'applying';
+			saveError = undefined;
+			post({
+				type: 'applyDraftSave',
+				fileName: activePreview.fileName,
+				contents: preview.hcl,
+				previewToken: activePreview.previewToken,
+			});
+			render();
+		});
+		const cancelPreviewBtn = el('button', 'cf-btn', 'Cancel Preview');
+		cancelPreviewBtn.type = 'button';
+		cancelPreviewBtn.disabled = busy;
+		cancelPreviewBtn.addEventListener('click', () => {
+			resetSavePreviewState();
+			render();
+		});
+		metaActions.append(applyBtn, cancelPreviewBtn);
+		meta.append(metaLeft, metaActions);
+		card.append(meta);
+
+		if (activePreview.findings.length > 0) {
+			const warnBox = el('div', 'cf-save-warnings');
+			warnBox.setAttribute('role', 'alert');
+			warnBox.append(el('strong', undefined, `Sensitive literal warning (${activePreview.findings.length})`));
+			for (const finding of activePreview.findings) {
+				const loc = finding.line ? `${finding.file}:${finding.line}` : finding.file;
+				warnBox.append(el('span', 'cf-mono', `${finding.code} at ${loc} — consider using a variable instead of a literal secret.`));
+			}
+			card.append(warnBox);
+		}
+		body.append(card);
+	}
+
 	body.append(el('pre', 'cf-hcl-preview cf-mono', preview.hcl));
 	dialog.append(body);
 
@@ -1994,6 +2194,8 @@ window.addEventListener('message', event => {
 			draftDoc = createDraftDocument(message.graph);
 			hclReviewOpen = false;
 			connectFeedback = undefined;
+			validationInFlight = false;
+			resetSavePreviewState();
 			state = message.viewState;
 			notice = message.notice;
 			currentRun = currentRun && currentRun.architectureId === message.graph.architectureId
@@ -2015,17 +2217,61 @@ window.addEventListener('message', event => {
 			draftDoc = undefined;
 			projection = undefined;
 			currentRun = undefined;
+			validationInFlight = false;
 			hclReviewOpen = false;
 			connectFeedback = undefined;
+			resetSavePreviewState();
 			notice = null;
 			emptyMessage = message.message;
 			render();
 			break;
 		case 'runValidation':
-			startValidation(message.scope, message.nodeId);
+			startValidation(message.scope, message.nodeId, message.localOnly === true);
 			break;
 		case 'cancelValidation':
 			cancelActiveRun();
+			break;
+		case 'validationRunUpdate':
+			currentRun = message.run;
+			validationInFlight = message.run.outcome === 'running';
+			timelineOpen = true;
+			render();
+			applyViewportTransform();
+			break;
+		case 'draftSavePreview':
+			if (message.result.ok) {
+				savePhase = 'previewReady';
+				savePreview = message.result.preview;
+				saveError = undefined;
+			} else {
+				savePhase = 'idle';
+				savePreview = undefined;
+				saveError = message.result.error;
+			}
+			render();
+			break;
+		case 'draftSaveApplied':
+			if (message.result.ok) {
+				resetSavePreviewState();
+				hclReviewOpen = false;
+			} else {
+				savePhase = 'idle';
+				savePreview = undefined;
+				saveError = message.result.error;
+			}
+			render();
+			break;
+		case 'catalogueSnapshots':
+			catalogueSnapshots = message.snapshots;
+			render();
+			applyViewportTransform();
+			break;
+		case 'liveSchema':
+			pendingSchemaRequests.delete(message.typeName);
+			liveSchemas.set(message.typeName, message.schema);
+			if (state.focusedWorkspaceOpen || hclReviewOpen) {
+				render();
+			}
 			break;
 	}
 });

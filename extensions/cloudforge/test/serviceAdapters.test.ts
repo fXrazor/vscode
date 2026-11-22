@@ -1,0 +1,230 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { isValidTfFileName, parseWebviewMessage, type CanvasGraphSnapshot } from '../src/canvas/protocol.ts';
+import {
+	draftSaveErrorMessage,
+	mapRustFormSchemaToCanvasFormSchema,
+	mapServiceValidationPollToRun,
+	parseCatalogueSnapshots,
+	parseDraftSaveApply,
+	parseDraftSavePreview,
+	parseValidationPoll,
+	parseValidationStart,
+	selectBestSnapshotForType
+} from '../src/canvas/serviceAdapters.ts';
+
+function sampleGraph(): CanvasGraphSnapshot {
+	return {
+		workspaceId: 'workspace-' + 'a'.repeat(32),
+		architectureId: 'workspace-' + 'a'.repeat(32) + '-architecture-1',
+		architectureName: 'Hub Network',
+		sourceRevision: 'b'.repeat(64),
+		status: 'complete',
+		nodes: [
+			{ id: 'node-1', kind: 'resource', resourceType: 'azurerm_resource_group', name: 'hub', label: 'azurerm_resource_group.hub', hasSource: true },
+			{ id: 'node-2', kind: 'resource', resourceType: 'azurerm_virtual_network', name: 'vnet', label: 'azurerm_virtual_network.vnet', hasSource: true },
+			{ id: 'node-3', kind: 'resource', resourceType: 'azurerm_subnet', name: 'app', label: 'azurerm_subnet.app', hasSource: true },
+		],
+		edges: [
+			{ fromId: 'node-1', toId: 'node-2', kind: 'reference' },
+			{ fromId: 'node-2', toId: 'node-3', kind: 'reference' },
+		],
+		diagnostics: [],
+	};
+}
+
+test('Stage 3 catalogue adapters parse snapshots, pick newest provider version, and map Rust FormSchema', () => {
+	const shaA = '1'.repeat(64);
+	const shaB = '2'.repeat(64);
+	const snapshots = parseCatalogueSnapshots({
+		snapshots: [
+			{
+				manifestVersion: 1,
+				key: { address: 'registry.terraform.io/hashicorp/azurerm', version: '4.12.0', formatVersion: '1.0', sha256: shaA },
+				provenance: { engine: { name: 'opentofu', version: '1.13.9' }, recordedAt: '2026-11-22T00:00:00Z' },
+				counts: { resources: 900, dataSources: 200 },
+			},
+			{
+				manifestVersion: 1,
+				key: { address: 'registry.terraform.io/hashicorp/azurerm', version: '5.14.0', formatVersion: '1.0', sha256: shaB },
+				provenance: { engine: { name: 'opentofu', version: '1.13.9' }, recordedAt: '2026-11-22T00:00:00Z' },
+				counts: { resources: 1050, dataSources: 240 },
+			},
+		],
+	});
+	assert.equal(snapshots.length, 2);
+	const best = selectBestSnapshotForType(snapshots, 'azurerm_storage_account');
+	assert.equal(best?.version, '5.14.0');
+	assert.equal(selectBestSnapshotForType(snapshots, 'aws_s3_bucket'), undefined);
+
+	const adapted = mapRustFormSchemaToCanvasFormSchema({
+		key: { address: 'registry.terraform.io/hashicorp/azurerm', version: '5.14.0', formatVersion: '1.0', sha256: shaB },
+		form: {
+			kind: 'resource',
+			typeName: 'azurerm_storage_account',
+			description: 'Manages an Azure Storage Account.',
+			block: {
+				attributes: [
+					{ name: 'name', path: 'name', access: 'required', editor: 'text', encoding: 'plain', description: 'Storage account name.' },
+					{ name: 'https_traffic_only_enabled', path: 'https_traffic_only_enabled', access: 'optional', editor: 'checkbox', encoding: 'plain' },
+					{ name: 'primary_access_key', path: 'primary_access_key', access: 'computedOnly', editor: 'secret', encoding: 'plain', sensitive: true },
+				],
+				blocks: [
+					{
+						name: 'blob_properties',
+						path: 'blob_properties',
+						mode: 'list',
+						maxItems: 1,
+						block: {
+							attributes: [
+								{ name: 'versioning_enabled', path: 'blob_properties.versioning_enabled', access: 'optional', editor: 'checkbox', encoding: 'plain' },
+							],
+							blocks: [],
+						},
+					},
+				],
+			},
+		},
+	});
+	assert.ok(adapted);
+	assert.equal(adapted.providerSource, 'hashicorp/azurerm');
+	assert.equal(adapted.providerVersion, '5.14.0');
+	assert.equal(adapted.attributes.length, 3);
+	assert.equal(adapted.attributes[1].valueType, 'bool');
+	assert.equal(adapted.attributes[2].access, 'computedOnly');
+	assert.equal(adapted.attributes[2].sensitive, true);
+	assert.equal(adapted.blocks.length, 1);
+	assert.equal(adapted.blocks[0].attributes[0].valueType, 'bool');
+	assert.ok(adapted.outputs.some(o => o.name === 'primary_access_key' && o.knownAtApply));
+});
+
+test('Stage 4 validation runner adapter projects Rust poll response with cycle/blocker states into ValidationRun', () => {
+	const graph = sampleGraph();
+	const start = parseValidationStart({
+		runId: `${graph.workspaceId}-run-1`,
+		workspaceId: graph.workspaceId,
+		architectureId: graph.architectureId,
+		sourceRevision: graph.sourceRevision,
+		state: 'running',
+		reused: false,
+	});
+	assert.ok(start);
+
+	const poll = parseValidationPoll({
+		runId: start.runId,
+		workspaceId: graph.workspaceId,
+		architectureId: graph.architectureId,
+		sourceRevision: graph.sourceRevision,
+		state: 'failed',
+		stage: 'static_checks',
+		coverage: 'partial',
+		coverageGaps: ['UNRESOLVED_REFERENCE'],
+		elapsedMs: 14,
+		nextCursor: 4,
+		hasMore: false,
+		cursorGap: false,
+		events: [
+			{ seq: 1, elapsedMs: 1, kind: 'stageStarted', payload: { stage: 'read_architecture' } },
+			{ seq: 2, elapsedMs: 4, kind: 'stageFinished', payload: { stage: 'read_architecture', status: 'completed', durationMs: 3 } },
+			{ seq: 3, elapsedMs: 10, kind: 'nodeUpdated', payload: { nodeId: 'node-1', state: 'failed', reasonCode: 'DEPENDENCY_CYCLE' } },
+			{ seq: 4, elapsedMs: 14, kind: 'runFinished', payload: { state: 'failed' } },
+		],
+		snapshot: {
+			nodes: [
+				{ nodeId: 'node-1', state: 'failed', blockedBy: ['node-2'], reasonCode: 'DEPENDENCY_CYCLE' },
+				{ nodeId: 'node-2', state: 'failed', blockedBy: ['node-1'], reasonCode: 'DEPENDENCY_CYCLE' },
+				{ nodeId: 'node-3', state: 'skipped', blockedBy: ['node-2'], reasonCode: 'PREREQUISITE_CYCLE' },
+			],
+			findings: [
+				{ code: 'DEPENDENCY_CYCLE', severity: 'error', message: 'Cycle detected', nodeId: 'node-1' },
+			],
+		},
+	});
+	assert.ok(poll);
+
+	const run = mapServiceValidationPollToRun(poll, {
+		graph,
+		scope: 'architecture',
+		targetNodeId: null,
+		attempt: 1,
+		previousRunId: null,
+		startedAtMs: 1000,
+		accumulatedEvents: poll.events,
+	});
+
+	assert.equal(run.outcome, 'failed');
+	assert.equal(run.coverage, 'partial');
+	assert.equal(run.coverageNotes.length, 1);
+	assert.equal(run.nodeResults['node-1'].status, 'failed');
+	assert.equal(run.nodeResults['node-3'].status, 'skipped');
+	assert.deepEqual(run.nodeResults['node-3'].blockedBy, ['node-2']);
+	assert.deepEqual(run.cycleNodeIds.sort(), ['node-1', 'node-2']);
+	assert.equal(run.stages.length, 3);
+	assert.equal(run.events.length, 4);
+});
+
+test('Stage 5 guarded save parsers and Webview protocol validation enforce strict .tf boundaries', () => {
+	assert.equal(isValidTfFileName('cloudforge_draft.tf'), true);
+	assert.equal(isValidTfFileName('.hidden.tf'), false);
+	assert.equal(isValidTfFileName('sub/main.tf'), false);
+	assert.equal(isValidTfFileName('main.tf.json'), false);
+	assert.equal(isValidTfFileName('.tf'), false);
+
+	assert.deepEqual(
+		parseWebviewMessage({ type: 'requestDraftSavePreview', fileName: 'network.tf', contents: 'resource "null_resource" "a" {}\n' }),
+		{ type: 'requestDraftSavePreview', fileName: 'network.tf', contents: 'resource "null_resource" "a" {}\n' }
+	);
+	assert.equal(
+		parseWebviewMessage({ type: 'requestDraftSavePreview', fileName: '..\\escape.tf', contents: '' }),
+		undefined
+	);
+	assert.deepEqual(
+		parseWebviewMessage({ type: 'applyDraftSave', fileName: 'network.tf', contents: 'locals {}', previewToken: 'save-' + 'a'.repeat(32) }),
+		{ type: 'applyDraftSave', fileName: 'network.tf', contents: 'locals {}', previewToken: 'save-' + 'a'.repeat(32) }
+	);
+	assert.equal(
+		parseWebviewMessage({ type: 'requestValidation', scope: 'resource', nodeId: 'node-2' })?.type,
+		'requestValidation'
+	);
+	assert.deepEqual(
+		parseWebviewMessage({ type: 'requestSchema', kind: 'resource', typeName: 'azurerm_storage_account' }),
+		{ type: 'requestSchema', kind: 'resource', typeName: 'azurerm_storage_account' }
+	);
+	assert.equal(
+		parseWebviewMessage({ type: 'requestSchema', kind: 'resource', typeName: '../bad' }),
+		undefined
+	);
+
+	const preview = parseDraftSavePreview({
+		workspaceId: 'workspace-' + 'a'.repeat(32),
+		architectureId: 'workspace-' + 'a'.repeat(32) + '-architecture-1',
+		sourceRevision: 'b'.repeat(64),
+		fileName: 'network.tf',
+		created: true,
+		afterSha256: 'c'.repeat(64),
+		addedLines: 5,
+		removedLines: 0,
+		findings: [{ code: 'SENSITIVE_LITERAL', file: 'network.tf', line: 3 }],
+		previewToken: 'save-' + 'd'.repeat(32),
+	});
+	assert.ok(preview);
+	assert.equal(preview.created, true);
+	assert.equal(preview.findings.length, 1);
+
+	const applied = parseDraftSaveApply({
+		fileName: 'network.tf',
+		created: true,
+		newSourceRevision: 'e'.repeat(64),
+		bytesWritten: 128,
+	});
+	assert.ok(applied);
+	assert.equal(applied.bytesWritten, 128);
+
+	assert.match(draftSaveErrorMessage('SCOPE_DENIED').message, /read-only/i);
+	assert.match(draftSaveErrorMessage('STALE_SOURCE').message, /Refresh/i);
+});
