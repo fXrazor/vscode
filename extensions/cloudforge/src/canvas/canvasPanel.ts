@@ -86,6 +86,26 @@ export class CloudForgeCanvasPanel implements Disposable {
 		this.post({ type: 'notice', notice });
 	}
 
+	/** Triggers a validation run inside the Architecture Canvas Webview. */
+	triggerValidation(graph: CanvasGraphSnapshot | undefined, scope: 'architecture' | 'resource' = 'architecture', nodeId?: string): void {
+		if (!this.panel) {
+			this.show(graph, false);
+		} else {
+			this.panel.reveal(this.panel.viewColumn ?? ViewColumn.One, false);
+		}
+		if (this.ready) {
+			this.post({ type: 'runValidation', scope, ...(nodeId ? { nodeId } : {}) });
+		}
+	}
+
+	/** Cancels the active validation run in the Architecture Canvas Webview. */
+	cancelValidation(): void {
+		if (!this.panel || !this.ready) {
+			return;
+		}
+		this.post({ type: 'cancelValidation' });
+	}
+
 	private ensurePanel(preserveFocus: boolean): WebviewPanel {
 		if (this.panel) {
 			this.panel.reveal(this.panel.viewColumn ?? ViewColumn.One, preserveFocus);

@@ -31,6 +31,14 @@ import {
 	type ResourceDraft
 } from '../src/canvas/schemaForm';
 import {
+	cancelValidationRun,
+	computePrerequisiteScope,
+	runOfflineValidation,
+	syncRunWithRevision,
+	type RunnerNodeStatus,
+	type ValidationRun
+} from '../src/canvas/validationRunner';
+import {
 	defaultCanvasViewState,
 	type CanvasGraphSnapshot,
 	type CanvasGridMode,
@@ -68,6 +76,8 @@ const draftsByNodeId = new Map<string, ResourceDraft>();
 let activeFieldKey: { readonly blockId?: string; readonly attrName: string } | undefined;
 let workspaceResultsTab: 'findings' | 'preview' | 'outputs' = 'preview';
 let nextDraftBlockId = 1;
+let currentRun: ValidationRun | undefined;
+let timelineOpen = false;
 
 const root = document.getElementById('app')!;
 
@@ -318,6 +328,47 @@ function relatedEdges(nodeId: string): { upstream: { node: CanvasNodeSummary; ki
 	return { upstream, downstream };
 }
 
+function statusLabel(status: RunnerNodeStatus): { readonly icon: string; readonly text: string } {
+	switch (status) {
+		case 'pending': return { icon: '\u25cb', text: 'Pending' };
+		case 'running': return { icon: '\u25cf', text: 'Running' };
+		case 'success': return { icon: '\u2713', text: 'Passed' };
+		case 'warning': return { icon: '!', text: 'Warning' };
+		case 'failed': return { icon: '\u2717', text: 'Failed' };
+		case 'skipped': return { icon: '\u2298', text: 'Skipped' };
+	}
+}
+
+function startValidation(scope: 'architecture' | 'resource', nodeId?: string): void {
+	if (!graph) {
+		return;
+	}
+	const previousRun = currentRun && currentRun.architectureId === graph.architectureId ? currentRun : undefined;
+	currentRun = runOfflineValidation(graph, {
+		scope,
+		targetNodeId: nodeId,
+		drafts: draftsByNodeId,
+		lookupSchema: lookupBundledSchema,
+		renderDraft: renderDraftPreview,
+		previousRun,
+	});
+	timelineOpen = true;
+	if (scope === 'resource') {
+		workspaceResultsTab = 'findings';
+	}
+	render();
+	applyViewportTransform();
+}
+
+function cancelActiveRun(): void {
+	if (!currentRun) {
+		return;
+	}
+	currentRun = cancelValidationRun(currentRun);
+	render();
+	applyViewportTransform();
+}
+
 function renderHeader(): HTMLElement {
 	const header = el('header', 'cf-header');
 	const left = el('div', 'cf-header-group');
@@ -339,6 +390,15 @@ function renderHeader(): HTMLElement {
 		}
 		if (graph.diagnostics.length > 0) {
 			left.append(el('span', 'cf-pill cf-pill-warn', `${graph.diagnostics.length} diagnostic${graph.diagnostics.length === 1 ? '' : 's'}`));
+		}
+		if (currentRun) {
+			const outcomeCls = currentRun.outcome === 'failed'
+				? 'cf-pill-err'
+				: currentRun.outcome === 'completed'
+					? 'cf-pill-ok'
+					: 'cf-pill-warn';
+			const runText = `Run #${currentRun.attempt}: ${currentRun.outcome.replace(/_/g, ' ')} (${currentRun.coverage} coverage${currentRun.stale ? ', stale' : ''})`;
+			left.append(el('span', `cf-pill ${outcomeCls}`, runText));
 		}
 	}
 	header.append(left);
@@ -438,12 +498,28 @@ function renderHeader(): HTMLElement {
 		}
 	});
 
+	const validateBtn = el('button', 'cf-btn cf-btn-primary', currentRun ? 'Revalidate' : 'Validate');
+	validateBtn.type = 'button';
+	validateBtn.disabled = !graph;
+	validateBtn.title = 'Run offline architecture validation (read, dependencies, static & schema checks)';
+	validateBtn.addEventListener('click', () => startValidation('architecture'));
+
+	const timelineBtn = el('button', 'cf-btn', 'Timeline');
+	timelineBtn.type = 'button';
+	timelineBtn.setAttribute('aria-pressed', String(timelineOpen));
+	timelineBtn.title = 'Toggle Runner Timeline panel';
+	timelineBtn.addEventListener('click', () => {
+		timelineOpen = !timelineOpen;
+		render();
+		applyViewportTransform();
+	});
+
 	const refreshBtn = el('button', 'cf-btn', 'Refresh');
 	refreshBtn.type = 'button';
 	refreshBtn.title = 'Re-read architecture from CloudForge service';
 	refreshBtn.addEventListener('click', () => post({ type: 'refresh' }));
 
-	right.append(listBtn, inspBtn, viewDetails, fitBtn, refreshBtn);
+	right.append(listBtn, inspBtn, timelineBtn, viewDetails, fitBtn, validateBtn, refreshBtn);
 	header.append(right);
 	return header;
 }
@@ -578,7 +654,11 @@ function renderStage(): HTMLElement {
 			const d = `M ${edge.fromX} ${edge.fromY} C ${edge.fromX + dx} ${edge.fromY}, ${edge.toX - dx} ${edge.toY}, ${edge.toX} ${edge.toY}`;
 			const isRelated = state.selectedId !== null && (edge.fromId === state.selectedId || edge.toId === state.selectedId);
 			const isDimmed = state.selectedId !== null && !isRelated;
-			const cls = `cf-edge${edge.collapsedSummary ? ' summary' : ''}${isRelated ? ' active' : ''}${isDimmed ? ' dimmed' : ''}`;
+			const fromRes = currentRun?.nodeResults[edge.fromId];
+			const toRes = currentRun?.nodeResults[edge.toId];
+			const isBlockedEdge = (fromRes?.status === 'failed' || toRes?.status === 'skipped' || (currentRun?.cycleNodeIds.includes(edge.fromId) && currentRun?.cycleNodeIds.includes(edge.toId)));
+			const isPassedEdge = fromRes?.status === 'success' && toRes?.status === 'success';
+			const cls = `cf-edge${edge.collapsedSummary ? ' summary' : ''}${isRelated ? ' active' : ''}${isDimmed ? ' dimmed' : ''}${isBlockedEdge ? ' edge-blocked' : isPassedEdge ? ' edge-passed' : ''}`;
 			edgesSvg.append(svgEl('path', { d, class: cls, 'marker-end': 'url(#cf-arrow)' }));
 		}
 		world.append(edgesSvg);
@@ -681,7 +761,9 @@ function zoomBy(factor: number): void {
 
 function renderNodeCard(item: PositionedNode): HTMLElement {
 	const selected = item.node.id === state.selectedId;
-	const card = el('button', `cf-node cf-node-${state.mode} cf-provider-${item.provider}${selected ? ' selected' : ''}`);
+	const runResult = currentRun?.nodeResults[item.node.id];
+	const statusCls = runResult ? ` cf-status-${runResult.status}` : '';
+	const card = el('button', `cf-node cf-node-${state.mode} cf-provider-${item.provider}${selected ? ' selected' : ''}${statusCls}`);
 	card.type = 'button';
 	card.dataset.nodeId = item.node.id;
 	card.style.left = `${item.x}px`;
@@ -689,19 +771,28 @@ function renderNodeCard(item: PositionedNode): HTMLElement {
 	card.style.width = `${item.width}px`;
 	card.style.height = `${item.height}px`;
 	card.setAttribute('aria-pressed', String(selected));
-	card.setAttribute('aria-label', `${item.node.name}, ${item.node.resourceType ?? item.node.kind}`);
+	const badgeInfo = runResult ? statusLabel(runResult.status) : undefined;
+	card.setAttribute('aria-label', `${item.node.name}, ${item.node.resourceType ?? item.node.kind}${badgeInfo ? `, ${badgeInfo.text}` : ''}`);
 
 	if (state.mode === 'visual') {
 		const top = el('div', 'cf-node-top');
 		top.append(el('span', 'cf-provider-tag', providerDisplayName(item.provider)));
-		top.append(el('span', 'cf-kind-tag', item.node.kind));
+		if (badgeInfo && runResult) {
+			top.append(el('span', `cf-status-badge cf-badge-${runResult.status}`, `${badgeInfo.icon} ${badgeInfo.text}`));
+		} else {
+			top.append(el('span', 'cf-kind-tag', item.node.kind));
+		}
 		card.append(top);
 		card.append(el('div', 'cf-node-name', item.node.name));
 		card.append(el('div', 'cf-node-type cf-mono', item.node.resourceType ?? item.node.label));
 	} else {
 		const head = el('div', 'cf-tech-head');
 		head.append(el('span', 'cf-provider-tag', providerDisplayName(item.provider)));
-		head.append(el('span', 'cf-kind-tag', item.node.kind));
+		if (badgeInfo && runResult) {
+			head.append(el('span', `cf-status-badge cf-badge-${runResult.status}`, `${badgeInfo.icon} ${badgeInfo.text}`));
+		} else {
+			head.append(el('span', 'cf-kind-tag', item.node.kind));
+		}
 		card.append(head);
 		card.append(el('div', 'cf-node-name', item.node.name));
 		card.append(el('div', 'cf-node-type cf-mono', item.node.resourceType ?? item.node.label));
@@ -759,6 +850,11 @@ function renderInspector(): HTMLElement {
 	openWs.addEventListener('click', () => openFocusedWorkspace(selected.id));
 	actions.append(openWs);
 
+	const valRes = el('button', 'cf-btn', 'Validate Resource');
+	valRes.type = 'button';
+	valRes.addEventListener('click', () => startValidation('resource', selected.id));
+	actions.append(valRes);
+
 	const openSrc = el('button', 'cf-btn', 'Open Source');
 	openSrc.type = 'button';
 	openSrc.disabled = !selected.hasSource || isStale;
@@ -772,6 +868,26 @@ function renderInspector(): HTMLElement {
 
 	summary.append(actions);
 	aside.append(summary);
+
+	const runNodeRes = currentRun?.nodeResults[selected.id];
+	if (runNodeRes) {
+		const runSec = el('div', 'cf-inspector-section');
+		const info = statusLabel(runNodeRes.status);
+		runSec.append(el('h3', 'cf-section-title', `Validation: ${info.icon} ${info.text}`));
+		if (runNodeRes.reason) {
+			runSec.append(el('p', 'cf-muted', runNodeRes.reason));
+		}
+		for (const finding of runNodeRes.findings) {
+			const card = el('div', `cf-diag cf-diag-${finding.severity}`);
+			card.append(
+				el('div', 'cf-diag-head cf-mono', `${finding.code} · ${finding.severity}`),
+				el('div', 'cf-diag-msg', finding.message),
+				el('div', 'cf-muted', finding.remediation)
+			);
+			runSec.append(card);
+		}
+		aside.append(runSec);
+	}
 
 	aside.append(renderDepListSection('Upstream dependencies', upstream, false));
 	aside.append(renderDepListSection('Downstream dependents', downstream, false));
@@ -1085,6 +1201,13 @@ function renderFocusedWorkspace(selected: CanvasNodeSummary): HTMLElement {
 	if (graph) {
 		actions.append(el('span', 'cf-pill cf-mono', `rev ${graph.sourceRevision.slice(0, 8)}`));
 	}
+	const prereqCount = graph ? computePrerequisiteScope(graph, selected.id).length : 1;
+	const validateResBtn = el('button', 'cf-btn', `Validate Resource (${prereqCount})`);
+	validateResBtn.type = 'button';
+	validateResBtn.title = `Validate ${selected.name} and its ${Math.max(0, prereqCount - 1)} upstream prerequisite(s)`;
+	validateResBtn.addEventListener('click', () => startValidation('resource', selected.id));
+	actions.append(validateResBtn);
+
 	const openSrc = el('button', 'cf-btn cf-btn-primary', 'Advanced (Open Source)');
 	openSrc.type = 'button';
 	openSrc.disabled = !selected.hasSource || isStale;
@@ -1239,6 +1362,25 @@ function renderFocusedWorkspace(selected: CanvasNodeSummary): HTMLElement {
 			rightPane.append(el('p', 'cf-muted', 'HCL draft preview is available for schema-backed Azure networking resources. Use Advanced (Open Source) for native Terraform source.'));
 		}
 	} else if (workspaceResultsTab === 'findings') {
+		const runRes = currentRun?.nodeResults[selected.id];
+		if (runRes) {
+			const info = statusLabel(runRes.status);
+			const sec = el('div', 'cf-inspector-section');
+			sec.append(el('h3', 'cf-section-title', `Runner result: ${info.icon} ${info.text}`));
+			if (runRes.reason) {
+				sec.append(el('p', 'cf-muted', runRes.reason));
+			}
+			for (const finding of runRes.findings) {
+				const item = el('div', `cf-diag cf-diag-${finding.severity}`);
+				item.append(
+					el('div', 'cf-diag-head cf-mono', `${finding.code} · ${finding.severity}`),
+					el('div', 'cf-diag-msg', finding.message),
+					el('div', 'cf-muted', finding.remediation)
+				);
+				sec.append(item);
+			}
+			rightPane.append(sec);
+		}
 		if (rendered && rendered.diagnostics.length > 0) {
 			const diagSec = el('div', 'cf-inspector-section');
 			diagSec.append(el('h3', 'cf-section-title', `Draft schema checks (${rendered.diagnostics.length})`));
@@ -1279,6 +1421,94 @@ function renderFocusedWorkspace(selected: CanvasNodeSummary): HTMLElement {
 	return overlay;
 }
 
+function renderTimeline(): HTMLElement {
+	const panel = el('section', 'cf-timeline');
+	panel.setAttribute('aria-label', 'Runner Timeline');
+
+	const head = el('div', 'cf-timeline-header');
+	const titleGroup = el('div', 'cf-header-group');
+	titleGroup.append(el('strong', undefined, 'Runner Timeline'));
+	if (currentRun) {
+		titleGroup.append(
+			el('span', 'cf-pill cf-mono', `${currentRun.runId} · ${currentRun.scope}`),
+			el('span', 'cf-pill', `${currentRun.analyzedNodeIds.length} resource(s) · ${currentRun.coverage} coverage`)
+		);
+		if (currentRun.previousRunId) {
+			titleGroup.append(el('span', 'cf-muted', `rerun of ${currentRun.previousRunId}`));
+		}
+		if (currentRun.stale) {
+			titleGroup.append(el('span', 'cf-pill cf-pill-warn', 'Stale revision'));
+		}
+	}
+	head.append(titleGroup);
+
+	const actions = el('div', 'cf-header-group');
+	const runBtn = el('button', 'cf-btn', currentRun ? 'Rerun' : 'Validate Architecture');
+	runBtn.type = 'button';
+	runBtn.addEventListener('click', () => startValidation('architecture'));
+	actions.append(runBtn);
+
+	if (currentRun && currentRun.outcome !== 'cancelled') {
+		const cancelBtn = el('button', 'cf-btn', 'Cancel Run');
+		cancelBtn.type = 'button';
+		cancelBtn.addEventListener('click', () => cancelActiveRun());
+		actions.append(cancelBtn);
+	}
+
+	const closeBtn = el('button', 'cf-btn', 'Close');
+	closeBtn.type = 'button';
+	closeBtn.addEventListener('click', () => {
+		timelineOpen = false;
+		render();
+		applyViewportTransform();
+	});
+	actions.append(closeBtn);
+	head.append(actions);
+	panel.append(head);
+
+	if (!currentRun) {
+		panel.append(el('p', 'cf-empty-note', 'No validation run yet. Click Validate Architecture or Validate Resource to run deterministic offline checks.'));
+		return panel;
+	}
+
+	const body = el('div', 'cf-timeline-body');
+	const stagesCol = el('div', 'cf-timeline-stages');
+	for (const stage of currentRun.stages) {
+		const card = el('div', 'cf-stage-card');
+		const row = el('div', 'cf-block-header');
+		row.append(el('strong', undefined, stage.label), el('span', 'cf-mono cf-muted', `${stage.status} · ${stage.durationMs}ms`));
+		card.append(row, el('span', 'cf-muted', stage.detail));
+		stagesCol.append(card);
+	}
+	for (const note of currentRun.coverageNotes) {
+		stagesCol.append(el('p', 'cf-muted', note));
+	}
+	body.append(stagesCol);
+
+	const eventsCol = el('div', 'cf-timeline-events');
+	for (const ev of currentRun.events) {
+		const row = el('div', 'cf-event-row');
+		row.append(
+			el('span', 'cf-mono cf-muted', `#${ev.sequence}`),
+			el('span', 'cf-mono', ev.stage),
+			el('span', 'cf-mono cf-muted', ev.status)
+		);
+		if (ev.nodeId) {
+			const link = el('button', 'cf-event-link', ev.message);
+			link.type = 'button';
+			const targetId = ev.nodeId;
+			link.addEventListener('click', () => selectNode(targetId, { focusInCanvas: true }));
+			row.append(link);
+		} else {
+			row.append(el('span', undefined, ev.message));
+		}
+		eventsCol.append(row);
+	}
+	body.append(eventsCol);
+	panel.append(body);
+	return panel;
+}
+
 function render(): void {
 	root.dataset.theme = state.theme;
 	root.dataset.mode = state.mode;
@@ -1300,6 +1530,9 @@ function render(): void {
 	const selected = nodeById(state.selectedId);
 	if (state.focusedWorkspaceOpen && selected) {
 		root.append(renderFocusedWorkspace(selected));
+		if (timelineOpen) {
+			root.append(renderTimeline());
+		}
 		return;
 	}
 
@@ -1312,6 +1545,9 @@ function render(): void {
 		body.append(renderInspector());
 	}
 	root.append(body);
+	if (timelineOpen) {
+		root.append(renderTimeline());
+	}
 }
 
 // Keyboard shortcuts: / (search), ArrowUp/ArrowDown (cycle resources), Enter (open resource),
@@ -1374,6 +1610,9 @@ window.addEventListener('message', event => {
 			graph = message.graph;
 			state = message.viewState;
 			notice = message.notice;
+			currentRun = currentRun && currentRun.architectureId === graph.architectureId
+				? syncRunWithRevision(currentRun, graph.sourceRevision)
+				: undefined;
 			rebuildProjection();
 			render();
 			fitGraph(false);
@@ -1389,9 +1628,16 @@ window.addEventListener('message', event => {
 		case 'empty':
 			graph = undefined;
 			projection = undefined;
+			currentRun = undefined;
 			notice = null;
 			emptyMessage = message.message;
 			render();
+			break;
+		case 'runValidation':
+			startValidation(message.scope, message.nodeId);
+			break;
+		case 'cancelValidation':
+			cancelActiveRun();
 			break;
 	}
 });

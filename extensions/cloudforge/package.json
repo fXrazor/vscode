@@ -86,6 +86,18 @@
 				"title": "%command.openCanvas%",
 				"category": "%displayName%",
 				"icon": "$(type-hierarchy)"
+			},
+			{
+				"command": "cloudforge.validateArchitecture",
+				"title": "%command.validateArchitecture%",
+				"category": "%displayName%",
+				"icon": "$(check-all)"
+			},
+			{
+				"command": "cloudforge.cancelValidation",
+				"title": "%command.cancelValidation%",
+				"category": "%displayName%",
+				"icon": "$(debug-stop)"
 			}
 		],
 		"views": {
@@ -159,6 +171,11 @@
 					"command": "cloudforge.openCanvas",
 					"when": "view == cloudforge.resources",
 					"group": "navigation@1"
+				},
+				{
+					"command": "cloudforge.validateArchitecture",
+					"when": "view == cloudforge.resources",
+					"group": "navigation@2"
 				}
 			],
 			"view/item/context": [

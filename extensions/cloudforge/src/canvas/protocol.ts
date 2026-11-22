@@ -86,6 +86,14 @@ export type ExtensionToWebviewMessage =
 	| {
 		readonly type: 'empty';
 		readonly message: string;
+	}
+	| {
+		readonly type: 'runValidation';
+		readonly scope: 'architecture' | 'resource';
+		readonly nodeId?: string;
+	}
+	| {
+		readonly type: 'cancelValidation';
 	};
 
 export type WebviewToExtensionMessage =

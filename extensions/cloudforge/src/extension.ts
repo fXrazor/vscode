@@ -517,6 +517,17 @@ export function activate(context: ExtensionContext): void {
 		const graph = provider.getGraph();
 		canvas.show(graph ? toCanvasSnapshot(graph, currentArchitectureName) : undefined, false);
 	}));
+	context.subscriptions.push(commands.registerCommand('cloudforge.validateArchitecture', () => {
+		const graph = provider.getGraph();
+		if (!graph) {
+			void window.showInformationMessage(l10n.t('Open an architecture before running validation.'));
+			return;
+		}
+		canvas.triggerValidation(toCanvasSnapshot(graph, currentArchitectureName), 'architecture');
+	}));
+	context.subscriptions.push(commands.registerCommand('cloudforge.cancelValidation', () => {
+		canvas.cancelValidation();
+	}));
 	let opening: Promise<void> | undefined;
 	context.subscriptions.push(commands.registerCommand('cloudforge.openWorkspace', () => {
 		return opening ??= openWorkspace(provider, treeView, (loaded, architectureName) => {

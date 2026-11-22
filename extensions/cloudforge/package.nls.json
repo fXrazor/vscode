@@ -15,6 +15,8 @@
 	"command.removeRepository": "Remove from Project",
 	"command.cloneRepositoryAgain": "Clone Again",
 	"command.openCanvas": "Open Architecture Canvas",
+	"command.validateArchitecture": "Validate Architecture",
+	"command.cancelValidation": "Cancel Validation Run",
 	"view.projects": "CloudForge Project",
 	"view.projects.welcome": "Clone a repository into a CloudForge project:\n[GitHub](command:cloudforge.cloneRepository?%5B%22github%22%5D)\n[GitLab](command:cloudforge.cloneRepository?%5B%22gitlab%22%5D)\n[Bitbucket](command:cloudforge.cloneRepository?%5B%22bitbucket%22%5D)\n[Any Git URL](command:cloudforge.cloneRepository?%5B%22url%22%5D)\nOr [create a project](command:cloudforge.createProject).",
 	"view.projects.emptyProject": "This project has no repos yet. Clone one into its repos folder:\n[GitHub](command:cloudforge.cloneRepository?%5B%22github%22%5D)\n[GitLab](command:cloudforge.cloneRepository?%5B%22gitlab%22%5D)\n[Bitbucket](command:cloudforge.cloneRepository?%5B%22bitbucket%22%5D)\n[Any Git URL](command:cloudforge.cloneRepository?%5B%22url%22%5D)\nTo use a repo you already have, add its folder to this window and CloudForge offers to import its Terraform."

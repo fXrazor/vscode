@@ -124,6 +124,11 @@ html, body {
 	border-color: color-mix(in srgb, var(--cf-warn) 45%, transparent);
 }
 
+.cf-pill-err {
+	color: var(--cf-err);
+	border-color: color-mix(in srgb, var(--cf-err) 50%, transparent);
+}
+
 .cf-segmented {
 	display: inline-flex;
 	border: 1px solid var(--cf-border);
@@ -837,6 +842,113 @@ html, body {
 	line-height: 1.5;
 	overflow: auto;
 	white-space: pre;
+}
+
+.cf-edge.edge-blocked {
+	stroke: var(--cf-err);
+	stroke-dasharray: 4 3;
+	stroke-width: 2;
+}
+
+.cf-edge.edge-passed {
+	stroke: color-mix(in srgb, var(--cf-ok) 75%, var(--cf-edge));
+}
+
+.cf-status-badge {
+	font-size: 10px;
+	font-weight: 600;
+	padding: 1px 6px;
+	border-radius: 999px;
+	border: 1px solid var(--cf-border);
+}
+
+.cf-badge-success { color: var(--cf-ok); border-color: color-mix(in srgb, var(--cf-ok) 50%, transparent); }
+.cf-badge-warning { color: var(--cf-warn); border-color: color-mix(in srgb, var(--cf-warn) 50%, transparent); }
+.cf-badge-failed { color: var(--cf-err); border-color: color-mix(in srgb, var(--cf-err) 55%, transparent); }
+.cf-badge-skipped { color: var(--cf-muted); }
+.cf-badge-running { color: var(--cf-accent); border-color: var(--cf-accent); }
+.cf-badge-pending { color: var(--cf-muted); }
+
+.cf-timeline {
+	height: 210px;
+	flex-shrink: 0;
+	display: flex;
+	flex-direction: column;
+	background: var(--cf-surface);
+	border-top: 1px solid var(--cf-border);
+}
+
+.cf-timeline-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+	padding: 6px 12px;
+	border-bottom: 1px solid var(--cf-border);
+	font-size: 12px;
+}
+
+.cf-timeline-body {
+	flex: 1;
+	min-height: 0;
+	display: grid;
+	grid-template-columns: 300px 1fr;
+}
+
+.cf-timeline-stages {
+	overflow: auto;
+	padding: 8px 12px;
+	border-right: 1px solid var(--cf-border);
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.cf-stage-card {
+	padding: 6px 8px;
+	border-radius: 6px;
+	border: 1px solid var(--cf-border);
+	background: var(--cf-card);
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	font-size: 12px;
+}
+
+.cf-timeline-events {
+	overflow: auto;
+	padding: 6px 12px;
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+}
+
+.cf-event-row {
+	display: grid;
+	grid-template-columns: 36px 96px 86px 1fr;
+	gap: 8px;
+	align-items: center;
+	font-size: 11.5px;
+	padding: 3px 4px;
+	border-radius: 4px;
+}
+
+.cf-event-row:hover {
+	background: var(--cf-accent-soft);
+}
+
+.cf-event-link {
+	background: transparent;
+	border: 0;
+	padding: 0;
+	text-align: left;
+	color: var(--cf-fg);
+	cursor: pointer;
+	font-size: 11.5px;
+}
+
+.cf-event-link:hover {
+	text-decoration: underline;
 }
 
 button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible, .cf-stage:focus-visible {

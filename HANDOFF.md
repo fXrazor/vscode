@@ -513,3 +513,22 @@ Implemented on `fxrazor/continue-project-handoff-review` in `E:\Orca\CloudForge-
 | Live Edge Playwright verification of compiled Webview bundle | **13/13 passed**, **0 console errors**, **0 page errors**; visually inspected updated [canvas-focused-workspace.png](file:///C:/Users/dalep/.gemini/antigravity-cli/brain/b485a25a-5b7f-463d-a740-47981a091ce1/scratch/canvas-verify-out/canvas-focused-workspace.png). |
 
 **Remaining for Phase 2 cross-repo completion:** Rust owner exposes the scoped `catalogue` schema lookup and `draft::render` service capabilities in `Z:\CloudForge` so live provider snapshots replace/augment the bundled offline Azure networking set.
+
+### Phase 3 (Desktop): Resource & Architecture Validation Runner (2026-11-22)
+
+Implemented on `fxrazor/continue-project-handoff-review` in `E:\Orca\CloudForge-Code\dace` (on top of `28fd23db9fd`, with `28fd23db9fd` pushed to `origin/main`) with zero edits to `extensions/cloudforge/studio/**` or `Z:\CloudForge`. Follows [runner-view-design.md](docs/cloudforge/runner-view-design.md).
+
+- **Deterministic offline runner ([validationRunner.ts](extensions/cloudforge/src/canvas/validationRunner.ts)):** executes the three fixed stages (`Read Architecture`, `Map Dependencies`, `Static Checks`) over one immutable captured `sourceRevision`; detects dependency cycles via Tarjan SCC (`DEPENDENCY_CYCLE`); blocks only dependent downstream work (`skipped` with exact `blockedBy` causes) while independent branches continue executing; integrates Phase 2 schema draft checks and reports explicit `partial` coverage whenever the static graph is partial or a resource type lacks a bundled provider schema (`SCHEMA_UNAVAILABLE`); supports scoped `Validate Resource` (`computePrerequisiteScope`), linked rerun attempts (`attempt`, `previousRunId`), terminal `cancelValidationRun`, and `syncRunWithRevision` stale detection.
+- **Workbench & Canvas Runner UI ([protocol.ts](extensions/cloudforge/src/canvas/protocol.ts), [canvasPanel.ts](extensions/cloudforge/src/canvas/canvasPanel.ts), [extension.ts](extensions/cloudforge/src/extension.ts), [package.json](extensions/cloudforge/package.json), [package.nls.json](extensions/cloudforge/package.nls.json), [canvas-src/index.ts](extensions/cloudforge/canvas-src/index.ts), [canvas-src/canvas.css](extensions/cloudforge/canvas-src/canvas.css)):** adds **CloudForge: Validate Architecture** (`cloudforge.validateArchitecture`) and **CloudForge: Cancel Validation Run** (`cloudforge.cancelValidation`) in Command Palette and `CloudForge Graph` title bar; displays accessible icon+text status pills on canvas nodes, blocked/passed edge highlighting, a dockable **Runner Timeline** (3 stage cards, coverage notes, Cancel/Rerun, and clickable chronological event rows), and scoped **Validate Resource** inside the Focused Resource Workspace and inspector.
+
+| Check (newly run in `E:\Orca\CloudForge-Code\dace`) | Result |
+| --- | --- |
+| `CLOUDFORGE_REPO=Z:\CloudForge node --test extensions/cloudforge/test/*.test.ts` | **29/29 passed**, 0 skipped (includes 4 new [validationRunner.test.ts](extensions/cloudforge/test/validationRunner.test.ts) suites). |
+| `tsc --noEmit` (TS 7) & `tsc6 --noEmit` (TS 6) on `extensions/cloudforge/tsconfig.json` and `extensions/cloudforge/canvas-src/tsconfig.json` | Passed with 0 errors. |
+| `node extensions/cloudforge/esbuild.mts` & `node extensions/cloudforge/esbuild.webview.mts` | Built cleanly (`dist/extension.js`, `media/canvas.js`, `media/canvas-style.css`). |
+| `node build/oxlint.ts` & `node --experimental-strip-types build/hygiene.ts` on all Phase 3 files | Passed with 0 errors after formatting `validationRunner.ts`. |
+| Live Edge Playwright verification of compiled Webview bundle | **14/14 passed**, **0 console errors**, **0 page errors**; visually inspected [canvas-runner-timeline.png](file:///C:/Users/dalep/.gemini/antigravity-cli/brain/b485a25a-5b7f-463d-a740-47981a091ce1/scratch/canvas-verify-out/canvas-runner-timeline.png). |
+
+**Next actions:**
+- Rebuild the Windows x64 installer from `main` to package Phases 1–3 together for installed-app testing.
+- Cross-repo (Rust `Z:\CloudForge`): expose scoped `catalogue` schema/draft rendering (Phase 2) and background cursor-based validation runs (Phase 3) in the canonical service protocol before starting Phase 4 guarded authoring/save.
