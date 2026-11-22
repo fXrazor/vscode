@@ -29,7 +29,8 @@ interface CloudForgeCallFailure {
 type CloudForgeCallResult = CloudForgeCallSuccess | CloudForgeCallFailure;
 type CloudForgeServiceMethod =
 	| 'chooseTerraformRoot' | 'selectArchitecture' | 'readArchitecture'
-	| 'startValidationRun' | 'pollValidationRun' | 'cancelValidationRun';
+	| 'startValidationRun' | 'pollValidationRun' | 'cancelValidationRun'
+	| 'previewDraftSave' | 'applyDraftSave';
 type CloudForgeCatalogueMethod = 'listCatalogueSnapshots' | 'listCatalogueTypes' | 'getResourceFormSchema' | 'renderResourceDraft';
 type CloudForgeProjectMethod = 'createProject' | 'openProject' | 'grantProject' | 'forgetProjectAccess' | 'createWorkspaceFile' | 'inspectRepository' | 'importRepository' | 'removeRepository' | 'installGit';
 
@@ -274,7 +275,8 @@ CommandsRegistry.registerCommand('_cloudforge.callService', async (accessor, met
 	}
 	if (
 		method !== 'chooseTerraformRoot' && method !== 'selectArchitecture' && method !== 'readArchitecture' &&
-		method !== 'startValidationRun' && method !== 'pollValidationRun' && method !== 'cancelValidationRun'
+		method !== 'startValidationRun' && method !== 'pollValidationRun' && method !== 'cancelValidationRun' &&
+		method !== 'previewDraftSave' && method !== 'applyDraftSave'
 	) {
 		return failure('INVALID_PARAMS', 'The CloudForge request is invalid.');
 	}
@@ -296,6 +298,12 @@ CommandsRegistry.registerCommand('_cloudforge.callService', async (accessor, met
 		case 'readArchitecture':
 		case 'startValidationRun':
 			if (!isOpaqueId(params.architectureId) || params.architectureId !== activeArchitectureId || (params.expectedSourceRevision !== undefined && (typeof params.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(params.expectedSourceRevision)))) {
+				return failure('SCOPE_DENIED', 'The requested architecture is not active in this window.');
+			}
+			break;
+		case 'previewDraftSave':
+		case 'applyDraftSave':
+			if (!isOpaqueId(params.architectureId) || params.architectureId !== activeArchitectureId || typeof params.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(params.expectedSourceRevision)) {
 				return failure('SCOPE_DENIED', 'The requested architecture is not active in this window.');
 			}
 			break;

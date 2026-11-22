@@ -52,7 +52,8 @@ export type CloudForgeServiceMethod =
 	| 'createProject' | 'openProject' | 'grantProject' | 'forgetProjectAccess' | 'createWorkspaceFile'
 	| 'inspectRepository' | 'importRepository' | 'removeRepository' | 'installGit'
 	| 'listCatalogueSnapshots' | 'listCatalogueTypes' | 'getResourceFormSchema' | 'renderResourceDraft'
-	| 'startValidationRun' | 'pollValidationRun' | 'cancelValidationRun';
+	| 'startValidationRun' | 'pollValidationRun' | 'cancelValidationRun'
+	| 'previewDraftSave' | 'applyDraftSave';
 
 export class CloudForgeServiceError extends Error {
 	constructor(readonly code: string, readonly kind?: string) {

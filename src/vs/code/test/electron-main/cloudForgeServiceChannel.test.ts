@@ -367,6 +367,13 @@ suite('CloudForgeServiceChannel', () => {
 		assert.strictEqual(validateCloudForgeServiceParams('pollValidationRun', { workspaceId, runId: `${workspaceId}-run-1`, maxEvents: 513 }), undefined);
 		assert.ok(validateCloudForgeServiceParams('cancelValidationRun', { workspaceId, runId: `${workspaceId}-run-1` }));
 
+		const draftBase = { workspaceId, architectureId: `${workspaceId}-architecture-1`, expectedSourceRevision: sha256, fileName: 'main.tf', contents: 'resource "x" "y" {}\n' };
+		assert.ok(validateCloudForgeServiceParams('previewDraftSave', draftBase));
+		assert.strictEqual(validateCloudForgeServiceParams('previewDraftSave', { ...draftBase, fileName: '../escape.tf' }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('previewDraftSave', { ...draftBase, fileName: 'secrets.tfvars' }), undefined);
+		assert.ok(validateCloudForgeServiceParams('applyDraftSave', { ...draftBase, previewToken: 'save-0123456789abcdef0123456789abcdef' }));
+		assert.strictEqual(validateCloudForgeServiceParams('applyDraftSave', { ...draftBase, previewToken: 'save-0123', extra: true }), undefined);
+
 		const { broker, call } = createBroker([contosoWindow], { reply: () => { throw new CloudForgeServiceError('SCHEMA_UNAVAILABLE'); } });
 		const schemaErr = await call(1, 'listCatalogueTypes', { key });
 		assert.deepStrictEqual(schemaErr, { ok: false, error: { code: 'SCHEMA_UNAVAILABLE', message: 'The requested provider schema snapshot or resource type is not available.' } });

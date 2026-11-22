@@ -35,7 +35,8 @@ const cloudForgeMethods: ReadonlySet<string> = new Set<CloudForgeServiceMethod>(
 	'createProject', 'openProject', 'grantProject', 'forgetProjectAccess', 'createWorkspaceFile',
 	'inspectRepository', 'importRepository', 'removeRepository', 'installGit',
 	'listCatalogueSnapshots', 'listCatalogueTypes', 'getResourceFormSchema', 'renderResourceDraft',
-	'startValidationRun', 'pollValidationRun', 'cancelValidationRun'
+	'startValidationRun', 'pollValidationRun', 'cancelValidationRun',
+	'previewDraftSave', 'applyDraftSave'
 ]);
 
 /** The service allows `installGit` 10 minutes; the broker waits a little longer for its reply. */
@@ -46,6 +47,7 @@ const maxRemoteBytes = 2048;
 const maxSelections = 32;
 const maxWorkspaceFolders = 1024;
 const maxPollEvents = 512;
+const maxDraftBytes = 512 * 1024;
 
 const serviceErrorMessages: Readonly<Record<string, string>> = {
 	INVALID_PARAMS: 'The CloudForge request is invalid.',
@@ -335,6 +337,46 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 				return undefined;
 			}
 			return { workspaceId: value.workspaceId, runId: value.runId };
+		}
+		case 'previewDraftSave': {
+			if (
+				!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'expectedSourceRevision', 'fileName', 'contents']) ||
+				!isOpaqueId(value.workspaceId) ||
+				!isOpaqueId(value.architectureId) ||
+				typeof value.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(value.expectedSourceRevision) ||
+				!isPathComponent(value.fileName) || value.fileName.startsWith('.') || !value.fileName.toLowerCase().endsWith('.tf') || value.fileName.length <= 3 ||
+				typeof value.contents !== 'string' || Buffer.byteLength(value.contents, 'utf8') > maxDraftBytes
+			) {
+				return undefined;
+			}
+			return {
+				workspaceId: value.workspaceId,
+				architectureId: value.architectureId,
+				expectedSourceRevision: value.expectedSourceRevision,
+				fileName: value.fileName,
+				contents: value.contents
+			};
+		}
+		case 'applyDraftSave': {
+			if (
+				!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'expectedSourceRevision', 'fileName', 'contents', 'previewToken']) ||
+				!isOpaqueId(value.workspaceId) ||
+				!isOpaqueId(value.architectureId) ||
+				typeof value.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(value.expectedSourceRevision) ||
+				!isPathComponent(value.fileName) || value.fileName.startsWith('.') || !value.fileName.toLowerCase().endsWith('.tf') || value.fileName.length <= 3 ||
+				typeof value.contents !== 'string' || Buffer.byteLength(value.contents, 'utf8') > maxDraftBytes ||
+				!isOpaqueId(value.previewToken)
+			) {
+				return undefined;
+			}
+			return {
+				workspaceId: value.workspaceId,
+				architectureId: value.architectureId,
+				expectedSourceRevision: value.expectedSourceRevision,
+				fileName: value.fileName,
+				contents: value.contents,
+				previewToken: value.previewToken
+			};
 		}
 	}
 }
