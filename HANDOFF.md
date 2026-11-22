@@ -549,3 +549,29 @@ Implemented on `fxrazor/continue-project-handoff-review` in `E:\Orca\CloudForge-
 | Live Edge Playwright verification of compiled Webview bundle | **20/20 passed**, **0 console errors**, **0 page errors** (verifies `+ Add`, Visual↔Technical persistence, `Duplicate`, `Delete`, atomic `Undo`, **Review Generated Terraform HCL** modal, `Escape` close, and `Revert Draft`; visually inspected `canvas-phase4-hcl-review.png`). |
 
 **Remaining for Phase 4 cross-repo completion:** Rust owner implements revision-checked, previewed, atomic guarded Terraform save (`saveDraft` / guarded patch) in `Z:\CloudForge` and exposes it through the canonical service protocol before the desktop enables writing drafts to disk.
+
+### Auto-open project architecture & Stage 3/4 service broker wiring (2026-11-22)
+
+Implemented on `fxrazor/auto-open-and-stage3-4` in isolated worktree `Z:\CloudForge-Code\.claude\worktrees\auto-open-stage3-4` (rebased onto `86cd0782e31` and fast-forward merged into local `main` at `92625488807`). Coordinates with Rust `Z:\CloudForge` `main` at `3e17be1` (Stage 3 catalogue/draft RPCs `3a9130c` and Stage 4 offline validation runner RPCs `e2332d0`).
+
+- **Auto-open architecture on project load:**
+  - Added pure `selectDefaultArchitecture(project, lastArchitectureName?)` in [model.ts](extensions/cloudforge/src/project/model.ts): skips architectures backed by `missing`/`changed`/`notInWorkspace` repos, prefers the last-opened architecture by display name (case-insensitive across per-grant opaque ID changes), and falls back to the first available architecture.
+  - Updated [controller.ts](extensions/cloudforge/src/project/controller.ts) to persist `cloudforge.lastArchitectureName` in `context.workspaceState` whenever an architecture opens (click or post-import) and automatically call `openArchitecture(...)` on initial `doConnect()`, landing reopened CloudForge projects directly on the Architecture Canvas tab without re-yanking focus on subsequent folder refreshes.
+  - Added `workspaceContains:*.tf` and `workspaceContains:*.tf.json` to `activationEvents` in [package.json](extensions/cloudforge/package.json).
+- **Stage 3 & Stage 4 Electron-main broker + Workbench bridge wiring:**
+  - Extended [cloudForgeService.ts](src/vs/code/electron-main/cloudForgeService.ts) with Stage 3 (`listCatalogueSnapshots`, `listCatalogueTypes`, `getResourceFormSchema`, `renderResourceDraft`) and Stage 4 (`startValidationRun`, `pollValidationRun`, `cancelValidationRun`) methods and `-32011` (`SCHEMA_UNAVAILABLE`) error mapping.
+  - Added strict parameter validation (including `SnapshotKey`, `DraftBody`, `expectedSourceRevision`, and `maxEvents` 1..=512; rejecting unknown fields and path parameters) in [cloudForgeServiceChannel.ts](src/vs/code/electron-main/cloudForgeServiceChannel.ts).
+  - Forwarded Stage 3 read-only catalogue methods and active-scope-checked Stage 4 validation methods through `_cloudforge.callService` in [cloudForgeService.contribution.ts](src/vs/workbench/electron-browser/cloudForgeService.contribution.ts).
+  - Added tests in [projectModel.test.ts](extensions/cloudforge/test/projectModel.test.ts) and [cloudForgeServiceChannel.test.ts](src/vs/code/test/electron-main/cloudForgeServiceChannel.test.ts).
+
+| Check (newly run on `92625488807` in `Z:\CloudForge-Code`) | Result |
+| --- | --- |
+| `node --experimental-strip-types build/hygiene.ts` & `node build/oxlint.ts` (all 8 changed files) | Passed (0 errors, 0 warnings). |
+| `node extensions/cloudforge/esbuild.mts` | Passed. |
+| `CLOUDFORGE_REPO=E:\Orca\CloudForge\umibozu node --test extensions/cloudforge/test/*.test.ts` | **33/33 passed**, 0 skipped. |
+| `tsc -p extensions/cloudforge/tsconfig.json --noEmit` & `tsc -p src/tsconfig.json --noEmit --skipLibCheck` | Passed (0 errors). |
+| `node build/next/index.ts transpile` & `scripts\test.bat --run src/vs/code/test/electron-main/cloudForgeServiceChannel.test.ts --run src/vs/code/test/electron-main/cloudForgeService.test.ts` | **41/41 Electron-main tests passed**. |
+
+**Remaining gaps & next actions:**
+- Not run: full Windows x64 installer rebuild packaging the new Rust service (`e2332d0`) together with this desktop revision (`92625488807`) and live installed smoke verifying auto-open on project reopen.
+- Connect the Architecture Canvas Webview (`canvasPanel.ts` / `canvas-src/index.ts`) to call the newly wired Stage 3 (`getResourceFormSchema` / `renderResourceDraft`) and Stage 4 (`startValidationRun` / `pollValidationRun` / `cancelValidationRun`) RPCs against the live Rust service.
