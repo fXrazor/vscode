@@ -39,6 +39,19 @@ import {
 	type ValidationRun
 } from '../src/canvas/validationRunner';
 import {
+	applyDraftEdit,
+	computeDraftChangeSummary,
+	createDraftDocument,
+	generateTerraformPreview,
+	projectDraftGraph,
+	redoDraftEdit,
+	revertDraftDocument,
+	undoDraftEdit,
+	uniqueResourceName,
+	type DraftDocument,
+	type DraftEdit
+} from '../src/canvas/draftDocument';
+import {
 	defaultCanvasViewState,
 	type CanvasGraphSnapshot,
 	type CanvasGridMode,
@@ -62,7 +75,16 @@ const vscode = acquireVsCodeApi<CanvasViewState>();
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
-let graph: CanvasGraphSnapshot | undefined;
+const ADDABLE_RESOURCE_TYPES: readonly { readonly typeName: string; readonly shortLabel: string; readonly defaultName: string }[] = [
+	{ typeName: 'azurerm_resource_group', shortLabel: 'Resource Group', defaultName: 'rg' },
+	{ typeName: 'azurerm_virtual_network', shortLabel: 'Virtual Network', defaultName: 'vnet' },
+	{ typeName: 'azurerm_subnet', shortLabel: 'Subnet', defaultName: 'subnet' },
+	{ typeName: 'azurerm_network_security_group', shortLabel: 'Network Security Group', defaultName: 'nsg' },
+	{ typeName: 'azurerm_public_ip', shortLabel: 'Public IP', defaultName: 'pip' },
+	{ typeName: 'azurerm_route_table', shortLabel: 'Route Table', defaultName: 'rt' },
+];
+
+let draftDoc: DraftDocument | undefined;
 let notice: CanvasNotice | null = null;
 let emptyMessage = 'Select an architecture in CloudForge Project or run CloudForge: Open Workspace to inspect its infrastructure graph.';
 let state: CanvasViewState = defaultCanvasViewState();
@@ -72,12 +94,23 @@ let viewport: CanvasViewport = { x: 40, y: 40, zoom: 1 };
 let dragging: { startX: number; startY: number; originX: number; originY: number } | undefined;
 let persistTimer: number | undefined;
 let lastFocusBeforeWorkspace: HTMLElement | null = null;
-const draftsByNodeId = new Map<string, ResourceDraft>();
+let lastFocusBeforeHclReview: HTMLElement | null = null;
 let activeFieldKey: { readonly blockId?: string; readonly attrName: string } | undefined;
 let workspaceResultsTab: 'findings' | 'preview' | 'outputs' = 'preview';
 let nextDraftBlockId = 1;
+let nextDraftNodeSeq = 1;
 let currentRun: ValidationRun | undefined;
 let timelineOpen = false;
+let hclReviewOpen = false;
+let connectFeedback: string | undefined;
+
+function activeGraph(): CanvasGraphSnapshot | undefined {
+	return draftDoc ? projectDraftGraph(draftDoc) : undefined;
+}
+
+function draftsAsMap(): ReadonlyMap<string, ResourceDraft> {
+	return draftDoc ? new Map(Object.entries(draftDoc.present.drafts)) : new Map();
+}
 
 const root = document.getElementById('app')!;
 
@@ -290,29 +323,163 @@ function toggleGroupCollapsed(groupId: string): void {
 	schedulePersistViewState();
 }
 
+function commitDraftEdit(edit: DraftEdit, options?: { readonly selectId?: string | null; readonly focusInCanvas?: boolean }): boolean {
+	if (!draftDoc) {
+		return false;
+	}
+	const next = applyDraftEdit(draftDoc, edit);
+	if (next === draftDoc) {
+		return false;
+	}
+	draftDoc = next;
+	connectFeedback = undefined;
+	if (options?.selectId !== undefined) {
+		state = {
+			...state,
+			selectedId: options.selectId,
+			inspectorOpen: options.selectId !== null ? true : state.inspectorOpen,
+			focusedWorkspaceOpen: options.selectId !== null ? state.focusedWorkspaceOpen : false,
+		};
+	} else if (state.selectedId && !draftDoc.present.nodes.some(n => n.id === state.selectedId)) {
+		state = { ...state, selectedId: null, focusedWorkspaceOpen: false };
+	}
+	rebuildProjection();
+	render();
+	if (options?.selectId && options.focusInCanvas) {
+		fitNode(options.selectId);
+	} else {
+		applyViewportTransform();
+		schedulePersistViewState();
+	}
+	return true;
+}
+
+function addNewResource(typeName: string, defaultName: string): void {
+	if (!draftDoc) {
+		return;
+	}
+	const name = uniqueResourceName(draftDoc.present.nodes, defaultName);
+	const nodeId = `draft:${typeName}.${name}:${nextDraftNodeSeq++}`;
+	const node: CanvasNodeSummary = {
+		id: nodeId,
+		kind: 'resource',
+		resourceType: typeName,
+		name,
+		label: `${typeName}.${name}`,
+		hasSource: false,
+	};
+	const schema = lookupBundledSchema(node);
+	const initialDraft = schema ? createInitialDraft(node, schema, draftDoc.baseSourceRevision) : undefined;
+	commitDraftEdit({ type: 'addResource', node, initialDraft }, { selectId: nodeId, focusInCanvas: true });
+}
+
+function duplicateSelectedResource(node: CanvasNodeSummary): void {
+	if (!draftDoc) {
+		return;
+	}
+	const newName = uniqueResourceName(draftDoc.present.nodes, `${node.name}_copy`);
+	const newNodeId = `draft:${node.resourceType ?? node.kind}.${newName}:${nextDraftNodeSeq++}`;
+	commitDraftEdit(
+		{ type: 'duplicateResource', sourceNodeId: node.id, newNodeId, newName },
+		{ selectId: newNodeId, focusInCanvas: true }
+	);
+}
+
+function deleteSelectedResource(nodeId: string): void {
+	commitDraftEdit({ type: 'deleteResource', nodeId }, { selectId: null });
+}
+
+function performUndo(): void {
+	if (!draftDoc || draftDoc.past.length === 0) {
+		return;
+	}
+	draftDoc = undoDraftEdit(draftDoc);
+	connectFeedback = undefined;
+	if (state.selectedId && !draftDoc.present.nodes.some(n => n.id === state.selectedId)) {
+		state = { ...state, selectedId: null, focusedWorkspaceOpen: false };
+	}
+	rebuildProjection();
+	render();
+	applyViewportTransform();
+}
+
+function performRedo(): void {
+	if (!draftDoc || draftDoc.future.length === 0) {
+		return;
+	}
+	draftDoc = redoDraftEdit(draftDoc);
+	connectFeedback = undefined;
+	if (state.selectedId && !draftDoc.present.nodes.some(n => n.id === state.selectedId)) {
+		state = { ...state, selectedId: null, focusedWorkspaceOpen: false };
+	}
+	rebuildProjection();
+	render();
+	applyViewportTransform();
+}
+
+function performRevertDraft(): void {
+	if (!draftDoc) {
+		return;
+	}
+	draftDoc = revertDraftDocument(draftDoc);
+	connectFeedback = undefined;
+	hclReviewOpen = false;
+	if (state.selectedId && !draftDoc.present.nodes.some(n => n.id === state.selectedId)) {
+		state = { ...state, selectedId: null, focusedWorkspaceOpen: false };
+	}
+	rebuildProjection();
+	render();
+	fitGraph(false);
+}
+
+function openHclReviewModal(): void {
+	if (!draftDoc) {
+		return;
+	}
+	lastFocusBeforeHclReview = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+	hclReviewOpen = true;
+	render();
+	root.querySelector<HTMLButtonElement>('.cf-modal-close')?.focus();
+}
+
+function closeHclReviewModal(): void {
+	if (!hclReviewOpen) {
+		return;
+	}
+	hclReviewOpen = false;
+	render();
+	applyViewportTransform();
+	if (lastFocusBeforeHclReview?.isConnected) {
+		lastFocusBeforeHclReview.focus();
+	}
+}
+
 function rebuildProjection(): void {
-	if (!graph) {
+	const current = activeGraph();
+	if (!current) {
 		projection = undefined;
 		return;
 	}
-	projection = buildCanvasProjection(graph, state.mode, searchQuery, new Set(state.collapsedGroups));
+	projection = buildCanvasProjection(current, state.mode, searchQuery, new Set(state.collapsedGroups));
 }
 
 function nodeById(id: string | null): CanvasNodeSummary | undefined {
-	if (!graph || !id) {
+	const current = activeGraph();
+	if (!current || !id) {
 		return undefined;
 	}
-	return graph.nodes.find(node => node.id === id);
+	return current.nodes.find(node => node.id === id);
 }
 
 function relatedEdges(nodeId: string): { upstream: { node: CanvasNodeSummary; kind: string }[]; downstream: { node: CanvasNodeSummary; kind: string }[] } {
-	if (!graph) {
+	const current = activeGraph();
+	if (!current) {
 		return { upstream: [], downstream: [] };
 	}
-	const map = new Map(graph.nodes.map(n => [n.id, n]));
+	const map = new Map(current.nodes.map(n => [n.id, n]));
 	const upstream: { node: CanvasNodeSummary; kind: string }[] = [];
 	const downstream: { node: CanvasNodeSummary; kind: string }[] = [];
-	for (const edge of graph.edges) {
+	for (const edge of current.edges) {
 		if (edge.toId === nodeId) {
 			const src = map.get(edge.fromId);
 			if (src) {
@@ -340,14 +507,15 @@ function statusLabel(status: RunnerNodeStatus): { readonly icon: string; readonl
 }
 
 function startValidation(scope: 'architecture' | 'resource', nodeId?: string): void {
-	if (!graph) {
+	const current = activeGraph();
+	if (!current) {
 		return;
 	}
-	const previousRun = currentRun && currentRun.architectureId === graph.architectureId ? currentRun : undefined;
-	currentRun = runOfflineValidation(graph, {
+	const previousRun = currentRun && currentRun.architectureId === current.architectureId ? currentRun : undefined;
+	currentRun = runOfflineValidation(current, {
 		scope,
 		targetNodeId: nodeId,
-		drafts: draftsByNodeId,
+		drafts: draftsAsMap(),
 		lookupSchema: lookupBundledSchema,
 		renderDraft: renderDraftPreview,
 		previousRun,
@@ -370,26 +538,38 @@ function cancelActiveRun(): void {
 }
 
 function renderHeader(): HTMLElement {
+	const current = activeGraph();
+	const summary = draftDoc ? computeDraftChangeSummary(draftDoc) : undefined;
+	const hasHistory = !!draftDoc && (draftDoc.past.length > 0 || draftDoc.future.length > 0 || !!summary?.dirty);
+
 	const header = el('header', 'cf-header');
 	const left = el('div', 'cf-header-group');
-	const title = el('h1', 'cf-title', graph ? graph.architectureName : 'CloudForge Canvas');
+	const title = el('h1', 'cf-title', current ? current.architectureName : 'CloudForge Canvas');
 	left.append(title);
 
-	if (graph) {
-		left.append(el('span', 'cf-pill cf-mono', `rev ${graph.sourceRevision.slice(0, 8)}`));
-		left.append(el(
-			'span',
-			`cf-pill ${graph.status === 'partial' ? 'cf-pill-warn' : 'cf-pill-ok'}`,
-			graph.status === 'partial' ? 'Partial coverage' : 'Read-only Terraform'
-		));
+	if (current) {
+		left.append(el('span', 'cf-pill cf-mono', `rev ${current.sourceRevision.slice(0, 8)}`));
+		if (summary?.dirty) {
+			left.append(el(
+				'span',
+				'cf-pill cf-pill-warn',
+				`Unsaved draft (+${summary.added.length} / ~${summary.modified.length} / -${summary.deleted.length})`
+			));
+		} else {
+			left.append(el(
+				'span',
+				`cf-pill ${current.status === 'partial' ? 'cf-pill-warn' : 'cf-pill-ok'}`,
+				current.status === 'partial' ? 'Partial coverage' : 'Read-only Terraform'
+			));
+		}
 		if (projection) {
 			const countText = projection.hiddenByFilterOrCollapse > 0
 				? `${projection.visibleNodes} / ${projection.totalNodes} visible`
 				: `${projection.totalNodes} resource${projection.totalNodes === 1 ? '' : 's'}`;
 			left.append(el('span', 'cf-pill', countText));
 		}
-		if (graph.diagnostics.length > 0) {
-			left.append(el('span', 'cf-pill cf-pill-warn', `${graph.diagnostics.length} diagnostic${graph.diagnostics.length === 1 ? '' : 's'}`));
+		if (current.diagnostics.length > 0) {
+			left.append(el('span', 'cf-pill cf-pill-warn', `${current.diagnostics.length} diagnostic${current.diagnostics.length === 1 ? '' : 's'}`));
 		}
 		if (currentRun) {
 			const outcomeCls = currentRun.outcome === 'failed'
@@ -422,6 +602,68 @@ function renderHeader(): HTMLElement {
 
 	modeGroup.append(visualBtn, techBtn);
 	right.append(modeGroup);
+
+	// Contextual + Add Resource disclosure
+	if (current) {
+		const addDetails = el('details', 'cf-disclosure');
+		const addSummary = el('summary', 'cf-btn', '+ Add');
+		addSummary.title = 'Add a schema-backed Azure resource to the unsaved draft';
+		addDetails.append(addSummary);
+		const addMenu = el('div', 'cf-popover cf-popover-menu');
+		for (const item of ADDABLE_RESOURCE_TYPES) {
+			const btn = el('button', 'cf-menu-item');
+			btn.type = 'button';
+			btn.append(
+				el('span', 'cf-dep-name', item.shortLabel),
+				el('span', 'cf-dep-meta cf-mono', item.typeName)
+			);
+			btn.addEventListener('click', () => {
+				addDetails.open = false;
+				addNewResource(item.typeName, item.defaultName);
+			});
+			addMenu.append(btn);
+		}
+		addDetails.append(addMenu);
+		addDetails.addEventListener('keydown', event => {
+			if (event.key === 'Escape' && addDetails.open) {
+				event.preventDefault();
+				addDetails.open = false;
+				addSummary.focus();
+			}
+		});
+		right.append(addDetails);
+	}
+
+	// Contextual authoring controls: only shown when the user has unsaved draft history or changes
+	if (hasHistory && draftDoc) {
+		const undoBtn = el('button', 'cf-btn', 'Undo');
+		undoBtn.type = 'button';
+		undoBtn.disabled = draftDoc.past.length === 0;
+		undoBtn.title = draftDoc.past.length > 0 ? `Undo: ${draftDoc.past.at(-1)!.reason} (Ctrl+Z)` : 'Nothing to undo';
+		undoBtn.addEventListener('click', () => performUndo());
+
+		const redoBtn = el('button', 'cf-btn', 'Redo');
+		redoBtn.type = 'button';
+		redoBtn.disabled = draftDoc.future.length === 0;
+		redoBtn.title = draftDoc.future.length > 0 ? `Redo: ${draftDoc.future[0].reason} (Ctrl+Shift+Z)` : 'Nothing to redo';
+		redoBtn.addEventListener('click', () => performRedo());
+
+		right.append(undoBtn, redoBtn);
+
+		if (summary?.dirty) {
+			const reviewBtn = el('button', 'cf-btn', 'Review HCL');
+			reviewBtn.type = 'button';
+			reviewBtn.title = 'Inspect deterministic generated Terraform HCL preview (read-only)';
+			reviewBtn.addEventListener('click', () => openHclReviewModal());
+
+			const revertBtn = el('button', 'cf-btn cf-btn-danger', 'Revert Draft');
+			revertBtn.type = 'button';
+			revertBtn.title = 'Discard all unsaved draft edits and restore read-only Terraform baseline';
+			revertBtn.addEventListener('click', () => performRevertDraft());
+
+			right.append(reviewBtn, revertBtn);
+		}
+	}
 
 	const listBtn = el('button', 'cf-btn', 'List');
 	listBtn.type = 'button';
@@ -500,7 +742,7 @@ function renderHeader(): HTMLElement {
 
 	const validateBtn = el('button', 'cf-btn cf-btn-primary', currentRun ? 'Revalidate' : 'Validate');
 	validateBtn.type = 'button';
-	validateBtn.disabled = !graph;
+	validateBtn.disabled = !current;
 	validateBtn.title = 'Run offline architecture validation (read, dependencies, static & schema checks)';
 	validateBtn.addEventListener('click', () => startValidation('architecture'));
 
@@ -525,6 +767,7 @@ function renderHeader(): HTMLElement {
 }
 
 function renderNoticeBanner(): HTMLElement | null {
+	const current = activeGraph();
 	if (notice) {
 		const banner = el('div', `cf-banner cf-banner-${notice.kind}`);
 		banner.setAttribute('role', 'alert');
@@ -535,7 +778,7 @@ function renderNoticeBanner(): HTMLElement | null {
 		banner.append(refreshBtn);
 		return banner;
 	}
-	if (graph && graph.status === 'partial') {
+	if (current && current.status === 'partial') {
 		const banner = el('div', 'cf-banner cf-banner-info');
 		banner.setAttribute('role', 'status');
 		banner.append(el('span', undefined, 'Partial graph coverage: some Terraform declarations or references could not be statically resolved. Check Diagnostics in the inspector.'));
@@ -761,9 +1004,10 @@ function zoomBy(factor: number): void {
 
 function renderNodeCard(item: PositionedNode): HTMLElement {
 	const selected = item.node.id === state.selectedId;
+	const isDraftAdded = !!draftDoc && draftDoc.present.addedIds.includes(item.node.id);
 	const runResult = currentRun?.nodeResults[item.node.id];
 	const statusCls = runResult ? ` cf-status-${runResult.status}` : '';
-	const card = el('button', `cf-node cf-node-${state.mode} cf-provider-${item.provider}${selected ? ' selected' : ''}${statusCls}`);
+	const card = el('button', `cf-node cf-node-${state.mode} cf-provider-${item.provider}${selected ? ' selected' : ''}${isDraftAdded ? ' cf-node-draft' : ''}${statusCls}`);
 	card.type = 'button';
 	card.dataset.nodeId = item.node.id;
 	card.style.left = `${item.x}px`;
@@ -772,13 +1016,15 @@ function renderNodeCard(item: PositionedNode): HTMLElement {
 	card.style.height = `${item.height}px`;
 	card.setAttribute('aria-pressed', String(selected));
 	const badgeInfo = runResult ? statusLabel(runResult.status) : undefined;
-	card.setAttribute('aria-label', `${item.node.name}, ${item.node.resourceType ?? item.node.kind}${badgeInfo ? `, ${badgeInfo.text}` : ''}`);
+	card.setAttribute('aria-label', `${item.node.name}, ${item.node.resourceType ?? item.node.kind}${isDraftAdded ? ', unsaved draft' : ''}${badgeInfo ? `, ${badgeInfo.text}` : ''}`);
 
 	if (state.mode === 'visual') {
 		const top = el('div', 'cf-node-top');
 		top.append(el('span', 'cf-provider-tag', providerDisplayName(item.provider)));
 		if (badgeInfo && runResult) {
 			top.append(el('span', `cf-status-badge cf-badge-${runResult.status}`, `${badgeInfo.icon} ${badgeInfo.text}`));
+		} else if (isDraftAdded) {
+			top.append(el('span', 'cf-draft-tag', 'Draft'));
 		} else {
 			top.append(el('span', 'cf-kind-tag', item.node.kind));
 		}
@@ -790,6 +1036,8 @@ function renderNodeCard(item: PositionedNode): HTMLElement {
 		head.append(el('span', 'cf-provider-tag', providerDisplayName(item.provider)));
 		if (badgeInfo && runResult) {
 			head.append(el('span', `cf-status-badge cf-badge-${runResult.status}`, `${badgeInfo.icon} ${badgeInfo.text}`));
+		} else if (isDraftAdded) {
+			head.append(el('span', 'cf-draft-tag', 'Draft'));
 		} else {
 			head.append(el('span', 'cf-kind-tag', item.node.kind));
 		}
@@ -818,17 +1066,18 @@ function renderNodeCard(item: PositionedNode): HTMLElement {
 function renderInspector(): HTMLElement {
 	const aside = el('aside', 'cf-inspector');
 	aside.setAttribute('aria-label', 'Resource inspector');
+	const current = activeGraph();
 
 	const selected = nodeById(state.selectedId);
 	if (!selected) {
 		const empty = el('div', 'cf-inspector-section');
 		empty.append(
 			el('h2', 'cf-section-title', 'Inspector'),
-			el('p', 'cf-muted', 'Click any resource to inspect its dependencies and open its Terraform source. Double-click or press Enter to open the focused resource workspace.')
+			el('p', 'cf-muted', 'Click any resource to inspect its dependencies, author draft edits, or open its Terraform source. Double-click or press Enter to open the focused resource workspace.')
 		);
 		aside.append(empty);
-		if (graph && graph.diagnostics.length > 0) {
-			aside.append(renderDiagnosticsSection(graph));
+		if (current && current.diagnostics.length > 0) {
+			aside.append(renderDiagnosticsSection(current));
 		}
 		return aside;
 	}
@@ -862,9 +1111,21 @@ function renderInspector(): HTMLElement {
 		? 'Refresh the graph before opening source'
 		: selected.hasSource
 			? 'Open declaration in native Terraform editor (O)'
-			: 'No source location available';
+			: 'No source location available (unsaved draft resource)';
 	openSrc.addEventListener('click', () => post({ type: 'openSource', nodeId: selected.id }));
 	actions.append(openSrc);
+
+	const dupBtn = el('button', 'cf-btn', 'Duplicate');
+	dupBtn.type = 'button';
+	dupBtn.title = 'Duplicate resource in the unsaved draft';
+	dupBtn.addEventListener('click', () => duplicateSelectedResource(selected));
+	actions.append(dupBtn);
+
+	const delBtn = el('button', 'cf-btn cf-btn-danger', 'Delete');
+	delBtn.type = 'button';
+	delBtn.title = 'Remove resource and connected edges from the unsaved draft (undoable)';
+	delBtn.addEventListener('click', () => deleteSelectedResource(selected.id));
+	actions.append(delBtn);
 
 	summary.append(actions);
 	aside.append(summary);
@@ -892,8 +1153,42 @@ function renderInspector(): HTMLElement {
 	aside.append(renderDepListSection('Upstream dependencies', upstream, false));
 	aside.append(renderDepListSection('Downstream dependents', downstream, false));
 
-	if (graph && graph.diagnostics.length > 0) {
-		aside.append(renderDiagnosticsSection(graph));
+	// Contextual Add Dependency control (cycle-safe)
+	if (current && current.nodes.length > 1) {
+		const existingDownstream = new Set(downstream.map(d => d.node.id));
+		const targets = current.nodes.filter(n => n.id !== selected.id && !existingDownstream.has(n.id));
+		if (targets.length > 0) {
+			const connSec = el('div', 'cf-inspector-section');
+			connSec.append(el('h3', 'cf-section-title', 'Connect dependency'));
+			const row = el('div', 'cf-connect-row');
+			const targetSel = el('select', 'cf-select');
+			targetSel.setAttribute('aria-label', 'Connect to target resource');
+			for (const t of targets) {
+				const opt = el('option', undefined, `${t.name} (${t.resourceType ?? t.kind})`);
+				opt.value = t.id;
+				targetSel.append(opt);
+			}
+			const connBtn = el('button', 'cf-btn', 'Connect');
+			connBtn.type = 'button';
+			connBtn.addEventListener('click', () => {
+				const ok = commitDraftEdit({ type: 'connectResources', fromId: selected.id, toId: targetSel.value });
+				if (!ok) {
+					connectFeedback = 'Connection skipped: would create a dependency cycle.';
+					render();
+					applyViewportTransform();
+				}
+			});
+			row.append(targetSel, connBtn);
+			connSec.append(row);
+			if (connectFeedback) {
+				connSec.append(el('div', 'cf-field-error', connectFeedback));
+			}
+			aside.append(connSec);
+		}
+	}
+
+	if (current && current.diagnostics.length > 0) {
+		aside.append(renderDiagnosticsSection(current));
 	}
 	return aside;
 }
@@ -944,22 +1239,27 @@ function renderDiagnosticsSection(current: CanvasGraphSnapshot): HTMLElement {
 }
 
 function getOrCreateDraft(node: CanvasNodeSummary, schema: FormSchema): ResourceDraft {
-	const existing = draftsByNodeId.get(node.id);
+	const existing = draftDoc?.present.drafts[node.id];
 	if (existing && existing.typeName === schema.typeName) {
 		return existing;
 	}
-	const created = createInitialDraft(node, schema, graph?.sourceRevision ?? '0'.repeat(64));
-	draftsByNodeId.set(node.id, created);
-	return created;
+	return createInitialDraft(node, schema, draftDoc?.baseSourceRevision ?? '0'.repeat(64));
 }
 
 function updateDraft(nodeId: string, updater: (draft: ResourceDraft) => ResourceDraft): void {
-	const current = draftsByNodeId.get(nodeId);
+	if (!draftDoc) {
+		return;
+	}
+	const node = nodeById(nodeId);
+	if (!node) {
+		return;
+	}
+	const schema = lookupBundledSchema(node);
+	const current = draftDoc.present.drafts[nodeId] ?? (schema ? createInitialDraft(node, schema, draftDoc.baseSourceRevision) : undefined);
 	if (!current) {
 		return;
 	}
-	draftsByNodeId.set(nodeId, updater(current));
-	render();
+	commitDraftEdit({ type: 'updateDraft', nodeId, draft: updater(current) });
 }
 
 function setAttrInDraft(draft: ResourceDraft, attrName: string, value: DraftValue | undefined, blockId?: string): ResourceDraft {
@@ -1173,15 +1473,16 @@ function renderFocusedWorkspace(selected: CanvasNodeSummary): HTMLElement {
 	const overlay = el('section', 'cf-workspace');
 	overlay.setAttribute('aria-label', `Focused resource workspace: ${selected.name}`);
 
+	const current = activeGraph();
 	const provider = inferProvider(selected);
 	const isStale = notice?.kind === 'stale';
 	const { upstream, downstream } = relatedEdges(selected.id);
 	const schema = lookupBundledSchema(selected);
 	const draft = schema ? getOrCreateDraft(selected, schema) : undefined;
-	const draftStale = !!draft && !!graph && draft.baseSourceRevision !== graph.sourceRevision;
+	const draftStale = !!draft && !!current && draft.baseSourceRevision !== current.sourceRevision;
 	const rendered = schema && draft ? renderDraftPreview(schema, draft) : undefined;
 	const diagByPath = new Map((rendered?.diagnostics ?? []).map(d => [d.path, d.message]));
-	const references = graph ? buildReferenceCandidates(graph, selected.id) : [];
+	const references = current ? buildReferenceCandidates(current, selected.id) : [];
 
 	const top = el('header', 'cf-workspace-header');
 	const backBtn = el('button', 'cf-btn cf-back-btn', '← Back to Canvas');
@@ -1198,10 +1499,10 @@ function renderFocusedWorkspace(selected: CanvasNodeSummary): HTMLElement {
 	if (schema) {
 		actions.append(el('span', 'cf-pill', `${schema.providerSource} ${schema.providerVersion}`));
 	}
-	if (graph) {
-		actions.append(el('span', 'cf-pill cf-mono', `rev ${graph.sourceRevision.slice(0, 8)}`));
+	if (current) {
+		actions.append(el('span', 'cf-pill cf-mono', `rev ${current.sourceRevision.slice(0, 8)}`));
 	}
-	const prereqCount = graph ? computePrerequisiteScope(graph, selected.id).length : 1;
+	const prereqCount = current ? computePrerequisiteScope(current, selected.id).length : 1;
 	const validateResBtn = el('button', 'cf-btn', `Validate Resource (${prereqCount})`);
 	validateResBtn.type = 'button';
 	validateResBtn.title = `Validate ${selected.name} and its ${Math.max(0, prereqCount - 1)} upstream prerequisite(s)`;
@@ -1224,8 +1525,9 @@ function renderFocusedWorkspace(selected: CanvasNodeSummary): HTMLElement {
 		const resetBtn = el('button', 'cf-btn', 'Reset Draft');
 		resetBtn.type = 'button';
 		resetBtn.addEventListener('click', () => {
-			draftsByNodeId.delete(selected.id);
-			render();
+			if (schema && current) {
+				commitDraftEdit({ type: 'updateDraft', nodeId: selected.id, draft: createInitialDraft(selected, schema, current.sourceRevision) });
+			}
 		});
 		staleBar.append(resetBtn);
 		overlay.append(staleBar);
@@ -1330,7 +1632,7 @@ function renderFocusedWorkspace(selected: CanvasNodeSummary): HTMLElement {
 
 	const tabs = el('div', 'cf-segmented');
 	tabs.setAttribute('role', 'tablist');
-	for (const [tabId, label] of [['preview', 'HCL Preview'], ['findings', `Findings (${(rendered?.diagnostics.length ?? 0) + (graph?.diagnostics.length ?? 0)})`], ['outputs', 'Outputs']] as const) {
+	for (const [tabId, label] of [['preview', 'HCL Preview'], ['findings', `Findings (${(rendered?.diagnostics.length ?? 0) + (current?.diagnostics.length ?? 0)})`], ['outputs', 'Outputs']] as const) {
 		const btn = el('button', 'cf-seg-btn', label);
 		btn.type = 'button';
 		btn.setAttribute('role', 'tab');
@@ -1351,13 +1653,14 @@ function renderFocusedWorkspace(selected: CanvasNodeSummary): HTMLElement {
 			const resetBtn = el('button', 'cf-btn', 'Reset Draft');
 			resetBtn.type = 'button';
 			resetBtn.addEventListener('click', () => {
-				draftsByNodeId.delete(selected.id);
-				render();
+				if (schema && current) {
+					commitDraftEdit({ type: 'updateDraft', nodeId: selected.id, draft: createInitialDraft(selected, schema, current.sourceRevision) });
+				}
 			});
 			headRow.append(resetBtn);
 			rightPane.append(headRow);
 			rightPane.append(el('pre', 'cf-hcl-preview cf-mono', rendered.hcl));
-			rightPane.append(el('p', 'cf-muted', 'Preview only. Project Terraform files remain unchanged on disk until guarded save arrives in Phase 4.'));
+			rightPane.append(el('p', 'cf-muted', 'Preview only. Project Terraform files remain unchanged on disk until Rust guarded save is connected.'));
 		} else {
 			rightPane.append(el('p', 'cf-muted', 'HCL draft preview is available for schema-backed Azure networking resources. Use Advanced (Open Source) for native Terraform source.'));
 		}
@@ -1396,8 +1699,8 @@ function renderFocusedWorkspace(selected: CanvasNodeSummary): HTMLElement {
 		} else if (rendered) {
 			rightPane.append(el('p', 'cf-muted', 'All required fields in this draft pass local schema checks.'));
 		}
-		if (graph && graph.diagnostics.length > 0) {
-			rightPane.append(renderDiagnosticsSection(graph));
+		if (current && current.diagnostics.length > 0) {
+			rightPane.append(renderDiagnosticsSection(current));
 		}
 	} else {
 		rightPane.append(renderDepListSection('Downstream dependents', downstream, true));
@@ -1509,6 +1812,56 @@ function renderTimeline(): HTMLElement {
 	return panel;
 }
 
+function renderHclReviewModal(): HTMLElement | null {
+	if (!hclReviewOpen || !draftDoc) {
+		return null;
+	}
+	const summary = computeDraftChangeSummary(draftDoc);
+	const preview = generateTerraformPreview(draftDoc, lookupBundledSchema, renderDraftPreview);
+
+	const backdrop = el('div', 'cf-modal-backdrop');
+	backdrop.addEventListener('click', event => {
+		if (event.target === backdrop) {
+			closeHclReviewModal();
+		}
+	});
+
+	const dialog = el('section', 'cf-modal');
+	dialog.setAttribute('role', 'dialog');
+	dialog.setAttribute('aria-modal', 'true');
+	dialog.setAttribute('aria-label', 'Review Generated Terraform HCL');
+
+	const head = el('header', 'cf-modal-header');
+	const titleGroup = el('div', 'cf-header-group');
+	titleGroup.append(
+		el('strong', undefined, 'Review Generated Terraform HCL'),
+		el('span', 'cf-pill cf-mono', `base ${preview.baseSourceRevision.slice(0, 8)}`),
+		el('span', `cf-pill ${preview.hasErrors ? 'cf-pill-err' : 'cf-pill-ok'}`, `${preview.resourceCount} block(s) · ${preview.diagnosticsCount} diagnostic(s)`)
+	);
+	const headActions = el('div', 'cf-header-group');
+	const revertBtn = el('button', 'cf-btn cf-btn-danger', 'Revert Draft');
+	revertBtn.type = 'button';
+	revertBtn.addEventListener('click', () => performRevertDraft());
+	const closeBtn = el('button', 'cf-btn cf-modal-close', 'Close');
+	closeBtn.type = 'button';
+	closeBtn.addEventListener('click', () => closeHclReviewModal());
+	headActions.append(revertBtn, closeBtn);
+	head.append(titleGroup, headActions);
+	dialog.append(head);
+
+	const body = el('div', 'cf-modal-body');
+	body.append(el(
+		'p',
+		'cf-muted',
+		`Unsaved draft summary: +${summary.added.length} added, ~${summary.modified.length} modified, -${summary.deleted.length} removed, +${summary.addedEdges}/-${summary.removedEdges} edge(s). Read-only preview: no files on disk are modified until Rust guarded save is connected.`
+	));
+	body.append(el('pre', 'cf-hcl-preview cf-mono', preview.hcl));
+	dialog.append(body);
+
+	backdrop.append(dialog);
+	return backdrop;
+}
+
 function render(): void {
 	root.dataset.theme = state.theme;
 	root.dataset.mode = state.mode;
@@ -1520,7 +1873,8 @@ function render(): void {
 		root.append(banner);
 	}
 
-	if (!graph) {
+	const current = activeGraph();
+	if (!current) {
 		const empty = el('div', 'cf-empty-state');
 		empty.append(el('p', undefined, emptyMessage));
 		root.append(empty);
@@ -1532,6 +1886,10 @@ function render(): void {
 		root.append(renderFocusedWorkspace(selected));
 		if (timelineOpen) {
 			root.append(renderTimeline());
+		}
+		const modal = renderHclReviewModal();
+		if (modal) {
+			root.append(modal);
 		}
 		return;
 	}
@@ -1548,21 +1906,47 @@ function render(): void {
 	if (timelineOpen) {
 		root.append(renderTimeline());
 	}
+	const modal = renderHclReviewModal();
+	if (modal) {
+		root.append(modal);
+	}
 }
 
-// Keyboard shortcuts: / (search), ArrowUp/ArrowDown (cycle resources), Enter (open resource),
-// O (open source), F (fit), Escape (close focused workspace).
+// Keyboard shortcuts: Ctrl/Cmd+Z (undo), Ctrl/Cmd+Shift+Z / Ctrl+Y (redo), / (search),
+// ArrowUp/ArrowDown (cycle resources), Enter (open resource), O (open source), F (fit),
+// Escape (close HCL review modal or focused workspace).
 window.addEventListener('keydown', event => {
 	const target = event.target;
 	const inInput = target instanceof HTMLElement && target.matches('input, textarea, select');
 	if (event.key === 'Escape') {
+		if (hclReviewOpen) {
+			event.preventDefault();
+			closeHclReviewModal();
+			return;
+		}
 		if (state.focusedWorkspaceOpen) {
 			event.preventDefault();
 			closeFocusedWorkspace();
 		}
 		return;
 	}
-	if (inInput || !graph) {
+	const current = activeGraph();
+	if (inInput || !current) {
+		return;
+	}
+	const mod = event.ctrlKey || event.metaKey;
+	if (mod && !event.altKey && event.key.toLowerCase() === 'z') {
+		event.preventDefault();
+		if (event.shiftKey) {
+			performRedo();
+		} else {
+			performUndo();
+		}
+		return;
+	}
+	if (mod && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'y') {
+		event.preventDefault();
+		performRedo();
 		return;
 	}
 	if (event.key === '/') {
@@ -1586,10 +1970,10 @@ window.addEventListener('keydown', event => {
 			event.preventDefault();
 			post({ type: 'openSource', nodeId: selected.id });
 		}
-	} else if (event.key === 'Enter' && state.selectedId && !state.focusedWorkspaceOpen && !(target instanceof HTMLButtonElement && !target.classList.contains('cf-node'))) {
+	} else if (event.key === 'Enter' && state.selectedId && !state.focusedWorkspaceOpen && !hclReviewOpen && !(target instanceof HTMLButtonElement && !target.classList.contains('cf-node'))) {
 		event.preventDefault();
 		openFocusedWorkspace(state.selectedId);
-	} else if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && projection && projection.nodes.length > 0 && !state.focusedWorkspaceOpen) {
+	} else if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && projection && projection.nodes.length > 0 && !state.focusedWorkspaceOpen && !hclReviewOpen) {
 		event.preventDefault();
 		const ids = projection.nodes.map(n => n.node.id);
 		const idx = state.selectedId ? ids.indexOf(state.selectedId) : -1;
@@ -1607,11 +1991,13 @@ window.addEventListener('message', event => {
 	}
 	switch (message.type) {
 		case 'graph':
-			graph = message.graph;
+			draftDoc = createDraftDocument(message.graph);
+			hclReviewOpen = false;
+			connectFeedback = undefined;
 			state = message.viewState;
 			notice = message.notice;
-			currentRun = currentRun && currentRun.architectureId === graph.architectureId
-				? syncRunWithRevision(currentRun, graph.sourceRevision)
+			currentRun = currentRun && currentRun.architectureId === message.graph.architectureId
+				? syncRunWithRevision(currentRun, message.graph.sourceRevision)
 				: undefined;
 			rebuildProjection();
 			render();
@@ -1626,9 +2012,11 @@ window.addEventListener('message', event => {
 			applyViewportTransform();
 			break;
 		case 'empty':
-			graph = undefined;
+			draftDoc = undefined;
 			projection = undefined;
 			currentRun = undefined;
+			hclReviewOpen = false;
+			connectFeedback = undefined;
 			notice = null;
 			emptyMessage = message.message;
 			render();

@@ -151,7 +151,7 @@ export function detectDependencyCycles(graph: CanvasGraphSnapshot, scopeIds: Rea
 
 		if (lowlink.get(v) === indices.get(v)) {
 			const component: string[] = [];
-			for (;;) {
+			for (; ;) {
 				const w = stack.pop()!;
 				onStack.delete(w);
 				component.push(w);

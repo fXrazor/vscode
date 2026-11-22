@@ -532,3 +532,20 @@ Implemented on `fxrazor/continue-project-handoff-review` in `E:\Orca\CloudForge-
 **Next actions:**
 - Rebuild the Windows x64 installer from `main` to package Phases 1–3 together for installed-app testing.
 - Cross-repo (Rust `Z:\CloudForge`): expose scoped `catalogue` schema/draft rendering (Phase 2) and background cursor-based validation runs (Phase 3) in the canonical service protocol before starting Phase 4 guarded authoring/save.
+
+### Phase 4 (Desktop Foundation): Shared Draft Document, Semantic Undo/Redo & Reviewable HCL Generation (2026-11-22)
+
+Implemented on `fxrazor/continue-project-handoff-review` in `E:\Orca\CloudForge-Code\dace` (on top of `ad83d0d6b58`) with zero edits to `extensions/cloudforge/studio/**` or `Z:\CloudForge`. Keeps all edits strictly in memory bound to `baseSourceRevision` until Rust's guarded atomic save capability is approved and connected in `Z:\CloudForge`.
+
+- **Shared semantic draft model ([draftDocument.ts](extensions/cloudforge/src/canvas/draftDocument.ts)):** introduces `DraftDocument` as the single architecture model shared across Visual Design, Technical Design, Focused Resource Workspace, and the Validation Runner (`projectDraftGraph`), with a single semantic undo/redo stack (`applyDraftEdit`, `undoDraftEdit`, `redoDraftEdit`, `revertDraftDocument`) covering `addResource`, `duplicateResource`, atomic `deleteResource` (removing and restoring connected edges together), cycle-safe `connectResources` (rejecting self-loops, duplicate edges, and cycles), and `updateDraft`. Presentation state (`theme`, `grid`, `mode`, `viewport`) stays completely outside undo history. `generateTerraformPreview` emits deterministic, read-only Terraform HCL for all added and modified schema-backed resources plus an explicit removal summary without mutating disk files.
+- **Contextual authoring UI ([canvas-src/index.ts](extensions/cloudforge/canvas-src/index.ts), [canvas-src/canvas.css](extensions/cloudforge/canvas-src/canvas.css), [canvas-src/tsconfig.json](extensions/cloudforge/canvas-src/tsconfig.json)):** adds a contextual `+ Add` disclosure for the 6 schema-backed Azure networking types, dashed `Draft` indicators on added nodes, inspector `Duplicate`, `Delete`, and cycle-safe `Connect dependency` controls, a contextual dirty-state header group (`Undo` / `Redo` / `Review HCL` / `Revert Draft`, shown only once draft edits exist, plus `Ctrl/Cmd+Z` and `Ctrl/Cmd+Shift+Z` / `Ctrl+Y`), and an accessible **Review Generated Terraform HCL** modal (`Escape` focus restore). Also formatted [validationRunner.ts](extensions/cloudforge/src/canvas/validationRunner.ts) via `build/lib/formatter.ts --replace` so `build/hygiene.ts` passes with zero notices.
+
+| Check (newly run in `E:\Orca\CloudForge-Code\dace`) | Result |
+| --- | --- |
+| `CLOUDFORGE_REPO=Z:\CloudForge node --test extensions/cloudforge/test/*.test.ts` | **32/32 passed**, 0 skipped (includes 3 new [draftDocument.test.ts](extensions/cloudforge/test/draftDocument.test.ts) suites). |
+| `tsc --noEmit` (TS 7) & `tsc6 --noEmit` (TS 6) on `extensions/cloudforge/tsconfig.json` and `extensions/cloudforge/canvas-src/tsconfig.json` | Passed with 0 errors. |
+| `node extensions/cloudforge/esbuild.mts` & `node extensions/cloudforge/esbuild.webview.mts` | Built cleanly (`dist/extension.js`, `media/canvas.js`, `media/canvas-style.css`). |
+| `node build/oxlint.ts` & `node --experimental-strip-types build/hygiene.ts` on all Phase 4 files + `validationRunner.ts` | Passed with 0 errors and 0 formatting notices. |
+| Live Edge Playwright verification of compiled Webview bundle | **20/20 passed**, **0 console errors**, **0 page errors** (verifies `+ Add`, Visual↔Technical persistence, `Duplicate`, `Delete`, atomic `Undo`, **Review Generated Terraform HCL** modal, `Escape` close, and `Revert Draft`; visually inspected `canvas-phase4-hcl-review.png`). |
+
+**Remaining for Phase 4 cross-repo completion:** Rust owner implements revision-checked, previewed, atomic guarded Terraform save (`saveDraft` / guarded patch) in `Z:\CloudForge` and exposes it through the canonical service protocol before the desktop enables writing drafts to disk.
