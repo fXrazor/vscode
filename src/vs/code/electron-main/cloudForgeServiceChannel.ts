@@ -138,7 +138,7 @@ function validateDraftBody(value: unknown, depth: number): Record<string, unknow
 		if (!isTypeName(key) || !isRecord(entry)) {
 			return undefined;
 		}
-		if (entry.kind === 'literal' && hasOnlyKeys(entry, ['kind', 'value']) && 'value' in entry) {
+		if (entry.kind === 'literal' && hasOnlyKeys(entry, ['kind', 'value']) && Object.hasOwn(entry, 'value')) {
 			cleanAttrs[key] = { kind: 'literal', value: entry.value };
 		} else if (entry.kind === 'expression' && hasOnlyKeys(entry, ['kind', 'text']) && typeof entry.text === 'string' && entry.text.length <= 16384) {
 			cleanAttrs[key] = { kind: 'expression', text: entry.text };
