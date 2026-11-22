@@ -589,3 +589,28 @@ Implemented on `fxrazor/auto-open-and-stage3-4` in `Z:\CloudForge-Code\.claude\w
 **Next actions:**
 - Wire the Architecture Canvas Webview (`canvasPanel.ts` / `canvas-src/index.ts`) to invoke the live Stage 3 (`getResourceFormSchema` / `renderResourceDraft`), Stage 4 (`startValidationRun` / `pollValidationRun` / `cancelValidationRun`), and Stage 5 (`previewDraftSave` / `applyDraftSave`) RPCs.
 - Rebuild the Windows x64 installer packaging Rust `311ed186308236bd11ad86baf0d965699af34d19` + desktop `main` and run installed smoke.
+
+### Live Architecture Canvas wiring for Stage 3, Stage 4, and Stage 5 RPCs (2026-11-22)
+
+Implemented on `fxrazor/auto-open-and-stage3-4` in `Z:\CloudForge-Code\.claude\worktrees\auto-open-stage3-4` and fast-forward merged into local `main` at `8a6bc8d0037`. Pairs end-to-end with Rust `Z:\CloudForge` `main` at `9581a4d` (`311ed186308236bd11ad86baf0d965699af34d19`).
+
+- **Pure-TS service adapters ([serviceAdapters.ts](extensions/cloudforge/src/canvas/serviceAdapters.ts)) & strict Webview protocol ([protocol.ts](extensions/cloudforge/src/canvas/protocol.ts)):**
+  - Added validated narrow Webview intents (`requestValidation`, `cancelValidation`, `requestDraftSavePreview`, `applyDraftSave`, `requestSchema`) enforcing top-level `*.tf` filenames, `<= 512 KiB` UTF-8 content, opaque `previewToken`, and safe Terraform type names with zero path-taking parameters.
+  - Added Stage 3 (`parseCatalogueSnapshots`, `selectBestSnapshotForType`, `mapRustFormSchemaToCanvasFormSchema`), Stage 4 (`parseValidationStart`, `parseValidationPoll`, `mapServiceValidationPollToRun`), and Stage 5 (`parseDraftSavePreview`, `parseDraftSaveApply`, `draftSaveErrorMessage`) adapters with unit coverage in [serviceAdapters.test.ts](extensions/cloudforge/test/serviceAdapters.test.ts).
+- **Extension host & Webview integration ([canvasPanel.ts](extensions/cloudforge/src/canvas/canvasPanel.ts), [extension.ts](extensions/cloudforge/src/extension.ts), [canvas-src/index.ts](extensions/cloudforge/canvas-src/index.ts), [canvas-src/canvas.css](extensions/cloudforge/canvas-src/canvas.css)):**
+  - **Stage 4 live Runner View:** clean architectures delegate **Validate** / **Validate Resource** to `startValidationRun` + cursor-batched `pollValidationRun` (streaming live status updates and supporting `cancelValidationRun`), falling back gracefully (`localOnly: true`) if an older service does not support Stage 4, while unsaved local drafts continue validating in memory.
+  - **Stage 5 guarded Terraform draft save:** upgraded the **Review Generated Terraform HCL** modal with a two-step **Preview Save** (`previewDraftSave` showing create/replace target, `+added/-removed` line counts, SHA-256 digest, and any `SENSITIVE_LITERAL` warnings without values) -> **Apply Saved Changes** (`applyDraftSave` with one-shot `previewToken`), automatically refreshing both the `CloudForge Graph` tree and Architecture Canvas to `newSourceRevision` and clearing the dirty draft state on success.
+  - **Stage 3 live provider catalogue hydration:** queries `listCatalogueSnapshots` on canvas load and fetches verified `getResourceFormSchema` snapshots on demand when opening the Focused Resource Workspace for resource types beyond the 6 bundled Azure networking schemas.
+
+| Check (newly run on `8a6bc8d0037` in `Z:\CloudForge-Code`) | Result |
+| --- | --- |
+| `node extensions/cloudforge/esbuild.mts` & `node extensions/cloudforge/esbuild.webview.mts` | Passed (`dist/extension.js`, `media/canvas.js`, `media/canvas-style.css` rebuilt cleanly). |
+| `tsc -p extensions/cloudforge/tsconfig.json --noEmit` & `tsc -p extensions/cloudforge/canvas-src/tsconfig.json --noEmit` | Passed (0 errors). |
+| `CLOUDFORGE_REPO=E:\Orca\CloudForge\umibozu node --test extensions/cloudforge/test/*.test.ts` | **36/36 passed**, 0 skipped (includes 3 new [serviceAdapters.test.ts](extensions/cloudforge/test/serviceAdapters.test.ts) suites). |
+| `node --experimental-strip-types build/hygiene.ts` & `node build/oxlint.ts` (all 7 changed files) | Passed (0 errors, 0 warnings). |
+
+**Remaining gaps & next actions:**
+- Not run: full Windows x64 installer rebuild packaging Rust `cloudforge-service.exe` (`311ed186308236bd11ad86baf0d965699af34d19`, SHA-256 `1f69b077e1edb62bcde229b66d728c7ef7f0e4960faace1103dab963d7952f9f`) with desktop `main`, and live installed smoke verifying auto-open on project reopen, live Stage 4 validation, and Stage 5 guarded save end-to-end.
+- Follow-up: align `readArchitecture` edge orientation (`fromId`/`toId`) for left-to-right dependency layout as noted in the Phases 1–3 smoke report.
+- `main` remains local-only in both repositories (not pushed to `origin/main`).
+
