@@ -137,6 +137,21 @@ export function providerDisplayName(provider: string): string {
 	}
 }
 
+/**
+ * Normalizes Rust `readArchitecture` edges (`from` = referencing dependent -> `to` = referenced
+ * prerequisite) into left-to-right provision/dataflow edges (`fromId` = prerequisite -> `toId` = dependent)
+ * expected by canvas layout, upstream/downstream inspector lists, and prerequisite validation scopes.
+ */
+export function orientServiceEdgesForCanvas(edges: readonly CanvasEdgeSummary[]): readonly CanvasEdgeSummary[] {
+	return edges.map(edge => {
+		const kind = edge.kind.toLowerCase();
+		if (kind === 'reference' || kind === 'explicit') {
+			return { fromId: edge.toId, toId: edge.fromId, kind: edge.kind };
+		}
+		return edge;
+	});
+}
+
 export function matchesSearch(node: CanvasNodeSummary, query: string): boolean {
 	const needle = query.trim().toLowerCase();
 	if (!needle) {

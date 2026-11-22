@@ -17,6 +17,7 @@ import {
 } from 'vscode';
 import { activateProjects } from './project/index';
 import { CloudForgeCanvasPanel } from './canvas/canvasPanel';
+import { orientServiceEdgesForCanvas } from './canvas/layout';
 import type { CanvasCatalogueSnapshot, CanvasGraphSnapshot } from './canvas/protocol';
 import { lookupBundledSchema, type FormSchema } from './canvas/schemaForm';
 import {
@@ -475,7 +476,7 @@ function toCanvasSnapshot(graph: ArchitectureGraph, architectureName: string): C
 		sourceRevision: graph.sourceRevision,
 		status: graph.status,
 		nodes: graph.nodes,
-		edges: graph.edges,
+		edges: orientServiceEdgesForCanvas(graph.edges),
 		diagnostics: graph.diagnostics,
 	};
 }

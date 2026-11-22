@@ -5,7 +5,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { adaptiveGridStep, buildCanvasProjection, fitRectToStage, inferProvider } from '../src/canvas/layout.ts';
+import { adaptiveGridStep, buildCanvasProjection, fitRectToStage, inferProvider, orientServiceEdgesForCanvas } from '../src/canvas/layout.ts';
 import { defaultCanvasViewState, parseWebviewMessage, sanitizeViewState, type CanvasGraphSnapshot } from '../src/canvas/protocol.ts';
 
 function sampleGraph(): CanvasGraphSnapshot {
@@ -147,4 +147,17 @@ test('view state sanitizer preserves valid independent theme/mode/viewports and 
 	const noSel = sanitizeViewState({ selectedId: null, focusedWorkspaceOpen: true });
 	assert.equal(noSel.focusedWorkspaceOpen, false);
 	assert.deepEqual(sanitizeViewState('corrupt'), defaultCanvasViewState());
+});
+
+test('orientServiceEdgesForCanvas normalizes Rust dependent->prerequisite edges to left-to-right flow', () => {
+	const rawEdges = [
+		{ fromId: 'apps', toId: 'vnet_hub', kind: 'reference' },
+		{ fromId: 'vnet_hub', toId: 'hub', kind: 'explicit' },
+		{ fromId: 'a', toId: 'b', kind: 'custom' },
+	];
+	assert.deepEqual(orientServiceEdgesForCanvas(rawEdges), [
+		{ fromId: 'vnet_hub', toId: 'apps', kind: 'reference' },
+		{ fromId: 'hub', toId: 'vnet_hub', kind: 'explicit' },
+		{ fromId: 'a', toId: 'b', kind: 'custom' },
+	]);
 });
