@@ -577,3 +577,15 @@ Implemented on `fxrazor/auto-open-and-stage3-4` in isolated worktree `Z:\CloudFo
 **Remaining gaps & next actions:**
 - Not run: full Windows x64 installer rebuild packaging the new Rust service (`e2332d0`) together with this desktop revision (`92625488807`) and live installed smoke verifying auto-open on project reopen.
 - Connect the Architecture Canvas Webview (`canvasPanel.ts` / `canvas-src/index.ts`) to call the newly wired Stage 3 (`getResourceFormSchema` / `renderResourceDraft`) and Stage 4 (`startValidationRun` / `pollValidationRun` / `cancelValidationRun`) RPCs against the live Rust service.
+
+### Stage 5 guarded draft save broker wiring (2026-11-22)
+
+Implemented on `fxrazor/auto-open-and-stage3-4` in `Z:\CloudForge-Code\.claude\worktrees\auto-open-stage3-4` (rebased onto `3980ac11ea7`, fast-forward merged into `main` at `5b802643203`). Pairs with Rust `Z:\CloudForge` `main` at `9581a4d` (Stage 5 service revision `311ed186308236bd11ad86baf0d965699af34d19`, release `cloudforge-service.exe` 2,632,704 bytes, SHA-256 `1f69b077e1edb62bcde229b66d728c7ef7f0e4960faace1103dab963d7952f9f`).
+
+- Extended [cloudForgeService.ts](src/vs/code/electron-main/cloudForgeService.ts), [cloudForgeServiceChannel.ts](src/vs/code/electron-main/cloudForgeServiceChannel.ts), and [cloudForgeService.contribution.ts](src/vs/workbench/electron-browser/cloudForgeService.contribution.ts) with `previewDraftSave` and `applyDraftSave` (enforcing single top-level `.tf` filename, `<= 512 KiB` UTF-8 payload, 64-hex `expectedSourceRevision`, opaque `previewToken` on apply, active workspace/architecture scope check, and unknown-field rejection).
+- Extended [cloudForgeServiceChannel.test.ts](src/vs/code/test/electron-main/cloudForgeServiceChannel.test.ts) with Stage 5 valid & invalid parameter tests.
+- Fresh verification on `5b802643203`: `build/hygiene.ts` & `build/oxlint.ts` passed (0 errors/warnings); `tsc -p src/tsconfig.json --noEmit --skipLibCheck` passed; `node build/next/index.ts transpile` + `scripts\test.bat --run cloudForgeServiceChannel.test.ts --run cloudForgeService.test.ts` passed **41/41 tests**.
+
+**Next actions:**
+- Wire the Architecture Canvas Webview (`canvasPanel.ts` / `canvas-src/index.ts`) to invoke the live Stage 3 (`getResourceFormSchema` / `renderResourceDraft`), Stage 4 (`startValidationRun` / `pollValidationRun` / `cancelValidationRun`), and Stage 5 (`previewDraftSave` / `applyDraftSave`) RPCs.
+- Rebuild the Windows x64 installer packaging Rust `311ed186308236bd11ad86baf0d965699af34d19` + desktop `main` and run installed smoke.
