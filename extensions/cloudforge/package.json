@@ -43,6 +43,12 @@
 				"icon": "$(new-folder)"
 			},
 			{
+				"command": "cloudforge.createArchitecture",
+				"title": "%command.createArchitecture%",
+				"category": "%displayName%",
+				"icon": "$(add)"
+			},
+			{
 				"command": "cloudforge.importRepository",
 				"title": "%command.importRepository%",
 				"category": "%displayName%",
@@ -147,11 +153,20 @@
 					"when": "cloudforge.projectOpen"
 				},
 				{
+					"command": "cloudforge.createArchitecture",
+					"when": "cloudforge.projectOpen"
+				},
+				{
 					"command": "cloudforge.forgetProjectAccess",
 					"when": "cloudforge.projectOpen"
 				}
 			],
 			"view/title": [
+				{
+					"command": "cloudforge.createArchitecture",
+					"when": "view == cloudforge.projects && cloudforge.projectOpen",
+					"group": "navigation@0"
+				},
 				{
 					"command": "cloudforge.cloneRepository",
 					"when": "view == cloudforge.projects",

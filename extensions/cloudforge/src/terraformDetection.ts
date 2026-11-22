@@ -29,3 +29,31 @@ export async function findTerraformImportCandidates(
 	}
 	return candidates;
 }
+
+const TERRAFORM_SOURCE_PATTERN = /\.(tf|tf\.json)$/i;
+const TERRAFORM_SUPPORT_PATTERN = /\.(tf|tf\.json|tfvars|tfvars\.json)$/i;
+
+/**
+ * Finds top-level Terraform files placed directly in a project root folder (by filename only;
+ * never reads file contents). Returns an empty array unless at least one `.tf` or `.tf.json`
+ * source file is present.
+ */
+export function findProjectRootTerraformFiles(
+	entries: readonly (readonly [string, number])[],
+	fileTypeFile = 1,
+): string[] {
+	const files: string[] = [];
+	let hasSource = false;
+	for (const [name, type] of entries) {
+		if (type !== fileTypeFile || name.startsWith('.')) {
+			continue;
+		}
+		if (TERRAFORM_SOURCE_PATTERN.test(name)) {
+			hasSource = true;
+			files.push(name);
+		} else if (TERRAFORM_SUPPORT_PATTERN.test(name)) {
+			files.push(name);
+		}
+	}
+	return hasSource ? files.sort((a, b) => a.localeCompare(b)) : [];
+}

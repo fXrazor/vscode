@@ -18,7 +18,7 @@ import {
 	type WorkspaceFolder
 } from 'vscode';
 import { validateImportSelections, type ImportSelection, type ImportSelectionError } from '../importSelections';
-import { findTerraformImportCandidates } from '../terraformDetection';
+import { findProjectRootTerraformFiles, findTerraformImportCandidates } from '../terraformDetection';
 import { ensureGit, repositoryRemote } from './git';
 import {
 	cloneUrlPrefix,
@@ -36,8 +36,11 @@ import { SecretFindings } from './secretFindings';
 import { callProjectService, projectErrorMessage, showProjectError } from './service';
 
 const PROJECT_MARKER = 'cloudforge.project.json';
+const ARCHITECTURES_FOLDER = 'architectures';
+const ARCHITECTURE_MARKER = 'cloudforge.architecture.json';
 const REPOSITORIES_FOLDER = 'repos';
 const IGNORED_FOLDERS_KEY = 'cloudforge.ignoredImportFolders';
+const IGNORED_ROOT_TERRAFORM_KEY = 'cloudforge.ignoredRootTerraform';
 const LAST_ARCHITECTURE_NAME_KEY = 'cloudforge.lastArchitectureName';
 const PENDING_CLONE_KEY = 'cloudforge.pendingClone';
 const PENDING_CLONE_LIFETIME_MS = 15 * 60 * 1000;
@@ -148,6 +151,9 @@ export class ProjectController implements Disposable {
 		}
 		await this.resumePendingClone();
 		await this.offerImports();
+		if (project.architectures.length === 0) {
+			await this.offerAdoptRootTerraform(folder, project);
+		}
 	}
 
 	/** Reloads the project without prompting (after a change on disk or in the window). */
@@ -357,6 +363,114 @@ export class ProjectController implements Disposable {
 		}
 		await commands.executeCommand('vscode.openFolder', Uri.parse(created.workspaceFile));
 		return true;
+	}
+
+	/** Creates a writable local architecture inside `architectures/<name>/`, optionally moving root `.tf` files into it. */
+	async createArchitecture(adoptRootFiles?: boolean): Promise<void> {
+		const project = this.project;
+		const folder = project ? this.projectFolder() : undefined;
+		if (!project || !folder) {
+			void window.showInformationMessage(l10n.t('Open a CloudForge project before creating an architecture.'));
+			return;
+		}
+		const rootFiles = await this.readProjectRootTerraformFiles(folder);
+		let shouldAdopt = adoptRootFiles;
+		if (shouldAdopt === undefined && rootFiles.length > 0) {
+			const moveChoice = l10n.t('Move {0} Terraform file(s) from project root', rootFiles.length);
+			const blankChoice = l10n.t('Create empty starter architecture');
+			const picked = await window.showQuickPick(
+				[
+					{ label: moveChoice, adopt: true, description: rootFiles.slice(0, 4).join(', ') + (rootFiles.length > 4 ? '…' : '') },
+					{ label: blankChoice, adopt: false, description: l10n.t('Creates a new starter main.tf') },
+				],
+				{ title: l10n.t('New local CloudForge architecture'), placeHolder: l10n.t('Choose how to initialize this architecture') }
+			);
+			if (!picked) {
+				return;
+			}
+			shouldAdopt = picked.adopt;
+		}
+
+		const existingNames = new Set(project.architectures.map(a => a.displayName.toLowerCase()));
+		const defaultName = existingNames.has(project.displayName.toLowerCase()) ? 'main' : project.displayName;
+		const rawName = await window.showInputBox({
+			title: l10n.t('New CloudForge architecture'),
+			prompt: l10n.t('Architecture name (created under architectures/<name>/)'),
+			value: isPathComponent(defaultName) ? defaultName : 'main',
+			validateInput: value => {
+				const trimmed = value.trim();
+				if (!isPathComponent(trimmed)) {
+					return l10n.t('Use a valid Windows folder name.');
+				}
+				if (existingNames.has(trimmed.toLowerCase())) {
+					return l10n.t('An architecture with that name already exists.');
+				}
+				return undefined;
+			}
+		});
+		if (rawName === undefined) {
+			return;
+		}
+		const name = rawName.trim();
+		const archDir = Uri.joinPath(folder, ARCHITECTURES_FOLDER, name);
+		if (await exists(archDir)) {
+			void window.showErrorMessage(l10n.t('A folder named architectures/{0} already exists.', name));
+			return;
+		}
+
+		await workspace.fs.createDirectory(archDir);
+		const markerBytes = new TextEncoder().encode(JSON.stringify({ formatVersion: 1, name }, null, 2) + '\n');
+		await workspace.fs.writeFile(Uri.joinPath(archDir, ARCHITECTURE_MARKER), markerBytes);
+
+		if (shouldAdopt && rootFiles.length > 0) {
+			for (const fileName of rootFiles) {
+				await workspace.fs.rename(Uri.joinPath(folder, fileName), Uri.joinPath(archDir, fileName), { overwrite: false });
+			}
+		} else {
+			const starter = new TextEncoder().encode(`# CloudForge architecture: ${name}\n`);
+			await workspace.fs.writeFile(Uri.joinPath(archDir, 'main.tf'), starter);
+		}
+
+		await this.refresh();
+		const created = this.project?.architectures.find(a => a.displayName.toLowerCase() === name.toLowerCase());
+		if (created) {
+			await this.openArchitecture(created.architectureId);
+		}
+	}
+
+	private async readProjectRootTerraformFiles(folder: Uri): Promise<string[]> {
+		try {
+			const entries = await workspace.fs.readDirectory(folder);
+			return findProjectRootTerraformFiles(entries, FileType.File);
+		} catch {
+			return [];
+		}
+	}
+
+	private async offerAdoptRootTerraform(folder: Uri, project: ProjectResult): Promise<void> {
+		const key = `root:${folder.toString()}`;
+		if (this.offered.has(key) || this.context.workspaceState.get<boolean>(IGNORED_ROOT_TERRAFORM_KEY, false)) {
+			return;
+		}
+		const rootFiles = await this.readProjectRootTerraformFiles(folder);
+		if (rootFiles.length === 0) {
+			return;
+		}
+		this.offered.add(key);
+		const createLabel = l10n.t('Create Architecture…');
+		const ignore = l10n.t("Don't Ask Again");
+		const choice = await window.showInformationMessage(
+			l10n.t('Terraform files found in the root of {0}. Move them into a CloudForge architecture?', project.displayName),
+			{ detail: l10n.t('CloudForge loads project architectures from architectures/<name>/ or imported repos. Moving these {0} top-level Terraform file(s) into architectures/ lets you view, validate, and edit them in the Architecture Canvas.', rootFiles.length) },
+			createLabel,
+			l10n.t('Not Now'),
+			ignore
+		);
+		if (choice === createLabel) {
+			await this.createArchitecture(true);
+		} else if (choice === ignore) {
+			await this.context.workspaceState.update(IGNORED_ROOT_TERRAFORM_KEY, true);
+		}
 	}
 
 	/** Offers imports for window folders that hold Terraform and are not part of the project. */

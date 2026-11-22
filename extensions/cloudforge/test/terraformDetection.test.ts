@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Uri, WorkspaceFolder } from 'vscode';
-import { findTerraformImportCandidates } from '../src/terraformDetection.ts';
+import { findProjectRootTerraformFiles, findTerraformImportCandidates } from '../src/terraformDetection.ts';
 
 function folder(name: string, scheme = 'file'): WorkspaceFolder {
 	return { name, uri: { scheme, toString: () => `${scheme}:///project/${name}` } } as unknown as WorkspaceFolder;
@@ -37,4 +37,19 @@ test('skips file searches when the window has no workspace folders', async () =>
 		assert.fail('A file search needs a workspace folder');
 	});
 	assert.deepEqual(candidates, []);
+});
+
+test('detects top-level project-root Terraform files while skipping markers, dotfiles, and folders', () => {
+	const entries: [string, number][] = [
+		['cloudforge.project.json', 1],
+		['project1.code-workspace', 1],
+		['main.tf', 1],
+		['hub.tf', 1],
+		['terraform.tfvars', 1],
+		['.hidden.tf', 1],
+		['repos', 2],
+		['readme.md', 1],
+	];
+	assert.deepEqual(findProjectRootTerraformFiles(entries, 1), ['hub.tf', 'main.tf', 'terraform.tfvars']);
+	assert.deepEqual(findProjectRootTerraformFiles([['terraform.tfvars', 1], ['cloudforge.project.json', 1]], 1), []);
 });
