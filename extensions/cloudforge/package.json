@@ -198,6 +198,8 @@
 		}
 	},
 	"activationEvents": [
-		"workspaceContains:cloudforge.project.json"
+		"workspaceContains:cloudforge.project.json",
+		"workspaceContains:*.tf",
+		"workspaceContains:*.tf.json"
 	]
 }

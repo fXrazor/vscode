@@ -14,6 +14,7 @@ import {
 	parseInspection,
 	parseProjectResult,
 	repositoryFolderName,
+	selectDefaultArchitecture,
 	suggestArchitectureName,
 	validateCloneUrl,
 } from '../src/project/model.ts';
@@ -165,4 +166,41 @@ test('git install results are typed', () => {
 	assert.deepEqual(parseGitInstall({ status: 'wingetMissing' }), { status: 'wingetMissing' });
 	assert.equal(parseGitInstall({ status: 'installed', gitVersion: 'rm -rf' }), undefined);
 	assert.equal(parseGitInstall({ status: 'done' }), undefined);
+});
+
+test('selectDefaultArchitecture prefers remembered available architecture and skips unavailable repos', () => {
+	const project = parseProjectResult({
+		workspaceId: 'w1',
+		kind: 'project',
+		displayName: 'Contoso',
+		hasWorkspaceFile: true,
+		repositories: [
+			{ repositoryId: 'r-missing', displayName: 'old-repo', location: 'project', status: 'missing' },
+			{ repositoryId: 'r-ok', displayName: 'infra', location: 'project', status: 'available', workspaceFolderIndex: 1 },
+		],
+		architectures: [
+			{ architectureId: 'a-missing', displayName: 'Gone', source: 'repository', repositoryId: 'r-missing' },
+			{ architectureId: 'a-local', displayName: 'Sandbox', source: 'local' },
+			{ architectureId: 'a-hub', displayName: 'Hub Network', source: 'repository', repositoryId: 'r-ok' },
+		],
+		unimportedFolders: [],
+	})!;
+
+	// Falls back to first available (skipping missing repo architecture).
+	assert.equal(selectDefaultArchitecture(project)?.architectureId, 'a-local');
+	// Remembers previously opened architecture case-insensitively across grant ID changes.
+	assert.equal(selectDefaultArchitecture(project, 'hub network')?.architectureId, 'a-hub');
+	// Ignores remembered architecture whose repo is currently unavailable.
+	assert.equal(selectDefaultArchitecture(project, 'Gone')?.architectureId, 'a-local');
+	// Empty project returns undefined.
+	const empty = parseProjectResult({
+		workspaceId: 'w2',
+		kind: 'project',
+		displayName: 'Empty',
+		hasWorkspaceFile: true,
+		repositories: [],
+		architectures: [],
+		unimportedFolders: [],
+	})!;
+	assert.equal(selectDefaultArchitecture(empty), undefined);
 });

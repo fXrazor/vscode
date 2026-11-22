@@ -288,3 +288,27 @@ export function findingSummary(finding: Finding): string {
 	const where = finding.line === undefined ? finding.file : `${finding.file}:${finding.line}`;
 	return `${where}: ${findingDescription(finding.code)}`;
 }
+
+/**
+ * Picks which architecture to open automatically when a CloudForge project connects.
+ * Considers only architectures whose backing repository (if linked) is `available`, preferring
+ * the previously opened architecture by display name before falling back to the first available.
+ */
+export function selectDefaultArchitecture(project: ProjectResult, lastArchitectureName?: string): ProjectArchitecture | undefined {
+	const availableRepos = new Set(
+		project.repositories.filter(repo => repo.status === 'available').map(repo => repo.repositoryId)
+	);
+	const available = project.architectures.filter(arch =>
+		arch.source === 'local' || (arch.repositoryId !== undefined && availableRepos.has(arch.repositoryId))
+	);
+	if (available.length === 0) {
+		return undefined;
+	}
+	if (lastArchitectureName) {
+		const remembered = available.find(arch => arch.displayName.toLowerCase() === lastArchitectureName.toLowerCase());
+		if (remembered) {
+			return remembered;
+		}
+	}
+	return available[0];
+}

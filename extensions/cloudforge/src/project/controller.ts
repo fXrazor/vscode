@@ -26,6 +26,7 @@ import {
 	parseCreatedProject,
 	parseInspection,
 	parseProjectResult,
+	selectDefaultArchitecture,
 	suggestArchitectureName,
 	validateCloneUrl,
 	type CloneProvider,
@@ -37,6 +38,7 @@ import { callProjectService, projectErrorMessage, showProjectError } from './ser
 const PROJECT_MARKER = 'cloudforge.project.json';
 const REPOSITORIES_FOLDER = 'repos';
 const IGNORED_FOLDERS_KEY = 'cloudforge.ignoredImportFolders';
+const LAST_ARCHITECTURE_NAME_KEY = 'cloudforge.lastArchitectureName';
 const PENDING_CLONE_KEY = 'cloudforge.pendingClone';
 const PENDING_CLONE_LIFETIME_MS = 15 * 60 * 1000;
 
@@ -59,6 +61,8 @@ export class ProjectController implements Disposable {
 	private connecting: Promise<void> | undefined;
 	/** Set when the user declined consent; cleared only by an explicit refresh. */
 	private consentDeclined = false;
+	/** Tracks whether this window already auto-opened an architecture on connect. */
+	private hasAutoOpenedArchitecture = false;
 	private readonly offered = new Set<string>();
 	private readonly changeEmitter = new EventEmitter<void>();
 	readonly onDidChange: Event<void> = this.changeEmitter.event;
@@ -131,6 +135,14 @@ export class ProjectController implements Disposable {
 		if (!project) {
 			return;
 		}
+		if (!this.hasAutoOpenedArchitecture) {
+			const lastName = this.context.workspaceState.get<string>(LAST_ARCHITECTURE_NAME_KEY);
+			const initial = selectDefaultArchitecture(project, lastName);
+			if (initial) {
+				this.hasAutoOpenedArchitecture = true;
+				await this.openArchitecture(initial.architectureId);
+			}
+		}
 		if (!project.hasWorkspaceFile) {
 			void this.offerWorkspaceFile(project, folder);
 		}
@@ -161,6 +173,8 @@ export class ProjectController implements Disposable {
 	async openArchitecture(architectureId: string): Promise<void> {
 		const architecture = this.project?.architectures.find(item => item.architectureId === architectureId);
 		if (this.project && architecture) {
+			this.hasAutoOpenedArchitecture = true;
+			void this.context.workspaceState.update(LAST_ARCHITECTURE_NAME_KEY, architecture.displayName);
 			await this.graph.show(this.project.workspaceId, architecture.architectureId, architecture.displayName);
 		}
 	}
@@ -263,6 +277,10 @@ export class ProjectController implements Disposable {
 		const first = updated?.importedArchitectureIds[0];
 		if (updated && first) {
 			const architecture = updated.architectures.find(item => item.architectureId === first);
+			this.hasAutoOpenedArchitecture = true;
+			if (architecture) {
+				void this.context.workspaceState.update(LAST_ARCHITECTURE_NAME_KEY, architecture.displayName);
+			}
 			await this.graph.show(updated.workspaceId, first, architecture?.displayName);
 		}
 	}

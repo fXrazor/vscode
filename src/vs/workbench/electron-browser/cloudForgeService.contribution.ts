@@ -27,8 +27,15 @@ interface CloudForgeCallFailure {
 }
 
 type CloudForgeCallResult = CloudForgeCallSuccess | CloudForgeCallFailure;
-type CloudForgeServiceMethod = 'chooseTerraformRoot' | 'selectArchitecture' | 'readArchitecture';
+type CloudForgeServiceMethod =
+	| 'chooseTerraformRoot' | 'selectArchitecture' | 'readArchitecture'
+	| 'startValidationRun' | 'pollValidationRun' | 'cancelValidationRun';
+type CloudForgeCatalogueMethod = 'listCatalogueSnapshots' | 'listCatalogueTypes' | 'getResourceFormSchema' | 'renderResourceDraft';
 type CloudForgeProjectMethod = 'createProject' | 'openProject' | 'grantProject' | 'forgetProjectAccess' | 'createWorkspaceFile' | 'inspectRepository' | 'importRepository' | 'removeRepository' | 'installGit';
+
+const catalogueMethods: ReadonlySet<string> = new Set<CloudForgeCatalogueMethod>([
+	'listCatalogueSnapshots', 'listCatalogueTypes', 'getResourceFormSchema', 'renderResourceDraft'
+]);
 
 /**
  * Stage 2 project methods. Electron main validates their parameters and fills every path
@@ -255,7 +262,20 @@ CommandsRegistry.registerCommand('_cloudforge.callService', async (accessor, met
 			? callProjectMethod(accessor, method as CloudForgeProjectMethod, params)
 			: failure('INVALID_PARAMS', 'The CloudForge request is invalid.');
 	}
-	if (method !== 'chooseTerraformRoot' && method !== 'selectArchitecture' && method !== 'readArchitecture') {
+	if (typeof method === 'string' && catalogueMethods.has(method)) {
+		if (!isRecord(params)) {
+			return failure('INVALID_PARAMS', 'The CloudForge request is invalid.');
+		}
+		try {
+			return await serviceChannel(accessor).call<CloudForgeCallResult>(method, params);
+		} catch {
+			return failure('SERVICE_UNAVAILABLE', 'The CloudForge service is unavailable.');
+		}
+	}
+	if (
+		method !== 'chooseTerraformRoot' && method !== 'selectArchitecture' && method !== 'readArchitecture' &&
+		method !== 'startValidationRun' && method !== 'pollValidationRun' && method !== 'cancelValidationRun'
+	) {
 		return failure('INVALID_PARAMS', 'The CloudForge request is invalid.');
 	}
 	if (!isRecord(params) || !isOpaqueId(params.workspaceId) || params.workspaceId !== activeWorkspaceId) {
@@ -274,8 +294,15 @@ CommandsRegistry.registerCommand('_cloudforge.callService', async (accessor, met
 			}
 			break;
 		case 'readArchitecture':
+		case 'startValidationRun':
 			if (!isOpaqueId(params.architectureId) || params.architectureId !== activeArchitectureId || (params.expectedSourceRevision !== undefined && (typeof params.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(params.expectedSourceRevision)))) {
 				return failure('SCOPE_DENIED', 'The requested architecture is not active in this window.');
+			}
+			break;
+		case 'pollValidationRun':
+		case 'cancelValidationRun':
+			if (!isOpaqueId(params.runId)) {
+				return failure('INVALID_PARAMS', 'The CloudForge request is invalid.');
 			}
 			break;
 	}

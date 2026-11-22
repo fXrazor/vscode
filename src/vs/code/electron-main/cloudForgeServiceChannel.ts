@@ -33,7 +33,9 @@ export type CloudForgeCallResult = CloudForgeCallSuccess | CloudForgeCallFailure
 const cloudForgeMethods: ReadonlySet<string> = new Set<CloudForgeServiceMethod>([
 	'openWorkspace', 'chooseTerraformRoot', 'selectArchitecture', 'readArchitecture',
 	'createProject', 'openProject', 'grantProject', 'forgetProjectAccess', 'createWorkspaceFile',
-	'inspectRepository', 'importRepository', 'removeRepository', 'installGit'
+	'inspectRepository', 'importRepository', 'removeRepository', 'installGit',
+	'listCatalogueSnapshots', 'listCatalogueTypes', 'getResourceFormSchema', 'renderResourceDraft',
+	'startValidationRun', 'pollValidationRun', 'cancelValidationRun'
 ]);
 
 /** The service allows `installGit` 10 minutes; the broker waits a little longer for its reply. */
@@ -43,6 +45,7 @@ const maxNameLength = 255;
 const maxRemoteBytes = 2048;
 const maxSelections = 32;
 const maxWorkspaceFolders = 1024;
+const maxPollEvents = 512;
 
 const serviceErrorMessages: Readonly<Record<string, string>> = {
 	INVALID_PARAMS: 'The CloudForge request is invalid.',
@@ -56,6 +59,7 @@ const serviceErrorMessages: Readonly<Record<string, string>> = {
 	LIMIT_EXCEEDED: 'The workspace exceeds the CloudForge inspection limit.',
 	CONSENT_REQUIRED: 'CloudForge needs your permission to read this project.',
 	ALREADY_EXISTS: 'A CloudForge project or workspace file with that name already exists.',
+	SCHEMA_UNAVAILABLE: 'The requested provider schema snapshot or resource type is not available.',
 	CANCELLED: 'The CloudForge request was cancelled.',
 	SERVICE_UNAVAILABLE: 'The CloudForge service is unavailable.',
 	SERVICE_ERROR: 'The CloudForge service could not complete the request.'
@@ -86,6 +90,81 @@ function isPathComponent(value: unknown): value is string {
 /** A local absolute Windows path with a drive letter. UNC and device paths are refused. */
 function isLocalPath(value: string): boolean {
 	return value.length > 0 && value.length <= maxPathLength && /^[a-zA-Z]:\\/.test(value) && !value.includes('\0');
+}
+
+function isSnapshotSegment(value: unknown): value is string {
+	return typeof value === 'string' && value.length > 0 && value.length <= 256 && value !== '.' && value !== '..' && /^[A-Za-z0-9._+-]+$/.test(value);
+}
+
+function validateSnapshotKey(value: unknown): Record<string, string> | undefined {
+	if (!isRecord(value) || !hasOnlyKeys(value, ['address', 'version', 'formatVersion', 'sha256'])) {
+		return undefined;
+	}
+	if (typeof value.address !== 'string') {
+		return undefined;
+	}
+	const segments = value.address.split('/');
+	if (segments.length !== 3 || !segments.every(isSnapshotSegment)) {
+		return undefined;
+	}
+	if (!isSnapshotSegment(value.version) || !isSnapshotSegment(value.formatVersion)) {
+		return undefined;
+	}
+	if (typeof value.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(value.sha256)) {
+		return undefined;
+	}
+	return { address: value.address, version: value.version, formatVersion: value.formatVersion, sha256: value.sha256 };
+}
+
+function isTypeName(value: unknown): value is string {
+	return typeof value === 'string' && value.length > 0 && value.length <= 256 && /^[A-Za-z0-9_-]+$/.test(value);
+}
+
+function isSchemaKind(value: unknown): value is 'resource' | 'dataSource' {
+	return value === 'resource' || value === 'dataSource';
+}
+
+function validateDraftBody(value: unknown, depth: number): Record<string, unknown> | undefined {
+	if (depth > 8 || !isRecord(value) || !hasOnlyKeys(value, ['attributes', 'blocks'])) {
+		return undefined;
+	}
+	const attributes = value.attributes === undefined ? {} : value.attributes;
+	const blocks = value.blocks === undefined ? [] : value.blocks;
+	if (!isRecord(attributes) || !Array.isArray(blocks) || blocks.length > 256) {
+		return undefined;
+	}
+	const cleanAttrs: Record<string, unknown> = {};
+	for (const [key, entry] of Object.entries(attributes)) {
+		if (!isTypeName(key) || !isRecord(entry)) {
+			return undefined;
+		}
+		if (entry.kind === 'literal' && hasOnlyKeys(entry, ['kind', 'value']) && 'value' in entry) {
+			cleanAttrs[key] = { kind: 'literal', value: entry.value };
+		} else if (entry.kind === 'expression' && hasOnlyKeys(entry, ['kind', 'text']) && typeof entry.text === 'string' && entry.text.length <= 16384) {
+			cleanAttrs[key] = { kind: 'expression', text: entry.text };
+		} else {
+			return undefined;
+		}
+	}
+	const cleanBlocks: Record<string, unknown>[] = [];
+	for (const block of blocks) {
+		if (!isRecord(block) || !hasOnlyKeys(block, ['name', 'origin', 'body']) || !isTypeName(block.name)) {
+			return undefined;
+		}
+		if (block.origin !== undefined && (typeof block.origin !== 'number' || !Number.isSafeInteger(block.origin) || block.origin < 0)) {
+			return undefined;
+		}
+		const body = block.body === undefined ? { attributes: {}, blocks: [] } : validateDraftBody(block.body, depth + 1);
+		if (!body) {
+			return undefined;
+		}
+		cleanBlocks.push({
+			name: block.name,
+			...(block.origin === undefined ? {} : { origin: block.origin }),
+			body
+		});
+	}
+	return { attributes: cleanAttrs, blocks: cleanBlocks };
 }
 
 /**
@@ -184,6 +263,78 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 				return undefined;
 			}
 			return { workspaceId: value.workspaceId, repositoryId: value.repositoryId };
+		}
+		case 'listCatalogueSnapshots': {
+			return Object.keys(value).length === 0 ? {} : undefined;
+		}
+		case 'listCatalogueTypes': {
+			if (!hasOnlyKeys(value, ['key'])) {
+				return undefined;
+			}
+			const key = validateSnapshotKey(value.key);
+			return key ? { key } : undefined;
+		}
+		case 'getResourceFormSchema': {
+			if (!hasOnlyKeys(value, ['key', 'kind', 'typeName']) || !isSchemaKind(value.kind) || !isTypeName(value.typeName)) {
+				return undefined;
+			}
+			const key = validateSnapshotKey(value.key);
+			return key ? { key, kind: value.kind, typeName: value.typeName } : undefined;
+		}
+		case 'renderResourceDraft': {
+			if (!hasOnlyKeys(value, ['key', 'draft']) || !isRecord(value.draft)) {
+				return undefined;
+			}
+			const key = validateSnapshotKey(value.key);
+			const draft = value.draft;
+			if (!key || !hasOnlyKeys(draft, ['kind', 'typeName', 'label', 'body']) || !isSchemaKind(draft.kind) || !isTypeName(draft.typeName) || typeof draft.label !== 'string' || draft.label.length > 256 || /[\u0000-\u001f\u007f]/.test(draft.label)) {
+				return undefined;
+			}
+			const body = draft.body === undefined ? { attributes: {}, blocks: [] } : validateDraftBody(draft.body, 0);
+			if (!body) {
+				return undefined;
+			}
+			return { key, draft: { kind: draft.kind, typeName: draft.typeName, label: draft.label, body } };
+		}
+		case 'startValidationRun': {
+			if (!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'expectedSourceRevision']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId)) {
+				return undefined;
+			}
+			if (value.expectedSourceRevision !== undefined && (typeof value.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(value.expectedSourceRevision))) {
+				return undefined;
+			}
+			return {
+				workspaceId: value.workspaceId,
+				architectureId: value.architectureId,
+				...(value.expectedSourceRevision === undefined ? {} : { expectedSourceRevision: value.expectedSourceRevision })
+			};
+		}
+		case 'pollValidationRun': {
+			if (!hasOnlyKeys(value, ['workspaceId', 'runId', 'cursor', 'maxEvents', 'includeSnapshot']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.runId)) {
+				return undefined;
+			}
+			if (value.cursor !== undefined && (typeof value.cursor !== 'number' || !Number.isSafeInteger(value.cursor) || value.cursor < 0)) {
+				return undefined;
+			}
+			if (value.maxEvents !== undefined && (typeof value.maxEvents !== 'number' || !Number.isSafeInteger(value.maxEvents) || value.maxEvents < 1 || value.maxEvents > maxPollEvents)) {
+				return undefined;
+			}
+			if (value.includeSnapshot !== undefined && typeof value.includeSnapshot !== 'boolean') {
+				return undefined;
+			}
+			return {
+				workspaceId: value.workspaceId,
+				runId: value.runId,
+				...(value.cursor === undefined ? {} : { cursor: value.cursor }),
+				...(value.maxEvents === undefined ? {} : { maxEvents: value.maxEvents }),
+				...(value.includeSnapshot === undefined ? {} : { includeSnapshot: value.includeSnapshot })
+			};
+		}
+		case 'cancelValidationRun': {
+			if (!hasOnlyKeys(value, ['workspaceId', 'runId']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.runId)) {
+				return undefined;
+			}
+			return { workspaceId: value.workspaceId, runId: value.runId };
 		}
 	}
 }

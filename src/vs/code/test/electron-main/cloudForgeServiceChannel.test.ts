@@ -345,4 +345,31 @@ suite('CloudForgeServiceChannel', () => {
 			{ ok: false, error: { code: 'SERVICE_ERROR', message: 'The CloudForge service could not complete the request.' } },
 		]);
 	});
+
+	test('validates Stage 3 catalogue and Stage 4 validation runner parameters and rejects extra fields', async () => {
+		const sha256 = 'a'.repeat(64);
+		const key = { address: 'registry.terraform.io/hashicorp/azurerm', version: '5.14.0', formatVersion: '1.0', sha256 };
+		assert.deepStrictEqual(validateCloudForgeServiceParams('listCatalogueSnapshots', {}), {});
+		assert.strictEqual(validateCloudForgeServiceParams('listCatalogueSnapshots', { path: 'C:\\Windows' }), undefined);
+		assert.ok(validateCloudForgeServiceParams('listCatalogueTypes', { key }));
+		assert.strictEqual(validateCloudForgeServiceParams('listCatalogueTypes', { key: { ...key, address: '../escape/azurerm' } }), undefined);
+		assert.ok(validateCloudForgeServiceParams('getResourceFormSchema', { key, kind: 'resource', typeName: 'azurerm_resource_group' }));
+		assert.strictEqual(validateCloudForgeServiceParams('getResourceFormSchema', { key, kind: 'provider', typeName: 'azurerm_resource_group' }), undefined);
+		assert.ok(validateCloudForgeServiceParams('renderResourceDraft', {
+			key,
+			draft: { kind: 'dataSource', typeName: 'azurerm_resource_group', label: 'hub', body: { attributes: { name: { kind: 'literal', value: 'rg-hub' } }, blocks: [] } }
+		}));
+
+		assert.ok(validateCloudForgeServiceParams('startValidationRun', { workspaceId, architectureId: `${workspaceId}-architecture-1`, expectedSourceRevision: sha256 }));
+		assert.strictEqual(validateCloudForgeServiceParams('startValidationRun', { workspaceId, architectureId: `${workspaceId}-architecture-1`, rootPath: 'C:\\Windows' }), undefined);
+		assert.ok(validateCloudForgeServiceParams('pollValidationRun', { workspaceId, runId: `${workspaceId}-run-1`, cursor: 0, maxEvents: 128, includeSnapshot: true }));
+		assert.strictEqual(validateCloudForgeServiceParams('pollValidationRun', { workspaceId, runId: `${workspaceId}-run-1`, maxEvents: 0 }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('pollValidationRun', { workspaceId, runId: `${workspaceId}-run-1`, maxEvents: 513 }), undefined);
+		assert.ok(validateCloudForgeServiceParams('cancelValidationRun', { workspaceId, runId: `${workspaceId}-run-1` }));
+
+		const { broker, call } = createBroker([contosoWindow], { reply: () => { throw new CloudForgeServiceError('SCHEMA_UNAVAILABLE'); } });
+		const schemaErr = await call(1, 'listCatalogueTypes', { key });
+		assert.deepStrictEqual(schemaErr, { ok: false, error: { code: 'SCHEMA_UNAVAILABLE', message: 'The requested provider schema snapshot or resource type is not available.' } });
+		await broker.stop();
+	});
 });
