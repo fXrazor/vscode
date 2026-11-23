@@ -739,3 +739,23 @@ Implemented on `fxrazor/auto-open-and-stage3-4` in `Z:\CloudForge-Code\.claude\w
 2. When a Windows code-signing certificate is installed on the build host, pass `-SignCertificateThumbprint <40-hex>` (and optionally `-RequireSignedService`) to `build/cloudforge/package-win32-x64.ps1` for signed releases.
 3. Proceed to **Phase 6 (Modules, Reusable Patterns & Scale)**: Terraform module drill-down with breadcrumb navigation, typed module input/output inspection, reusable starter architecture templates, and bounded group pagination/LOD for large graphs.
 
+### Stage 7 Live Child Module Drill-Down & Typed I/O Integration (`readModule`, 2026-11-23)
+
+Implemented on `fxrazor/auto-open-and-stage3-4` in `Z:\CloudForge-Code\.claude\worktrees\auto-open-stage3-4` (`86478d200cb`, fast-forward merged into `Z:\CloudForge-Code` `main` cleanly on top of Phase 6/7 `65941d7d4ae`). Pairs end-to-end with Rust `Z:\CloudForge` Stage 7 service revision `ad360e3eca5b5c4209931baba21e3369587092ba` (`3,351,552` bytes, SHA-256 `7580b16aae7dfd89d72b5e0cc4bf037365607758683328593343c93533298ec2`, archived at `Z:\CFStage\service-ad360e3\cloudforge-service.exe`).
+
+- **Electron-main broker & Workbench bridge ([cloudForgeService.ts](src/vs/code/electron-main/cloudForgeService.ts), [cloudForgeServiceChannel.ts](src/vs/code/electron-main/cloudForgeServiceChannel.ts), [cloudForgeService.contribution.ts](src/vs/workbench/electron-browser/cloudForgeService.contribution.ts), [cloudForgeServiceChannel.test.ts](src/vs/code/test/electron-main/cloudForgeServiceChannel.test.ts)):**
+  - Wired `readModule` (`{ workspaceId, architectureId, expectedSourceRevision?, modulePath: string[] }`) with active-window scope enforcement and strict `1..=8` safe identifier validation on `modulePath` (zero filesystem paths).
+- **Live child module boundary & nested drill-down ([protocol.ts](extensions/cloudforge/src/canvas/protocol.ts), [serviceAdapters.ts](extensions/cloudforge/src/canvas/serviceAdapters.ts), [canvasPanel.ts](extensions/cloudforge/src/canvas/canvasPanel.ts), [extension.ts](extensions/cloudforge/src/extension.ts), [canvas-src/index.ts](extensions/cloudforge/canvas-src/index.ts), [canvas-src/canvas.css](extensions/cloudforge/canvas-src/canvas.css), [serviceAdapters.test.ts](extensions/cloudforge/test/serviceAdapters.test.ts)):**
+  - Upgraded the Phase 6 `Module boundary view` overlay to request live Rust Stage 7 `readModule` data on open and nested drill-down, displaying clickable multi-level breadcrumbs (`architecture / module.net / module.sub`), declared `variable` blocks (`typeExpr`, `passed`/`required`/`optional`, `sensitive`), declared `output` blocks (`sensitive`, description), declared child module resources, clickable nested local child modules, and honest read-only summaries for external registry/git modules (with URL credentials stripped by Rust).
+
+| Check (run on `86478d200cb`) | Verified result |
+| --- | --- |
+| `build/hygiene.ts` (11 files) & `build/oxlint.ts` (10 files) | Passed (`0` errors, `0` warnings). |
+| `tsc -p extensions/cloudforge/tsconfig.json --noEmit` & `tsc -p extensions/cloudforge/canvas-src/tsconfig.json --noEmit` | Passed (`0` errors). |
+| `node --test extensions/cloudforge/test/*.test.ts` | **48/48 extension tests passed** (`0` skipped; includes Phase 5, Phase 6/7, and Stage 3–7 adapter suites). |
+| `node extensions/cloudforge/esbuild.mts` & `node extensions/cloudforge/esbuild.webview.mts` | Passed (`dist/extension.js`, `media/canvas.js`, `media/canvas-style.css`). |
+| `node build/next/index.ts transpile` & `scripts\test.bat --run src/vs/code/test/electron-main/cloudForgeServiceChannel.test.ts --run src/vs/code/test/electron-main/cloudForgeService.test.ts` | **42/42 Electron-main tests passed**. |
+
+**Remaining next action:**
+- Once the sibling session's packaging run in `Z:\CFStage` completes, package `86478d200cb` (Phase 6/7 + Stage 7 `readModule` UI) together with Rust Stage 7 `ad360e3` (`Z:\CFStage\service-ad360e3\cloudforge-service.exe`, SHA-256 `7580b16aae7dfd89d72b5e0cc4bf037365607758683328593343c93533298ec2`) and run a live packaged-desktop smoke verifying nested local module drill-down and typed I/O.
+
