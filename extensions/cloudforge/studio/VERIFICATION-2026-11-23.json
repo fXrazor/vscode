@@ -1,0 +1,39 @@
+{
+  "date": "2026-11-23",
+  "scope": "Standalone preview only; no installed desktop, Rust service, Terraform execution or reference-app configuration writes",
+  "checks": {
+    "typescript": "corepack pnpm --dir extensions/cloudforge/studio check",
+    "tests": "corepack pnpm --dir extensions/cloudforge/studio test — 22 passed",
+    "build": "corepack pnpm --dir extensions/cloudforge/studio build",
+    "whitespace": "git diff --check"
+  },
+  "browser": {
+    "target": "http://127.0.0.1:50429/",
+    "fallback": "Embedded browser transport disconnected; final verification used an isolated Playwright browser",
+    "observed": [
+      "main.tf Whole architecture with no selection; Resource Terraform code with one resource selected",
+      "Selected virtual-network name changed from vnet-production to vnet-refined through HCL Apply; Block view reflected it; Undo restored vnet-production",
+      "Block view without selection restores architecture overview after whole-architecture Code view",
+      "Reviewed literal .tf import added private_network bool=false and location string=uksouth",
+      "Descending name sort displayed private_network before location",
+      "Copy reference feedback displayed Copied var.private_network; clipboard contents were not independently read",
+      "Diamond dashed border with weight 3 rendered stroke-dasharray 6 4.5",
+      "Selected shape toolbar x462.87 width499 fit inside canvas x362 width716",
+      "Right resource inspector x918 width440 at viewport 1358x1000; zero .dock-bottom elements",
+      "Light architecture and dark configuration screenshots inspected",
+      "Captured preview console log contained React development information and no error entries"
+    ],
+    "screenshots": [
+      "output/playwright/terraform-main-right-final.png",
+      "output/playwright/resource-form-dark-final.png",
+      "output/playwright/variables-right-light.png"
+    ]
+  },
+  "limitations": [
+    "Reload resets the in-memory draft",
+    "Terraform projection is incomplete and not validated; only existing representable fields can apply",
+    "Variable import supports a bounded literal subset; no tfvars generation or project/environment scope integration",
+    "Inherited resource values, typed references, required nested schema constraints and semantic canvas dependency updates are the next annotated pass",
+    "Shape drag/drop end-to-end, full keyboard/contrast audit, very narrow layouts and full PDF fidelity remain unverified"
+  ]
+}

@@ -236,7 +236,50 @@
 .studio .inspector .schema-type { font-size:10px; font-weight:400; max-width:140px; margin-left:auto; }
 .studio .code-tabs { overflow-x:auto; }
 @media (forced-colors: active) { .selection-editbar { border-color:CanvasText; } }
-.studio .dock-bottom .code-panel { height:var(--code-height,32vh); resize:none; position:relative; overflow:visible; }
-.dock-resize-handle { position:absolute; top:-3px; left:0; right:0; height:6px; cursor:row-resize; touch-action:none; z-index:15; }
-.dock-resize-handle:hover,.dock-resize-handle:focus-visible { background:var(--accent-soft); outline:none; }
 .studio .code-panel > .code-content { overflow:hidden; }
+
+/* Resource editing owns its code surface; the canvas has no global code dock. */
+.studio .design-area { flex-direction: column; }
+.studio .pane-resize-handle.resize-details { right: 0; left: auto; }
+.studio.details-code .inspector { display: flex; flex-direction: column; overflow: hidden; }
+.studio .inspector .code-panel { flex: 1; min-height: 220px; max-height: none; border-top: 0; }
+.studio .inspector .code-tabs { flex-wrap: wrap; height: auto; min-height: 36px; flex-shrink: 0; }
+.studio .inspector .code-tabs button { padding: 5px 7px; }
+.resource-code-caption { padding: 8px 12px; font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+.resource-editor-appearance { margin: 0 12px 8px; font-size: 11px; }
+.resource-editor-appearance > summary { cursor: pointer; padding: 5px 0; }
+.studio .form-action-row button[aria-pressed=true] { color: var(--accent); background: var(--accent-soft); }
+.inspector-switchbar, .inspector-categories { display: flex; align-items: center; gap: 3px; padding: 8px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.inspector-switchbar button, .inspector-categories button { display: inline-flex; align-items: center; gap: 5px; padding: 5px; border: 0; border-radius: 4px; color: var(--muted); background: transparent; cursor: pointer; font-size: 12px; }
+.inspector-switchbar button[aria-pressed=true], .inspector-categories button[aria-pressed=true] { color: var(--accent); background: var(--accent-soft); }
+.inspector-switchbar button:disabled { opacity: .5; cursor: default; }
+.resource-code-actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; padding: 0 8px; flex-shrink: 0; }
+.resource-code-actions:has(button) { padding-top: 8px; padding-bottom: 8px; }
+.variable-container[hidden] { display: none; }
+.variables-panel { padding: 14px; }
+.variables-panel h2 { font-size: 13px; margin: 0; }
+.variables-panel > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 14px; }
+.variables-panel button { color: var(--text); background: var(--panel-2); border: 1px solid var(--border); padding: 6px; border-radius: 4px; font-size: 11px; cursor: pointer; }
+.variables-panel .muted { margin-top: 12px; }
+.variable-card { margin-top: 8px; border: 1px solid var(--border); border-radius: 5px; background: var(--panel-solid); overflow: hidden; }
+.variable-card .variable-open { width: 100%; display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px; border: 0; border-radius: 0; padding: 10px; background: transparent; text-align: left; }
+.variable-open strong { overflow-wrap: anywhere; font-size: 12px; }
+.variable-open > span:last-child { grid-column: 1/-1; color: var(--muted); font-size: 11px; display: flex; gap: 4px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.variable-scope { color: var(--accent); background: var(--accent-soft); padding: 2px 4px; border-radius: 3px; font-size: 10px; }
+.variable-card footer { padding: 4px 10px; display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 10px; color: var(--muted); }
+.variable-card footer button { border: 0; background: transparent; color: var(--muted); }
+.variable-card footer button:disabled { opacity: .5; cursor: default; }
+.variable-form > label { display: grid; gap: 6px; margin-bottom: 16px; font-size: 12px; }
+.variable-form input:not([type=checkbox]), .variable-form textarea, .variable-form select { width: 100%; min-height: 32px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--panel-2); color: var(--text); font: inherit; }
+.variable-form textarea { min-height: 65px; resize: vertical; }
+.variable-form .variable-checkbox { display: flex; align-items: center; gap: 8px; }
+.variable-form .field-help { margin: -4px 0 16px; font-size: 11px; }
+.variable-error { color: var(--danger); margin-bottom: 12px; font-size: 12px; }
+.variable-code { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 14px; color: var(--text); font-size: 12px; font-family: var(--font-code); }
+.variable-discovery { padding: 10px 0; font-size: 11px; color: var(--muted); }
+.variable-list-options { display: flex; gap: 6px; margin: 10px 0; }
+.variable-list-options select { min-width: 0; flex: 1; font-size: 11px; padding: 5px; color: var(--text); background: var(--panel-2); border: 1px solid var(--border); border-radius: 4px; }
+.variable-import-review { margin: 12px 0; padding-left: 16px; font-size: 11px; overflow-wrap: anywhere; }
+.variable-import-review li { padding: 4px 0; }
+.code-projection-note { padding: 0 12px 8px; font-size: 11px; color: var(--muted); }
+.variable-container { min-height: 0; overflow-y: auto; }

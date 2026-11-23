@@ -1,5 +1,7 @@
 # Refinement checkpoint — 2026-11-17
 
+**Layout update, 23 November:** bottom/global docking instructions below are historical. The current user-approved layout is library left, canvas centre, resource form/code/variables right, with no bottom code dock. Read the latest HANDOFF.md entry and AFFINE-ADAPTATION.md before continuing.
+
 Implementation stopped at the user's explicit request. This is the resumption guide.
 
 ## Location and source ownership

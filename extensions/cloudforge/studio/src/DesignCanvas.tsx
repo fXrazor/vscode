@@ -2,6 +2,7 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
+import { shapeDefinitions, type ShapeId } from './shapes.ts';
 import { memo, useEffect, useMemo, useRef, useState, type Dispatch, type RefObject } from 'react';
 import {
 	Background, BackgroundVariant, MarkerType, MiniMap, ReactFlow, SelectionMode,
@@ -28,7 +29,7 @@ const zoomPresets = [0.1, 0.25, 0.5, 0.7, 1, 2, 4, 12, 20];
 
 /** Keep pointer/viewport state here so dragging never rerenders the parameter editor. */
 export const DesignCanvas = memo(function DesignCanvas({
-	architecture, mode, theme, onThemeChange, selectedId, dispatch, onSelect, onOpen, onInit, viewports, onAddItem, onAddResource, onAddCatalogue
+	architecture, mode, theme, onThemeChange, selectedId, dispatch, onSelect, onOpen, onInit, viewports, onAddItem, onAddResource, onAddCatalogue, onOpenShapes
 }: {
 	architecture: Architecture;
 	mode: DesignMode;
@@ -40,7 +41,8 @@ export const DesignCanvas = memo(function DesignCanvas({
 	onOpen: (id: string) => void;
 	onInit: (instance: ReactFlowInstance<CanvasNode>) => void;
 	viewports: RefObject<Partial<Record<DesignMode, Viewport>>>;
-	onAddItem: (kind: BoardItem['kind'], position: { x: number; y: number }) => void;
+ onOpenShapes: () => void;
+	onAddItem: (kind: BoardItem['kind'], position: { x: number; y: number }, caption?: string, shape?: ShapeId) => void;
 	onAddResource: (kind: ResourceKind, provider: Provider, position?: Position) => void;
  onAddCatalogue: (type:string, provider:Provider, position:Position) => void;
 }) {
@@ -108,6 +110,8 @@ export const DesignCanvas = memo(function DesignCanvas({
 			onDragOver={event => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }}
 			onDrop={event => {
 				event.preventDefault();
+    const shape = shapeDefinitions.find(candidate => candidate.id === event.dataTransfer.getData('application/x-cloudforge-shape'));
+    if (shape && flow) { onAddItem('shape', flow.screenToFlowPosition({ x: event.clientX, y: event.clientY }), shape.label, shape.id); return; }
 				const catalogue = event.dataTransfer.getData('application/x-cloudforge-catalogue');
     if (catalogue && catalogue.length < 512 && flow) {
      try { const data=JSON.parse(catalogue); if(typeof data.type === 'string' && Object.hasOwn(providerNames,data.provider)) { onAddCatalogue(data.type,data.provider,flow.screenToFlowPosition({x:event.clientX,y:event.clientY})); } } catch { /* Foreign payload. */ }
@@ -128,7 +132,7 @@ export const DesignCanvas = memo(function DesignCanvas({
 				<span className="tool-divider" />
 				<button aria-label="Add text" title="Add text" onClick={() => createItem('text')}><Type /></button>
 				<button aria-label="Add sticky note" title="Add sticky note" onClick={() => createItem('note')}><StickyNote /></button>
-				<button aria-label="Add shape" title="Add shape" onClick={() => createItem('shape')}><Shapes /></button>
+				<button aria-label="Add shape" title="Add shape" onClick={onOpenShapes}><Shapes /></button>
 				<button aria-label="Add frame" title="Add frame" onClick={() => createItem('frame')}><Frame /></button>
 			</div>
 			<ReactFlow<CanvasNode>

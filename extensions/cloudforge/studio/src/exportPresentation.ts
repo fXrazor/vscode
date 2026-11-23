@@ -1,3 +1,4 @@
+import { shapeDefinition, shapeTextColor, shapeStrokeDash } from './shapes.ts';
 import type { Architecture } from './model.ts';
 import { resourceDefinition } from './fixture.ts';
 
@@ -17,7 +18,14 @@ export async function presentationSvg(architecture: Architecture): Promise<strin
   const blob = await response.blob();
   return new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = reject; reader.readAsDataURL(blob); });
  }));
- const items = architecture.items.map(item => `<g><rect x="${item.positions.visual.x}" y="${item.positions.visual.y}" width="${item.width}" height="${item.height}" rx="8" fill="${escape(item.fill ?? (item.kind === 'note' ? '#fff0b5' : item.kind === 'frame' ? '#f7faff' : '#ffffff'))}" stroke="#b8c6dc"/><text x="${item.positions.visual.x + 12}" y="${item.positions.visual.y + 24}" font-size="${item.fontSize ?? 13}" font-weight="${item.bold ? 700 : 400}">${escape(item.text)}</text></g>`).join('');
+ const items = architecture.items.map(item => {
+  const { x, y } = item.positions.visual;
+  if (item.kind === 'shape') {
+   const fill = item.fill ?? '#eef2ff';
+   return `<g transform="translate(${x},${y})"><svg width="${item.width}" height="${item.height}" viewBox="0 0 100 100" preserveAspectRatio="none"><path d="${shapeDefinition(item.shape).path}" fill="${escape(fill)}" stroke="${escape(item.strokeColor ?? '#7565bd')}" stroke-width="${item.strokeWidth ?? 1.5}" ${item.strokeStyle && item.strokeStyle !== 'solid' ? `stroke-dasharray="${shapeStrokeDash(item.strokeStyle, item.strokeWidth)}"` : ''} stroke-linecap="round" vector-effect="non-scaling-stroke"/></svg><text x="${item.width / 2}" y="${item.height / 2}" text-anchor="middle" dominant-baseline="middle" fill="${shapeTextColor(fill)}" font-size="${item.fontSize ?? 14}" font-weight="${item.bold ? 700 : 400}">${escape(item.text)}</text></g>`;
+  }
+  return `<g><rect x="${x}" y="${y}" width="${item.width}" height="${item.height}" rx="8" fill="${escape(item.fill ?? (item.kind === 'note' ? '#fff0b5' : item.kind === 'frame' ? '#f7faff' : '#ffffff'))}" stroke="#b8c6dc"/><text x="${x + 12}" y="${y + 24}" font-size="${item.fontSize ?? 13}" font-weight="${item.bold ? 700 : 400}">${escape(item.text)}</text></g>`;
+ }).join('');
  const edges = architecture.connections.map(edge => { const source = architecture.resources.find(resource => resource.id === edge.source); const target = architecture.resources.find(resource => resource.id === edge.target); return source && target ? `<path d="M ${source.positions.visual.x + 78} ${source.positions.visual.y + 20} H ${(source.positions.visual.x + target.positions.visual.x + 96) / 2} V ${target.positions.visual.y + 20} H ${target.positions.visual.x + 18}" stroke="#7565bd" fill="none" marker-end="url(#arrow)"/>` : ''; }).join('');
  const nodes = architecture.resources.map((resource, index) => `<g transform="translate(${resource.positions.visual.x},${resource.positions.visual.y})"><image href="${icons[index]}" x="28" y="0" width="40" height="40"/><text x="48" y="60" text-anchor="middle" font-size="12">${escape(resource.label || resource.name)}</text></g>`).join('');
  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="${x} ${y} ${width} ${height}" font-family="Segoe UI, sans-serif" fill="#203049"><defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#7565bd"/></marker></defs><rect x="${x}" y="${y}" width="${width}" height="${height}" fill="white"/><text x="${x + 20}" y="${y + 30}" font-size="20">${escape(architecture.name)}</text>${items}${edges}${nodes}</svg>`;

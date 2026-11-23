@@ -38,6 +38,8 @@ export function ResourceFields({ resource, dispatch }: { resource: Resource; dis
 				<summary>Metadata<span className="schema-type">{resourceDefinition(resource).type}</span></summary>
 				<div className="form-section-body">
 					<label>Resource name<input value={resource.name} onChange={event => dispatch({ type: 'update', id: resource.id, patch: { name: event.target.value } })} /></label>
+					<label>Terraform identifier<input readOnly value={resource.terraformName ?? resource.name.replace(/[^A-Za-z0-9_-]/g, '_').replace(/^[^A-Za-z_]/, '_$&')} /></label>
+					<label>File name<input readOnly value="main.tf" /></label>
 				</div>
 			</details>
 			<details className="form-section" open>

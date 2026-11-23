@@ -48,7 +48,7 @@ h3 { font-size: 13px; font-weight: 650; }
 	color-scheme: light;
 	--surface: #ffffff;
 	--canvas: #f5f5f5;
-	--grid-pattern: #e6e6e6;
+	--grid-pattern: #efefef;
 	--text: #24283d;
 	--muted: #666c80;
 	--border: #dfe2ec;
@@ -71,7 +71,7 @@ h3 { font-size: 13px; font-weight: 650; }
 	color-scheme: dark;
 	--surface: #242632;
 	--canvas: #1a1b26;
-	--grid-pattern: #292c37;
+	--grid-pattern: #22252f;
 	--text: #f3f1fa;
 	--muted: #a5a9bd;
 	--border: #3c3e52;
@@ -125,7 +125,6 @@ h1 { font-size: 19px; font-weight: 650; letter-spacing: -0.4px; display: flex; a
 .preview-banner .sample-label { color: var(--text); }
 .studio-body { display: flex; min-height: 0; flex: 1; }
 .design-area { display: flex; flex: 1; min-width: 0; min-height: 0; }
-.design-area.dock-bottom, .design-area.dock-closed { flex-direction: column; }
 .canvas-shell { flex: 1; min-width: 0; min-height: 0; position: relative; display: flex; }
 .canvas-tools { position: absolute; left: 16px; top: 80px; z-index: 5; display: flex; flex-direction: column; gap: 4px; padding: 4px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
 .canvas-tools button { border: 0; background: transparent; width: 32px; height: 32px; font-size: 18px; }
@@ -148,6 +147,30 @@ h1 { font-size: 19px; font-weight: 650; letter-spacing: -0.4px; display: flex; a
 .board-item.text { border-color: transparent; font-size: 20px; background: transparent; }
 .board-item.shape { border: 2px solid #9a88cc; border-radius: 12px; background: var(--selection); text-align: center; display: grid; place-content: center; font-size: 16px; }
 .board-item.is-selected { outline: 2px solid var(--accent); outline-offset: 3px; }
+.board-item.shape { position: relative; border: 0; border-radius: 0; padding: 0; background: transparent; }
+.board-shape-geometry { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+.board-shape-label { position: absolute; inset: 28% 22%; display: grid; place-items: center; text-align: center; line-height: 1.3; pointer-events: none; }
+.shape-library { display: flex; flex-direction: column; min-height: 0; height: 100%; color: var(--text); }
+.shape-library-heading { display: flex; align-items: center; gap: 10px; padding: 12px; border-bottom: 1px solid var(--border); }
+.shape-library-heading h2 { font-size: 13px; font-weight: 600; margin: 0; }
+.shape-library-heading button { display: grid; place-items: center; padding: 6px; background: transparent; border: 0; color: inherit; cursor: pointer; }
+.shape-library > .lab-search { margin: 12px; }
+.shape-library-body { overflow-y: auto; min-height: 0; flex: 1; padding: 4px 12px; }
+.shape-library-body h3 { font-size: 12px; margin: 8px 0 12px; }
+.shape-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 6px; }
+.shape-grid button { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 12px 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-solid); color: inherit; cursor: pointer; font-size: 11px; }
+.shape-grid button:hover { background: var(--hover); border-color: var(--accent); }
+.shape-grid svg { width: 30px; height: 30px; fill: none; stroke: currentColor; stroke-width: 4; }
+.shape-library-hint { padding: 12px; margin: 0; border-top: 1px solid var(--border); color: var(--muted); font-size: 11px; }
+.shape-library button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.selection-editbar select[aria-label="Shape type"] { width: 112px; }
+.shape-appearance { position: relative; }
+.shape-appearance > summary { display: grid; place-items: center; padding: 7px; cursor: pointer; list-style: none; }
+.shape-appearance > summary::-webkit-details-marker { display: none; }
+.shape-appearance-content { position: absolute; top: calc(100% + 8px); right: 0; width: 220px; padding: 14px; background: var(--panel-solid); border: 1px solid var(--border); border-radius: 8px; color: var(--text); z-index: 40; }
+.shape-appearance-content > strong { display: block; margin-bottom: 12px; font-size: 12px; }
+.shape-appearance-content > label { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 10px; font-size: 12px; }
+.shape-appearance-content select { width: 106px; }
 .board-item-inspector > label { display: grid; gap: 12px; margin-top: 20px; }
 .board-item-inspector textarea { min-height: 140px; resize: vertical; padding: 10px; color: var(--text); background: var(--input); border: 1px solid var(--border); font: inherit; }
 .board-item-inspector > p { margin-top: 16px; }
@@ -198,9 +221,6 @@ h1 { font-size: 19px; font-weight: 650; letter-spacing: -0.4px; display: flex; a
 .overview-card-details > span:nth-child(odd) { color: var(--muted); }
 .architecture-overview > .muted { margin-top: 8px; }
 .code-panel { display: flex; flex-direction: column; min-height: 180px; min-width: 0; border-top: 1px solid var(--border); background: var(--surface); }
-.dock-bottom .code-panel { height: 280px; flex-shrink: 0; resize: vertical; overflow: auto; }
-.dock-left .code-panel, .dock-right .code-panel { width: 340px; flex-shrink: 0; border-top: 0; border-left: 1px solid var(--border); }
-.dock-left .code-panel { order: -1; border-left: 0; border-right: 1px solid var(--border); }
 .code-panel > header { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 11px; }
 .code-panel > header > strong { flex: 1; white-space: nowrap; }
 .code-panel > header select { min-height: 26px; width: 100px; font-size: 10px; }
@@ -520,7 +540,6 @@ dialog::backdrop { background: #12152488; backdrop-filter: blur(3px); }
 .architecture-overview h2 { font-size:14px; }.architecture-overview > p { font-size:11px; margin:6px 0 12px; }
 .studio .overview-card { border-radius:6px; box-shadow:none; }.overview-card-heading { padding:10px; }
 .studio .overview-card-details { padding:10px; font-size:11px; gap:10px; }
-.studio .dock-bottom .code-panel { height:32vh; min-height:220px; background:var(--input); }
 .studio .code-panel > header { padding:4px 8px; height:36px; }.studio .code-file-name { padding:6px 10px; font-size:11px; }
 .studio .code-panel textarea { background:#1e2024; color:#e5e7eb; border-radius:6px; margin:0 8px; font-size:12px; }
 .studio .canvas-tools { top:12px; }.studio .canvas-options { top:12px; }

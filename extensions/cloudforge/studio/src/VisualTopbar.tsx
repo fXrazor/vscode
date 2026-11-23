@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import type { Architecture, DesignMode } from './model.ts';
 import { exportPresentation } from './exportPresentation.ts';
-import { Download, PanelLeft, PanelRight, Pencil, Waypoints, Moon, Sun, Undo2, Redo2, Code2, Ellipsis } from 'lucide-react';
+import { Download, PanelLeft, PanelRight, Pencil, Waypoints, Moon, Sun, Undo2, Redo2 } from 'lucide-react';
 
-export function VisualTopbar({ mode, onMode, architecture, name, onRename, onTechnical, onExport, onToggleLibrary, onToggleInspector, revisions, onUndo, onRedo, canRedo, onCode, theme, onTheme }: {
+export function VisualTopbar({ mode, onMode, architecture, name, onRename, onTechnical, onExport, onToggleLibrary, onToggleInspector, revisions, onUndo, onRedo, canRedo, theme, onTheme }: {
  mode: DesignMode; onMode: (mode: DesignMode) => void; architecture: Architecture; name: string;
  onRename: (name: string) => void; onTechnical: () => void; onExport: () => void;
  onToggleLibrary: () => void; onToggleInspector: () => void; revisions: number;
- onUndo: () => void; onRedo: () => void; canRedo: boolean; onCode: () => void;
+ onUndo: () => void; onRedo: () => void; canRedo: boolean;
  theme: 'light' | 'dark'; onTheme: () => void;
 }) {
  const [environment, setEnvironment] = useState('Development');
@@ -23,7 +23,6 @@ export function VisualTopbar({ mode, onMode, architecture, name, onRename, onTec
    <button aria-label="Redo" disabled={!canRedo} onClick={onRedo}><Redo2 /></button>
    <button aria-label="Toggle resource library" onClick={onToggleLibrary}><PanelLeft /></button>
    <button aria-label="Toggle resource inspector" onClick={onToggleInspector}><PanelRight /></button>
-   <button aria-label="Toggle code panel" onClick={onCode}><Code2 /></button>
    <div className="shell-modes" role="group" aria-label="Infrastructure design mode">
     <button aria-label="Architecture" title="Architecture Design View" aria-pressed={mode === 'visual'} onClick={() => onMode('visual')}><Pencil /></button>
     <button aria-label="Configuration" title="Infrastructure Configuration View" aria-pressed={mode === 'technical'} onClick={onTechnical}><Waypoints /></button>

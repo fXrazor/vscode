@@ -2,7 +2,8 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-
+import { variableError, variableUses, type VariableDefinition } from './variables.ts';
+import type { ShapeId } from './shapes.ts';
 export type DesignMode = 'visual' | 'technical';
 export type ResourceKind = 'network' | 'subnet' | 'gateway' | 'cluster' | 'storage' | 'monitor' | 'group' | 'compute' | 'database' | 'module' | 'generic';
 export type Provider = 'azure' | 'aws' | 'gcp';
@@ -22,6 +23,7 @@ export interface Resource {
 	catalogue?: CatalogueEntry;
 	provider: Provider;
 	name: string;
+	terraformName?: string;
 	label?: string;
 	iconKind?: ResourceKind;
 	region: string;
@@ -39,6 +41,7 @@ export interface ResourceBlock {
 
 export interface Architecture {
 	name: string;
+	variables?: VariableDefinition[];
 	resources: Resource[];
 	items: BoardItem[];
 	connections: { id: string; source: string; target: string }[];
@@ -47,6 +50,10 @@ export interface Architecture {
 export interface BoardItem {
 	id: string;
 	kind: 'frame' | 'note' | 'text' | 'shape';
+	shape?: ShapeId;
+	strokeColor?: string;
+	strokeWidth?: number;
+	strokeStyle?: 'solid' | 'dashed' | 'dotted';
 	text: string;
 	fill?: string;
 	fontSize?: number;
@@ -64,15 +71,21 @@ export interface History {
 }
 
 export type Edit =
-	| { type: 'update'; id: string; patch: Partial<Pick<Resource, 'name' | 'label' | 'iconKind' | 'region' | 'settings' | 'blocks'>> }
+	| { type: 'update'; id: string; patch: Partial<Pick<Resource, 'name' | 'terraformName' | 'label' | 'iconKind' | 'region' | 'settings' | 'blocks'>> }
 	| { type: 'move'; id: string; mode: DesignMode; position: Position }
+	| { type: 'applyResourceCode'; resources: Resource[] }
 	| { type: 'add'; resource: Resource }
 	| { type: 'insert'; architecture: Architecture }
 	| { type: 'delete'; id: string }
 	| { type: 'addItem'; item: BoardItem }
-	| { type: 'updateItem'; id: string; patch: Partial<Pick<BoardItem, 'text' | 'width' | 'height' | 'fill' | 'fontSize' | 'bold'>> }
+	| { type: 'updateItem'; id: string; patch: Partial<Pick<BoardItem, 'text' | 'width' | 'height' | 'fill' | 'fontSize' | 'bold' | 'shape' | 'strokeColor' | 'strokeWidth' | 'strokeStyle'>> }
 	| { type: 'moveItem'; id: string; mode: DesignMode; position: Position }
+	| { type: 'resizeItem'; id: string; mode: DesignMode; position: Position; width: number; height: number }
 	| { type: 'deleteItem'; id: string }
+	| { type: 'importVariables'; variables: VariableDefinition[]; override: boolean }
+	| { type: 'addVariables'; variables: VariableDefinition[] }
+	| { type: 'saveVariable'; variable: VariableDefinition }
+	| { type: 'deleteVariable'; id: string }
 	| { type: 'renameArchitecture'; name: string }
 	| { type: 'connect'; source: string; target: string };
 
@@ -84,6 +97,38 @@ export function createHistory(architecture: Architecture): History {
 
 function editArchitecture(architecture: Architecture, action: Edit): Architecture {
 	switch (action.type) {
+		case 'importVariables': {
+			const variables = [...(architecture.variables ?? [])];
+			for (const imported of action.variables) {
+				const index = variables.findIndex(variable => variable.name === imported.name);
+				if (index < 0) { variables.push(imported); } else if (action.override) { variables[index] = { ...imported, id: variables[index].id }; }
+			}
+			if (new Set(variables.map(variable => variable.id)).size !== variables.length || variables.some(variable => variableError(variable, variables))) { return architecture; }
+			return { ...architecture, variables };
+		}
+		case 'addVariables': {
+			const existing = architecture.variables ?? [];
+			const variables = [...existing, ...action.variables];
+			if (!action.variables.length || new Set(variables.map(variable => variable.id)).size !== variables.length || action.variables.some(variable => variableError(variable, variables))) { return architecture; }
+			return { ...architecture, variables };
+		}
+		case 'saveVariable': {
+			const variables = architecture.variables ?? [];
+			if (variableError(action.variable, variables)) { return architecture; }
+			const previous = variables.find(variable => variable.id === action.variable.id);
+			if (previous && previous.name !== action.variable.name && variableUses(architecture).has(previous.name)) { return architecture; }
+			return { ...architecture, variables: previous ? variables.map(variable => variable.id === previous.id ? action.variable : variable) : [...variables, action.variable] };
+		}
+		case 'deleteVariable': {
+			const variable = architecture.variables?.find(variable => variable.id === action.id);
+			if (!variable || variableUses(architecture).has(variable.name)) { return architecture; }
+			return { ...architecture, variables: architecture.variables!.filter(variable => variable.id !== action.id) };
+		}
+		case 'applyResourceCode': {
+			const updates = new Map(action.resources.map(resource => [resource.id, resource]));
+			if (action.resources.some(resource => !architecture.resources.some(existing => existing.id === resource.id))) { return architecture; }
+			return { ...architecture, resources: architecture.resources.map(resource => updates.get(resource.id) ?? resource) };
+		}
 		case 'renameArchitecture':
 			return { ...architecture, name: action.name };
 		case 'update':
@@ -115,7 +160,11 @@ function editArchitecture(architecture: Architecture, action: Edit): Architectur
 		case 'addItem':
 			return { ...architecture, items: [...architecture.items, action.item] };
 		case 'updateItem':
+			if (!architecture.items.some(item => item.id === action.id && Object.entries(action.patch).some(([key, value]) => item[key as keyof BoardItem] !== value))) { return architecture; }
 			return { ...architecture, items: architecture.items.map(item => item.id === action.id ? { ...item, ...action.patch } : item) };
+		case 'resizeItem':
+			if (![action.width, action.height, action.position.x, action.position.y].every(Number.isFinite) || action.width <= 0 || action.height <= 0) { return architecture; }
+			return editArchitecture(editArchitecture(architecture, { type: 'moveItem', id: action.id, mode: action.mode, position: action.position }), { type: 'updateItem', id: action.id, patch: { width: action.width, height: action.height } });
 		case 'deleteItem':
 			return { ...architecture, items: architecture.items.filter(item => item.id !== action.id) };
 		case 'moveItem': {

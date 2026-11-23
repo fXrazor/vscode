@@ -15,11 +15,11 @@ The development server prints an available loopback port. Verification commands 
 
 Architecture Design View renders cloud icons, labels, groups and design relationships. Infrastructure Configuration View renders configuration cards with inline name/settings editors, expandable incoming relationships, local name-check findings and a clearly unavailable cost estimate. Both views use `history.present` in `App.tsx`. `ResourceNode.tsx` projects the same resource objects; inline inputs dispatch the same update actions as `ResourceFields`. Switching renderers does not dispatch an architecture edit or reset history. Per-view positions and viewport are presentation metadata, not copies of resources or configuration.
 
-The shared resource form also appears in the focused resource workspace. Provider-specific nested block definitions are sample definitions. The code dock edits draft JSON, not Terraform. Module import records a reference only and does not fetch or execute code.
+The shared resource form also appears in the focused resource workspace. Provider-specific nested block definitions are sample definitions. Code view projects Terraform through the supplied CloudLab generator: no selection shows main.tf; a selected resource shows its block. Existing representable field edits apply atomically; unsupported changes retain the draft and report an error. Module import records a reference only and does not fetch or execute code.
 
 ## Canvas-first rule
 
-Persistent chrome must directly support the current workflow. The CloudLab-style authoring layout opens with resource library, overview inspector and bottom code dock. Each can be closed from the compact header to reclaim canvas space. Workspace identity, export and panel actions are in the compact header; grid, snap and minimap are in View. Minimap starts off. View also provides an independent Light/Dark theme selector. Changing the renderer preserves the selected theme. The default background is a faint line grid whose world-aligned spacing subdivides with zoom; Dots and None remain available. Theme and grid choices do not modify graph history. Mode choice, creation tools and zoom remain available for the active canvas task. The duplicated app headers and permanent status strip were removed. Whiteboard elements have a selection-only editing bar for text, size, bold, fill, duplicate and delete. Toolbar edits use the same graph history. Status messages remain available to assistive technology. This rule is also recorded in the repository root AGENTS.md for future CloudForge UI work.
+Persistent chrome must directly support the current workflow. The authoring layout keeps the resource library on the left, the canvas in the centre and the overview/resource/variables inspector on the right. Supporting panels can close to reclaim canvas space. There is no global bottom code dock; use Block view / Code view in the resource panel. Workspace identity, export and panel actions are in the compact header; grid, snap and minimap are in View. Minimap starts off. View also provides an independent Light/Dark theme selector. Changing the renderer preserves the selected theme. The default background is a faint line grid whose world-aligned spacing subdivides with zoom; Dots and None remain available. Theme and grid choices do not modify graph history. Mode choice, creation tools and zoom remain available for the active canvas task. The duplicated app headers and permanent status strip were removed. Whiteboard elements have a selection-only editing bar for text, size, bold, fill, duplicate and delete. Toolbar edits use the same graph history. Status messages remain available to assistive technology. This rule is also recorded in the repository root AGENTS.md for future CloudForge UI work.
 
 ## Export
 
@@ -27,7 +27,7 @@ Workspace offers SVG, PNG and Print / Save PDF. Export projects the architecture
 
 ## Boundaries
 
-This is an in-memory sample preview. Reload resets edits. No Rust service, workspace authorization, live provider schema lookup, Terraform validation, pricing service or deployment operation is connected. Bundled CloudLab catalogue snapshots supply metadata and primitive form properties. A passing node indicator means only the local draft-name check passed. Relationship labels describe design links, not verified Terraform references. Cost is explicitly Not estimated. Normal Code OSS editors and production docking remain future integration work.
+This is an in-memory sample preview. Reload resets edits. No Rust service, workspace authorization, live provider schema lookup, Terraform validation, pricing service or deployment operation is connected. Bundled CloudLab catalogue snapshots supply metadata and primitive form properties. A passing node indicator means only the local draft-name check passed. Relationship labels describe design links, not verified Terraform references. Cost is explicitly Not estimated. Normal Code OSS source editors remain future integration work.
 
 Catalogue and code-panel tabs now use Radix Tabs. Dialogs and other menu surfaces still use native controls; the full shadcn/Radix migration is pending. Do not report the production shadcn/Radix migration as complete.
 
@@ -40,6 +40,10 @@ Catalogue and code-panel tabs now use Radix Tabs. Dialogs and other menu surface
 - Browser console inspection returned no captured error entries.
 - Print/PDF save, full keyboard audit, large-graph performance, all pane arrangements and production webview integration remain unverified.
 
-The CloudLab Forge 3.0 source layout is adapted in cloudlab-layout.css and ArchitectureOverview.tsx. SOURCE-PROVENANCE.md records the source path, file ownership and boundaries. The code dock ports the source Monaco/appearance components but edits draft JSON; Terraform generation/import is not ported.
+The CloudLab Forge 3.0 source layout is adapted in cloudlab-layout.css and ArchitectureOverview.tsx. SOURCE-PROVENANCE.md records source ownership and boundaries. The contextual right-side editor uses the source Monaco/appearance components and a computed Terraform projection; it does not maintain another editable graph. The former bottom code dock is removed.
 
-Paused at the user request. See [REFINEMENT-CHECKPOINT.md](REFINEMENT-CHECKPOINT.md) for the exact continuation plan, verification coverage and known gaps.
+See [REFINEMENT-CHECKPOINT.md](REFINEMENT-CHECKPOINT.md) for the historical checkpoint and [AFFINE-ADAPTATION.md](AFFINE-ADAPTATION.md) for current coverage and remaining gaps.
+
+## Refinement on 23 November 2026
+
+See [AFFINE-ADAPTATION.md](AFFINE-ADAPTATION.md) for source evidence, current controls, variables and coverage. A searchable Shapes drawer now offers six editable vector shapes with shared geometry/stroke export. Resource code editing is contextual on the right; variable forms and declaration previews use the shared architecture model. Sensitive variable values are omitted from graph exports. The preview remains in memory and is not connected to Terraform execution or Rust persistence.

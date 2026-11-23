@@ -1,7 +1,12 @@
+import { applyTerraformDraft, terraformCode } from './terraformProjection.ts';
 /*---------------------------------------------------------------------------------------------
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
+import { importVariableDraft, exportableArchitecture, variableDeclarations, variableUses, type VariableDefinition } from './variables.ts';
+import type { BoardItem } from './model.ts';
+import { presentationSvg } from './exportPresentation.ts';
+import { shapeDefinitions } from './shapes.ts';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHistory, historyReducer, checkDraft } from './model.ts';
@@ -77,4 +82,140 @@ test('inserting a template is one undo step for resources and their relationship
  assert.equal(added.past.length,1);
  assert.deepEqual(historyReducer(added,{type:'undo'}).present,initial.present);
  assert.deepEqual(historyReducer(historyReducer(added,{type:'undo'}),{type:'redo'}).present,added.present);
+});
+
+
+test('shape geometry and top-left resize share history across renderers and undo atomically', () => {
+ const initial = createHistory(sampleArchitecture());
+ const added = historyReducer(initial, { type: 'addItem', item: { id: 'shape-test', kind: 'shape', shape: 'diamond', text: 'Decision', positions: { visual: { x: 100, y: 100 }, technical: { x: 400, y: 400 } }, width: 200, height: 120, members: [] } });
+ const resized = historyReducer(added, { type: 'resizeItem', id: 'shape-test', mode: 'visual', position: { x: 60, y: 80 }, width: 240, height: 140 });
+ const item = resized.present.items.find(item => item.id === 'shape-test')!;
+ assert.equal(resized.past.length, added.past.length + 1);
+ assert.deepEqual(item.positions, { visual: { x: 60, y: 80 }, technical: { x: 400, y: 400 } });
+ assert.equal(item.shape, 'diamond');
+ assert.equal(item.width, 240);
+ assert.deepEqual(historyReducer(resized, { type: 'undo' }).present, added.present);
+ assert.equal(historyReducer(resized, { type: 'resizeItem', id: 'shape-test', mode: 'visual', position: { x: 60, y: 80 }, width: 240, height: 140 }), resized);
+ assert.equal(historyReducer(resized, { type: 'resizeItem', id: 'shape-test', mode: 'visual', position: { x: 0, y: 0 }, width: NaN, height: 140 }), resized);
+});
+
+test('presentation export retains each shape geometry and escapes labels', async () => {
+ const items: BoardItem[] = shapeDefinitions.map((shape, index) => ({ id: shape.id, kind: 'shape' as const, shape: shape.id, text: '<review & approve>', fill: '#ffffff', positions: { visual: { x: index * 220, y: 0 }, technical: { x: 0, y: 0 } }, width: 200, height: 140, members: [] }));
+ items[0] = { ...items[0], strokeColor: '#123456', strokeWidth: 3, strokeStyle: 'dashed' };
+ const svg = await presentationSvg({ name: 'Shapes', resources: [], connections: [], items });
+ for (const shape of shapeDefinitions) { assert.ok(svg.includes('d="' + shape.path + '"')); }
+ assert.ok(svg.includes('stroke="#123456" stroke-width="3" stroke-dasharray="12 9"'));
+ assert.ok(svg.includes('&lt;review &amp; approve&gt;'));
+ assert.ok(!svg.includes('<review & approve>'));
+});
+
+
+test('variable defaults preserve empty, false and zero, and edits share semantic undo', () => {
+ const initial = createHistory(sampleArchitecture());
+ const variable: VariableDefinition = { id: 'input-1', name: 'replicas', type: 'number', description: '', sensitive: false, defaultValue: 0 };
+ const added = historyReducer(initial, { type: 'saveVariable', variable });
+ assert.equal(added.present.variables?.[0].defaultValue, 0);
+ assert.deepEqual(historyReducer(added, { type: 'undo' }).present, initial.present);
+ assert.equal(historyReducer(added, { type: 'saveVariable', variable: { ...variable, id: 'duplicate' } }), added);
+ assert.equal(historyReducer(added, { type: 'saveVariable', variable: { ...variable, defaultValue: 'bad-number' } }), added);
+ assert.ok(variableDeclarations([{ ...variable, name: 'enabled', type: 'bool', defaultValue: false }]).includes('default = false'));
+ assert.ok(variableDeclarations([{ ...variable, name: 'label', type: 'string', defaultValue: '' }]).includes('default = ""'));
+});
+
+test('referenced variables cannot be deleted or renamed by the draft reducer', () => {
+ const architecture = sampleArchitecture();
+ architecture.resources[0].settings = { cidr: 'var.network_cidr' };
+ architecture.variables = [{ id: 'cidr', name: 'network_cidr', type: 'string', description: '', sensitive: false }];
+ const initial = createHistory(architecture);
+ assert.deepEqual([...variableUses(architecture).get('network_cidr')!], [architecture.resources[0].id]);
+ assert.equal(historyReducer(initial, { type: 'deleteVariable', id: 'cidr' }), initial);
+ assert.equal(historyReducer(initial, { type: 'saveVariable', variable: { ...architecture.variables[0], name: 'renamed' } }), initial);
+});
+
+test('variable exports omit sensitive values and escape literal HCL template openers', () => {
+ const architecture = sampleArchitecture();
+ architecture.variables = [{ id: 'secret', name: 'token', type: 'string', description: '', sensitive: true, defaultValue: 'private-default', value: 'private-value' }];
+ const exported = JSON.stringify(exportableArchitecture(architecture));
+ const code = variableDeclarations(architecture.variables);
+ assert.ok(!exported.includes('private-default') && !exported.includes('private-value'));
+ assert.ok(!code.includes('private-default') && !code.includes('private-value'));
+ assert.ok(code.includes('sensitive = true'));
+ assert.equal(architecture.variables[0].value, 'private-value');
+ const literal = variableDeclarations([{ id: 'literal', name: 'labels', type: 'map(string)', description: '', sensitive: false, defaultValue: { literal: '${untrusted}' } }]);
+ assert.ok(literal.includes('$${untrusted}'));
+});
+
+
+test('discovered variable declarations are inserted as one undo operation', () => {
+ const initial = createHistory(sampleArchitecture());
+ const added = historyReducer(initial, { type: 'addVariables', variables: ['region_input', 'size_input'].map(name => ({ id: name, name, type: 'any' as const, description: '', sensitive: false })) });
+ assert.equal(added.present.variables?.length, 2);
+ assert.equal(added.past.length, 1);
+ assert.deepEqual(historyReducer(added, { type: 'undo' }).present, initial.present);
+ const invalid = historyReducer(initial, { type: 'addVariables', variables: ['duplicate', 'duplicate'].map((name, index) => ({ id: String(index), name, type: 'string' as const, description: '', sensitive: false })) });
+ assert.equal(invalid, initial);
+});
+
+
+test('Terraform code scopes to main or the selected resource using the source generator', () => {
+ const architecture = sampleArchitecture();
+ const main = terraformCode(architecture);
+ const selected = terraformCode(architecture, 'network');
+ assert.ok(main.includes('resource "azurerm_virtual_network"'));
+ assert.ok(main.includes('resource "azurerm_kubernetes_cluster"'));
+ assert.ok(selected.includes('address_space'));
+ assert.ok(!selected.includes('resource "azurerm_kubernetes_cluster"'));
+});
+
+test('supported resource HCL applies atomically and keeps the Terraform identifier stable', () => {
+ const initial = createHistory(sampleArchitecture());
+ const source = terraformCode(initial.present, 'network');
+ const edited = source.replace(/(\n\s+name\s*=\s*)"vnet-production"/, '$1"vnet-edited"');
+ assert.notEqual(source, edited);
+ const resources = applyTerraformDraft(initial.present, edited, 'network');
+ assert.equal(resources[0].name, 'vnet-edited');
+ assert.equal(resources[0].terraformName, 'vnet-production');
+ const applied = historyReducer(initial, { type: 'applyResourceCode', resources });
+ assert.equal(applied.past.length, 1);
+ assert.deepEqual(historyReducer(applied, { type: 'undo' }).present, initial.present);
+ assert.ok(terraformCode(applied.present, 'network').includes('resource "azurerm_virtual_network" "vnet-production"'));
+});
+
+test('unsupported Terraform edits reject without changing the graph', () => {
+ const architecture = sampleArchitecture();
+ const before = JSON.stringify(architecture);
+ const source = terraformCode(architecture, 'network');
+ assert.throws(() => applyTerraformDraft(architecture, source + '\n# custom comment', 'network'), /comments/);
+ assert.throws(() => applyTerraformDraft(architecture, source.replace(/}\s*$/, '  unmodelled = true\n}'), 'network'), /unmodelled/);
+ assert.equal(JSON.stringify(architecture), before);
+});
+
+
+test('variable declaration and tfvars imports distinguish defaults, assigned values and conflicts', () => {
+ const declarations = importVariableDraft('variable "enabled" {\n type = bool\n default = false\n}\nvariable "count_input" {\n type = number\n default = 0\n}', [], 'tf');
+ assert.equal(declarations[0].defaultValue, false);
+ assert.equal(declarations[1].defaultValue, 0);
+ const values = importVariableDraft('enabled = true', declarations, 'tfvars');
+ assert.equal(values[0].defaultValue, false);
+ assert.equal(values[0].value, true);
+ const initial = createHistory({ ...sampleArchitecture(), variables: declarations });
+ const kept = historyReducer(initial, { type: 'importVariables', variables: values, override: false });
+ assert.equal(kept.present.variables?.[0].value, undefined);
+ const replaced = historyReducer(initial, { type: 'importVariables', variables: values, override: true });
+ assert.equal(replaced.present.variables?.[0].value, true);
+ assert.equal(replaced.past.length, 1);
+ assert.deepEqual(historyReducer(replaced, { type: 'undo' }).present, initial.present);
+});
+
+test('variable imports refuse unsupported expressions, validations and structural types', () => {
+ assert.throws(() => importVariableDraft('input_value = var.other', [], 'tfvars'), /Expression/);
+ assert.throws(() => importVariableDraft('variable "x" {\n type = object({ a = string })\n}', [], 'tf'), /structural type/);
+ assert.throws(() => importVariableDraft('variable "x" {\n type = string\n validation {\n condition = true\n error_message = "bad"\n }\n}', [], 'tf'), /advanced attributes/);
+});
+
+test('sensitive resource properties are omitted from graph and Terraform projections', () => {
+ const architecture = sampleArchitecture();
+ architecture.resources[0] = { ...architecture.resources[0], kind: 'compute', settings: { admin_password: 'private-resource-password' } };
+ assert.ok(!JSON.stringify(exportableArchitecture(architecture)).includes('private-resource-password'));
+ assert.ok(!terraformCode(architecture).includes('private-resource-password'));
 });

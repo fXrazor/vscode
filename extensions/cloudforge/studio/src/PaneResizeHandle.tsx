@@ -11,7 +11,7 @@ export function PaneResizeHandle({ side, width, minimum, onCommit }: {
 	onCommit: (width: number) => void;
 }) {
 	const drag = useRef<{ start: number; width: number; next: number } | undefined>(undefined);
-	const sign = side === 'library' ? 1 : -1;
+	const sign = side === 'inspector' ? -1 : 1;
 	const cssProperty = side === 'library' ? '--library-width' : '--inspector-width';
 	function clamp(value: number) {
 		return Math.max(minimum, Math.min(innerWidth * 0.6, value));

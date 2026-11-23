@@ -1,0 +1,38 @@
+{
+  "source": "Z:\\CLOUDLAB FORGE 3.0\\apps\\web\\lib",
+  "purpose": "Read-only computed Terraform projection and bounded parsing in the standalone preview; no second editable Project store",
+  "files": [
+    {
+      "file": "terraform.ts",
+      "sha256": "b7da056956966bff653170e959df647adaec50e37f0aef5a9463019a44640dd6"
+    },
+    {
+      "file": "hcl.ts",
+      "sha256": "bda035e59ada16545fc8b11ffdb81b08c1161fa575fdf1db695d2bcbbb09306b"
+    },
+    {
+      "file": "model.ts",
+      "sha256": "b80b711e038831a5163619cf95b82a4865adc9c06285e6fb79ec96af0ff83667"
+    },
+    {
+      "file": "catalog/index.ts",
+      "sha256": "cf68477979cd35b70804507008d710dfcc19f3e84ef2b55922e818cf326f644f"
+    },
+    {
+      "file": "catalog/types.ts",
+      "sha256": "b717ffe075cfecf834c17018c1d68849e619e59882e775cbf4094fb4fcb0a49a"
+    },
+    {
+      "file": "catalog/azure.ts",
+      "sha256": "584fc38244e5a275422bc0f5ff02bd15a0ac1e2eca5d7333d02401d9b9d6a5ed"
+    },
+    {
+      "file": "catalog/aws.ts",
+      "sha256": "8fb9cf7fcdbd53f85444b2478dd68efc5e81669513737d7359dd40b5b6263ebc"
+    },
+    {
+      "file": "catalog/google.ts",
+      "sha256": "4f5f5dc0760f914de8e6df819dd27e1dda3f30e23c67085dbdda374747043ce5"
+    }
+  ]
+}
