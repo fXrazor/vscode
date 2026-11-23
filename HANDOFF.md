@@ -807,3 +807,27 @@ Completed on `fxrazor/continue-project-handoff-review` in `E:\Orca\CloudForge-Co
 1. Wire live Stage 8 `auditExportReadiness` and `diffCatalogueSnapshots` (broker + adapters landed in `6476cd0ecd3`) into the Phase 8 Plan & Policy Review modal and package with Rust Stage 8 `a75edf0`.
 2. When ready for signed releases, pass `-SignCertificateThumbprint <40-hex>` + `-RequireSignedService` to `build/cloudforge/package-win32-x64.ps1`.
 
+### Stage 8 Live Plan & Policy Review UI + Combined Stages 1–8 / Phases 1–9 Installer, Live Smoke & Installed Upgrade (2026-11-23)
+
+Implemented on `fxrazor/auto-open-and-stage3-4` in `Z:\CloudForge-Code\.claude\worktrees\auto-open-stage3-4` (`00e91c5dbc51f51e26ad5c2029c0a5abc5e91bd5`, rebased and fast-forward merged cleanly into `Z:\CloudForge-Code` `main`). Packaged end-to-end with Rust `Z:\CloudForge` Stage 8 service revision `a75edf0f42745c57afcaa0df0474b4d2d82f8bbf` (`3,527,680` bytes, SHA-256 `0e1e8d3fa4a472133d6465e6436c9848f756fc8893b74bf72defa1ed640f7767`).
+
+- **Live Stage 8 UI wiring ([protocol.ts](extensions/cloudforge/src/canvas/protocol.ts), [serviceAdapters.ts](extensions/cloudforge/src/canvas/serviceAdapters.ts), [canvasPanel.ts](extensions/cloudforge/src/canvas/canvasPanel.ts), [extension.ts](extensions/cloudforge/src/extension.ts), [canvas-src/index.ts](extensions/cloudforge/canvas-src/index.ts), [serviceAdapters.test.ts](extensions/cloudforge/test/serviceAdapters.test.ts)):**
+  - Auto-fetches `auditExportReadiness` alongside `inspectDependencies` on architecture load and renders **Reproducible Export & Lock Audit** (`Reproducible` vs `Unresolved (N)`, engine, lock file state/entry count, module count, and unresolved reason badges) inside `Plan Review, Policy, Cost & Recipes -> Policies`.
+  - Adds **Provider Schema Upgrade Impact** inside `Policies`, automatically surfacing provider/version selectors and **Check Upgrade Impact** (`requestSchemaDiff` -> Rust `diffCatalogueSnapshots`, showing added/removed type counts, path changes, breaking impact badge, and impacted architecture items) whenever two or more versions of a provider schema are imported (or a quiet import hint otherwise).
+
+| Artifact or check (run on `00e91c5dbc5` + Rust Stage 8 `a75edf0`) | Verified result |
+| --- | --- |
+| `build/hygiene.ts` & `build/oxlint.ts` (all 6 changed files) | Passed (`0` errors, `0` warnings). |
+| `tsc -p extensions/cloudforge/tsconfig.json --noEmit`, `tsc -p extensions/cloudforge/canvas-src/tsconfig.json --noEmit`, `esbuild.mts`, `esbuild.webview.mts` | Passed (`0` errors). |
+| `node --test extensions/cloudforge/test/*.test.ts` | **52/52 extension tests passed** (`0` skipped). |
+| `node build/next/index.ts transpile` & `scripts\test.bat --run src/vs/code/test/electron-main/cloudForgeServiceChannel.test.ts --run src/vs/code/test/electron-main/cloudForgeService.test.ts` | **42/42 Electron-main tests passed**. |
+| Combined Stages 1–8 + Phases 1–9 Windows x64 installer | [CloudForgeProofSetup-x64-00e91c5dbc5.exe](Z:/CFStage/CloudForgeProofSetup-x64-00e91c5dbc5.exe), unsigned (`ServiceSigned: false`), `322,015,352` bytes, SHA-256 `2c6bf44b3d24b250b8e2bfc1287f2add51a42cf8399a45c5fe958e251e284982`; Rust Stage 8 `a75edf0f42745c57afcaa0df0474b4d2d82f8bbf` (`0e1e8d3f...`), VSIX `7accf785...`. |
+| Payload hygiene & `serviceArtifact.ts --verify` | `media/canvas.js` & `media/canvas-style.css` present; `studio/`, `canvas-src/`, `tsconfig.typecheck.tsbuildinfo` absent; `serviceArtifact.ts --verify` passed on built payload and installed app. |
+| Live Stage 8 + Stage 7 packaged-desktop smoke ([stage8-smoke.mjs](Z:/CFStage/smoke/stage8-smoke.mjs), [report-stage8-00e91c5dbc5.json](Z:/CFStage/smoke/report-stage8-00e91c5dbc5.json)) | **6/6 passed** (`01-stage8-policy-audit.png` & `02-stage7-nested-module.png` inspected): live Stage 8 `auditExportReadiness` rendered `Reproducible Export & Lock Audit`, `Unresolved (2)`, `Engine: terraform (inferred) · Lock file: valid (1 entry) · Modules: 3`, `missingLockHashes` + `partialScan`, and `Provider Schema Upgrade Impact`; Stage 6 `inspectDependencies` rendered `Providers & locks`; Stage 7 `readModule` inspected `module.net` (zero secrets) and nested 2-level `stage8-tf / module.net / module.sub` (`azurerm_subnet`); Stage 4 live validation completed on the Stage 8 sidecar; `0` payload `cloudforge-service.exe` orphans remained after quit. |
+| Silent per-user upgrade (`%LOCALAPPDATA%\Programs\CloudForge Proof`) | Exit code `0`; installed `serviceArtifact.ts --verify` passed (`00e91c5dbc5` + Rust Stage 8 `a75edf0`), `tsconfig.typecheck.tsbuildinfo` absent, `consent.json` SHA-256 `ee409e0c...` preserved. |
+
+**Next actions:**
+1. When ready for signed releases, install a Windows Authenticode certificate on the build host and pass `-SignCertificateThumbprint <40-hex>` + `-RequireSignedService` to `build/cloudforge/package-win32-x64.ps1`.
+2. Proceed to the next approved roadmap milestone (e.g., Stage 9 managed Terraform/OpenTofu engine execution & live `terraform plan -json` capture, or AI Builder / Projects & Template Library from `Z:\CloudForge\design.md`).
+
+
