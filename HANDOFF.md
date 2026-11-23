@@ -662,3 +662,24 @@ Completed on `fxrazor/continue-project-handoff-review` in `E:\Orca\CloudForge-Co
 1. Push local `Z:\CloudForge` `main` (`01e1b4b`) to `origin/main` when ready (this session did not modify `Z:\CloudForge`).
 2. Add Authenticode signing prior to the pre-Inno `serviceArtifact.ts --verify` gate for signed releases, and consider adding a Stage 3 provider schema snapshot download/import workflow for providers beyond the 6 bundled offline Azure networking schemas.
 
+### Stage 6: Offline Provider Dependencies & Scoped Cloud Region Metadata Integration (2026-11-23)
+
+Implemented on `fxrazor/auto-open-and-stage3-4` in `Z:\CloudForge-Code\.claude\worktrees\auto-open-stage3-4` (`4e7b58a64ea` + `2569bd924ad`, fast-forward merged into local `Z:\CloudForge-Code` `main`). Pairs end-to-end with Rust `Z:\CloudForge` `main` at `a3dd202` (Stage 6 service revision `c4ffa00981d3505e965faf9749bde5fded1fbdc4`, release `cloudforge-service.exe` 3,078,144 bytes, SHA-256 `7aa6005e7555b1dcc689fccf0d6907dae07eb874c88005412e22302adc811070`).
+
+- **Electron-main broker & Workbench bridge (`4e7b58a64ea`):** extended [cloudForgeService.ts](src/vs/code/electron-main/cloudForgeService.ts), [cloudForgeServiceChannel.ts](src/vs/code/electron-main/cloudForgeServiceChannel.ts), [cloudForgeService.contribution.ts](src/vs/workbench/electron-browser/cloudForgeService.contribution.ts), and [cloudForgeServiceChannel.test.ts](src/vs/code/test/electron-main/cloudForgeServiceChannel.test.ts) with `inspectDependencies` (active workspace/architecture scope check, optional `expectedSourceRevision` and `engine`) and `listCloudRegions` (strict `provider`/`scope`/`configuredRegions` validation, unknown-field rejection).
+- **Architecture Canvas UI (`2569bd924ad`):** extended [protocol.ts](extensions/cloudforge/src/canvas/protocol.ts), [serviceAdapters.ts](extensions/cloudforge/src/canvas/serviceAdapters.ts), [canvasPanel.ts](extensions/cloudforge/src/canvas/canvasPanel.ts), [extension.ts](extensions/cloudforge/src/extension.ts), [canvas-src/index.ts](extensions/cloudforge/canvas-src/index.ts), and [serviceAdapters.test.ts](extensions/cloudforge/test/serviceAdapters.test.ts):
+  - Hydrates live Azure, AWS, and Google Cloud region lists from `listCloudRegions` on canvas ready to populate `location`/`region` dropdown pickers in the Focused Resource Workspace (preserving bundled defaults gracefully on older sidecars).
+  - Queries `inspectDependencies` per architecture revision and displays a scannable **Providers & locks** section inside the contextual Inspector (`engine`, lock file state, per-provider `locked`/`unlocked`/`conflict`/`lockOutsideConstraints` status, requirement/conflict counts, and unused lock entries) without altering the 44px full-bleed header.
+
+| Check (newly run on `4e7b58a64ea` / `2569bd924ad` in `Z:\CloudForge-Code`) | Result |
+| --- | --- |
+| `build/hygiene.ts` & `build/oxlint.ts` (all 10 changed files across broker + canvas) | Passed (0 errors, 0 warnings). |
+| `tsc -p src/tsconfig.json --noEmit --skipLibCheck`, `tsc -p extensions/cloudforge/tsconfig.json --noEmit`, `tsc -p extensions/cloudforge/canvas-src/tsconfig.json --noEmit` | Passed (0 errors). |
+| `node build/next/index.ts transpile` & `scripts\test.bat --run cloudForgeServiceChannel.test.ts --run cloudForgeService.test.ts` | **41/41 Electron-main tests passed**. |
+| `node extensions/cloudforge/esbuild.mts` & `node extensions/cloudforge/esbuild.webview.mts` | Passed (`dist/extension.js`, `media/canvas.js`, `media/canvas-style.css`). |
+| `CLOUDFORGE_REPO=E:\Orca\CloudForge\umibozu node --test extensions/cloudforge/test/*.test.ts` | **39/39 extension tests passed**, 0 skipped. |
+
+**Remaining next actions:**
+1. Package Rust Stage 6 `cloudforge-service.exe` (`c4ffa00981d3505e965faf9749bde5fded1fbdc4`, SHA-256 `7aa6005e7555b1dcc689fccf0d6907dae07eb874c88005412e22302adc811070`) with desktop `main` in the next Windows x64 installer rebuild and run live smoke verifying **Providers & locks** and expanded cloud region pickers.
+2. Push local `main` branches (`Z:\CloudForge` `a3dd202` and `Z:\CloudForge-Code` Stage 6 commits) to `origin/main` when ready.
+
