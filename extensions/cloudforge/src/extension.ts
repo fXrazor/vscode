@@ -807,6 +807,98 @@ export function activate(context: ExtensionContext): void {
 		}
 		canvas.openExport(toCanvasSnapshot(graph, currentArchitectureName));
 	}));
+	context.subscriptions.push(commands.registerCommand('cloudforge.importProviderSchema', async () => {
+		const inspected = await callService<unknown>('inspectCatalogueSchemaFile', {});
+		if (!inspected.ok) {
+			if (inspected.error.code !== 'CANCELLED') {
+				showServiceError(inspected.error);
+			}
+			return;
+		}
+		if (!isRecord(inspected.value) || typeof inspected.value.previewId !== 'string' || !Array.isArray(inspected.value.providers) || inspected.value.providers.length === 0) {
+			void window.showErrorMessage(l10n.t('The selected schema file did not contain any supported providers.'));
+			return;
+		}
+		const previewId = inspected.value.previewId;
+		const providers: { address: string; resources: number; dataSources: number; lockVersion?: string }[] = [];
+		for (const item of inspected.value.providers) {
+			if (isRecord(item) && typeof item.address === 'string' && typeof item.resources === 'number' && typeof item.dataSources === 'number') {
+				providers.push({
+					address: item.address,
+					resources: item.resources,
+					dataSources: item.dataSources,
+					lockVersion: typeof item.lockVersion === 'string' ? item.lockVersion : undefined,
+				});
+			}
+		}
+		if (providers.length === 0) {
+			void window.showErrorMessage(l10n.t('The selected schema file did not contain any supported providers.'));
+			return;
+		}
+		let chosen = providers[0];
+		if (providers.length > 1) {
+			const picked = await window.showQuickPick(
+				providers.map(entry => ({
+					label: entry.address,
+					description: entry.lockVersion ? l10n.t('lock {0}', entry.lockVersion) : undefined,
+					detail: l10n.t('{0} resources · {1} data sources', entry.resources, entry.dataSources),
+					entry,
+				})),
+				{ title: l10n.t('Choose Provider to Import into CloudForge Catalogue') }
+			);
+			if (!picked) {
+				return;
+			}
+			chosen = picked.entry;
+		}
+		const version = await window.showInputBox({
+			title: l10n.t('Provider Release Version for {0}', chosen.address),
+			value: chosen.lockVersion ?? '',
+			placeHolder: '5.14.0',
+			validateInput: text => /^[A-Za-z0-9._+-]+$/.test(text.trim()) ? undefined : l10n.t('Enter a provider release version such as 5.14.0.'),
+		});
+		if (!version) {
+			return;
+		}
+		const enginePick = await window.showQuickPick(
+			[
+				{ label: 'OpenTofu', engineName: 'openTofu' as const, defaultVersion: '1.11.0' },
+				{ label: 'Terraform', engineName: 'terraform' as const, defaultVersion: '1.15.8' },
+			],
+			{ title: l10n.t('Engine That Generated This Schema File') }
+		);
+		if (!enginePick) {
+			return;
+		}
+		const engineVersion = await window.showInputBox({
+			title: l10n.t('{0} Version', enginePick.label),
+			value: enginePick.defaultVersion,
+			validateInput: text => /^[A-Za-z0-9._+-]+$/.test(text.trim()) ? undefined : l10n.t('Enter an engine version such as {0}.', enginePick.defaultVersion),
+		});
+		if (!engineVersion) {
+			return;
+		}
+		const imported = await callService<unknown>('importCatalogueSnapshot', {
+			previewId,
+			address: chosen.address,
+			version: version.trim(),
+			engineName: enginePick.engineName,
+			engineVersion: engineVersion.trim(),
+		});
+		if (!imported.ok) {
+			showServiceError(imported.error);
+			return;
+		}
+		cachedCatalogueSnapshots = undefined;
+		cachedLiveSchemas.clear();
+		const graph = provider.getGraph();
+		if (graph) {
+			canvas.updateIfOpen(toCanvasSnapshot(graph, currentArchitectureName));
+		}
+		void window.showInformationMessage(
+			l10n.t('Imported {0} {1} ({2} resources) into the CloudForge provider catalogue.', chosen.address, version.trim(), chosen.resources)
+		);
+	}));
 	let opening: Promise<void> | undefined;
 	context.subscriptions.push(commands.registerCommand('cloudforge.openWorkspace', () => {
 		return opening ??= openWorkspace(provider, treeView, (loaded, architectureName) => {

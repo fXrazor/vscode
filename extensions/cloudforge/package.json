@@ -110,6 +110,12 @@
 				"title": "%command.exportCanvas%",
 				"category": "%displayName%",
 				"icon": "$(export)"
+			},
+			{
+				"command": "cloudforge.importProviderSchema",
+				"title": "%command.importProviderSchema%",
+				"category": "%displayName%",
+				"icon": "$(cloud-upload)"
 			}
 		],
 		"views": {

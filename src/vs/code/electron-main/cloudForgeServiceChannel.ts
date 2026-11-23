@@ -34,6 +34,7 @@ const cloudForgeMethods: ReadonlySet<string> = new Set<CloudForgeServiceMethod>(
 	'openWorkspace', 'chooseTerraformRoot', 'selectArchitecture', 'readArchitecture',
 	'createProject', 'openProject', 'grantProject', 'forgetProjectAccess', 'createWorkspaceFile',
 	'inspectRepository', 'importRepository', 'removeRepository', 'installGit',
+	'inspectCatalogueSchemaFile', 'importCatalogueSnapshot',
 	'listCatalogueSnapshots', 'listCatalogueTypes', 'getResourceFormSchema', 'renderResourceDraft',
 	'startValidationRun', 'pollValidationRun', 'cancelValidationRun',
 	'previewDraftSave', 'applyDraftSave',
@@ -296,8 +297,32 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 			}
 			return { workspaceId: value.workspaceId, repositoryId: value.repositoryId };
 		}
+		case 'inspectCatalogueSchemaFile':
 		case 'listCatalogueSnapshots': {
 			return Object.keys(value).length === 0 ? {} : undefined;
+		}
+		case 'importCatalogueSnapshot': {
+			if (
+				!hasOnlyKeys(value, ['previewId', 'address', 'version', 'engineName', 'engineVersion']) ||
+				typeof value.previewId !== 'string' || !/^[a-z0-9-]{1,64}$/.test(value.previewId) ||
+				typeof value.address !== 'string' ||
+				!isSnapshotSegment(value.version) ||
+				(value.engineName !== 'terraform' && value.engineName !== 'openTofu') ||
+				!isSnapshotSegment(value.engineVersion)
+			) {
+				return undefined;
+			}
+			const segments = value.address.split('/');
+			if (segments.length !== 3 || !segments.every(isSnapshotSegment)) {
+				return undefined;
+			}
+			return {
+				previewId: value.previewId,
+				address: value.address,
+				version: value.version,
+				engineName: value.engineName,
+				engineVersion: value.engineVersion
+			};
 		}
 		case 'listCatalogueTypes': {
 			if (!hasOnlyKeys(value, ['key'])) {
@@ -512,6 +537,8 @@ export interface ICloudForgeRequestContext {
 	resolveScope(): Promise<ICloudForgeWindowScope | undefined>;
 	/** Opens a native folder picker owned by the calling window. `undefined` when cancelled. */
 	pickParentFolder(): Promise<string | undefined>;
+	/** Opens a native schema JSON file picker owned by the calling window. `undefined` when cancelled. */
+	pickSchemaFile?(): Promise<string | undefined>;
 }
 
 export type CloudForgeResolvedRequest =
@@ -555,6 +582,16 @@ export async function resolveCloudForgeRequest(method: CloudForgeServiceMethod, 
 				return { kind: 'failure', code: 'SCOPE_DENIED' };
 			}
 			return { kind: 'call', params: { workspaceId: params.workspaceId, folderPath } };
+		}
+		case 'inspectCatalogueSchemaFile': {
+			const schemaPath = await context.pickSchemaFile?.();
+			if (schemaPath === undefined) {
+				return { kind: 'failure', code: 'CANCELLED' };
+			}
+			if (!isLocalPath(schemaPath)) {
+				return { kind: 'failure', code: 'SCOPE_DENIED' };
+			}
+			return { kind: 'call', params: { schemaPath } };
 		}
 		default:
 			return { kind: 'call', params };
@@ -638,7 +675,8 @@ export class CloudForgeServiceBroker implements IServerChannel<string> {
 		try {
 			const request = await resolveCloudForgeRequest(method, params, {
 				resolveScope: () => resolveCloudForgeWindowScope(window.openedWorkspace, configPath => this.workspacesManagementMainService.resolveLocalWorkspace(configPath)),
-				pickParentFolder: () => this.pickParentFolder(window.win ?? undefined)
+				pickParentFolder: () => this.pickParentFolder(window.win ?? undefined),
+				pickSchemaFile: () => this.pickSchemaFile(window.win ?? undefined)
 			});
 			if (request.kind === 'failure') {
 				return safeFailure(new CloudForgeServiceError(request.code)) as T;
@@ -675,6 +713,19 @@ export class CloudForgeServiceBroker implements IServerChannel<string> {
 			title: localize('cloudForge.createProjectLocation', "Choose Where to Create the CloudForge Project"),
 			buttonLabel: localize('cloudForge.createProjectHere', "Create Project Here"),
 			properties: ['openDirectory', 'createDirectory']
+		}, window);
+		if (result.canceled || result.filePaths.length !== 1) {
+			return undefined;
+		}
+		return result.filePaths[0];
+	}
+
+	private async pickSchemaFile(window: electron.BrowserWindow | undefined): Promise<string | undefined> {
+		const result = await this.dialogMainService.showOpenDialog({
+			title: localize('cloudForge.pickSchemaFile', "Choose Provider Schema JSON File"),
+			buttonLabel: localize('cloudForge.inspectSchema', "Inspect Schema"),
+			properties: ['openFile'],
+			filters: [{ name: localize('cloudForge.schemaJsonFilter', "Provider Schema JSON"), extensions: ['json'] }]
 		}, window);
 		if (result.canceled || result.filePaths.length !== 1) {
 			return undefined;

@@ -7,6 +7,9 @@ param(
     [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$ServiceCommit,
     [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{64}$')][string]$ServiceSha256,
     [string]$WindowsSdkBin = "${env:ProgramFiles(x86)}\Windows Kits\10\bin\10.0.26100.0\x64",
+    [ValidatePattern('^$|^[0-9a-fA-F]{40}$')][string]$SignCertificateThumbprint = '',
+    [string]$SignTimestampUrl = 'https://timestamp.digicert.com',
+    [switch]$RequireSignedService,
     [switch]$UseBuiltDesktop
 )
 
@@ -17,14 +20,46 @@ $hash = (Get-FileHash -LiteralPath $service).Hash.ToLowerInvariant()
 if ($hash -cne $ServiceSha256) {
     throw "The service SHA-256 is $hash. Expected $ServiceSha256."
 }
-if (-not (Test-Path -LiteralPath (Join-Path $WindowsSdkBin 'signtool.exe') -PathType Leaf)) {
+$signTool = Join-Path $WindowsSdkBin 'signtool.exe'
+if (-not (Test-Path -LiteralPath $signTool -PathType Leaf)) {
     throw 'Pass the installed Windows SDK x64 bin directory containing signtool.exe.'
 }
+
+$stageService = $service
+$signedTemp = $null
+$serviceSigned = $false
 
 $oldPath = $env:PATH
 Push-Location -LiteralPath $repo
 try {
     $env:PATH = "$WindowsSdkBin;$oldPath"
+    if ($SignCertificateThumbprint) {
+        if (-not $SignTimestampUrl -or $SignTimestampUrl -notmatch '^https://') {
+            throw 'Pass an https:// RFC 3161 timestamp server URL in -SignTimestampUrl.'
+        }
+        $signedTemp = Join-Path ([IO.Path]::GetTempPath()) ("cloudforge-service-signed-" + [guid]::NewGuid().ToString('N') + '.exe')
+        Copy-Item -LiteralPath $service -Destination $signedTemp -Force
+        & $signTool sign /fd SHA256 /sha1 $SignCertificateThumbprint /tr $SignTimestampUrl /td SHA256 /v $signedTemp
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Authenticode signing of cloudforge-service.exe failed.'
+        }
+        $signature = Get-AuthenticodeSignature -LiteralPath $signedTemp
+        if ($signature.Status -ne 'Valid') {
+            throw "Signed cloudforge-service.exe failed Authenticode verification: $($signature.Status)."
+        }
+        $stageService = $signedTemp
+        $hash = (Get-FileHash -LiteralPath $stageService).Hash.ToLowerInvariant()
+        $serviceSigned = $true
+    } elseif ($RequireSignedService) {
+        $signature = Get-AuthenticodeSignature -LiteralPath $service
+        if ($signature.Status -ne 'Valid') {
+            throw "Expected a valid Authenticode signature on cloudforge-service.exe (status: $($signature.Status)). Pass -SignCertificateThumbprint to sign before staging."
+        }
+        $serviceSigned = $true
+    } else {
+        $signature = Get-AuthenticodeSignature -LiteralPath $service
+        $serviceSigned = ($signature.Status -eq 'Valid')
+    }
     $productCommit = (git rev-parse HEAD).Trim()
     if ($LASTEXITCODE -ne 0 -or $productCommit -cnotmatch '^[0-9a-f]{40}$') {
         throw 'Could not resolve the desktop source revision.'
@@ -93,13 +128,13 @@ try {
 
     # The shared stager rechecks the digest and packaged desktop commit, copies the service, verifies
     # the copied bytes, and writes the runtime manifest last. Stage final (signed) service bytes.
-    node build/cloudforge/serviceArtifact.ts --artifact $service --sha256 $hash --service-commit $ServiceCommit `
+    node build/cloudforge/serviceArtifact.ts --artifact $stageService --sha256 $hash --service-commit $ServiceCommit `
         --protocol 1 --desktop-commit $productCommit --app-directory $app
     if ($LASTEXITCODE -ne 0) { throw 'CloudForge service staging failed.' }
 
     # Gate the payload immediately before Inno packages it. Any step that rewrites the staged
-    # executable (such as a future signing pass) must run before this check, which fails if the
-    # executable no longer matches its manifest or the pinned build inputs.
+    # executable (such as the optional Authenticode signing pass above) must run before this check,
+    # which fails if the executable no longer matches its manifest or the pinned build inputs.
     node build/cloudforge/serviceArtifact.ts --verify --app-directory $app --sha256 $hash `
         --service-commit $ServiceCommit --protocol 1 --desktop-commit $productCommit
     if ($LASTEXITCODE -ne 0) { throw 'CloudForge service verification failed before packaging.' }
@@ -117,10 +152,14 @@ try {
         ProductCommit = $productCommit
         ServiceCommit = $ServiceCommit
         ServiceSha256 = $hash
+        ServiceSigned = $serviceSigned
         VsixSha256 = $vsixHash
     } | ConvertTo-Json
 }
 finally {
+    if ($signedTemp -and (Test-Path -LiteralPath $signedTemp -PathType Leaf)) {
+        Remove-Item -LiteralPath $signedTemp -Force -ErrorAction SilentlyContinue
+    }
     Pop-Location
     $env:PATH = $oldPath
 }

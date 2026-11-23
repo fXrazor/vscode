@@ -32,11 +32,11 @@ type CloudForgeServiceMethod =
 	| 'startValidationRun' | 'pollValidationRun' | 'cancelValidationRun'
 	| 'previewDraftSave' | 'applyDraftSave'
 	| 'inspectDependencies';
-type CloudForgeCatalogueMethod = 'listCatalogueSnapshots' | 'listCatalogueTypes' | 'getResourceFormSchema' | 'renderResourceDraft' | 'listCloudRegions';
+type CloudForgeCatalogueMethod = 'inspectCatalogueSchemaFile' | 'importCatalogueSnapshot' | 'listCatalogueSnapshots' | 'listCatalogueTypes' | 'getResourceFormSchema' | 'renderResourceDraft' | 'listCloudRegions';
 type CloudForgeProjectMethod = 'createProject' | 'openProject' | 'grantProject' | 'forgetProjectAccess' | 'createWorkspaceFile' | 'inspectRepository' | 'importRepository' | 'removeRepository' | 'installGit';
 
 const catalogueMethods: ReadonlySet<string> = new Set<CloudForgeCatalogueMethod>([
-	'listCatalogueSnapshots', 'listCatalogueTypes', 'getResourceFormSchema', 'renderResourceDraft', 'listCloudRegions'
+	'inspectCatalogueSchemaFile', 'importCatalogueSnapshot', 'listCatalogueSnapshots', 'listCatalogueTypes', 'getResourceFormSchema', 'renderResourceDraft', 'listCloudRegions'
 ]);
 
 /**

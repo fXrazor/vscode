@@ -390,4 +390,57 @@ suite('CloudForgeServiceChannel', () => {
 		assert.deepStrictEqual(schemaErr, { ok: false, error: { code: 'SCHEMA_UNAVAILABLE', message: 'The requested provider schema snapshot or resource type is not available.' } });
 		await broker.stop();
 	});
+
+	test('picks a local schema JSON file in Electron main for inspectCatalogueSchemaFile and validates importCatalogueSnapshot', async () => {
+		assert.deepStrictEqual(validateCloudForgeServiceParams('inspectCatalogueSchemaFile', {}), {});
+		assert.strictEqual(validateCloudForgeServiceParams('inspectCatalogueSchemaFile', { schemaPath: 'C:\\schema.json' }), undefined);
+		assert.ok(validateCloudForgeServiceParams('importCatalogueSnapshot', {
+			previewId: 'schema-1',
+			address: 'registry.terraform.io/hashicorp/azurerm',
+			version: '5.14.0',
+			engineName: 'openTofu',
+			engineVersion: '1.11.0'
+		}));
+		assert.strictEqual(validateCloudForgeServiceParams('importCatalogueSnapshot', {
+			previewId: 'schema-1',
+			address: 'hashicorp/azurerm',
+			version: '5.14.0',
+			engineName: 'openTofu',
+			engineVersion: '1.11.0'
+		}), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('importCatalogueSnapshot', {
+			previewId: 'schema-1',
+			address: 'registry.terraform.io/hashicorp/azurerm',
+			version: '5.14.0',
+			engineName: 'pulumi',
+			engineVersion: '1.11.0'
+		}), undefined);
+
+		const cancelled = createBroker([contosoWindow]);
+		assert.deepStrictEqual(await cancelled.call(1, 'inspectCatalogueSchemaFile', {}), {
+			ok: false,
+			error: { code: 'CANCELLED', message: 'The CloudForge request was cancelled.' }
+		});
+		assert.deepStrictEqual(cancelled.dialogs.map(dialog => dialog.properties), [['openFile']]);
+		assert.deepStrictEqual(cancelled.callsByWindow(), { 1: [] });
+
+		const unc = createBroker([contosoWindow], { picked: ['\\\\server\\share\\schema.json'] });
+		assert.deepStrictEqual(await unc.call(1, 'inspectCatalogueSchemaFile', {}), {
+			ok: false,
+			error: { code: 'SCOPE_DENIED', message: 'The requested CloudForge workspace is not active in this window.' }
+		});
+		assert.deepStrictEqual(unc.callsByWindow(), { 1: [] });
+
+		const local = createBroker([contosoWindow], {
+			picked: ['D:\\Schemas\\azurerm.json'],
+			reply: () => ({ previewId: 'schema-1', fileName: 'azurerm.json', formatVersion: '1.0', providers: [] })
+		});
+		const inspected = await local.call(1, 'inspectCatalogueSchemaFile', {});
+		assert.strictEqual(inspected.ok, true);
+		assert.deepStrictEqual(local.callsByWindow(), {
+			1: [{ method: 'inspectCatalogueSchemaFile', params: { schemaPath: 'D:\\Schemas\\azurerm.json' } }]
+		});
+
+		await Promise.all([cancelled, unc, local].map(item => item.broker.stop()));
+	});
 });

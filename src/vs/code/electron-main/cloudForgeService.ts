@@ -51,6 +51,7 @@ export type CloudForgeServiceMethod =
 	| 'openWorkspace' | 'chooseTerraformRoot' | 'selectArchitecture' | 'readArchitecture'
 	| 'createProject' | 'openProject' | 'grantProject' | 'forgetProjectAccess' | 'createWorkspaceFile'
 	| 'inspectRepository' | 'importRepository' | 'removeRepository' | 'installGit'
+	| 'inspectCatalogueSchemaFile' | 'importCatalogueSnapshot'
 	| 'listCatalogueSnapshots' | 'listCatalogueTypes' | 'getResourceFormSchema' | 'renderResourceDraft'
 	| 'startValidationRun' | 'pollValidationRun' | 'cancelValidationRun'
 	| 'previewDraftSave' | 'applyDraftSave'
