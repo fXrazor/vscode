@@ -36,7 +36,8 @@ const cloudForgeMethods: ReadonlySet<string> = new Set<CloudForgeServiceMethod>(
 	'inspectRepository', 'importRepository', 'removeRepository', 'installGit',
 	'listCatalogueSnapshots', 'listCatalogueTypes', 'getResourceFormSchema', 'renderResourceDraft',
 	'startValidationRun', 'pollValidationRun', 'cancelValidationRun',
-	'previewDraftSave', 'applyDraftSave'
+	'previewDraftSave', 'applyDraftSave',
+	'inspectDependencies', 'listCloudRegions'
 ]);
 
 /** The service allows `installGit` 10 minutes; the broker waits a little longer for its reply. */
@@ -48,6 +49,8 @@ const maxSelections = 32;
 const maxWorkspaceFolders = 1024;
 const maxPollEvents = 512;
 const maxDraftBytes = 512 * 1024;
+const maxConfiguredRegions = 128;
+const maxScopeFieldLength = 128;
 
 const serviceErrorMessages: Readonly<Record<string, string>> = {
 	INVALID_PARAMS: 'The CloudForge request is invalid.',
@@ -124,6 +127,33 @@ function isTypeName(value: unknown): value is string {
 
 function isSchemaKind(value: unknown): value is 'resource' | 'dataSource' {
 	return value === 'resource' || value === 'dataSource';
+}
+
+function isScopeText(value: unknown): value is string {
+	return typeof value === 'string' && value.trim().length > 0 && value.length <= maxScopeFieldLength && !/[\u0000-\u001f\u007f]/.test(value);
+}
+
+function validateCloudScope(provider: 'azure' | 'aws' | 'google', value: unknown): Record<string, string> | undefined {
+	if (!isRecord(value) || value.provider !== provider) {
+		return undefined;
+	}
+	switch (provider) {
+		case 'azure':
+			if (!hasOnlyKeys(value, ['provider', 'cloud', 'tenantId', 'subscriptionId']) || !isScopeText(value.cloud) || !isScopeText(value.tenantId) || !isScopeText(value.subscriptionId)) {
+				return undefined;
+			}
+			return { provider: 'azure', cloud: value.cloud, tenantId: value.tenantId, subscriptionId: value.subscriptionId };
+		case 'aws':
+			if (!hasOnlyKeys(value, ['provider', 'partition', 'accountId']) || !isScopeText(value.partition) || !isScopeText(value.accountId)) {
+				return undefined;
+			}
+			return { provider: 'aws', partition: value.partition, accountId: value.accountId };
+		case 'google':
+			if (!hasOnlyKeys(value, ['provider', 'projectId']) || !isScopeText(value.projectId)) {
+				return undefined;
+			}
+			return { provider: 'google', projectId: value.projectId };
+	}
 }
 
 function validateDraftBody(value: unknown, depth: number): Record<string, unknown> | undefined {
@@ -376,6 +406,56 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 				fileName: value.fileName,
 				contents: value.contents,
 				previewToken: value.previewToken
+			};
+		}
+		case 'inspectDependencies': {
+			if (!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'expectedSourceRevision', 'engine']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId)) {
+				return undefined;
+			}
+			if (value.expectedSourceRevision !== undefined && (typeof value.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(value.expectedSourceRevision))) {
+				return undefined;
+			}
+			if (value.engine !== undefined && value.engine !== 'opentofu' && value.engine !== 'terraform') {
+				return undefined;
+			}
+			return {
+				workspaceId: value.workspaceId,
+				architectureId: value.architectureId,
+				...(value.expectedSourceRevision === undefined ? {} : { expectedSourceRevision: value.expectedSourceRevision }),
+				...(value.engine === undefined ? {} : { engine: value.engine })
+			};
+		}
+		case 'listCloudRegions': {
+			if (!hasOnlyKeys(value, ['provider', 'scope', 'configuredRegions'])) {
+				return undefined;
+			}
+			if (value.provider !== 'azure' && value.provider !== 'aws' && value.provider !== 'google') {
+				return undefined;
+			}
+			let scope: Record<string, string> | undefined;
+			if (value.scope !== undefined) {
+				scope = validateCloudScope(value.provider, value.scope);
+				if (!scope) {
+					return undefined;
+				}
+			}
+			let configuredRegions: string[] | undefined;
+			if (value.configuredRegions !== undefined) {
+				if (!Array.isArray(value.configuredRegions) || value.configuredRegions.length > maxConfiguredRegions) {
+					return undefined;
+				}
+				configuredRegions = [];
+				for (const item of value.configuredRegions) {
+					if (typeof item !== 'string' || item.length > maxScopeFieldLength || /[\u0000-\u001f\u007f]/.test(item)) {
+						return undefined;
+					}
+					configuredRegions.push(item);
+				}
+			}
+			return {
+				provider: value.provider,
+				...(scope === undefined ? {} : { scope }),
+				...(configuredRegions === undefined ? {} : { configuredRegions })
 			};
 		}
 	}

@@ -374,6 +374,17 @@ suite('CloudForgeServiceChannel', () => {
 		assert.ok(validateCloudForgeServiceParams('applyDraftSave', { ...draftBase, previewToken: 'save-0123456789abcdef0123456789abcdef' }));
 		assert.strictEqual(validateCloudForgeServiceParams('applyDraftSave', { ...draftBase, previewToken: 'save-0123', extra: true }), undefined);
 
+		assert.ok(validateCloudForgeServiceParams('inspectDependencies', { workspaceId, architectureId: `${workspaceId}-architecture-1`, expectedSourceRevision: sha256, engine: 'opentofu' }));
+		assert.strictEqual(validateCloudForgeServiceParams('inspectDependencies', { workspaceId, architectureId: `${workspaceId}-architecture-1`, engine: 'pulumi' }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('inspectDependencies', { workspaceId, architectureId: `${workspaceId}-architecture-1`, rootPath: 'C:\\Windows' }), undefined);
+		assert.ok(validateCloudForgeServiceParams('listCloudRegions', {
+			provider: 'azure',
+			scope: { provider: 'azure', cloud: 'AzureCloud', tenantId: 'tenant-1', subscriptionId: 'sub-1' },
+			configuredRegions: ['uksouth', 'eastus']
+		}));
+		assert.strictEqual(validateCloudForgeServiceParams('listCloudRegions', { provider: 'azure', scope: { provider: 'aws', partition: 'aws', accountId: '123' } }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('listCloudRegions', { provider: 'digitalocean' }), undefined);
+
 		const { broker, call } = createBroker([contosoWindow], { reply: () => { throw new CloudForgeServiceError('SCHEMA_UNAVAILABLE'); } });
 		const schemaErr = await call(1, 'listCatalogueTypes', { key });
 		assert.deepStrictEqual(schemaErr, { ok: false, error: { code: 'SCHEMA_UNAVAILABLE', message: 'The requested provider schema snapshot or resource type is not available.' } });

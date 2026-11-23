@@ -30,12 +30,13 @@ type CloudForgeCallResult = CloudForgeCallSuccess | CloudForgeCallFailure;
 type CloudForgeServiceMethod =
 	| 'chooseTerraformRoot' | 'selectArchitecture' | 'readArchitecture'
 	| 'startValidationRun' | 'pollValidationRun' | 'cancelValidationRun'
-	| 'previewDraftSave' | 'applyDraftSave';
-type CloudForgeCatalogueMethod = 'listCatalogueSnapshots' | 'listCatalogueTypes' | 'getResourceFormSchema' | 'renderResourceDraft';
+	| 'previewDraftSave' | 'applyDraftSave'
+	| 'inspectDependencies';
+type CloudForgeCatalogueMethod = 'listCatalogueSnapshots' | 'listCatalogueTypes' | 'getResourceFormSchema' | 'renderResourceDraft' | 'listCloudRegions';
 type CloudForgeProjectMethod = 'createProject' | 'openProject' | 'grantProject' | 'forgetProjectAccess' | 'createWorkspaceFile' | 'inspectRepository' | 'importRepository' | 'removeRepository' | 'installGit';
 
 const catalogueMethods: ReadonlySet<string> = new Set<CloudForgeCatalogueMethod>([
-	'listCatalogueSnapshots', 'listCatalogueTypes', 'getResourceFormSchema', 'renderResourceDraft'
+	'listCatalogueSnapshots', 'listCatalogueTypes', 'getResourceFormSchema', 'renderResourceDraft', 'listCloudRegions'
 ]);
 
 /**
@@ -276,7 +277,7 @@ CommandsRegistry.registerCommand('_cloudforge.callService', async (accessor, met
 	if (
 		method !== 'chooseTerraformRoot' && method !== 'selectArchitecture' && method !== 'readArchitecture' &&
 		method !== 'startValidationRun' && method !== 'pollValidationRun' && method !== 'cancelValidationRun' &&
-		method !== 'previewDraftSave' && method !== 'applyDraftSave'
+		method !== 'previewDraftSave' && method !== 'applyDraftSave' && method !== 'inspectDependencies'
 	) {
 		return failure('INVALID_PARAMS', 'The CloudForge request is invalid.');
 	}
@@ -297,6 +298,7 @@ CommandsRegistry.registerCommand('_cloudforge.callService', async (accessor, met
 			break;
 		case 'readArchitecture':
 		case 'startValidationRun':
+		case 'inspectDependencies':
 			if (!isOpaqueId(params.architectureId) || params.architectureId !== activeArchitectureId || (params.expectedSourceRevision !== undefined && (typeof params.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(params.expectedSourceRevision)))) {
 				return failure('SCOPE_DENIED', 'The requested architecture is not active in this window.');
 			}

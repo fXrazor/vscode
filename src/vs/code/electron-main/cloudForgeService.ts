@@ -53,7 +53,8 @@ export type CloudForgeServiceMethod =
 	| 'inspectRepository' | 'importRepository' | 'removeRepository' | 'installGit'
 	| 'listCatalogueSnapshots' | 'listCatalogueTypes' | 'getResourceFormSchema' | 'renderResourceDraft'
 	| 'startValidationRun' | 'pollValidationRun' | 'cancelValidationRun'
-	| 'previewDraftSave' | 'applyDraftSave';
+	| 'previewDraftSave' | 'applyDraftSave'
+	| 'inspectDependencies' | 'listCloudRegions';
 
 export class CloudForgeServiceError extends Error {
 	constructor(readonly code: string, readonly kind?: string) {
