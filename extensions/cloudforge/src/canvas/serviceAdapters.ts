@@ -9,7 +9,11 @@
 
 import type {
 	CanvasCatalogueSnapshot,
+	CanvasCloudRegion,
+	CanvasCloudRegionsPayload,
+	CanvasDependencyReport,
 	CanvasGraphSnapshot,
+	CanvasProviderDependency,
 	DraftSaveApplyResult,
 	DraftSaveError,
 	DraftSaveFinding,
@@ -970,4 +974,103 @@ export function draftSaveErrorMessage(code: string): DraftSaveError {
 				message: 'The CloudForge service could not save this draft.',
 			};
 	}
+}
+
+// ============================================================================
+// Stage 6: Offline Provider Dependencies & Cloud Region Metadata Adapters
+// ============================================================================
+
+export function parseCloudRegionsPayload(value: unknown): CanvasCloudRegionsPayload | undefined {
+	if (
+		!isRecord(value) ||
+		(value.provider !== 'azure' && value.provider !== 'aws' && value.provider !== 'google') ||
+		(value.source !== 'authenticatedScopeApi' && value.source !== 'bundledPublicFallback') ||
+		!isNonEmptyString(value.refreshedAt, 64) ||
+		typeof value.stale !== 'boolean' ||
+		typeof value.isFallback !== 'boolean' ||
+		!Array.isArray(value.regions)
+	) {
+		return undefined;
+	}
+	const regions: CanvasCloudRegion[] = [];
+	for (const entry of value.regions) {
+		if (!isRecord(entry) || !isNonEmptyString(entry.name, 128) || !isNonEmptyString(entry.displayName, 256)) {
+			continue;
+		}
+		const availabilityZones = Array.isArray(entry.availabilityZones)
+			? entry.availabilityZones.filter((z): z is string => isNonEmptyString(z, 64))
+			: [];
+		regions.push({
+			name: entry.name,
+			displayName: entry.displayName,
+			availabilityZones,
+			...(isNonEmptyString(entry.geography, 128) ? { geography: entry.geography } : {}),
+		});
+	}
+	return {
+		provider: value.provider,
+		source: value.source,
+		refreshedAt: value.refreshedAt,
+		stale: value.stale,
+		isFallback: value.isFallback,
+		regions,
+	};
+}
+
+export function parseDependencyReport(value: unknown): CanvasDependencyReport | undefined {
+	if (
+		!isRecord(value) ||
+		!isSha256(value.sourceRevision) ||
+		(value.engine !== 'opentofu' && value.engine !== 'terraform') ||
+		typeof value.engineInferred !== 'boolean' ||
+		!isRecord(value.lockFile) ||
+		!Array.isArray(value.providers)
+	) {
+		return undefined;
+	}
+	const lockState = value.lockFile.state;
+	if (lockState !== 'absent' && lockState !== 'valid' && lockState !== 'invalid' && lockState !== 'unreadable') {
+		return undefined;
+	}
+	const providers: CanvasProviderDependency[] = [];
+	for (const item of value.providers) {
+		if (!isRecord(item) || !isNonEmptyString(item.display, 256)) {
+			continue;
+		}
+		const status = item.status;
+		if (
+			status !== 'locked' &&
+			status !== 'unlocked' &&
+			status !== 'lockOutsideConstraints' &&
+			status !== 'noMatchingRelease' &&
+			status !== 'conflict'
+		) {
+			continue;
+		}
+		const lockedVersion = isRecord(item.lock) && isNonEmptyString(item.lock.version, 128)
+			? item.lock.version
+			: undefined;
+		const conflictCount = Array.isArray(item.conflicts) ? item.conflicts.length : 0;
+		const requirementCount = Array.isArray(item.requirements) ? item.requirements.length : 0;
+		providers.push({
+			display: item.display,
+			status,
+			...(lockedVersion ? { lockedVersion } : {}),
+			conflictCount,
+			requirementCount,
+		});
+	}
+	const unusedLockEntries = Array.isArray(value.unusedLockEntries)
+		? value.unusedLockEntries.filter((e): e is string => isNonEmptyString(e, 256))
+		: [];
+	const diagnosticCount = Array.isArray(value.diagnostics) ? value.diagnostics.length : 0;
+	return {
+		sourceRevision: value.sourceRevision,
+		engine: value.engine,
+		engineInferred: value.engineInferred,
+		lockState,
+		providers,
+		unusedLockEntries,
+		diagnosticCount,
+	};
 }

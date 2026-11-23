@@ -55,6 +55,8 @@ import {
 	defaultCanvasViewState,
 	isValidTfFileName,
 	type CanvasCatalogueSnapshot,
+	type CanvasCloudRegionsPayload,
+	type CanvasDependencyReport,
 	type CanvasGraphSnapshot,
 	type CanvasGridMode,
 	type CanvasNodeSummary,
@@ -111,6 +113,8 @@ let connectFeedback: string | undefined;
 let catalogueSnapshots: readonly CanvasCatalogueSnapshot[] = [];
 const liveSchemas = new Map<string, FormSchema | null>();
 const pendingSchemaRequests = new Set<string>();
+const cloudRegionsByProvider = new Map<'azure' | 'aws' | 'google', CanvasCloudRegionsPayload>();
+let dependencyReport: CanvasDependencyReport | null = null;
 let saveFileName = 'cloudforge_draft.tf';
 let savePhase: 'idle' | 'previewing' | 'previewReady' | 'applying' = 'idle';
 let savePreview: DraftSavePreviewResult | undefined;
@@ -124,14 +128,43 @@ function resetSavePreviewState(): void {
 	saveError = undefined;
 }
 
-function lookupEffectiveSchema(node: Pick<CanvasNodeSummary, 'kind' | 'resourceType'>): FormSchema | undefined {
-	if (node.resourceType) {
-		const live = liveSchemas.get(node.resourceType);
-		if (live) {
-			return live;
-		}
+function cloudProviderForType(resourceType: string | null): 'azure' | 'aws' | 'google' | undefined {
+	if (!resourceType) {
+		return undefined;
 	}
-	return lookupBundledSchema(node);
+	const lower = resourceType.toLowerCase();
+	if (lower.startsWith('azurerm_') || lower.startsWith('azapi_') || lower.startsWith('azuread_')) {
+		return 'azure';
+	}
+	if (lower.startsWith('aws_')) {
+		return 'aws';
+	}
+	if (lower.startsWith('google_')) {
+		return 'google';
+	}
+	return undefined;
+}
+
+function lookupEffectiveSchema(node: Pick<CanvasNodeSummary, 'kind' | 'resourceType'>): FormSchema | undefined {
+	const base = (node.resourceType ? liveSchemas.get(node.resourceType) : undefined) ?? lookupBundledSchema(node);
+	if (!base) {
+		return undefined;
+	}
+	const cloudProvider = cloudProviderForType(node.resourceType);
+	const regionData = cloudProvider ? cloudRegionsByProvider.get(cloudProvider) : undefined;
+	if (!regionData || regionData.regions.length === 0) {
+		return base;
+	}
+	const regionNames = regionData.regions.map(r => r.name);
+	let enriched = false;
+	const attributes = base.attributes.map(attr => {
+		if (attr.valueType === 'string' && (attr.name === 'location' || attr.name === 'region')) {
+			enriched = true;
+			return { ...attr, options: regionNames };
+		}
+		return attr;
+	});
+	return enriched ? { ...base, attributes } : base;
 }
 
 function maybeRequestLiveSchema(node: CanvasNodeSummary): void {
@@ -1333,6 +1366,9 @@ function renderInspector(): HTMLElement {
 			el('p', 'cf-muted', 'Click any resource to inspect its dependencies, author draft edits, or open its Terraform source. Double-click or press Enter to open the focused resource workspace.')
 		);
 		aside.append(empty);
+		if (dependencyReport && (dependencyReport.providers.length > 0 || dependencyReport.diagnosticCount > 0)) {
+			aside.append(renderDependencyReportSection(dependencyReport));
+		}
 		if (current && current.diagnostics.length > 0) {
 			aside.append(renderDiagnosticsSection(current));
 		}
@@ -1452,7 +1488,45 @@ function renderInspector(): HTMLElement {
 	if (current && current.diagnostics.length > 0) {
 		aside.append(renderDiagnosticsSection(current));
 	}
+	if (dependencyReport && (dependencyReport.providers.length > 0 || dependencyReport.diagnosticCount > 0)) {
+		aside.append(renderDependencyReportSection(dependencyReport));
+	}
 	return aside;
+}
+
+function renderDependencyReportSection(report: CanvasDependencyReport): HTMLElement {
+	const section = el('div', 'cf-inspector-section');
+	const lockLabel = report.lockState === 'valid'
+		? 'lock valid'
+		: report.lockState === 'absent'
+			? 'no lockfile'
+			: `lock ${report.lockState}`;
+	section.append(
+		el('h3', 'cf-section-title', `Providers & locks (${report.providers.length})`),
+		el('div', 'cf-muted cf-mono', `${report.engine}${report.engineInferred ? ' (inferred)' : ''} · ${lockLabel}`)
+	);
+	for (const prov of report.providers) {
+		const severity = prov.status === 'conflict' || prov.status === 'noMatchingRelease'
+			? 'error'
+			: prov.status === 'lockOutsideConstraints' || prov.status === 'unlocked'
+				? 'warning'
+				: 'info';
+		const item = el('div', `cf-diag cf-diag-${severity}`);
+		const statusText = prov.status === 'locked' && prov.lockedVersion
+			? `locked ${prov.lockedVersion}`
+			: prov.status === 'lockOutsideConstraints' && prov.lockedVersion
+				? `lock ${prov.lockedVersion} outside constraints`
+				: prov.status;
+		item.append(
+			el('div', 'cf-diag-head cf-mono', prov.display),
+			el('div', 'cf-diag-msg', `${statusText} · ${prov.requirementCount} requirement${prov.requirementCount === 1 ? '' : 's'}${prov.conflictCount > 0 ? ` · ${prov.conflictCount} conflict(s)` : ''}`)
+		);
+		section.append(item);
+	}
+	if (report.unusedLockEntries.length > 0) {
+		section.append(el('p', 'cf-muted', `${report.unusedLockEntries.length} unused lock entr${report.unusedLockEntries.length === 1 ? 'y' : 'ies'}.`));
+	}
+	return section;
 }
 
 function renderDepListSection(title: string, items: { node: CanvasNodeSummary; kind: string }[], inWorkspace: boolean): HTMLElement {
@@ -2372,6 +2446,7 @@ window.addEventListener('message', event => {
 	switch (message.type) {
 		case 'graph':
 			draftDoc = createDraftDocument(message.graph);
+			dependencyReport = null;
 			hclReviewOpen = false;
 			connectFeedback = undefined;
 			validationInFlight = false;
@@ -2451,6 +2526,19 @@ window.addEventListener('message', event => {
 			liveSchemas.set(message.typeName, message.schema);
 			if (state.focusedWorkspaceOpen || hclReviewOpen) {
 				render();
+			}
+			break;
+		case 'cloudRegions':
+			cloudRegionsByProvider.set(message.data.provider, message.data);
+			if (state.focusedWorkspaceOpen) {
+				render();
+			}
+			break;
+		case 'dependencyReport':
+			dependencyReport = message.report;
+			if (state.inspectorOpen) {
+				render();
+				applyViewportTransform();
 			}
 			break;
 	}

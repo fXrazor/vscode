@@ -18,13 +18,15 @@ import {
 import { activateProjects } from './project/index';
 import { CloudForgeCanvasPanel } from './canvas/canvasPanel';
 import { orientServiceEdgesForCanvas } from './canvas/layout';
-import type { CanvasCatalogueSnapshot, CanvasGraphSnapshot } from './canvas/protocol';
+import type { CanvasCatalogueSnapshot, CanvasCloudRegionsPayload, CanvasGraphSnapshot } from './canvas/protocol';
 import { lookupBundledSchema, type FormSchema } from './canvas/schemaForm';
 import {
 	draftSaveErrorMessage,
 	mapRustFormSchemaToCanvasFormSchema,
 	mapServiceValidationPollToRun,
 	parseCatalogueSnapshots,
+	parseCloudRegionsPayload,
+	parseDependencyReport,
 	parseDraftSaveApply,
 	parseDraftSavePreview,
 	parseValidationPoll,
@@ -506,6 +508,33 @@ export function activate(context: ExtensionContext): void {
 	let lastValidationRunId: string | null = null;
 	let cachedCatalogueSnapshots: readonly CanvasCatalogueSnapshot[] | undefined;
 	const cachedLiveSchemas = new Map<string, FormSchema | null>();
+	const cachedCloudRegions = new Map<'azure' | 'aws' | 'google', CanvasCloudRegionsPayload | null>();
+
+	async function loadCloudRegions(provider: 'azure' | 'aws' | 'google'): Promise<CanvasCloudRegionsPayload | undefined> {
+		const cached = cachedCloudRegions.get(provider);
+		if (cached !== undefined) {
+			return cached ?? undefined;
+		}
+		const result = await callService<unknown>('listCloudRegions', { provider });
+		if (!result.ok) {
+			return undefined;
+		}
+		const parsed = parseCloudRegionsPayload(result.value) ?? null;
+		cachedCloudRegions.set(provider, parsed);
+		return parsed ?? undefined;
+	}
+
+	async function inspectArchitectureDependencies(workspaceId: string, architectureId: string, sourceRevision: string) {
+		const result = await callService<unknown>('inspectDependencies', {
+			workspaceId,
+			architectureId,
+			expectedSourceRevision: sourceRevision,
+		});
+		if (!result.ok) {
+			return undefined;
+		}
+		return parseDependencyReport(result.value);
+	}
 
 	async function cancelServiceValidation(): Promise<void> {
 		const active = activeValidation;
@@ -703,6 +732,8 @@ export function activate(context: ExtensionContext): void {
 		},
 		onLoadCatalogueSnapshots: loadCatalogueSnapshots,
 		onLoadResourceSchema: loadResourceSchema,
+		onLoadCloudRegions: loadCloudRegions,
+		onInspectDependencies: inspectArchitectureDependencies,
 	});
 
 	context.subscriptions.push(provider, treeView, canvas);

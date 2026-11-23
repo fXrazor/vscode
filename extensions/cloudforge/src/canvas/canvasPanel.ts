@@ -10,6 +10,8 @@ import {
 	parseWebviewMessage,
 	sanitizeViewState,
 	type CanvasCatalogueSnapshot,
+	type CanvasCloudRegionsPayload,
+	type CanvasDependencyReport,
 	type CanvasGraphSnapshot,
 	type CanvasNotice,
 	type CanvasViewState,
@@ -52,6 +54,8 @@ export interface CanvasPanelHost {
 	): Promise<{ readonly ok: true; readonly applied: DraftSaveApplyResult } | { readonly ok: false; readonly error: DraftSaveError }>;
 	onLoadCatalogueSnapshots?(): Promise<readonly CanvasCatalogueSnapshot[]>;
 	onLoadResourceSchema?(kind: 'resource' | 'dataSource', typeName: string): Promise<FormSchema | null>;
+	onLoadCloudRegions?(provider: 'azure' | 'aws' | 'google'): Promise<CanvasCloudRegionsPayload | undefined>;
+	onInspectDependencies?(workspaceId: string, architectureId: string, sourceRevision: string): Promise<CanvasDependencyReport | undefined>;
 }
 
 /**
@@ -192,6 +196,15 @@ export class CloudForgeCanvasPanel implements Disposable {
 							this.post({ type: 'catalogueSnapshots', snapshots });
 						}
 					});
+				}
+				if (this.host.onLoadCloudRegions) {
+					for (const provider of ['azure', 'aws', 'google'] as const) {
+						void this.host.onLoadCloudRegions(provider).then(data => {
+							if (this.ready && data && data.regions.length > 0) {
+								this.post({ type: 'cloudRegions', data });
+							}
+						});
+					}
 				}
 				if (this.pendingValidation) {
 					const pending = this.pendingValidation;
@@ -351,6 +364,14 @@ export class CloudForgeCanvasPanel implements Disposable {
 			viewState,
 			notice: this.notice,
 		});
+		if (this.host.onInspectDependencies) {
+			const snapshot = this.graph;
+			void this.host.onInspectDependencies(snapshot.workspaceId, snapshot.architectureId, snapshot.sourceRevision).then(report => {
+				if (this.ready && this.graph?.workspaceId === snapshot.workspaceId && this.graph?.architectureId === snapshot.architectureId && this.graph?.sourceRevision === snapshot.sourceRevision) {
+					this.post({ type: 'dependencyReport', report: report ?? null });
+				}
+			});
+		}
 	}
 
 	private post(message: ExtensionToWebviewMessage): void {

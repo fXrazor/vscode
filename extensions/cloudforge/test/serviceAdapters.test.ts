@@ -11,6 +11,8 @@ import {
 	mapRustFormSchemaToCanvasFormSchema,
 	mapServiceValidationPollToRun,
 	parseCatalogueSnapshots,
+	parseCloudRegionsPayload,
+	parseDependencyReport,
 	parseDraftSaveApply,
 	parseDraftSavePreview,
 	parseValidationPoll,
@@ -227,4 +229,44 @@ test('Stage 5 guarded save parsers and Webview protocol validation enforce stric
 
 	assert.match(draftSaveErrorMessage('SCOPE_DENIED').message, /read-only/i);
 	assert.match(draftSaveErrorMessage('STALE_SOURCE').message, /Refresh/i);
+});
+
+test('Stage 6 cloud regions and dependency report adapters parse sanitized payloads and reject invalid fields', () => {
+	const regions = parseCloudRegionsPayload({
+		provider: 'azure',
+		source: 'bundledPublicFallback',
+		refreshedAt: '2026-11-16T00:00:00Z',
+		stale: false,
+		isFallback: true,
+		regions: [
+			{ name: 'uksouth', displayName: 'UK South', availabilityZones: ['1', '2', '3'], geography: 'United Kingdom' },
+			{ name: 'westeurope', displayName: 'West Europe', availabilityZones: ['1', '2', '3'], geography: 'Europe' },
+		],
+	});
+	assert.ok(regions);
+	assert.equal(regions.provider, 'azure');
+	assert.equal(regions.regions.length, 2);
+	assert.equal(regions.regions[0].name, 'uksouth');
+	assert.equal(parseCloudRegionsPayload({ provider: 'unknown', source: 'bundledPublicFallback', refreshedAt: 'x', stale: false, isFallback: true, regions: [] }), undefined);
+
+	const deps = parseDependencyReport({
+		sourceRevision: 'a'.repeat(64),
+		engine: 'terraform',
+		engineInferred: true,
+		lockFile: { state: 'valid', entries: [] },
+		providers: [
+			{ display: 'hashicorp/azurerm', status: 'locked', lock: { version: '5.14.0', rejectedBy: [] }, conflicts: [], requirements: [{}, {}] },
+			{ display: 'hashicorp/random', status: 'conflict', conflicts: [{ message: 'conflict' }], requirements: [{}, {}] },
+		],
+		unusedLockEntries: ['registry.terraform.io/hashicorp/null'],
+		diagnostics: [{ severity: 'warning', message: 'skipped' }],
+	});
+	assert.ok(deps);
+	assert.equal(deps.engine, 'terraform');
+	assert.equal(deps.lockState, 'valid');
+	assert.equal(deps.providers.length, 2);
+	assert.equal(deps.providers[0].lockedVersion, '5.14.0');
+	assert.equal(deps.providers[1].conflictCount, 1);
+	assert.equal(deps.unusedLockEntries.length, 1);
+	assert.equal(deps.diagnosticCount, 1);
 });

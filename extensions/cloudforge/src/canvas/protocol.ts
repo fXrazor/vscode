@@ -53,6 +53,40 @@ export interface DraftSaveError {
 	readonly message: string;
 }
 
+export interface CanvasCloudRegion {
+	readonly name: string;
+	readonly displayName: string;
+	readonly availabilityZones: readonly string[];
+	readonly geography?: string;
+}
+
+export interface CanvasCloudRegionsPayload {
+	readonly provider: 'azure' | 'aws' | 'google';
+	readonly source: 'authenticatedScopeApi' | 'bundledPublicFallback';
+	readonly refreshedAt: string;
+	readonly stale: boolean;
+	readonly isFallback: boolean;
+	readonly regions: readonly CanvasCloudRegion[];
+}
+
+export interface CanvasProviderDependency {
+	readonly display: string;
+	readonly status: 'locked' | 'unlocked' | 'lockOutsideConstraints' | 'noMatchingRelease' | 'conflict';
+	readonly lockedVersion?: string;
+	readonly conflictCount: number;
+	readonly requirementCount: number;
+}
+
+export interface CanvasDependencyReport {
+	readonly sourceRevision: string;
+	readonly engine: 'opentofu' | 'terraform';
+	readonly engineInferred: boolean;
+	readonly lockState: 'absent' | 'valid' | 'invalid' | 'unreadable';
+	readonly providers: readonly CanvasProviderDependency[];
+	readonly unusedLockEntries: readonly string[];
+	readonly diagnosticCount: number;
+}
+
 export interface CanvasViewport {
 	readonly x: number;
 	readonly y: number;
@@ -162,6 +196,14 @@ export type ExtensionToWebviewMessage =
 		readonly type: 'liveSchema';
 		readonly typeName: string;
 		readonly schema: FormSchema | null;
+	}
+	| {
+		readonly type: 'cloudRegions';
+		readonly data: CanvasCloudRegionsPayload;
+	}
+	| {
+		readonly type: 'dependencyReport';
+		readonly report: CanvasDependencyReport | null;
 	};
 
 export type WebviewToExtensionMessage =
