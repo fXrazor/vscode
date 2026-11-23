@@ -15,6 +15,7 @@ import {
 	parseDependencyReport,
 	parseDraftSaveApply,
 	parseDraftSavePreview,
+	parseModuleInspection,
 	parseValidationPoll,
 	parseValidationStart,
 	selectBestSnapshotForType
@@ -269,4 +270,53 @@ test('Stage 6 cloud regions and dependency report adapters parse sanitized paylo
 	assert.equal(deps.providers[1].conflictCount, 1);
 	assert.equal(deps.unusedLockEntries.length, 1);
 	assert.equal(deps.diagnosticCount, 1);
+});
+
+test('Stage 7 module inspection adapter and Webview requestModule validation sanitize inputs', () => {
+	assert.deepStrictEqual(parseWebviewMessage({ type: 'requestModule', modulePath: ['net', 'sub'] }), {
+		type: 'requestModule',
+		modulePath: ['net', 'sub'],
+	});
+	assert.equal(parseWebviewMessage({ type: 'requestModule', modulePath: [] }), undefined);
+	assert.equal(parseWebviewMessage({ type: 'requestModule', modulePath: ['../outside'] }), undefined);
+	assert.equal(parseWebviewMessage({ type: 'requestModule', modulePath: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i'] }), undefined);
+
+	const parsed = parseModuleInspection({
+		workspaceId: 'ws-1',
+		architectureId: 'ws-1-arch-1',
+		sourceRevision: 'a'.repeat(64),
+		moduleRevision: 'b'.repeat(64),
+		modulePath: ['net'],
+		status: 'local',
+		sourceKind: 'local',
+		source: './modules/net',
+		passedInputs: ['resource_group_name'],
+		variables: [
+			{ name: 'resource_group_name', typeExpr: 'string', description: 'RG name', required: true, sensitive: false, hasDefault: false },
+		],
+		outputs: [
+			{ name: 'vnet_id', description: 'VNet ID', sensitive: false },
+		],
+		childModules: [{ name: 'sub', source: './sub', isLocal: true }],
+		graph: {
+			workspaceId: 'ws-1',
+			architectureId: 'ws-1-arch-1',
+			sourceRevision: 'b'.repeat(64),
+			status: 'complete',
+			nodes: [
+				{ id: 'node-1', kind: 'resource', resourceType: 'azurerm_virtual_network', name: 'vnet', label: 'azurerm_virtual_network.vnet' },
+				{ id: 'node-2', kind: 'module', resourceType: null, name: 'sub', label: 'module.sub' },
+			],
+			edges: [{ from: 'node-2', to: 'node-1', kind: 'reference' }],
+			diagnostics: [],
+		},
+	}, 'Hub');
+	assert.ok(parsed);
+	assert.equal(parsed.status, 'local');
+	assert.equal(parsed.variables.length, 1);
+	assert.equal(parsed.outputs.length, 1);
+	assert.equal(parsed.childModules.length, 1);
+	assert.ok(parsed.graph);
+	assert.equal(parsed.graph.nodes.length, 2);
+	assert.deepStrictEqual(parsed.graph.edges[0], { fromId: 'node-1', toId: 'node-2', kind: 'reference' });
 });

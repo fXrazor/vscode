@@ -13,6 +13,7 @@ import {
 	type CanvasCloudRegionsPayload,
 	type CanvasDependencyReport,
 	type CanvasGraphSnapshot,
+	type CanvasModuleInspection,
 	type CanvasNotice,
 	type CanvasViewState,
 	type DraftSaveApplyResult,
@@ -57,6 +58,12 @@ export interface CanvasPanelHost {
 	onLoadResourceSchema?(kind: 'resource' | 'dataSource', typeName: string): Promise<FormSchema | null>;
 	onLoadCloudRegions?(provider: 'azure' | 'aws' | 'google'): Promise<CanvasCloudRegionsPayload | undefined>;
 	onInspectDependencies?(workspaceId: string, architectureId: string, sourceRevision: string): Promise<CanvasDependencyReport | undefined>;
+	onReadModule?(
+		workspaceId: string,
+		architectureId: string,
+		sourceRevision: string,
+		modulePath: readonly string[]
+	): Promise<{ readonly ok: true; readonly inspection: CanvasModuleInspection } | { readonly ok: false; readonly message: string }>;
 	onExportArtifact?(
 		format: ExportFormat,
 		suggestedFileName: string,
@@ -335,6 +342,27 @@ export class CloudForgeCanvasPanel implements Disposable {
 				const schema = await this.host.onLoadResourceSchema(message.kind, message.typeName);
 				if (this.panel && this.ready) {
 					this.post({ type: 'liveSchema', typeName: message.typeName, schema });
+				}
+				return;
+			}
+			case 'requestModule': {
+				const graph = this.graph;
+				if (!graph || !this.host.onReadModule) {
+					this.post({
+						type: 'moduleInspection',
+						modulePath: message.modulePath,
+						inspection: null,
+						error: l10n.t('Module inspection is not available in this window.'),
+					});
+					return;
+				}
+				const outcome = await this.host.onReadModule(graph.workspaceId, graph.architectureId, graph.sourceRevision, message.modulePath);
+				if (this.panel && this.ready) {
+					if (outcome.ok) {
+						this.post({ type: 'moduleInspection', modulePath: message.modulePath, inspection: outcome.inspection });
+					} else {
+						this.post({ type: 'moduleInspection', modulePath: message.modulePath, inspection: null, error: outcome.message });
+					}
 				}
 				return;
 			}

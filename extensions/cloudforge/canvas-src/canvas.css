@@ -1641,3 +1641,59 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 		animation: none !important;
 	}
 }
+
+/* Stage 7 live child module typed I/O & breadcrumb buttons */
+.cf-crumb-btn {
+	background: transparent;
+	border: none;
+	color: var(--cf-accent);
+	cursor: pointer;
+	padding: 2px 5px;
+	border-radius: 5px;
+	font-size: 12px;
+	font-weight: 500;
+}
+.cf-crumb-btn:hover {
+	background: var(--cf-hover);
+}
+.cf-mod-subhead {
+	font-size: 11px;
+	font-weight: 600;
+	color: var(--cf-fg);
+	margin: 12px 0 6px;
+}
+.cf-mod-io-list {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+.cf-mod-io-row {
+	padding: 6px 8px;
+	border-radius: 6px;
+	border: 1px solid var(--cf-border);
+	background: var(--cf-bg);
+	font-size: 11px;
+}
+.cf-mod-io-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 6px;
+	flex-wrap: wrap;
+}
+.cf-mod-io-name {
+	font-weight: 600;
+	color: var(--cf-fg);
+}
+.cf-mod-io-tags {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	flex-wrap: wrap;
+}
+.cf-mod-chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin-top: 4px;
+}

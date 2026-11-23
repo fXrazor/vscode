@@ -92,6 +92,7 @@ import {
 	type CanvasFrameColor,
 	type CanvasGraphSnapshot,
 	type CanvasGridMode,
+	type CanvasModuleInspection,
 	type CanvasNodeSummary,
 	type CanvasNotice,
 	type CanvasPoint,
@@ -199,6 +200,10 @@ let exportStatusMessage: { readonly ok: boolean; readonly text: string } | undef
 let nextPresentationSeq = 1;
 const expandedPaginatedGroups = new Set<string>();
 let drilledModuleId: string | null = null;
+let drilledModulePath: string[] = [];
+const moduleInspections = new Map<string, CanvasModuleInspection | null>();
+const moduleErrors = new Map<string, string>();
+const pendingModuleRequests = new Set<string>();
 let lastFocusBeforeModuleDrill: HTMLElement | null = null;
 let extractModuleModalOpen = false;
 let extractModuleName = 'network_core';
@@ -509,14 +514,46 @@ function openFocusedWorkspace(nodeId: string): void {
 	backBtn?.focus();
 }
 
+function modulePathKey(modulePath: readonly string[]): string {
+	return modulePath.join('/');
+}
+
+function maybeRequestModuleInspection(modulePath: readonly string[]): void {
+	if (modulePath.length === 0 || !draftDoc) {
+		return;
+	}
+	const key = modulePathKey(modulePath);
+	if (moduleInspections.has(key) || pendingModuleRequests.has(key)) {
+		return;
+	}
+	pendingModuleRequests.add(key);
+	moduleErrors.delete(key);
+	post({ type: 'requestModule', modulePath: [...modulePath] });
+}
+
 function openModuleDrillDown(moduleNodeId: string): void {
 	lastFocusBeforeModuleDrill = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 	drilledModuleId = moduleNodeId;
+	const modNode = nodeById(moduleNodeId);
+	drilledModulePath = modNode ? [modNode.name] : [];
+	if (drilledModulePath.length > 0) {
+		maybeRequestModuleInspection(drilledModulePath);
+	}
 	state = { ...state, selectedId: moduleNodeId, focusedWorkspaceOpen: false };
 	post({ type: 'selectNode', nodeId: moduleNodeId });
 	render();
 	schedulePersistViewState();
 	root.querySelector<HTMLButtonElement>('.cf-module-back-btn')?.focus();
+}
+
+function drillNestedModulePath(nextPath: readonly string[]): void {
+	if (nextPath.length === 0) {
+		closeModuleDrillDown();
+		return;
+	}
+	drilledModulePath = [...nextPath];
+	maybeRequestModuleInspection(drilledModulePath);
+	render();
 }
 
 function closeModuleDrillDown(): void {
@@ -525,6 +562,7 @@ function closeModuleDrillDown(): void {
 	}
 	const parentId = drilledModuleId;
 	drilledModuleId = null;
+	drilledModulePath = [];
 	render();
 	applyViewportTransform();
 	schedulePersistViewState();
@@ -3497,74 +3535,189 @@ function renderModuleDrillDown(moduleId: string): HTMLElement | null {
 		return null;
 	}
 	const isStale = notice?.kind === 'stale';
+	const activePath = drilledModulePath.length > 0 ? drilledModulePath : [info.moduleNode.name];
+	const activeKey = modulePathKey(activePath);
+	const liveMod = moduleInspections.get(activeKey);
+	const modErr = moduleErrors.get(activeKey);
+	const modLoading = pendingModuleRequests.has(activeKey);
+	const isNested = activePath.length > 1;
 	const overlay = el('section', 'cf-workspace');
-	overlay.setAttribute('aria-label', `Module boundary view: ${info.moduleNode.name}`);
+	overlay.setAttribute('aria-label', `Module boundary view: ${activePath.join('.')}`);
 
 	const top = el('header', 'cf-workspace-header');
 	const leftGroup = el('div', 'cf-header-group');
-	const backBtn = el('button', 'cf-btn cf-module-back-btn', '\u2190 Back to Parent');
+	const backBtn = el('button', 'cf-btn cf-module-back-btn', isNested ? '\u2190 Up One Module' : '\u2190 Back to Parent');
 	backBtn.type = 'button';
-	backBtn.addEventListener('click', () => closeModuleDrillDown());
+	backBtn.addEventListener('click', () => {
+		if (isNested) {
+			drillNestedModulePath(activePath.slice(0, -1));
+		} else {
+			closeModuleDrillDown();
+		}
+	});
 	const crumb = el('nav', 'cf-breadcrumb');
 	crumb.setAttribute('aria-label', 'Module breadcrumb');
-	crumb.append(
-		el('span', 'cf-muted', current.architectureName),
-		el('span', 'cf-muted', '/'),
-		el('strong', 'cf-mono', info.moduleNode.label)
-	);
+	const rootCrumb = el('button', 'cf-crumb-btn', current.architectureName);
+	rootCrumb.type = 'button';
+	rootCrumb.addEventListener('click', () => closeModuleDrillDown());
+	crumb.append(rootCrumb);
+	activePath.forEach((seg, idx) => {
+		crumb.append(el('span', 'cf-muted', '/'));
+		if (idx === activePath.length - 1) {
+			crumb.append(el('strong', 'cf-mono', `module.${seg}`));
+		} else {
+			const segBtn = el('button', 'cf-crumb-btn cf-mono', `module.${seg}`);
+			segBtn.type = 'button';
+			const prefix = activePath.slice(0, idx + 1);
+			segBtn.addEventListener('click', () => drillNestedModulePath(prefix));
+			crumb.append(segBtn);
+		}
+	});
 	leftGroup.append(backBtn, crumb);
 
 	const actions = el('div', 'cf-header-group');
-	actions.append(el('span', 'cf-pill cf-mono', `rev ${current.sourceRevision.slice(0, 8)}`));
-	const openSrc = el('button', 'cf-btn cf-btn-primary', 'Open Module Call (Source)');
-	openSrc.type = 'button';
-	openSrc.disabled = !info.moduleNode.hasSource || isStale;
-	openSrc.addEventListener('click', () => post({ type: 'openSource', nodeId: info.moduleNode.id }));
-	actions.append(openSrc);
+	actions.append(el('span', 'cf-pill cf-mono', `rev ${(liveMod?.moduleRevision ?? current.sourceRevision).slice(0, 8)}`));
+	if (!isNested) {
+		const openSrc = el('button', 'cf-btn cf-btn-primary', 'Open Module Call (Source)');
+		openSrc.type = 'button';
+		openSrc.disabled = !info.moduleNode.hasSource || isStale;
+		openSrc.addEventListener('click', () => post({ type: 'openSource', nodeId: info.moduleNode.id }));
+		actions.append(openSrc);
+	}
 	top.append(leftGroup, actions);
 	overlay.append(top);
 
 	const columns = el('div', 'cf-workspace-columns');
+	const passedSet = new Set(liveMod?.passedInputs ?? []);
 
 	const inPane = el('aside', 'cf-ws-pane');
-	inPane.append(el('h2', 'cf-ws-pane-title', `Module Inputs (${info.inputs.length})`));
-	if (info.inputs.length === 0) {
-		inPane.append(el('p', 'cf-muted', 'No upstream root resources feed this module statically.'));
-	} else {
-		const list = el('div', 'cf-dep-list');
-		for (const item of info.inputs) {
-			const btn = el('button', 'cf-dep-btn');
-			btn.type = 'button';
-			btn.append(
-				el('span', 'cf-dep-name', item.node.name),
-				el('span', 'cf-dep-meta cf-mono', `${item.edgeKind} · ${item.node.resourceType ?? item.node.kind}`)
-			);
-			btn.addEventListener('click', () => {
-				drilledModuleId = null;
-				selectNode(item.node.id, { focusInCanvas: true });
-			});
-			list.append(btn);
+	const varCount = liveMod?.variables.length ?? 0;
+	inPane.append(el('h2', 'cf-ws-pane-title', liveMod ? `Module Inputs (${varCount} vars)` : `Module Inputs (${info.inputs.length})`));
+	if (liveMod && liveMod.status === 'local') {
+		if (liveMod.variables.length === 0) {
+			inPane.append(el('p', 'cf-muted', 'No variable blocks declared in this child module.'));
+		} else {
+			const varList = el('div', 'cf-mod-io-list');
+			for (const v of liveMod.variables) {
+				const row = el('div', 'cf-mod-io-row');
+				const head = el('div', 'cf-mod-io-head');
+				head.append(el('span', 'cf-mono cf-mod-io-name', v.name));
+				const tags = el('span', 'cf-mod-io-tags');
+				if (v.typeExpr) {
+					tags.append(el('span', 'cf-pill cf-mono', v.typeExpr));
+				}
+				tags.append(el('span', `cf-pill${v.required && !passedSet.has(v.name) ? ' cf-pill-warn' : ''}`, passedSet.has(v.name) ? 'passed' : (v.required ? 'required' : 'optional')));
+				if (v.sensitive) {
+					tags.append(el('span', 'cf-pill cf-pill-warn', 'sensitive'));
+				}
+				head.append(tags);
+				row.append(head);
+				if (v.description) {
+					row.append(el('div', 'cf-muted', v.description));
+				}
+				varList.append(row);
+			}
+			inPane.append(varList);
 		}
-		inPane.append(list);
+	} else if (liveMod && liveMod.status === 'external' && liveMod.passedInputs.length > 0) {
+		inPane.append(el('div', 'cf-mod-subhead', `Passed arguments (${liveMod.passedInputs.length})`));
+		const chips = el('div', 'cf-mod-chips');
+		for (const name of liveMod.passedInputs) {
+			chips.append(el('span', 'cf-pill cf-mono', name));
+		}
+		inPane.append(chips);
+	}
+	if (!isNested) {
+		inPane.append(el('div', 'cf-mod-subhead', `Root upstream bindings (${info.inputs.length})`));
+		if (info.inputs.length === 0) {
+			inPane.append(el('p', 'cf-muted', 'No upstream root resources feed this module statically.'));
+		} else {
+			const list = el('div', 'cf-dep-list');
+			for (const item of info.inputs) {
+				const btn = el('button', 'cf-dep-btn');
+				btn.type = 'button';
+				btn.append(
+					el('span', 'cf-dep-name', item.node.name),
+					el('span', 'cf-dep-meta cf-mono', `${item.edgeKind} · ${item.node.resourceType ?? item.node.kind}`)
+				);
+				btn.addEventListener('click', () => {
+					drilledModuleId = null;
+					drilledModulePath = [];
+					selectNode(item.node.id, { focusInCanvas: true });
+				});
+				list.append(btn);
+			}
+			inPane.append(list);
+		}
 	}
 	columns.append(inPane);
 
 	const centerPane = el('div', 'cf-ws-pane cf-ws-center');
 	centerPane.append(
-		el('h2', 'cf-ws-pane-title', 'Module Boundary'),
-		el('p', 'cf-muted', 'Terraform child module calls preserve explicit input/output boundaries separately from visual grouping. Open the module call in native source to inspect its source reference and variable bindings.')
+		el('h2', 'cf-ws-pane-title', liveMod?.status === 'local' ? 'Local Child Module' : 'Module Boundary'),
+		el('p', 'cf-muted', liveMod?.status === 'local'
+			? 'Read-only offline inspection of the local child module source inside the active workspace grant.'
+			: liveMod?.status === 'external'
+				? 'External registry or git modules are not expanded offline; passed argument names and root boundary connections are shown.'
+				: 'Terraform child module calls preserve explicit input/output boundaries separately from visual grouping.')
 	);
+	const metaRows: [string, string][] = [
+		['Module path', `module.${activePath.join('.module.')}`],
+		['Module source', liveMod ? `${liveMod.source} (${liveMod.sourceKind})` : (modLoading ? 'Inspecting…' : 'Unavailable offline')],
+	];
+	if (liveMod?.status === 'local' && liveMod.graph) {
+		metaRows.push(['Child resources', `${liveMod.graph.nodes.length} node(s) · ${liveMod.graph.edges.length} edge(s)`]);
+	}
+	if (!isNested) {
+		metaRows.push(['Upstream bindings', `${info.inputs.length} input connection(s)`]);
+		metaRows.push(['Downstream consumers', `${info.outputs.length} output consumer(s)`]);
+	}
 	const dl = el('dl', 'cf-meta-grid');
-	for (const [k, v] of [
-		['Module declaration', info.moduleNode.label],
-		['Upstream bindings', `${info.inputs.length} input connection(s)`],
-		['Downstream consumers', `${info.outputs.length} output consumer(s)`],
-		['Boundary diagnostics', `${info.diagnostics.length} finding(s)`],
-	] as const) {
-		dl.append(el('dt', undefined, k), el('dd', k === 'Module declaration' ? 'cf-mono' : undefined, v));
+	for (const [k, v] of metaRows) {
+		dl.append(el('dt', undefined, k), el('dd', k === 'Module path' || k === 'Module source' ? 'cf-mono' : undefined, v));
 	}
 	centerPane.append(dl);
-	if (info.diagnostics.length > 0) {
+
+	if (modErr) {
+		centerPane.append(el('div', 'cf-diag cf-diag-warning', modErr));
+	}
+	if (liveMod?.status === 'local' && liveMod.graph) {
+		const childResSec = el('div', 'cf-inspector-section');
+		childResSec.append(el('h3', 'cf-section-title', `Declared child resources (${liveMod.graph.nodes.length})`));
+		if (liveMod.graph.nodes.length === 0) {
+			childResSec.append(el('p', 'cf-muted', 'No resources or nested modules declared in this module.'));
+		} else {
+			const resList = el('div', 'cf-mod-io-list');
+			for (const childNode of liveMod.graph.nodes) {
+				const row = el('div', 'cf-mod-io-row');
+				const head = el('div', 'cf-mod-io-head');
+				head.append(
+					el('span', 'cf-mono cf-mod-io-name', childNode.name),
+					el('span', 'cf-pill cf-mono', childNode.resourceType ?? childNode.kind)
+				);
+				row.append(head);
+				resList.append(row);
+			}
+			childResSec.append(resList);
+		}
+		centerPane.append(childResSec);
+	}
+	if (liveMod && liveMod.childModules.length > 0) {
+		const nestedSec = el('div', 'cf-inspector-section');
+		nestedSec.append(el('h3', 'cf-section-title', `Nested child modules (${liveMod.childModules.length})`));
+		const chips = el('div', 'cf-mod-chips');
+		for (const child of liveMod.childModules) {
+			const btn = el('button', 'cf-btn cf-mono', `module.${child.name}`);
+			btn.type = 'button';
+			btn.disabled = !child.isLocal;
+			btn.title = child.isLocal ? `Drill into ${child.source}` : `External: ${child.source}`;
+			btn.addEventListener('click', () => drillNestedModulePath([...activePath, child.name]));
+			chips.append(btn);
+		}
+		nestedSec.append(chips);
+		centerPane.append(nestedSec);
+	}
+	if (!isNested && info.diagnostics.length > 0) {
 		const diagSec = el('div', 'cf-inspector-section');
 		diagSec.append(el('h3', 'cf-section-title', `Boundary diagnostics (${info.diagnostics.length})`));
 		for (const diag of info.diagnostics) {
@@ -3577,25 +3730,51 @@ function renderModuleDrillDown(moduleId: string): HTMLElement | null {
 	columns.append(centerPane);
 
 	const outPane = el('aside', 'cf-ws-pane');
-	outPane.append(el('h2', 'cf-ws-pane-title', `Module Outputs (${info.outputs.length})`));
-	if (info.outputs.length === 0) {
-		outPane.append(el('p', 'cf-muted', 'No downstream root resources reference this module statically.'));
-	} else {
-		const list = el('div', 'cf-dep-list');
-		for (const item of info.outputs) {
-			const btn = el('button', 'cf-dep-btn');
-			btn.type = 'button';
-			btn.append(
-				el('span', 'cf-dep-name', item.node.name),
-				el('span', 'cf-dep-meta cf-mono', `${item.edgeKind} · ${item.node.resourceType ?? item.node.kind}`)
-			);
-			btn.addEventListener('click', () => {
-				drilledModuleId = null;
-				selectNode(item.node.id, { focusInCanvas: true });
-			});
-			list.append(btn);
+	const outCount = liveMod?.outputs.length ?? 0;
+	outPane.append(el('h2', 'cf-ws-pane-title', liveMod ? `Module Outputs (${outCount})` : `Module Outputs (${info.outputs.length})`));
+	if (liveMod && liveMod.status === 'local') {
+		if (liveMod.outputs.length === 0) {
+			outPane.append(el('p', 'cf-muted', 'No output blocks declared in this child module.'));
+		} else {
+			const outList = el('div', 'cf-mod-io-list');
+			for (const o of liveMod.outputs) {
+				const row = el('div', 'cf-mod-io-row');
+				const head = el('div', 'cf-mod-io-head');
+				head.append(el('span', 'cf-mono cf-mod-io-name', o.name));
+				if (o.sensitive) {
+					head.append(el('span', 'cf-pill cf-pill-warn', 'sensitive'));
+				}
+				row.append(head);
+				if (o.description) {
+					row.append(el('div', 'cf-muted', o.description));
+				}
+				outList.append(row);
+			}
+			outPane.append(outList);
 		}
-		outPane.append(list);
+	}
+	if (!isNested) {
+		outPane.append(el('div', 'cf-mod-subhead', `Root downstream consumers (${info.outputs.length})`));
+		if (info.outputs.length === 0) {
+			outPane.append(el('p', 'cf-muted', 'No downstream root resources reference this module statically.'));
+		} else {
+			const list = el('div', 'cf-dep-list');
+			for (const item of info.outputs) {
+				const btn = el('button', 'cf-dep-btn');
+				btn.type = 'button';
+				btn.append(
+					el('span', 'cf-dep-name', item.node.name),
+					el('span', 'cf-dep-meta cf-mono', `${item.edgeKind} · ${item.node.resourceType ?? item.node.kind}`)
+				);
+				btn.addEventListener('click', () => {
+					drilledModuleId = null;
+					drilledModulePath = [];
+					selectNode(item.node.id, { focusInCanvas: true });
+				});
+				list.append(btn);
+			}
+			outPane.append(list);
+		}
 	}
 	columns.append(outPane);
 
@@ -4197,6 +4376,10 @@ window.addEventListener('message', event => {
 			extractModuleModalOpen = false;
 			historyModalOpen = false;
 			drilledModuleId = null;
+			drilledModulePath = [];
+			moduleInspections.clear();
+			moduleErrors.clear();
+			pendingModuleRequests.clear();
 			activeExperiment = undefined;
 			expandedPaginatedGroups.clear();
 			exportBusy = false;
@@ -4298,6 +4481,20 @@ window.addEventListener('message', event => {
 				applyViewportTransform();
 			}
 			break;
+		case 'moduleInspection': {
+			const key = modulePathKey(message.modulePath);
+			pendingModuleRequests.delete(key);
+			moduleInspections.set(key, message.inspection);
+			if (message.error) {
+				moduleErrors.set(key, message.error);
+			} else {
+				moduleErrors.delete(key);
+			}
+			if (drilledModuleId !== null) {
+				render();
+			}
+			break;
+		}
 		case 'openExport':
 			openExportModal();
 			break;

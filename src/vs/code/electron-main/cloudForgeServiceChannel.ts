@@ -38,7 +38,7 @@ const cloudForgeMethods: ReadonlySet<string> = new Set<CloudForgeServiceMethod>(
 	'listCatalogueSnapshots', 'listCatalogueTypes', 'getResourceFormSchema', 'renderResourceDraft',
 	'startValidationRun', 'pollValidationRun', 'cancelValidationRun',
 	'previewDraftSave', 'applyDraftSave',
-	'inspectDependencies', 'listCloudRegions'
+	'inspectDependencies', 'listCloudRegions', 'readModule'
 ]);
 
 /** The service allows `installGit` 10 minutes; the broker waits a little longer for its reply. */
@@ -448,6 +448,30 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 				architectureId: value.architectureId,
 				...(value.expectedSourceRevision === undefined ? {} : { expectedSourceRevision: value.expectedSourceRevision }),
 				...(value.engine === undefined ? {} : { engine: value.engine })
+			};
+		}
+		case 'readModule': {
+			if (!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'expectedSourceRevision', 'modulePath']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId)) {
+				return undefined;
+			}
+			if (value.expectedSourceRevision !== undefined && (typeof value.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(value.expectedSourceRevision))) {
+				return undefined;
+			}
+			if (!Array.isArray(value.modulePath) || value.modulePath.length === 0 || value.modulePath.length > 8) {
+				return undefined;
+			}
+			const modulePath: string[] = [];
+			for (const seg of value.modulePath) {
+				if (typeof seg !== 'string' || seg.length === 0 || seg.length > 128 || !/^[A-Za-z0-9_-]+$/.test(seg)) {
+					return undefined;
+				}
+				modulePath.push(seg);
+			}
+			return {
+				workspaceId: value.workspaceId,
+				architectureId: value.architectureId,
+				...(value.expectedSourceRevision === undefined ? {} : { expectedSourceRevision: value.expectedSourceRevision }),
+				modulePath
 			};
 		}
 		case 'listCloudRegions': {

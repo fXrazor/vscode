@@ -145,6 +145,40 @@ export interface CanvasDependencyReport {
 	readonly diagnosticCount: number;
 }
 
+export interface CanvasModuleVariable {
+	readonly name: string;
+	readonly typeExpr?: string;
+	readonly description?: string;
+	readonly required: boolean;
+	readonly sensitive: boolean;
+	readonly hasDefault: boolean;
+}
+
+export interface CanvasModuleOutput {
+	readonly name: string;
+	readonly description?: string;
+	readonly sensitive: boolean;
+}
+
+export interface CanvasChildModuleRef {
+	readonly name: string;
+	readonly source: string;
+	readonly isLocal: boolean;
+}
+
+export interface CanvasModuleInspection {
+	readonly modulePath: readonly string[];
+	readonly status: 'local' | 'external';
+	readonly sourceKind: 'local' | 'registry' | 'git' | 'remote';
+	readonly source: string;
+	readonly moduleRevision?: string;
+	readonly passedInputs: readonly string[];
+	readonly variables: readonly CanvasModuleVariable[];
+	readonly outputs: readonly CanvasModuleOutput[];
+	readonly childModules: readonly CanvasChildModuleRef[];
+	readonly graph: CanvasGraphSnapshot | null;
+}
+
 export interface CanvasViewport {
 	readonly x: number;
 	readonly y: number;
@@ -271,6 +305,12 @@ export type ExtensionToWebviewMessage =
 		readonly report: CanvasDependencyReport | null;
 	}
 	| {
+		readonly type: 'moduleInspection';
+		readonly modulePath: readonly string[];
+		readonly inspection: CanvasModuleInspection | null;
+		readonly error?: string;
+	}
+	| {
 		readonly type: 'openExport';
 	}
 	| {
@@ -290,6 +330,7 @@ export type WebviewToExtensionMessage =
 	| { readonly type: 'requestDraftSavePreview'; readonly fileName: string; readonly contents: string }
 	| { readonly type: 'applyDraftSave'; readonly fileName: string; readonly contents: string; readonly previewToken: string }
 	| { readonly type: 'requestSchema'; readonly kind: 'resource' | 'dataSource'; readonly typeName: string }
+	| { readonly type: 'requestModule'; readonly modulePath: readonly string[] }
 	| { readonly type: 'exportArtifact'; readonly format: ExportFormat; readonly suggestedFileName: string; readonly content: string; readonly encoding: 'utf8' | 'base64' };
 
 const MAX_COLLAPSED_GROUPS = 256;
@@ -712,6 +753,19 @@ export function parseWebviewMessage(value: unknown): WebviewToExtensionMessage |
 				return undefined;
 			}
 			return { type: 'requestSchema', kind: value.kind, typeName: value.typeName };
+		case 'requestModule': {
+			if (!Array.isArray(value.modulePath) || value.modulePath.length === 0 || value.modulePath.length > 8) {
+				return undefined;
+			}
+			const modulePath: string[] = [];
+			for (const segment of value.modulePath) {
+				if (typeof segment !== 'string' || segment.length === 0 || segment.length > 128 || !/^[A-Za-z0-9_-]+$/.test(segment)) {
+					return undefined;
+				}
+				modulePath.push(segment);
+			}
+			return { type: 'requestModule', modulePath };
+		}
 		case 'exportArtifact': {
 			if (value.format !== 'svg' && value.format !== 'png' && value.format !== 'markdown') {
 				return undefined;

@@ -377,6 +377,10 @@ suite('CloudForgeServiceChannel', () => {
 		assert.ok(validateCloudForgeServiceParams('inspectDependencies', { workspaceId, architectureId: `${workspaceId}-architecture-1`, expectedSourceRevision: sha256, engine: 'opentofu' }));
 		assert.strictEqual(validateCloudForgeServiceParams('inspectDependencies', { workspaceId, architectureId: `${workspaceId}-architecture-1`, engine: 'pulumi' }), undefined);
 		assert.strictEqual(validateCloudForgeServiceParams('inspectDependencies', { workspaceId, architectureId: `${workspaceId}-architecture-1`, rootPath: 'C:\\Windows' }), undefined);
+		assert.ok(validateCloudForgeServiceParams('readModule', { workspaceId, architectureId: `${workspaceId}-architecture-1`, expectedSourceRevision: sha256, modulePath: ['net', 'sub'] }));
+		assert.strictEqual(validateCloudForgeServiceParams('readModule', { workspaceId, architectureId: `${workspaceId}-architecture-1`, modulePath: [] }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('readModule', { workspaceId, architectureId: `${workspaceId}-architecture-1`, modulePath: ['../outside'] }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('readModule', { workspaceId, architectureId: `${workspaceId}-architecture-1`, modulePath: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i'] }), undefined);
 		assert.ok(validateCloudForgeServiceParams('listCloudRegions', {
 			provider: 'azure',
 			scope: { provider: 'azure', cloud: 'AzureCloud', tenantId: 'tenant-1', subscriptionId: 'sub-1' },

@@ -9,10 +9,17 @@
 
 import type {
 	CanvasCatalogueSnapshot,
+	CanvasChildModuleRef,
 	CanvasCloudRegion,
 	CanvasCloudRegionsPayload,
 	CanvasDependencyReport,
+	CanvasDiagnosticSummary,
+	CanvasEdgeSummary,
 	CanvasGraphSnapshot,
+	CanvasModuleInspection,
+	CanvasModuleOutput,
+	CanvasModuleVariable,
+	CanvasNodeSummary,
 	CanvasProviderDependency,
 	DraftSaveApplyResult,
 	DraftSaveError,
@@ -1072,5 +1079,156 @@ export function parseDependencyReport(value: unknown): CanvasDependencyReport | 
 		providers,
 		unusedLockEntries,
 		diagnosticCount,
+	};
+}
+
+// ============================================================================
+// Stage 7: Guarded Child Module Drill-Down & Typed I/O Adapter
+// ============================================================================
+
+function parseChildModuleGraph(raw: unknown, architectureName: string): CanvasGraphSnapshot | null {
+	if (
+		!isRecord(raw) ||
+		!isNonEmptyString(raw.workspaceId, 256) ||
+		!isNonEmptyString(raw.architectureId, 256) ||
+		!isSha256(raw.sourceRevision) ||
+		(raw.status !== 'complete' && raw.status !== 'partial') ||
+		!Array.isArray(raw.nodes) ||
+		!Array.isArray(raw.edges) ||
+		!Array.isArray(raw.diagnostics)
+	) {
+		return null;
+	}
+	const nodes: CanvasNodeSummary[] = [];
+	for (const item of raw.nodes) {
+		if (!isRecord(item) || !isNonEmptyString(item.id, 256) || !isNonEmptyString(item.kind, 64) || !isNonEmptyString(item.name, 256) || !isNonEmptyString(item.label, 512)) {
+			continue;
+		}
+		const resourceType = isNonEmptyString(item.resourceType, 256) ? item.resourceType : null;
+		nodes.push({
+			id: item.id,
+			kind: item.kind,
+			resourceType,
+			name: item.name,
+			label: item.label,
+			// Child module sources live in a sub-root; keep openSource disabled to preserve root source-navigation invariants.
+			hasSource: false,
+		});
+	}
+	const edges: CanvasEdgeSummary[] = [];
+	for (const edge of raw.edges) {
+		if (!isRecord(edge) || !isNonEmptyString(edge.kind, 64)) {
+			continue;
+		}
+		const rawFrom = isNonEmptyString(edge.from, 256) ? edge.from : isNonEmptyString(edge.fromId, 256) ? edge.fromId : undefined;
+		const rawTo = isNonEmptyString(edge.to, 256) ? edge.to : isNonEmptyString(edge.toId, 256) ? edge.toId : undefined;
+		if (!rawFrom || !rawTo) {
+			continue;
+		}
+		const kindLower = edge.kind.toLowerCase();
+		if (kindLower === 'reference' || kindLower === 'explicit') {
+			edges.push({ fromId: rawTo, toId: rawFrom, kind: edge.kind });
+		} else {
+			edges.push({ fromId: rawFrom, toId: rawTo, kind: edge.kind });
+		}
+	}
+	const diagnostics: CanvasDiagnosticSummary[] = [];
+	for (const diag of raw.diagnostics) {
+		if (!isRecord(diag) || !isNonEmptyString(diag.code, 128) || !isNonEmptyString(diag.severity, 32) || !isSafeString(diag.message, 1024)) {
+			continue;
+		}
+		diagnostics.push({ code: diag.code, severity: diag.severity, message: diag.message });
+	}
+	return {
+		workspaceId: raw.workspaceId,
+		architectureId: raw.architectureId,
+		architectureName,
+		sourceRevision: raw.sourceRevision,
+		status: raw.status,
+		nodes,
+		edges,
+		diagnostics,
+	};
+}
+
+export function parseModuleInspection(value: unknown, architectureName: string): CanvasModuleInspection | undefined {
+	if (
+		!isRecord(value) ||
+		(value.status !== 'local' && value.status !== 'external') ||
+		(value.sourceKind !== 'local' && value.sourceKind !== 'registry' && value.sourceKind !== 'git' && value.sourceKind !== 'remote') ||
+		!isNonEmptyString(value.source, 256) ||
+		!Array.isArray(value.modulePath) ||
+		value.modulePath.length === 0 ||
+		value.modulePath.length > 8
+	) {
+		return undefined;
+	}
+	const modulePath: string[] = [];
+	for (const seg of value.modulePath) {
+		if (!isNonEmptyString(seg, 128) || !/^[A-Za-z0-9_-]+$/.test(seg)) {
+			return undefined;
+		}
+		modulePath.push(seg);
+	}
+	const passedInputs = Array.isArray(value.passedInputs)
+		? value.passedInputs.filter((item): item is string => isNonEmptyString(item, 128))
+		: [];
+	const variables: CanvasModuleVariable[] = [];
+	if (Array.isArray(value.variables)) {
+		for (const item of value.variables) {
+			if (!isRecord(item) || !isNonEmptyString(item.name, 128) || typeof item.required !== 'boolean' || typeof item.sensitive !== 'boolean' || typeof item.hasDefault !== 'boolean') {
+				continue;
+			}
+			variables.push({
+				name: item.name,
+				...(isNonEmptyString(item.typeExpr, 256) ? { typeExpr: item.typeExpr } : {}),
+				...(isNonEmptyString(item.description, 512) ? { description: item.description } : {}),
+				required: item.required,
+				sensitive: item.sensitive,
+				hasDefault: item.hasDefault,
+			});
+		}
+	}
+	const outputs: CanvasModuleOutput[] = [];
+	if (Array.isArray(value.outputs)) {
+		for (const item of value.outputs) {
+			if (!isRecord(item) || !isNonEmptyString(item.name, 128) || typeof item.sensitive !== 'boolean') {
+				continue;
+			}
+			outputs.push({
+				name: item.name,
+				...(isNonEmptyString(item.description, 512) ? { description: item.description } : {}),
+				sensitive: item.sensitive,
+			});
+		}
+	}
+	const childModules: CanvasChildModuleRef[] = [];
+	if (Array.isArray(value.childModules)) {
+		for (const item of value.childModules) {
+			if (!isRecord(item) || !isNonEmptyString(item.name, 128) || !isNonEmptyString(item.source, 256) || typeof item.isLocal !== 'boolean') {
+				continue;
+			}
+			childModules.push({
+				name: item.name,
+				source: item.source,
+				isLocal: item.isLocal,
+			});
+		}
+	}
+	const moduleLabel = `${architectureName} / module.${modulePath.join('.')}`;
+	const graph = value.status === 'local' ? parseChildModuleGraph(value.graph, moduleLabel) : null;
+	const moduleRevision = isSha256(value.moduleRevision) ? value.moduleRevision : undefined;
+
+	return {
+		modulePath,
+		status: value.status,
+		sourceKind: value.sourceKind,
+		source: value.source,
+		...(moduleRevision ? { moduleRevision } : {}),
+		passedInputs,
+		variables,
+		outputs,
+		childModules,
+		graph,
 	};
 }

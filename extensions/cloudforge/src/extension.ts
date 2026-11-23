@@ -31,6 +31,7 @@ import {
 	parseDependencyReport,
 	parseDraftSaveApply,
 	parseDraftSavePreview,
+	parseModuleInspection,
 	parseValidationPoll,
 	parseValidationStart,
 	selectBestSnapshotForType,
@@ -538,6 +539,30 @@ export function activate(context: ExtensionContext): void {
 		return parseDependencyReport(result.value);
 	}
 
+	async function readArchitectureModule(workspaceId: string, architectureId: string, sourceRevision: string, modulePath: readonly string[]) {
+		const result = await callService<unknown>('readModule', {
+			workspaceId,
+			architectureId,
+			expectedSourceRevision: sourceRevision,
+			modulePath: [...modulePath],
+		});
+		if (!result.ok) {
+			const msg = result.error.code === 'SCOPE_DENIED'
+				? l10n.t('This module source escapes the granted workspace folder.')
+				: result.error.code === 'STALE_SOURCE'
+					? l10n.t('The Terraform source changed on disk. Refresh the graph before inspecting modules.')
+					: result.error.code === 'WORKSPACE_UNAVAILABLE'
+						? l10n.t('The child module folder is unavailable or contains no Terraform source.')
+						: l10n.t('The requested module could not be inspected.');
+			return { ok: false as const, message: msg };
+		}
+		const inspection = parseModuleInspection(result.value, currentArchitectureName);
+		if (!inspection) {
+			return { ok: false as const, message: l10n.t('The CloudForge service returned an invalid module summary.') };
+		}
+		return { ok: true as const, inspection };
+	}
+
 	async function cancelServiceValidation(): Promise<void> {
 		const active = activeValidation;
 		if (!active) {
@@ -736,6 +761,7 @@ export function activate(context: ExtensionContext): void {
 		onLoadResourceSchema: loadResourceSchema,
 		onLoadCloudRegions: loadCloudRegions,
 		onInspectDependencies: inspectArchitectureDependencies,
+		onReadModule: readArchitectureModule,
 		async onExportArtifact(format, suggestedFileName, content, encoding) {
 			const folder = workspace.workspaceFolders?.[0]?.uri;
 			const defaultUri = folder ? Uri.joinPath(folder, suggestedFileName) : Uri.file(suggestedFileName);
