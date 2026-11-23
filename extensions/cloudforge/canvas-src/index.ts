@@ -319,7 +319,7 @@ function selectNode(nodeId: string | null, options?: { notifyExtension?: boolean
 		...state,
 		selectedId: nodeId,
 		focusedWorkspaceOpen: nodeId !== null ? state.focusedWorkspaceOpen : false,
-		inspectorOpen: nodeId !== null ? true : state.inspectorOpen,
+		inspectorOpen: nodeId !== null,
 	};
 	if (changed && options?.notifyExtension !== false) {
 		post({ type: 'selectNode', nodeId });
@@ -614,18 +614,101 @@ function cancelActiveRun(): void {
 	applyViewportTransform();
 }
 
+type ResourceGlyphCategory = 'network' | 'security' | 'compute' | 'storage' | 'module' | 'resource';
+
+function glyphCategoryFor(resourceType: string | null, kind: string): ResourceGlyphCategory {
+	if (kind.toLowerCase() === 'module') {
+		return 'module';
+	}
+	const type = (resourceType ?? '').toLowerCase();
+	if (/(security_group|key_vault|kms|iam|role|policy|secret|identity|rbac|cert)/.test(type)) {
+		return 'security';
+	}
+	if (/(network|vnet|subnet|route|firewall|gateway|vpc|public_ip|lb|load_balancer|dns|nat|peering)/.test(type)) {
+		return 'network';
+	}
+	if (/(kubernetes|aks|eks|gke|cluster|vm|virtual_machine|instance|compute|app_service|function|lambda|container|ecs)/.test(type)) {
+		return 'compute';
+	}
+	if (/(storage|bucket|s3|blob|disk|file|sql|database|db|postgres|mysql|cosmos|dynamo|rds|redis)/.test(type)) {
+		return 'storage';
+	}
+	return 'resource';
+}
+
+function createGlyphSvg(category: ResourceGlyphCategory): SVGSVGElement {
+	const svg = svgEl('svg', {
+		class: 'cf-glyph-svg',
+		viewBox: '0 0 16 16',
+		width: 15,
+		height: 15,
+		fill: 'none',
+		stroke: 'currentColor',
+		'stroke-width': 1.5,
+		'stroke-linecap': 'round',
+		'stroke-linejoin': 'round',
+		'aria-hidden': 'true',
+	});
+	switch (category) {
+		case 'network':
+			svg.append(
+				svgEl('circle', { cx: 3.5, cy: 8, r: 2 }),
+				svgEl('circle', { cx: 12.5, cy: 3.5, r: 2 }),
+				svgEl('circle', { cx: 12.5, cy: 12.5, r: 2 }),
+				svgEl('path', { d: 'M 5.3 7.1 L 10.7 4.4 M 5.3 8.9 L 10.7 11.6' })
+			);
+			break;
+		case 'security':
+			svg.append(
+				svgEl('path', { d: 'M 8 1.8 L 13 3.8 V 7.8 C 13 11.1 10.8 13.4 8 14.3 C 5.2 13.4 3 11.1 3 7.8 V 3.8 Z' }),
+				svgEl('path', { d: 'M 6 8 L 7.4 9.4 L 10.3 6.5' })
+			);
+			break;
+		case 'compute':
+			svg.append(
+				svgEl('rect', { x: 4, y: 4, width: 8, height: 8, rx: 1.5 }),
+				svgEl('path', { d: 'M 6 1.8 V 4 M 10 1.8 V 4 M 6 12 V 14.2 M 10 12 V 14.2 M 1.8 6 H 4 M 1.8 10 H 4 M 12 6 H 14.2 M 12 10 H 14.2' })
+			);
+			break;
+		case 'storage':
+			svg.append(
+				svgEl('ellipse', { cx: 8, cy: 4, rx: 5, ry: 2 }),
+				svgEl('path', { d: 'M 3 4 V 12 C 3 13.1 5.2 14 8 14 C 10.8 14 13 13.1 13 12 V 4' }),
+				svgEl('path', { d: 'M 3 8 C 3 9.1 5.2 10 8 10 C 10.8 10 13 9.1 13 8' })
+			);
+			break;
+		case 'module':
+			svg.append(
+				svgEl('path', { d: 'M 8 1.8 L 13.5 4.8 V 11.2 L 8 14.2 L 2.5 11.2 V 4.8 Z' }),
+				svgEl('path', { d: 'M 8 8 L 13.5 4.8 M 8 8 L 2.5 4.8 M 8 8 V 14.2' })
+			);
+			break;
+		case 'resource':
+			svg.append(
+				svgEl('rect', { x: 2.2, y: 2.5, width: 11.6, height: 11, rx: 2 }),
+				svgEl('path', { d: 'M 2.2 6.2 H 13.8' })
+			);
+			break;
+	}
+	return svg;
+}
+
 function renderHeader(): HTMLElement {
 	const current = activeGraph();
 	const summary = draftDoc ? computeDraftChangeSummary(draftDoc) : undefined;
 	const hasHistory = !!draftDoc && (draftDoc.past.length > 0 || draftDoc.future.length > 0 || !!summary?.dirty);
 
 	const header = el('header', 'cf-header');
-	const left = el('div', 'cf-header-group');
+	const left = el('div', 'cf-header-group cf-header-left');
 	const title = el('h1', 'cf-title', current ? current.architectureName : 'CloudForge Canvas');
 	left.append(title);
 
 	if (current) {
-		left.append(el('span', 'cf-pill cf-mono', `rev ${current.sourceRevision.slice(0, 8)}`));
+		const countText = projection
+			? projection.hiddenByFilterOrCollapse > 0
+				? `${projection.visibleNodes} / ${projection.totalNodes} visible`
+				: `${projection.totalNodes} resource${projection.totalNodes === 1 ? '' : 's'}`
+			: '';
 		if (summary?.dirty) {
 			left.append(el(
 				'span',
@@ -633,39 +716,50 @@ function renderHeader(): HTMLElement {
 				`Unsaved draft (+${summary.added.length} / ~${summary.modified.length} / -${summary.deleted.length})`
 			));
 		} else {
-			left.append(el(
+			const metaChip = el(
 				'span',
-				`cf-pill ${current.status === 'partial' ? 'cf-pill-warn' : 'cf-pill-ok'}`,
-				current.status === 'partial' ? 'Partial coverage' : 'Read-only Terraform'
-			));
-		}
-		if (projection) {
-			const countText = projection.hiddenByFilterOrCollapse > 0
-				? `${projection.visibleNodes} / ${projection.totalNodes} visible`
-				: `${projection.totalNodes} resource${projection.totalNodes === 1 ? '' : 's'}`;
-			left.append(el('span', 'cf-pill', countText));
-		}
-		if (current.diagnostics.length > 0) {
-			left.append(el('span', 'cf-pill cf-pill-warn', `${current.diagnostics.length} diagnostic${current.diagnostics.length === 1 ? '' : 's'}`));
+				`cf-pill cf-mono ${current.status === 'partial' ? 'cf-pill-warn' : ''}`,
+				`${countText ? `${countText} \u00b7 ` : ''}rev ${current.sourceRevision.slice(0, 8)}`
+			);
+			metaChip.title = current.status === 'partial'
+				? 'Partial static coverage — inspect Diagnostics for unresolved references'
+				: 'Read-only Terraform architecture snapshot';
+			left.append(metaChip);
 		}
 		if (validationInFlight) {
-			left.append(el('span', 'cf-pill cf-pill-warn', 'Validating (Rust)…'));
+			const liveBtn = el('button', 'cf-pill cf-pill-btn cf-pill-warn', 'Validating (Rust)\u2026');
+			liveBtn.type = 'button';
+			liveBtn.addEventListener('click', () => {
+				timelineOpen = !timelineOpen;
+				render();
+				applyViewportTransform();
+			});
+			left.append(liveBtn);
 		} else if (currentRun) {
 			const outcomeCls = currentRun.outcome === 'failed'
 				? 'cf-pill-err'
 				: currentRun.outcome === 'completed'
 					? 'cf-pill-ok'
 					: 'cf-pill-warn';
-			const runText = `Run #${currentRun.attempt}: ${currentRun.outcome.replace(/_/g, ' ')} (${currentRun.coverage} coverage${currentRun.stale ? ', stale' : ''})`;
-			left.append(el('span', `cf-pill ${outcomeCls}`, runText));
-		}
-		if (catalogueSnapshots.length > 0) {
-			left.append(el('span', 'cf-pill', `${catalogueSnapshots.length} verified catalogue${catalogueSnapshots.length === 1 ? '' : 's'}`));
+			const runLabel = currentRun.outcome === 'completed'
+				? `\u2713 Validated`
+				: currentRun.outcome === 'failed'
+					? `\u2717 Failed`
+					: `! ${currentRun.outcome.replace(/_/g, ' ')}`;
+			const runPill = el('button', `cf-pill cf-pill-btn ${outcomeCls}`, `${runLabel}${currentRun.stale ? ' (stale)' : ''}`);
+			runPill.type = 'button';
+			runPill.title = `Run #${currentRun.attempt}: ${currentRun.coverage} coverage \u2014 click to toggle Runner Timeline`;
+			runPill.addEventListener('click', () => {
+				timelineOpen = !timelineOpen;
+				render();
+				applyViewportTransform();
+			});
+			left.append(runPill);
 		}
 	}
 	header.append(left);
 
-	const right = el('div', 'cf-header-group');
+	const right = el('div', 'cf-header-group cf-header-right');
 
 	// Two-mode switch: Visual Design | Technical Design
 	const modeGroup = el('div', 'cf-segmented');
@@ -693,12 +787,16 @@ function renderHeader(): HTMLElement {
 		addDetails.append(addSummary);
 		const addMenu = el('div', 'cf-popover cf-popover-menu');
 		for (const item of ADDABLE_RESOURCE_TYPES) {
-			const btn = el('button', 'cf-menu-item');
+			const btn = el('button', 'cf-menu-item cf-menu-item-icon');
 			btn.type = 'button';
-			btn.append(
+			const iconWrap = el('span', 'cf-menu-glyph cf-provider-azure');
+			iconWrap.append(createGlyphSvg(glyphCategoryFor(item.typeName, 'resource')));
+			const textWrap = el('span', 'cf-menu-text');
+			textWrap.append(
 				el('span', 'cf-dep-name', item.shortLabel),
 				el('span', 'cf-dep-meta cf-mono', item.typeName)
 			);
+			btn.append(iconWrap, textWrap);
 			btn.addEventListener('click', () => {
 				addDetails.open = false;
 				addNewResource(item.typeName, item.defaultName);
@@ -733,9 +831,9 @@ function renderHeader(): HTMLElement {
 		right.append(undoBtn, redoBtn);
 
 		if (summary?.dirty) {
-			const reviewBtn = el('button', 'cf-btn', 'Review HCL');
+			const reviewBtn = el('button', 'cf-btn cf-btn-primary', 'Review HCL');
 			reviewBtn.type = 'button';
-			reviewBtn.title = 'Inspect deterministic generated Terraform HCL preview (read-only)';
+			reviewBtn.title = 'Review generated Terraform HCL and preview or apply a guarded save';
 			reviewBtn.addEventListener('click', () => openHclReviewModal());
 
 			const revertBtn = el('button', 'cf-btn cf-btn-danger', 'Revert Draft');
@@ -750,7 +848,7 @@ function renderHeader(): HTMLElement {
 	const listBtn = el('button', 'cf-btn', 'List');
 	listBtn.type = 'button';
 	listBtn.setAttribute('aria-pressed', String(state.listOpen));
-	listBtn.title = 'Toggle resource list';
+	listBtn.title = 'Toggle resource list (/)';
 	listBtn.addEventListener('click', () => {
 		state = { ...state, listOpen: !state.listOpen };
 		render();
@@ -761,7 +859,7 @@ function renderHeader(): HTMLElement {
 	const inspBtn = el('button', 'cf-btn', 'Inspector');
 	inspBtn.type = 'button';
 	inspBtn.setAttribute('aria-pressed', String(state.inspectorOpen));
-	inspBtn.title = 'Toggle inspector panel';
+	inspBtn.title = 'Toggle resource inspector';
 	inspBtn.addEventListener('click', () => {
 		state = { ...state, inspectorOpen: !state.inspectorOpen };
 		render();
@@ -769,7 +867,7 @@ function renderHeader(): HTMLElement {
 		schedulePersistViewState();
 	});
 
-	// View options disclosure (Theme + Grid)
+	// View options disclosure (Theme, Grid, Timeline, Fit, Refresh)
 	const viewDetails = el('details', 'cf-disclosure');
 	const viewSummary = el('summary', 'cf-btn', 'View');
 	viewDetails.append(viewSummary);
@@ -801,7 +899,38 @@ function renderHeader(): HTMLElement {
 	gridSelect.addEventListener('change', () => setGrid(gridSelect.value as CanvasGridMode));
 	gridLabel.append(gridSelect);
 
-	viewMenu.append(themeLabel, gridLabel);
+	const menuDivider = el('div', 'cf-popover-divider');
+	const menuActions = el('div', 'cf-popover-actions');
+
+	const timelineMenuBtn = el('button', 'cf-btn', timelineOpen ? 'Hide Timeline' : 'Show Timeline');
+	timelineMenuBtn.type = 'button';
+	timelineMenuBtn.addEventListener('click', () => {
+		viewDetails.open = false;
+		timelineOpen = !timelineOpen;
+		render();
+		applyViewportTransform();
+	});
+
+	const fitMenuBtn = el('button', 'cf-btn', 'Fit Graph');
+	fitMenuBtn.type = 'button';
+	fitMenuBtn.addEventListener('click', () => {
+		viewDetails.open = false;
+		fitGraph(true);
+	});
+
+	const refreshMenuBtn = el('button', 'cf-btn', 'Refresh');
+	refreshMenuBtn.type = 'button';
+	refreshMenuBtn.title = 'Re-read architecture from CloudForge service';
+	refreshMenuBtn.addEventListener('click', () => {
+		viewDetails.open = false;
+		post({ type: 'refresh' });
+	});
+
+	menuActions.append(timelineMenuBtn, fitMenuBtn, refreshMenuBtn);
+	viewMenu.append(themeLabel, gridLabel, menuDivider, menuActions);
+	if (catalogueSnapshots.length > 0) {
+		viewMenu.append(el('div', 'cf-field-help', `${catalogueSnapshots.length} verified provider catalogue${catalogueSnapshots.length === 1 ? '' : 's'} active`));
+	}
 	viewDetails.append(viewMenu);
 	viewDetails.addEventListener('keydown', event => {
 		if (event.key === 'Escape' && viewDetails.open) {
@@ -811,39 +940,13 @@ function renderHeader(): HTMLElement {
 		}
 	});
 
-	const fitBtn = el('button', 'cf-btn', 'Fit');
-	fitBtn.type = 'button';
-	fitBtn.title = 'Fit graph to view (F)';
-	fitBtn.addEventListener('click', () => {
-		if (state.selectedId) {
-			fitNode(state.selectedId);
-		} else {
-			fitGraph(true);
-		}
-	});
-
-	const validateBtn = el('button', 'cf-btn cf-btn-primary', currentRun ? 'Revalidate' : 'Validate');
+	const validateBtn = el('button', summary?.dirty ? 'cf-btn' : 'cf-btn cf-btn-primary', currentRun ? 'Revalidate' : 'Validate');
 	validateBtn.type = 'button';
 	validateBtn.disabled = !current;
 	validateBtn.title = 'Run offline architecture validation (read, dependencies, static & schema checks)';
 	validateBtn.addEventListener('click', () => startValidation('architecture'));
 
-	const timelineBtn = el('button', 'cf-btn', 'Timeline');
-	timelineBtn.type = 'button';
-	timelineBtn.setAttribute('aria-pressed', String(timelineOpen));
-	timelineBtn.title = 'Toggle Runner Timeline panel';
-	timelineBtn.addEventListener('click', () => {
-		timelineOpen = !timelineOpen;
-		render();
-		applyViewportTransform();
-	});
-
-	const refreshBtn = el('button', 'cf-btn', 'Refresh');
-	refreshBtn.type = 'button';
-	refreshBtn.title = 'Re-read architecture from CloudForge service';
-	refreshBtn.addEventListener('click', () => post({ type: 'refresh' }));
-
-	right.append(listBtn, inspBtn, timelineBtn, viewDetails, fitBtn, validateBtn, refreshBtn);
+	right.append(listBtn, inspBtn, viewDetails, validateBtn);
 	header.append(right);
 	return header;
 }
@@ -975,8 +1078,16 @@ function renderStage(): HTMLElement {
 		edgesSvg.append(defs);
 
 		for (const edge of projection.edges) {
-			const dx = Math.max(40, Math.abs(edge.toX - edge.fromX) * 0.45);
-			const d = `M ${edge.fromX} ${edge.fromY} C ${edge.fromX + dx} ${edge.fromY}, ${edge.toX - dx} ${edge.toY}, ${edge.toX} ${edge.toY}`;
+			let d: string;
+			if (edge.orientation === 'vertical') {
+				const dy = Math.max(36, Math.abs(edge.toY - edge.fromY) * 0.45);
+				const dir = edge.toY >= edge.fromY ? 1 : -1;
+				d = `M ${edge.fromX} ${edge.fromY} C ${edge.fromX} ${edge.fromY + dir * dy}, ${edge.toX} ${edge.toY - dir * dy}, ${edge.toX} ${edge.toY}`;
+			} else {
+				const dx = Math.max(40, Math.abs(edge.toX - edge.fromX) * 0.45);
+				const dir = edge.toX >= edge.fromX ? 1 : -1;
+				d = `M ${edge.fromX} ${edge.fromY} C ${edge.fromX + dir * dx} ${edge.fromY}, ${edge.toX - dir * dx} ${edge.toY}, ${edge.toX} ${edge.toY}`;
+			}
 			const isRelated = state.selectedId !== null && (edge.fromId === state.selectedId || edge.toId === state.selectedId);
 			const isDimmed = state.selectedId !== null && !isRelated;
 			const fromRes = currentRun?.nodeResults[edge.fromId];
@@ -994,6 +1105,46 @@ function renderStage(): HTMLElement {
 		}
 	}
 	stage.append(world);
+
+	// Empty architecture welcome card (e.g. brand-new starter architecture)
+	if (projection && projection.totalNodes === 0) {
+		const emptyCard = el('div', 'cf-canvas-empty-card');
+		emptyCard.append(
+			createGlyphSvg('module'),
+			el('h2', 'cf-section-title', 'Empty architecture'),
+			el('p', 'cf-muted', 'Use + Add in the top bar to place your first schema-backed Azure resource, then review and save Terraform HCL.')
+		);
+		stage.append(emptyCard);
+	}
+
+	// Bottom-left floating keyboard shortcuts disclosure
+	const helpDetails = el('details', 'cf-shortcuts-bar');
+	const helpSummary = el('summary', 'cf-icon-btn', '?');
+	helpSummary.title = 'Keyboard shortcuts';
+	helpSummary.setAttribute('aria-label', 'Keyboard shortcuts');
+	helpDetails.append(helpSummary);
+	const helpPop = el('div', 'cf-shortcuts-popover');
+	for (const [k, desc] of [
+		['/', 'Filter resources'],
+		['F', 'Fit graph or selection'],
+		['Enter', 'Open focused workspace'],
+		['O', 'Open Terraform source'],
+		['Ctrl+Z', 'Undo / Shift+Z Redo'],
+		['Esc', 'Close overlay'],
+	] as const) {
+		const row = el('div', 'cf-shortcut-row');
+		row.append(el('kbd', 'cf-kbd cf-mono', k), el('span', undefined, desc));
+		helpPop.append(row);
+	}
+	helpDetails.append(helpPop);
+	helpDetails.addEventListener('keydown', event => {
+		if (event.key === 'Escape' && helpDetails.open) {
+			event.preventDefault();
+			helpDetails.open = false;
+			helpSummary.focus();
+		}
+	});
+	stage.append(helpDetails);
 
 	// Bottom-right floating zoom controls
 	const controls = el('div', 'cf-zoom-bar');
@@ -1017,7 +1168,7 @@ function renderStage(): HTMLElement {
 
 	// Pointer pan & wheel zoom
 	stage.addEventListener('pointerdown', event => {
-		if (event.button !== 0 || (event.target as HTMLElement).closest('.cf-node, .cf-group-header, .cf-zoom-bar')) {
+		if (event.button !== 0 || (event.target as HTMLElement).closest('.cf-node, .cf-group-header, .cf-zoom-bar, .cf-shortcuts-bar')) {
 			return;
 		}
 		stage.setPointerCapture(event.pointerId);
@@ -1100,9 +1251,14 @@ function renderNodeCard(item: PositionedNode): HTMLElement {
 	const badgeInfo = runResult ? statusLabel(runResult.status) : undefined;
 	card.setAttribute('aria-label', `${item.node.name}, ${item.node.resourceType ?? item.node.kind}${isDraftAdded ? ', unsaved draft' : ''}${badgeInfo ? `, ${badgeInfo.text}` : ''}`);
 
+	const glyphBadge = el('span', 'cf-node-glyph');
+	glyphBadge.append(createGlyphSvg(glyphCategoryFor(item.node.resourceType, item.node.kind)));
+
 	if (state.mode === 'visual') {
 		const top = el('div', 'cf-node-top');
-		top.append(el('span', 'cf-provider-tag', providerDisplayName(item.provider)));
+		const providerRow = el('span', 'cf-node-provider-row');
+		providerRow.append(glyphBadge, el('span', 'cf-provider-tag', providerDisplayName(item.provider)));
+		top.append(providerRow);
 		if (badgeInfo && runResult) {
 			top.append(el('span', `cf-status-badge cf-badge-${runResult.status}`, `${badgeInfo.icon} ${badgeInfo.text}`));
 		} else if (isDraftAdded) {
@@ -1115,7 +1271,9 @@ function renderNodeCard(item: PositionedNode): HTMLElement {
 		card.append(el('div', 'cf-node-type cf-mono', item.node.resourceType ?? item.node.label));
 	} else {
 		const head = el('div', 'cf-tech-head');
-		head.append(el('span', 'cf-provider-tag', providerDisplayName(item.provider)));
+		const providerRow = el('span', 'cf-node-provider-row');
+		providerRow.append(glyphBadge, el('span', 'cf-provider-tag', providerDisplayName(item.provider)));
+		head.append(providerRow);
 		if (badgeInfo && runResult) {
 			head.append(el('span', `cf-status-badge cf-badge-${runResult.status}`, `${badgeInfo.icon} ${badgeInfo.text}`));
 		} else if (isDraftAdded) {
@@ -1150,11 +1308,28 @@ function renderInspector(): HTMLElement {
 	aside.setAttribute('aria-label', 'Resource inspector');
 	const current = activeGraph();
 
+	const closeInspectorBtn = el('button', 'cf-icon-btn cf-inspector-close', '\u00d7');
+	closeInspectorBtn.type = 'button';
+	closeInspectorBtn.title = 'Close inspector';
+	closeInspectorBtn.setAttribute('aria-label', 'Close inspector');
+	closeInspectorBtn.addEventListener('click', () => {
+		const selectedId = state.selectedId;
+		state = { ...state, inspectorOpen: false };
+		render();
+		applyViewportTransform();
+		schedulePersistViewState();
+		if (selectedId) {
+			root.querySelector<HTMLElement>(`.cf-node[data-node-id="${CSS.escape(selectedId)}"]`)?.focus();
+		}
+	});
+
 	const selected = nodeById(state.selectedId);
 	if (!selected) {
 		const empty = el('div', 'cf-inspector-section');
+		const emptyHead = el('div', 'cf-block-header');
+		emptyHead.append(el('h2', 'cf-section-title', 'Inspector'), closeInspectorBtn);
 		empty.append(
-			el('h2', 'cf-section-title', 'Inspector'),
+			emptyHead,
 			el('p', 'cf-muted', 'Click any resource to inspect its dependencies, author draft edits, or open its Terraform source. Double-click or press Enter to open the focused resource workspace.')
 		);
 		aside.append(empty);
@@ -1169,8 +1344,13 @@ function renderInspector(): HTMLElement {
 	const { upstream, downstream } = relatedEdges(selected.id);
 
 	const summary = el('div', 'cf-inspector-section');
-	summary.append(
+	const kickerRow = el('div', 'cf-block-header');
+	kickerRow.append(
 		el('div', 'cf-inspector-kicker', `${providerDisplayName(provider)} · ${selected.kind}`),
+		closeInspectorBtn
+	);
+	summary.append(
+		kickerRow,
 		el('h2', 'cf-inspector-title', selected.name),
 		el('div', 'cf-mono cf-inspector-type', selected.resourceType ?? selected.label)
 	);

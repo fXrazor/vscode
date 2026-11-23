@@ -48,6 +48,11 @@ test('layout orders dependencies left-to-right and supports visual and technical
 	assert.equal(vnetV.incomingCount, 1);
 	assert.equal(vnetV.outgoingCount, 1);
 
+	const intraGroupEdge = visual.edges.find(e => e.fromId === 'n2' && e.toId === 'n3')!;
+	const crossGroupVerticalEdge = visual.edges.find(e => e.fromId === 'n1' && e.toId === 'n2')!;
+	assert.equal(intraGroupEdge.orientation, 'horizontal');
+	assert.equal(crossGroupVerticalEdge.orientation, 'vertical');
+
 	const vnetT = technical.nodes.find(n => n.node.id === 'n2')!;
 	assert.ok(vnetT.width > vnetV.width, 'technical cards are wider than visual cards');
 	assert.ok(vnetT.height > vnetV.height, 'technical cards are taller than visual cards');

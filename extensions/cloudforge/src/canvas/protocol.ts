@@ -199,7 +199,7 @@ export function defaultCanvasViewState(): CanvasViewState {
 		grid: 'lines',
 		selectedId: null,
 		focusedWorkspaceOpen: false,
-		inspectorOpen: true,
+		inspectorOpen: false,
 		listOpen: false,
 		collapsedGroups: [],
 		viewports: {},

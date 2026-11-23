@@ -85,9 +85,10 @@ html, body {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	gap: 10px;
+	gap: 8px;
 	flex-wrap: wrap;
-	padding: 8px 12px;
+	min-height: 44px;
+	padding: 6px 12px;
 	background: var(--cf-surface);
 	border-bottom: 1px solid var(--cf-border);
 	flex-shrink: 0;
@@ -98,12 +99,14 @@ html, body {
 	align-items: center;
 	gap: 6px;
 	flex-wrap: wrap;
+	min-width: 0;
 }
 
 .cf-title {
 	margin: 0;
 	font-size: 13px;
 	font-weight: 600;
+	letter-spacing: -0.01em;
 }
 
 .cf-pill {
@@ -112,6 +115,16 @@ html, body {
 	border-radius: 999px;
 	border: 1px solid var(--cf-border);
 	color: var(--cf-muted);
+	white-space: nowrap;
+}
+
+.cf-pill-btn {
+	background: transparent;
+	cursor: pointer;
+}
+
+.cf-pill-btn:hover {
+	background: var(--cf-accent-soft);
 }
 
 .cf-pill-ok {
@@ -354,29 +367,42 @@ html, body {
 
 .cf-group {
 	position: absolute;
-	border: 1px dashed var(--cf-border);
-	border-radius: 10px;
-	background: color-mix(in srgb, var(--cf-surface) 58%, transparent);
+	border: 1px solid color-mix(in srgb, var(--cf-accent) 22%, var(--cf-border));
+	border-radius: 12px;
+	background: color-mix(in srgb, var(--cf-surface) 68%, transparent);
+	box-shadow: inset 0 1px 0 color-mix(in srgb, var(--cf-fg) 4%, transparent);
 }
 
 .cf-group-header {
 	width: 100%;
 	display: flex;
 	align-items: center;
-	gap: 6px;
+	gap: 7px;
 	padding: 8px 12px;
 	border: 0;
-	background: transparent;
+	border-bottom: 1px solid color-mix(in srgb, var(--cf-border) 65%, transparent);
+	border-radius: 11px 11px 0 0;
+	background: color-mix(in srgb, var(--cf-accent) 6%, transparent);
 	color: var(--cf-fg);
-	font-size: 12px;
+	font-size: 11.5px;
 	font-weight: 600;
+	letter-spacing: 0.01em;
 	cursor: pointer;
 	text-align: left;
 }
 
+.cf-group.collapsed .cf-group-header {
+	border-bottom: 0;
+	border-radius: 11px;
+}
+
 .cf-group-count {
 	margin-left: auto;
-	font-size: 11px;
+	font-size: 10.5px;
+	padding: 1px 7px;
+	border-radius: 999px;
+	background: color-mix(in srgb, var(--cf-bg) 70%, transparent);
+	border: 1px solid var(--cf-border);
 	color: var(--cf-muted);
 }
 
@@ -391,7 +417,8 @@ html, body {
 .cf-edge {
 	fill: none;
 	stroke: var(--cf-edge);
-	stroke-width: 1.5;
+	stroke-width: 1.65;
+	transition: stroke 120ms ease, opacity 120ms ease;
 }
 
 .cf-edge.summary {
@@ -400,11 +427,11 @@ html, body {
 
 .cf-edge.active {
 	stroke: var(--cf-accent);
-	stroke-width: 2.2;
+	stroke-width: 2.3;
 }
 
 .cf-edge.dimmed {
-	opacity: 0.25;
+	opacity: 0.22;
 }
 
 .cf-arrow-fill {
@@ -415,7 +442,7 @@ html, body {
 	position: absolute;
 	text-align: left;
 	padding: 10px 12px;
-	border-radius: 8px;
+	border-radius: 10px;
 	border: 1px solid var(--cf-border);
 	border-left: 3px solid var(--cf-accent);
 	background: var(--cf-card);
@@ -425,12 +452,153 @@ html, body {
 	flex-direction: column;
 	justify-content: space-between;
 	gap: 4px;
-	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.14);
+	box-shadow: 0 3px 10px rgba(0, 0, 0, 0.14);
+	transition: transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.cf-node:hover {
+	transform: translateY(-1px);
+	border-color: color-mix(in srgb, var(--cf-accent) 65%, var(--cf-border));
+	box-shadow: 0 6px 18px rgba(0, 0, 0, 0.2);
+	z-index: 4;
 }
 
 .cf-node.selected {
 	border-color: var(--cf-accent);
-	box-shadow: 0 0 0 2px var(--cf-accent-soft);
+	box-shadow: 0 0 0 2px var(--cf-accent-soft), 0 6px 20px rgba(0, 0, 0, 0.22);
+	z-index: 5;
+}
+
+.cf-node-provider-row {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	min-width: 0;
+}
+
+.cf-node-glyph, .cf-menu-glyph {
+	width: 22px;
+	height: 22px;
+	border-radius: 6px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex-shrink: 0;
+	color: var(--cf-accent);
+	background: color-mix(in srgb, var(--cf-accent) 14%, transparent);
+	border: 1px solid color-mix(in srgb, var(--cf-accent) 26%, transparent);
+}
+
+.cf-glyph-svg {
+	display: block;
+}
+
+.cf-menu-item-icon {
+	flex-direction: row;
+	align-items: center;
+	gap: 8px;
+}
+
+.cf-menu-text {
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	min-width: 0;
+}
+
+.cf-popover-divider {
+	height: 1px;
+	background: var(--cf-border);
+	margin: 2px 0;
+}
+
+.cf-popover-actions {
+	display: flex;
+	flex-direction: column;
+	gap: 5px;
+}
+
+.cf-popover-actions .cf-btn {
+	text-align: left;
+}
+
+.cf-canvas-empty-card {
+	position: absolute;
+	left: 50%;
+	top: 50%;
+	transform: translate(-50%, -50%);
+	max-width: 360px;
+	padding: 20px 24px;
+	border-radius: 12px;
+	background: var(--cf-card);
+	border: 1px solid var(--cf-border);
+	box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	text-align: center;
+	gap: 8px;
+	color: var(--cf-accent);
+}
+
+.cf-shortcuts-bar {
+	position: absolute;
+	left: 14px;
+	bottom: 14px;
+	z-index: 15;
+}
+
+.cf-shortcuts-bar > summary {
+	width: 28px;
+	height: 28px;
+	border-radius: 8px;
+	background: color-mix(in srgb, var(--cf-card) 92%, transparent);
+	backdrop-filter: blur(8px);
+	border: 1px solid var(--cf-border);
+	box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+	display: grid;
+	place-items: center;
+	font-weight: 600;
+	list-style: none;
+}
+
+.cf-shortcuts-popover {
+	position: absolute;
+	left: 0;
+	bottom: calc(100% + 8px);
+	min-width: 220px;
+	padding: 10px 12px;
+	border-radius: 9px;
+	background: var(--cf-card);
+	border: 1px solid var(--cf-border);
+	box-shadow: 0 10px 28px rgba(0, 0, 0, 0.3);
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	font-size: 11.5px;
+}
+
+.cf-shortcut-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	color: var(--cf-muted);
+}
+
+.cf-kbd {
+	padding: 1px 6px;
+	border-radius: 4px;
+	border: 1px solid var(--cf-border);
+	background: var(--cf-surface);
+	color: var(--cf-fg);
+	font-size: 10.5px;
+}
+
+.cf-inspector-close {
+	font-size: 16px;
+	line-height: 1;
+	padding: 2px 7px;
 }
 
 .cf-provider-azure { --cf-accent: #3b82f6; }
@@ -484,10 +652,12 @@ html, body {
 	align-items: center;
 	gap: 4px;
 	padding: 4px 6px;
-	border-radius: 8px;
-	background: var(--cf-card);
+	border-radius: 9px;
+	background: color-mix(in srgb, var(--cf-card) 92%, transparent);
+	backdrop-filter: blur(8px);
 	border: 1px solid var(--cf-border);
-	box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.22);
+	z-index: 15;
 }
 
 .cf-icon-btn {

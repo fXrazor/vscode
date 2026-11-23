@@ -48,6 +48,7 @@ export interface RoutedEdge {
 	readonly fromY: number;
 	readonly toX: number;
 	readonly toY: number;
+	readonly orientation: 'horizontal' | 'vertical';
 	readonly collapsedSummary: boolean;
 }
 
@@ -72,8 +73,8 @@ export interface NodeMetrics {
 
 export function metricsForMode(mode: CanvasViewMode): NodeMetrics {
 	return mode === 'technical'
-		? { width: 256, height: 112, gapX: 64, gapY: 40 }
-		: { width: 196, height: 84, gapX: 52, gapY: 36 };
+		? { width: 264, height: 118, gapX: 68, gapY: 40 }
+		: { width: 212, height: 88, gapX: 56, gapY: 36 };
 }
 
 export function inferProvider(node: CanvasNodeSummary): string {
@@ -219,6 +220,56 @@ function computeLayers(nodes: readonly CanvasNodeSummary[], edges: readonly Canv
 	return layer;
 }
 
+interface AnchorBox {
+	readonly x: number;
+	readonly y: number;
+	readonly width: number;
+	readonly height: number;
+}
+
+function computeEdgeAnchors(from: AnchorBox, to: AnchorBox): {
+	readonly fromX: number;
+	readonly fromY: number;
+	readonly toX: number;
+	readonly toY: number;
+	readonly orientation: 'horizontal' | 'vertical';
+} {
+	if (to.x >= from.x + from.width + 12) {
+		return {
+			fromX: from.x + from.width,
+			fromY: from.y + from.height / 2,
+			toX: to.x,
+			toY: to.y + to.height / 2,
+			orientation: 'horizontal',
+		};
+	}
+	if (from.x >= to.x + to.width + 12) {
+		return {
+			fromX: from.x,
+			fromY: from.y + from.height / 2,
+			toX: to.x + to.width,
+			toY: to.y + to.height / 2,
+			orientation: 'horizontal',
+		};
+	}
+	if (to.y >= from.y + from.height) {
+		return {
+			fromX: from.x + from.width / 2,
+			fromY: from.y + from.height,
+			toX: to.x + to.width / 2,
+			toY: to.y,
+			orientation: 'vertical',
+		};
+	}
+	return {
+		fromX: from.x + from.width / 2,
+		fromY: from.y,
+		toX: to.x + to.width / 2,
+		toY: to.y + to.height,
+		orientation: 'vertical',
+	};
+}
+
 /** Projects one canonical graph snapshot into positioned groups, nodes, and edges for the active mode. */
 export function buildCanvasProjection(
 	graph: CanvasGraphSnapshot,
@@ -253,7 +304,11 @@ export function buildCanvasProjection(
 	const layers = computeLayers(matchedNodes, graph.edges);
 	const orderedGroups = [...groupBuckets.entries()]
 		.filter(([, bucket]) => bucket.matched.length > 0)
-		.sort((a, b) => a[1].label.localeCompare(b[1].label));
+		.sort((a, b) => {
+			const minLayerA = a[1].matched.reduce((min, n) => Math.min(min, layers.get(n.id) ?? 0), Number.POSITIVE_INFINITY);
+			const minLayerB = b[1].matched.reduce((min, n) => Math.min(min, layers.get(n.id) ?? 0), Number.POSITIVE_INFINITY);
+			return minLayerA - minLayerB || a[1].label.localeCompare(b[1].label);
+		});
 
 	const groups: CanvasGroupLayout[] = [];
 	const positionedNodes: PositionedNode[] = [];
@@ -363,15 +418,13 @@ export function buildCanvasProjection(
 		const fromNode = nodeById.get(edge.fromId);
 		const toNode = nodeById.get(edge.toId);
 		if (fromNode && toNode) {
+			const anchors = computeEdgeAnchors(fromNode, toNode);
 			edges.push({
 				id: `${edge.fromId}->${edge.toId}:${edge.kind}`,
 				fromId: edge.fromId,
 				toId: edge.toId,
 				kind: edge.kind,
-				fromX: fromNode.x + fromNode.width,
-				fromY: fromNode.y + fromNode.height / 2,
-				toX: toNode.x,
-				toY: toNode.y + toNode.height / 2,
+				...anchors,
 				collapsedSummary: false,
 			});
 			continue;
@@ -392,15 +445,13 @@ export function buildCanvasProjection(
 			continue;
 		}
 		seenCollapsedEdges.add(key);
+		const anchors = computeEdgeAnchors(fromAnchor, toAnchor);
 		edges.push({
 			id: `summary:${key}`,
 			fromId: fromNode ? edge.fromId : fromGroupId,
 			toId: toNode ? edge.toId : toGroupId,
 			kind: edge.kind,
-			fromX: fromAnchor.x + fromAnchor.width,
-			fromY: fromAnchor.y + fromAnchor.height / 2,
-			toX: toAnchor.x,
-			toY: toAnchor.y + toAnchor.height / 2,
+			...anchors,
 			collapsedSummary: true,
 		});
 	}
