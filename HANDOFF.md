@@ -1,5 +1,9 @@
 # CloudForge Code OSS handoff
 
+## Resource form follow-up — 23 November 2026
+
+On `codex/infrastructure-studio-preview`, starting at `4c813511c4f`, extended the shared right-hand form with schema-derived nested blocks, required prompts, typed fields, optional advanced properties and canvas warnings derived from the same resource. All 4,078 bundled resource entries pass descriptor coverage. This implements catalogue-backed constraints, not complete version-matched provider validation. See [RESOURCE-CONSTRAINTS-PASS.md](extensions/cloudforge/studio/RESOURCE-CONSTRAINTS-PASS.md) for source correlations, runtime limitations, checks, screenshots and exact remaining work. Source/Rust/protocol files remain unchanged. Next work is full schema coverage plus typed inheritance/reference semantics; nested block UI is no longer merely sample-only.
+
 ## Studio refinement checkpoint — 23 November 2026
 
 Integration owner: Codex in `C:/Users/dalep/.codex/worktrees/infrastructure-studio/CloudForge-Code`, branch `codex/infrastructure-studio-preview`, starting revision `1767da9b53485aea155b60add064d1591569055b`. This entry accompanies the checkpoint commit; resolve its exact revision with `git log -1 -- HANDOFF.md`. All implementation remains under `extensions/cloudforge/studio`; no Rust, canonical protocol, installer or installed Workbench changes were made.

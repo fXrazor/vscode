@@ -4,6 +4,22 @@ import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { groupServices } from './catalogue.ts';
 import type { CatalogueEntry } from './model.ts';
+import type { Provider, Resource } from './model.ts';
+import { editableFields, additionalBlocks } from './formDefinition.ts';
+
+test('every bundled cloud resource retains its editable primitive fields in the shared form', () => {
+ for (const provider of ['azure', 'aws', 'gcp'] as Provider[]) {
+  const snapshot = JSON.parse(readFileSync(new URL('../assets/catalogue/' + provider + '.json', import.meta.url), 'utf8')) as { entries: CatalogueEntry[] };
+  for (const entry of snapshot.entries) {
+   const resource: Resource = { id: 'probe', kind: 'generic', catalogue: entry, provider, name: 'probe', region: '', settings: {}, blocks: [], positions: { visual: { x: 0, y: 0 }, technical: { x: 0, y: 0 } } };
+   const fields = editableFields(resource);
+   assert.equal(new Set(fields.map(field => field.name)).size, fields.length, entry.type);
+   for (const imported of entry.fields) { assert.ok(fields.some(field => field.name === imported.name), entry.type + '.' + imported.name); }
+   const blocks = additionalBlocks(resource);
+   assert.equal(new Set(blocks.map(block => block.type)).size, blocks.length, entry.type);
+  }
+ }
+});
 
 test('provider catalogue snapshots contain unique types and only bundled icon paths', () => {
  for (const provider of ['azure','aws','gcp']) {

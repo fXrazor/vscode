@@ -198,7 +198,19 @@ h1 { font-size: 19px; font-weight: 650; letter-spacing: -0.4px; display: flex; a
 .form-section > summary::before, .nested-block > summary::before, .add-blocks > summary::before { content: '›'; font-size: 16px; display: inline-block; transition: transform 100ms; }
 .form-section[open] > summary::before, .nested-block[open] > summary::before, .add-blocks[open] > summary::before { transform: rotate(90deg); }
 .form-section-body { padding: 12px 0 20px; display: grid; gap: 16px; }
-.nested-block { border-left: 2px solid #a18cd3; padding-left: 12px; margin: 4px 0 12px; }
+.nested-block { border-left: 1px solid var(--border); padding-left: 12px; margin: 4px 0 12px; }
+.nested-block:focus-within { border-left-color: var(--accent); }
+.schema-field { display: grid; gap: 6px; min-width: 0; }
+.schema-field > label { display: flex; align-items: baseline; gap: 4px; font-size: 12px; }
+.studio .inspector .resource-fields .schema-field > label { display: flex; flex-direction: row; align-items: baseline; gap: 4px; }
+.schema-field-type { margin-left: auto; color: var(--muted); font-size: 10px; }
+.schema-field input, .schema-field select, .schema-field textarea { width: 100%; min-width: 0; padding: 7px 9px; border: 1px solid var(--border); border-radius: 4px; background: var(--input); color: var(--text); font: inherit; font-size: 12px; }
+.schema-field textarea { resize: vertical; font-family: var(--font-code); }
+.schema-field [aria-invalid=true] { border-color: var(--accent); }
+.schema-field-error, .required-block-notice { color: var(--text); font-size: 11px; line-height: 1.5; }
+.required-block-notice { padding: 8px 0; border-bottom: 1px solid var(--border); }
+.schema-field-error::before { content: 'Review: '; font-weight: 600; }
+.node-form-review { display: inline-flex; color: var(--accent); margin-left: 4px; }
 .nested-block > summary { justify-content: flex-start; flex-wrap: wrap; }
 .nested-block > summary > span { margin-left: auto; font-size: 10px; color: var(--muted); font-weight: 400; }
 .nested-block-body { display: grid; gap: 16px; padding: 12px 0; }

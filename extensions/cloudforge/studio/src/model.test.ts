@@ -11,6 +11,43 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHistory, historyReducer, checkDraft } from './model.ts';
 import { sampleArchitecture } from './fixture.ts';
+import { additionalBlocks, blockDefinitions, fieldIssue, resourceFormIssues } from './formDefinition.ts';
+
+test('node form findings derive from current nested block values and clear with correction', () => {
+	const network = sampleArchitecture().resources[0];
+	const resource = { ...network, kind: 'generic' as const, catalogue: { type: 'azurerm_linux_virtual_machine', label: 'VM', service: 'Compute', category: 'Compute', icon: '', fields: [] }, blocks: [{ id: 'disk', type: 'os_disk', values: { caching: '', storage_account_type: 'Standard_LRS' }, blocks: [] }] };
+	assert.ok(resourceFormIssues(resource).some(issue => issue.includes('caching: Required value')));
+	assert.equal(resourceFormIssues({ ...resource, blocks: [{ ...resource.blocks[0], values: { ...resource.blocks[0].values, caching: 'ReadOnly' } }] }).some(issue => issue.startsWith('os_disk')), false);
+});
+
+test('nested schema preserves required flags, recursive cardinality and typed defaults', () => {
+	const blocks = blockDefinitions([{ name: 'pool', type: 'block', required: true, repeat: true, description: 'Pool', children: [
+		{ name: 'enabled', type: 'bool', default: false, description: 'Enabled' },
+		{ name: 'size', type: 'number', default: 0, description: 'Size' },
+		{ name: 'optional', type: 'string', description: 'Optional' },
+		{ name: 'child', type: 'block', description: 'Child', children: [] }
+	] }]);
+	assert.equal(blocks[0].required, true); assert.equal(blocks[0].max, Infinity);
+	assert.deepEqual(blocks[0].fields, { enabled: 'false', size: '0' });
+	assert.equal(blocks[0].children[0].max, 1);
+	assert.deepEqual(blocks[0].children[0].fields, {});
+});
+
+test('local nested field checks distinguish absence from false and zero', () => {
+	const attr = { name: 'value', required: true, description: '' };
+	assert.equal(fieldIssue('', { ...attr, type: 'string' }), 'Required value');
+	assert.equal(fieldIssue('false', { ...attr, type: 'bool' }), undefined);
+	assert.equal(fieldIssue('0', { ...attr, type: 'number' }), undefined);
+	assert.equal(fieldIssue('NaN', { ...attr, type: 'number' }), 'Enter a finite number');
+	assert.equal(fieldIssue('{}', { ...attr, type: 'list' }), 'Enter a JSON array');
+	assert.equal(fieldIssue('[]', { ...attr, type: 'map' }), 'Enter a JSON object');
+	assert.equal(fieldIssue('var.allowed', { ...attr, type: 'list' }), undefined);
+});
+
+test('sample cluster does not create a second editable default node pool', () => {
+	const cluster = sampleArchitecture().resources.find(resource => resource.kind === 'cluster')!;
+	assert.equal(additionalBlocks(cluster).some(block => block.type === 'default_node_pool'), false);
+});
 
 test('semantic edits share one history while each mode retains its layout', () => {
 	const initial = createHistory(sampleArchitecture());

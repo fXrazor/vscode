@@ -6,13 +6,16 @@ import type { Dispatch } from 'react';
 import type { Action, Resource, ResourceBlock } from './model.ts';
 import { providerRegions, resourceTypes, resourceDefinition } from './fixture.ts';
 import type { ResourceKind } from './model.ts';
-import { additionalBlocks, type BlockDefinition } from './formDefinition.ts';
+import { additionalBlocks, editableFields, fieldIssue, type BlockDefinition } from './formDefinition.ts';
+import { SchemaField } from './SchemaField.tsx';
 
 export function ResourceFields({ resource, dispatch }: { resource: Resource; dispatch: Dispatch<Action> }) {
+	const properties = editableFields(resource);
 
  function field(name:string,value:string) {
-  const definition=resource.catalogue?.fields.find(field=>field.name===name);
+  const definition=properties.find(field=>field.name===name);
   const update=(value:string)=>dispatch({type:'update',id:resource.id,patch:{settings:{...resource.settings,[name]:value}}});
+  if (resource.catalogue) { return <SchemaField key={name} name={name} value={value} definition={definition} onChange={update} />; }
   return <label key={name} className="provider-field" title={definition?.description}>
    <span>{name}{definition?.required&&<span className="field-required"> *</span>}</span>
    {definition?.type==='bool'?<select value={value} onChange={event=>update(event.target.value)}><option value="">Not set</option><option value="true">true</option><option value="false">false</option></select>:
@@ -23,6 +26,7 @@ export function ResourceFields({ resource, dispatch }: { resource: Resource; dis
 
 	const poolFields = resource.kind === 'cluster' ? ['Node count', 'VM size'] : [];
 	const settings = Object.entries(resource.settings);
+	if (resource.catalogue) { for (const property of properties) { if (property.required && !['name','location','region'].includes(property.name) && !Object.hasOwn(resource.settings, property.name)) { settings.push([property.name, '']); } } }
 	return (
 		<div className="resource-fields">
 			<details className="form-section">
@@ -57,8 +61,8 @@ export function ResourceFields({ resource, dispatch }: { resource: Resource; dis
 			</details>
 			<NestedBlocks blocks={resource.blocks} definitions={additionalBlocks(resource)} scope="resource"
 				onChange={blocks => dispatch({ type: 'update', id: resource.id, patch: { blocks } })} />
-			{resource.catalogue && <label className="add-provider-property">Add property<select aria-label="Add provider property" value="" onChange={event=>{const field=resource.catalogue!.fields.find(field=>field.name===event.target.value);if(field) {dispatch({type:'update',id:resource.id,patch:{settings:{...resource.settings,[field.name]:field.default===undefined?'':String(field.default)}}});}}}><option value="">Choose an optional property…</option>{resource.catalogue.fields.filter(field=>!['name','location','region'].includes(field.name)&&!Object.hasOwn(resource.settings,field.name)).map(field=><option key={field.name} value={field.name}>{field.name}</option>)}</select></label>}
-   <p className="form-coverage">{resource.catalogue?'Imported primitive properties · nested provider blocks and validation await integration':'Sample form definition'}</p>
+			{resource.catalogue && <details className="form-section advanced-properties"><summary>Advanced properties<span className="schema-type">Optional additions</span></summary><div className="form-section-body"><p className="field-help">Add optional arguments from the bundled catalogue. Required arguments stay in Main Parameters.</p><label className="add-provider-property">Add property<select aria-label="Add provider property" value="" onChange={event=>{const field=properties.find(field=>field.name===event.target.value);if(field) {dispatch({type:'update',id:resource.id,patch:{settings:{...resource.settings,[field.name]:field.default===undefined?'':typeof field.default==='string'?field.default:JSON.stringify(field.default)}}});}}}><option value="">Choose an optional property…</option>{properties.filter(field=>!field.required&&!['name','location','region'].includes(field.name)&&!Object.hasOwn(resource.settings,field.name)).map(field=><option key={field.name} value={field.name}>{field.name} · {field.type}</option>)}</select></label></div></details>}
+   <p className="form-coverage">Local catalogue form · nested fields use bundled definitions where available. Live provider validation is not connected.</p>
 		</div>
 	);
 }
@@ -72,30 +76,33 @@ function NestedBlocks({ blocks, definitions, scope, onChange }: {
 	const available = definitions.filter(definition => blocks.filter(block => block.type === definition.type).length < definition.max);
 	return (
 		<div className="nested-blocks">
-			{blocks.map((block, index) => {
-				const definition = definitions.find(item => item.type === block.type);
-				if (!definition) { return null; }
+			{blocks.map(block => {
+			const definition = definitions.find(item => item.type === block.type);
+				const label = definition?.label ?? block.type.replaceAll('_', ' ');
+				const fields = [...new Set([...(definition?.attributes ?? []).map(field => field.name), ...Object.keys(block.values)])];
+				const missing = fields.filter(name => fieldIssue(block.values[name] ?? '', definition?.attributes?.find(field => field.name === name))).length;
 				function update(next: ResourceBlock) {
 					onChange(blocks.map(item => item.id === block.id ? next : item));
 				}
 				return <details key={block.id} className="nested-block" open>
-					<summary>{definition.label}<span>{index + 1}</span></summary>
+					<summary>{label}<span>{blocks.filter(item => item.type === block.type).length > 1 ? '#' + (blocks.filter(item => item.type === block.type).indexOf(block) + 1) + ' · ' : ''}{missing ? missing + ' to review' : fields.length + ' fields'}</span></summary>
 					<div className="nested-block-body">
-						{Object.entries(block.values).map(([name, value]) => <label key={name}>{name}
-							<input value={value} onChange={event => update({ ...block, values: { ...block.values, [name]: event.target.value } })} />
-						</label>)}
-						<NestedBlocks blocks={block.blocks} definitions={definition.children} scope={definition.label}
+						{definition?.description && <p className="field-help">{definition.description}</p>}
+						{!definition && <p className="field-help">Schema unavailable. Existing values are preserved; review against your provider version.</p>}
+						{fields.map(name => <SchemaField key={name} name={name} value={block.values[name] ?? ''} definition={definition?.attributes?.find(field => field.name === name)} onChange={value => update({ ...block, values: { ...block.values, [name]: value } })} />)}
+						<NestedBlocks blocks={block.blocks} definitions={definition?.children ?? []} scope={label}
 							onChange={children => update({ ...block, blocks: children })} />
-						<button className="remove-block" onClick={() => onChange(blocks.filter(item => item.id !== block.id))}>Remove {definition.label}</button>
+						<button className="remove-block" onClick={() => onChange(blocks.filter(item => item.id !== block.id))}>Remove {label}</button>
 					</div>
 				</details>;
 			})}
+			{definitions.filter(definition => definition.required && !blocks.some(block => block.type === definition.type)).map(definition => <p className="required-block-notice" key={definition.type}>Required block: {definition.label}. Add it below to configure its fields.</p>)}
 			{available.length > 0 && <details className="add-blocks">
 				<summary>Add Blocks<span>＋</span></summary>
 				<div className="add-block-options">{available.map(definition => (
 					<button key={definition.type} aria-label={'Add ' + definition.label + ' to ' + scope} onClick={() => onChange([...blocks, {
 						id: crypto.randomUUID(), type: definition.type, values: { ...definition.fields }, blocks: []
-					}])}>＋ {definition.label}<small>{definition.max === 1 ? 'Single block' : 'Repeatable block'}</small></button>
+					}])}>＋ {definition.label}<small>{definition.required ? 'Required · ' : ''}{definition.max === 1 ? 'Single block' : 'Repeatable block'}</small></button>
 				))}</div>
 			</details>}
 		</div>

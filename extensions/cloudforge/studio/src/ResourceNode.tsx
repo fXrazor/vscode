@@ -6,7 +6,8 @@ import { shapeDefinitions, shapeDefinition, shapeTextColor, shapeStrokeDash } fr
 import { CanvasEditbar } from './CanvasEditbar.tsx';
 import { ShapeAppearance } from './ShapeAppearance.tsx';
 import { memo } from 'react';
-import { Bold, Copy, Trash2 } from 'lucide-react';
+import { Bold, Copy, Trash2, TriangleAlert } from 'lucide-react';
+import { resourceFormIssues } from './formDefinition.ts';
 import { Handle, Position, NodeResizer, NodeToolbar, type Node, type NodeProps } from '@xyflow/react';
 import type { DesignMode, Resource, BoardItem, Action } from './model.ts';
 import type { Dispatch } from 'react';
@@ -20,11 +21,13 @@ export const ResourceNode = memo(function ResourceNode({ data, selected }: NodeP
 	const metadata = resourceDefinition(data.resource);
 	const graphic = data.resource.iconKind ? resourceDefinition({ kind: data.resource.iconKind, provider: data.resource.provider }) : metadata;
 	const technical = data.mode === 'technical';
+	const formIssues = resourceFormIssues(data.resource);
 	return (
 		<div className={'resource-node ' + data.mode + (selected ? ' is-selected' : '')}>
 			<Handle type="target" position={Position.Left} id="input" aria-label="Design link input" />
 			<div className="resource-node-heading">
 				<img src={'./assets/' + graphic.icon} alt="" />
+				{!!formIssues.length && <span className="node-form-review" role="img" aria-label={formIssues.length + ' local configuration issues'} title={'Local catalogue checks (not Terraform validation)\n' + formIssues.join('\n')}><TriangleAlert size={12}/></span>}
 				{technical && <span>{metadata.label}</span>}
 			</div>
 			{technical ? <input className="nodrag nopan node-name" aria-label="Resource name on node" value={data.resource.name} onChange={event => data.dispatch({ type: 'update', id: data.resource.id, patch: { name: event.target.value } })} /> : <strong>{data.resource.label || data.resource.name || 'Unnamed resource'}</strong>}
