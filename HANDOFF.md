@@ -759,3 +759,22 @@ Implemented on `fxrazor/auto-open-and-stage3-4` in `Z:\CloudForge-Code\.claude\w
 **Remaining next action:**
 - Once the sibling session's packaging run in `Z:\CFStage` completes, package `86478d200cb` (Phase 6/7 + Stage 7 `readModule` UI) together with Rust Stage 7 `ad360e3` (`Z:\CFStage\service-ad360e3\cloudforge-service.exe`, SHA-256 `7580b16aae7dfd89d72b5e0cc4bf037365607758683328593343c93533298ec2`) and run a live packaged-desktop smoke verifying nested local module drill-down and typed I/O.
 
+### Stage 8 Broker & Adapter Wiring: Schema Upgrade Impact Diff & Reproducible Export Audit (2026-11-23)
+
+Implemented on `fxrazor/auto-open-and-stage3-4` in `Z:\CloudForge-Code\.claude\worktrees\auto-open-stage3-4` (`6476cd0ecd3`, fast-forward merged into `Z:\CloudForge-Code` `main` cleanly on top of Phase 8/9 `bb85491fa81`). Pairs with Rust `Z:\CloudForge` Stage 8 service revision `a75edf0f42745c57afcaa0df0474b4d2d82f8bbf` (`3,527,680` bytes, SHA-256 `0e1e8d3fa4a472133d6465e6436c9848f756fc8893b74bf72defa1ed640f7767`, archived at `Z:\CFStage\service-a75edf0\cloudforge-service.exe`).
+
+- **Electron-main broker & Workbench bridge ([cloudForgeService.ts](src/vs/code/electron-main/cloudForgeService.ts), [cloudForgeServiceChannel.ts](src/vs/code/electron-main/cloudForgeServiceChannel.ts), [cloudForgeService.contribution.ts](src/vs/workbench/electron-browser/cloudForgeService.contribution.ts), [cloudForgeServiceChannel.test.ts](src/vs/code/test/electron-main/cloudForgeServiceChannel.test.ts)):**
+  - Added strict parameter & active-window scope validation for `diffCatalogueSnapshots` (validated `fromKey`/`toKey`, optional paired `workspaceId`/`architectureId` + `expectedSourceRevision`) and `auditExportReadiness` (active scope, optional `expectedSourceRevision` and `engine: "openTofu" | "terraform"`). Zero filesystem paths.
+- **Pure-TS adapters ([serviceAdapters.ts](extensions/cloudforge/src/canvas/serviceAdapters.ts), [serviceAdapters.test.ts](extensions/cloudforge/test/serviceAdapters.test.ts)):**
+  - Added `parseSchemaDiffReport` and `parseExportAuditReport` ready to bind directly into Phase 8 plan/policy/approval review UI.
+
+| Check (run on `6476cd0ecd3`) | Verified result |
+| --- | --- |
+| `build/hygiene.ts` (6 files) & `build/oxlint.ts` (6 files) | Passed (`0` errors, `0` warnings). |
+| `tsc -p extensions/cloudforge/tsconfig.json --noEmit` & `node --test extensions/cloudforge/test/*.test.ts` | **52/52 extension tests passed** (`0` skipped). |
+| `node extensions/cloudforge/esbuild.mts`, `node build/next/index.ts transpile`, & `scripts\test.bat --run src/vs/code/test/electron-main/cloudForgeServiceChannel.test.ts --run src/vs/code/test/electron-main/cloudForgeService.test.ts` | **42/42 Electron-main tests passed**. |
+
+**Next actions:**
+1. Once `Z:\CFStage` is idle, package desktop `main` (`6476cd0ecd3`+) with Rust Stage 8 `a75edf0` (`Z:\CFStage\service-a75edf0\cloudforge-service.exe`), run live Stage 7 + Phase 6–9 smoke ([stage7-phase6-smoke.mjs](Z:/CFStage/smoke/stage7-phase6-smoke.mjs)), and silently upgrade `%LOCALAPPDATA%\Programs\CloudForge Proof`.
+2. Surface live `auditExportReadiness` and `diffCatalogueSnapshots` results inside the Phase 8 Plan & Policy Review modal.
+
