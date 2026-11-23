@@ -19,6 +19,8 @@
 		"../src/canvas/draftDocument.ts",
 		"../src/canvas/exportDiagram.ts",
 		"../src/canvas/patterns.ts",
-		"../src/canvas/history.ts"
+		"../src/canvas/history.ts",
+		"../src/canvas/planReview.ts",
+		"../src/canvas/advisorRecipes.ts"
 	]
 }

@@ -1622,6 +1622,24 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 	color: var(--cf-err);
 }
 
+/* Phase 8 & 9: Plan Review, Advisor & Simulated Run Playback */
+.cf-playback-bar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+	padding: 6px 12px;
+	border-bottom: 1px solid var(--cf-border);
+	background: color-mix(in srgb, var(--cf-warn) 10%, var(--cf-surface));
+	font-size: 12px;
+}
+
+.cf-node.cf-playback-active {
+	border-color: var(--cf-warn);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--cf-warn) 35%, transparent), 0 8px 22px rgba(0, 0, 0, 0.28);
+	z-index: 6;
+}
+
 @media (max-width: 900px) {
 	.cf-workspace-columns {
 		grid-template-columns: 1fr;

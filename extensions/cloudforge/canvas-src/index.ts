@@ -46,6 +46,24 @@ import {
 	type ExperimentSession
 } from '../src/canvas/history';
 import {
+	buildDraftPlanReview,
+	createPlanApproval,
+	estimateArchitectureCost,
+	evaluateArchitecturePolicies,
+	isPlanApprovalValid,
+	parseTerraformPlanJson,
+	type FullRootPlanReview,
+	type PlanApprovalRecord
+} from '../src/canvas/planReview';
+import {
+	buildPlaybackFrame,
+	evaluateRecipeSteps,
+	explainResource,
+	WORKFLOW_RECIPES,
+	type AdvisorProposal,
+	type WorkflowRecipeMeta
+} from '../src/canvas/advisorRecipes';
+import {
 	buildReferenceCandidates,
 	createInitialDraft,
 	lookupBundledSchema,
@@ -220,6 +238,20 @@ let activeExperiment: ExperimentSession | undefined;
 let sampleLabelInput = 'Staging Dry-Run';
 let sampleEnvInput: 'dev' | 'staging' | 'prod' = 'staging';
 let sampleRegionInput = 'uksouth';
+let reviewModalOpen = false;
+let reviewModalTab: 'plan' | 'policy' | 'cost' | 'recipes' = 'plan';
+let lastFocusBeforeReviewModal: HTMLElement | null = null;
+let importedPlanReview: FullRootPlanReview | undefined;
+let planJsonPasteInput = '';
+let planJsonParseError: string | undefined;
+let highRiskAck = false;
+let planApproval: PlanApprovalRecord | null = null;
+let selectedRecipeId: WorkflowRecipeMeta['id'] = 'delivery-pipeline';
+let explainNodeId: string | null = null;
+let lastFocusBeforeExplain: HTMLElement | null = null;
+let playbackActive = false;
+let playbackStep = 0;
+let playbackTimer: number | undefined;
 
 const FRAME_COLORS: readonly CanvasFrameColor[] = ['blue', 'emerald', 'amber', 'violet', 'slate'];
 const NOTE_COLORS: readonly CanvasAnnotationColor[] = ['amber', 'blue', 'emerald', 'rose'];
@@ -646,6 +678,108 @@ function closeHistoryModal(): void {
 	if (lastFocusBeforeHistoryModal?.isConnected) {
 		lastFocusBeforeHistoryModal.focus();
 	}
+}
+
+function activePlanReview(): FullRootPlanReview | undefined {
+	if (!draftDoc) {
+		return undefined;
+	}
+	if (importedPlanReview && importedPlanReview.baseSourceRevision === draftDoc.baseSourceRevision) {
+		return importedPlanReview;
+	}
+	return buildDraftPlanReview(draftDoc, {
+		environment: state.sampleContext?.environment ?? 'local-draft',
+		region: state.sampleContext?.region ?? 'uksouth',
+	});
+}
+
+function openReviewModal(tab: 'plan' | 'policy' | 'cost' | 'recipes' = 'plan'): void {
+	if (!draftDoc) {
+		return;
+	}
+	lastFocusBeforeReviewModal = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+	reviewModalOpen = true;
+	reviewModalTab = tab;
+	planJsonParseError = undefined;
+	render();
+	root.querySelector<HTMLButtonElement>('.cf-review-close')?.focus();
+}
+
+function closeReviewModal(): void {
+	if (!reviewModalOpen) {
+		return;
+	}
+	reviewModalOpen = false;
+	render();
+	applyViewportTransform();
+	if (lastFocusBeforeReviewModal?.isConnected) {
+		lastFocusBeforeReviewModal.focus();
+	}
+}
+
+function openExplainModal(nodeId: string): void {
+	if (!draftDoc) {
+		return;
+	}
+	lastFocusBeforeExplain = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+	explainNodeId = nodeId;
+	render();
+	root.querySelector<HTMLButtonElement>('.cf-explain-close')?.focus();
+}
+
+function closeExplainModal(): void {
+	if (!explainNodeId) {
+		return;
+	}
+	explainNodeId = null;
+	render();
+	applyViewportTransform();
+	if (lastFocusBeforeExplain?.isConnected) {
+		lastFocusBeforeExplain.focus();
+	}
+}
+
+function applyAdvisorProposal(nodeId: string, proposal: AdvisorProposal): void {
+	updateDraft(nodeId, draft => ({
+		...draft,
+		attributes: { ...draft.attributes, ...proposal.patch },
+	}));
+}
+
+function stopPlaybackTimer(): void {
+	if (playbackTimer !== undefined) {
+		window.clearInterval(playbackTimer);
+		playbackTimer = undefined;
+	}
+}
+
+function togglePlaybackAuto(): void {
+	if (!currentRun || currentRun.events.length === 0) {
+		return;
+	}
+	if (playbackTimer !== undefined) {
+		stopPlaybackTimer();
+		render();
+		applyViewportTransform();
+		return;
+	}
+	playbackActive = true;
+	if (playbackStep >= currentRun.events.length - 1) {
+		playbackStep = 0;
+	}
+	playbackTimer = window.setInterval(() => {
+		if (!currentRun || playbackStep >= currentRun.events.length - 1) {
+			stopPlaybackTimer();
+			render();
+			applyViewportTransform();
+			return;
+		}
+		playbackStep++;
+		render();
+		applyViewportTransform();
+	}, 700);
+	render();
+	applyViewportTransform();
 }
 
 function closeFocusedWorkspace(): void {
@@ -1347,6 +1481,15 @@ function renderHeader(): HTMLElement {
 			samplePill.addEventListener('click', () => openHistoryModal('sample'));
 			left.append(samplePill);
 		}
+		const plan = activePlanReview();
+		if (planApproval && plan) {
+			const check = isPlanApprovalValid(planApproval, plan);
+			const appPill = el('button', `cf-pill cf-pill-btn ${check.valid ? 'cf-pill-ok' : 'cf-pill-warn'}`, check.valid ? '\u2713 Plan Approved' : '! Approval Stale');
+			appPill.type = 'button';
+			appPill.title = check.valid ? `Approved ${planApproval.planFingerprint}` : (check.reason ?? 'Plan approval invalidated');
+			appPill.addEventListener('click', () => openReviewModal('plan'));
+			left.append(appPill);
+		}
 	}
 	header.append(left);
 
@@ -1573,7 +1716,14 @@ function renderHeader(): HTMLElement {
 			viewDetails.open = false;
 			openHistoryModal('checkpoints');
 		});
-		menuActions.append(addFrameBtn, addNoteBtn, historyMenuBtn, exportMenuBtn);
+		const reviewMenuBtn = el('button', 'cf-btn', 'Plan, Policy & Recipes\u2026');
+		reviewMenuBtn.type = 'button';
+		reviewMenuBtn.title = 'Full-root Plan review, offline security policies, cost estimates, approval, and workflow recipes (Ctrl+Shift+R)';
+		reviewMenuBtn.addEventListener('click', () => {
+			viewDetails.open = false;
+			openReviewModal('plan');
+		});
+		menuActions.append(addFrameBtn, addNoteBtn, reviewMenuBtn, historyMenuBtn, exportMenuBtn);
 
 		const hasCustomPositions = Object.keys(state.nodePositions[state.mode] ?? {}).length > 0;
 		if (hasCustomPositions) {
@@ -1910,6 +2060,7 @@ function renderStage(): HTMLElement {
 		['Enter', 'Open focused workspace'],
 		['O', 'Open Terraform source'],
 		['Shift+Click', 'Multi-select & align'],
+		['Ctrl+Shift+R', 'Plan, Policy & Recipes'],
 		['Ctrl+Shift+H', 'History & Experiments'],
 		['Ctrl+Shift+E', 'Export SVG / PNG / MD'],
 		['Ctrl+Z', 'Undo / Shift+Z Redo'],
@@ -2284,9 +2435,13 @@ function renderStickyNote(note: CanvasAnnotation): HTMLElement {
 function renderNodeCard(item: PositionedNode): HTMLElement {
 	const selected = item.node.id === state.selectedId || selectedIds.has(item.node.id);
 	const isDraftAdded = !!draftDoc && draftDoc.present.addedIds.includes(item.node.id);
+	const playbackFrame = playbackActive && currentRun ? buildPlaybackFrame(currentRun, playbackStep) : undefined;
+	const playbackStatus = playbackFrame?.nodeStatuses[item.node.id];
+	const isPlaybackFocus = playbackFrame?.activeNodeId === item.node.id;
 	const runResult = currentRun?.nodeResults[item.node.id];
-	const statusCls = runResult ? ` cf-status-${runResult.status}` : '';
-	const card = el('button', `cf-node cf-node-${state.mode} cf-provider-${item.provider}${selected ? ' selected' : ''}${isDraftAdded ? ' cf-node-draft' : ''}${statusCls}`);
+	const effectiveStatus = playbackStatus ?? runResult?.status;
+	const statusCls = effectiveStatus ? ` cf-status-${effectiveStatus}` : '';
+	const card = el('button', `cf-node cf-node-${state.mode} cf-provider-${item.provider}${selected ? ' selected' : ''}${isDraftAdded ? ' cf-node-draft' : ''}${isPlaybackFocus ? ' cf-playback-active' : ''}${statusCls}`);
 	card.type = 'button';
 	card.dataset.nodeId = item.node.id;
 	card.style.left = `${item.x}px`;
@@ -2294,7 +2449,7 @@ function renderNodeCard(item: PositionedNode): HTMLElement {
 	card.style.width = `${item.width}px`;
 	card.style.height = `${item.height}px`;
 	card.setAttribute('aria-pressed', String(selected));
-	const badgeInfo = runResult ? statusLabel(runResult.status) : undefined;
+	const badgeInfo = effectiveStatus ? statusLabel(effectiveStatus) : undefined;
 	card.setAttribute('aria-label', `${item.node.name}, ${item.node.resourceType ?? item.node.kind}${isDraftAdded ? ', unsaved draft' : ''}${badgeInfo ? `, ${badgeInfo.text}` : ''}`);
 
 	const glyphBadge = el('span', 'cf-node-glyph');
@@ -2305,8 +2460,8 @@ function renderNodeCard(item: PositionedNode): HTMLElement {
 		const providerRow = el('span', 'cf-node-provider-row');
 		providerRow.append(glyphBadge, el('span', 'cf-provider-tag', providerDisplayName(item.provider)));
 		top.append(providerRow);
-		if (badgeInfo && runResult) {
-			top.append(el('span', `cf-status-badge cf-badge-${runResult.status}`, `${badgeInfo.icon} ${badgeInfo.text}`));
+		if (badgeInfo && effectiveStatus) {
+			top.append(el('span', `cf-status-badge cf-badge-${effectiveStatus}`, `${badgeInfo.icon} ${badgeInfo.text}`));
 		} else if (isDraftAdded) {
 			top.append(el('span', 'cf-draft-tag', 'Draft'));
 		} else {
@@ -2322,8 +2477,8 @@ function renderNodeCard(item: PositionedNode): HTMLElement {
 		const providerRow = el('span', 'cf-node-provider-row');
 		providerRow.append(glyphBadge, el('span', 'cf-provider-tag', providerDisplayName(item.provider)));
 		head.append(providerRow);
-		if (badgeInfo && runResult) {
-			head.append(el('span', `cf-status-badge cf-badge-${runResult.status}`, `${badgeInfo.icon} ${badgeInfo.text}`));
+		if (badgeInfo && effectiveStatus) {
+			head.append(el('span', `cf-status-badge cf-badge-${effectiveStatus}`, `${badgeInfo.icon} ${badgeInfo.text}`));
 		} else if (isDraftAdded) {
 			head.append(el('span', 'cf-draft-tag', 'Draft'));
 		} else {
@@ -2433,6 +2588,12 @@ function renderInspector(): HTMLElement {
 	valRes.type = 'button';
 	valRes.addEventListener('click', () => startValidation('resource', selected.id));
 	actions.append(valRes);
+
+	const explainBtn = el('button', 'cf-btn', 'Explain');
+	explainBtn.type = 'button';
+	explainBtn.title = 'Offline Explain Resource brief, blast radius, cost estimate, and draft proposals';
+	explainBtn.addEventListener('click', () => openExplainModal(selected.id));
+	actions.append(explainBtn);
 
 	const openSrc = el('button', 'cf-btn', 'Open Source');
 	openSrc.type = 'button';
@@ -3125,6 +3286,24 @@ function renderTimeline(): HTMLElement {
 	head.append(titleGroup);
 
 	const actions = el('div', 'cf-header-group');
+	if (currentRun && currentRun.events.length > 0) {
+		const pbBtn = el('button', 'cf-btn', playbackActive ? 'Exit Playback' : 'Playback');
+		pbBtn.type = 'button';
+		pbBtn.setAttribute('aria-pressed', String(playbackActive));
+		pbBtn.title = 'Scrub or play back retained validation events on the canvas (Simulated Playback)';
+		pbBtn.addEventListener('click', () => {
+			if (playbackActive) {
+				stopPlaybackTimer();
+				playbackActive = false;
+			} else {
+				playbackActive = true;
+				playbackStep = 0;
+			}
+			render();
+			applyViewportTransform();
+		});
+		actions.append(pbBtn);
+	}
 	const runBtn = el('button', 'cf-btn', currentRun ? 'Rerun' : 'Validate Architecture');
 	runBtn.type = 'button';
 	runBtn.addEventListener('click', () => startValidation('architecture'));
@@ -3151,6 +3330,44 @@ function renderTimeline(): HTMLElement {
 	if (!currentRun) {
 		panel.append(el('p', 'cf-empty-note', 'No validation run yet. Click Validate Architecture or Validate Resource to run deterministic offline checks.'));
 		return panel;
+	}
+
+	if (playbackActive) {
+		const frame = buildPlaybackFrame(currentRun, playbackStep);
+		if (frame) {
+			const pbBar = el('div', 'cf-playback-bar');
+			const left = el('div', 'cf-header-group');
+			left.append(
+				el('span', 'cf-pill cf-pill-warn', frame.label),
+				el('span', 'cf-mono', frame.activeStage),
+				el('span', 'cf-muted', frame.message)
+			);
+			const controls = el('div', 'cf-header-group');
+			const prevBtn = el('button', 'cf-btn', 'Prev');
+			prevBtn.type = 'button';
+			prevBtn.disabled = frame.stepIndex <= 0;
+			prevBtn.addEventListener('click', () => {
+				stopPlaybackTimer();
+				playbackStep = Math.max(0, playbackStep - 1);
+				render();
+				applyViewportTransform();
+			});
+			const playBtn = el('button', 'cf-btn cf-btn-primary', playbackTimer !== undefined ? 'Pause' : 'Play');
+			playBtn.type = 'button';
+			playBtn.addEventListener('click', () => togglePlaybackAuto());
+			const nextBtn = el('button', 'cf-btn', 'Next');
+			nextBtn.type = 'button';
+			nextBtn.disabled = frame.stepIndex >= frame.totalSteps - 1;
+			nextBtn.addEventListener('click', () => {
+				stopPlaybackTimer();
+				playbackStep = Math.min(frame.totalSteps - 1, playbackStep + 1);
+				render();
+				applyViewportTransform();
+			});
+			controls.append(prevBtn, playBtn, nextBtn);
+			pbBar.append(left, controls);
+			panel.append(pbBar);
+		}
 	}
 
 	const body = el('div', 'cf-timeline-body');
@@ -4173,6 +4390,375 @@ function renderHistoryModal(): HTMLElement | null {
 	return backdrop;
 }
 
+function renderReviewModal(): HTMLElement | null {
+	const current = activeGraph();
+	const plan = activePlanReview();
+	if (!reviewModalOpen || !draftDoc || !current || !plan) {
+		return null;
+	}
+	const policies = evaluateArchitecturePolicies(current, draftDoc.present.drafts, dependencyReport);
+	const cost = estimateArchitectureCost(draftDoc, state.sampleContext?.region ?? 'uksouth');
+	const approvalCheck = isPlanApprovalValid(planApproval, plan);
+
+	const backdrop = el('div', 'cf-modal-backdrop');
+	backdrop.addEventListener('click', event => {
+		if (event.target === backdrop) {
+			closeReviewModal();
+		}
+	});
+
+	const dialog = el('section', 'cf-modal cf-review-modal');
+	dialog.setAttribute('role', 'dialog');
+	dialog.setAttribute('aria-modal', 'true');
+	dialog.setAttribute('aria-label', 'Plan Review, Policy, Cost & Workflow Recipes');
+
+	const head = el('header', 'cf-modal-header');
+	const titleGroup = el('div', 'cf-header-group');
+	titleGroup.append(
+		el('strong', undefined, 'Plan Review, Policy, Cost & Recipes'),
+		el('span', 'cf-pill cf-mono', `rev ${current.sourceRevision.slice(0, 8)}`),
+		el('span', `cf-pill ${approvalCheck.valid ? 'cf-pill-ok' : ''}`, approvalCheck.valid ? '\u2713 Approved' : plan.planFingerprint)
+	);
+	const closeBtn = el('button', 'cf-btn cf-review-close', 'Close');
+	closeBtn.type = 'button';
+	closeBtn.addEventListener('click', () => closeReviewModal());
+	head.append(titleGroup, closeBtn);
+	dialog.append(head);
+
+	const body = el('div', 'cf-modal-body');
+	const tabs = el('div', 'cf-segmented');
+	for (const [id, label] of [
+		['plan', `Full-Root Plan (${plan.changes.length})`],
+		['policy', `Policies (${policies.length})`],
+		['cost', `Cost ($${cost.projectedTotalUsd.toFixed(2)}/mo)`],
+		['recipes', 'Workflow Recipes'],
+	] as const) {
+		const btn = el('button', 'cf-seg-btn', label);
+		btn.type = 'button';
+		btn.setAttribute('aria-pressed', String(reviewModalTab === id));
+		btn.addEventListener('click', () => {
+			reviewModalTab = id;
+			render();
+		});
+		tabs.append(btn);
+	}
+	body.append(tabs);
+
+	if (reviewModalTab === 'plan') {
+		body.append(el('div', 'cf-save-preview-card', plan.notice));
+		const metricsRow = el('div', 'cf-header-group');
+		metricsRow.append(
+			el('span', 'cf-pill cf-pill-ok', `+${plan.createdCount} create`),
+			el('span', 'cf-pill', `~${plan.updatedCount} update`),
+			el('span', `cf-pill ${plan.replacedCount > 0 ? 'cf-pill-err' : ''}`, `\u00b1${plan.replacedCount} replace`),
+			el('span', `cf-pill ${plan.deletedCount > 0 ? 'cf-pill-err' : ''}`, `-${plan.deletedCount} delete`),
+			el('span', 'cf-pill', `${plan.unchangedCount} unchanged`)
+		);
+		body.append(metricsRow);
+
+		if (plan.changes.length === 0) {
+			body.append(el('p', 'cf-muted', 'No draft changes in the current full-root preview. Add or edit resources, or paste a `terraform show -json` plan below to review an external CLI plan.'));
+		} else {
+			const list = el('div', 'cf-dep-list');
+			for (const ch of plan.changes) {
+				const row = el('div', `cf-diag cf-diag-${ch.risk === 'high' ? 'error' : ch.risk === 'medium' ? 'warning' : 'info'}`);
+				row.append(
+					el('div', 'cf-diag-head cf-mono', `${ch.action.toUpperCase()} · ${ch.address} (${ch.risk} risk)`),
+					el('div', 'cf-diag-msg', ch.summary)
+				);
+				list.append(row);
+			}
+			body.append(list);
+		}
+
+		// Context-bound approval card
+		const appCard = el('div', approvalCheck.valid ? 'cf-save-preview-card' : 'cf-save-bar');
+		if (approvalCheck.valid && planApproval) {
+			appCard.append(
+				el('strong', undefined, `Plan Approved (${planApproval.summary})`),
+				el('span', 'cf-mono', `Bound to ${planApproval.planFingerprint} · rev ${planApproval.baseSourceRevision.slice(0, 8)} · ${planApproval.environment}/${planApproval.region} at ${planApproval.approvedAtIso.slice(0, 19).replace('T', ' ')} UTC`)
+			);
+			const revokeBtn = el('button', 'cf-btn cf-btn-danger', 'Revoke Approval');
+			revokeBtn.type = 'button';
+			revokeBtn.addEventListener('click', () => {
+				planApproval = null;
+				render();
+			});
+			appCard.append(revokeBtn);
+		} else {
+			if (planApproval && approvalCheck.reason) {
+				body.append(el('div', 'cf-save-warnings', approvalCheck.reason));
+			}
+			if (plan.hasHighRiskChanges) {
+				const ackLabel = el('label', 'cf-export-check');
+				const ackCb = el('input');
+				ackCb.type = 'checkbox';
+				ackCb.checked = highRiskAck;
+				ackCb.addEventListener('change', () => {
+					highRiskAck = ackCb.checked;
+					render();
+				});
+				ackLabel.append(ackCb, el('span', undefined, 'I have reviewed all replacements/deletions in this full-root plan.'));
+				appCard.append(ackLabel);
+			}
+			const approveBtn = el('button', 'cf-btn cf-btn-primary', 'Approve Exact Plan');
+			approveBtn.type = 'button';
+			approveBtn.disabled = plan.hasHighRiskChanges && !highRiskAck;
+			approveBtn.addEventListener('click', () => {
+				const rec = createPlanApproval(plan, highRiskAck);
+				if (rec) {
+					planApproval = rec;
+					render();
+				}
+			});
+			appCard.append(approveBtn);
+		}
+		body.append(appCard);
+
+		// Optional `terraform show -json` CLI plan import disclosure
+		const importDetails = el('details', 'cf-opt-details');
+		importDetails.append(el('summary', 'cf-section-title', importedPlanReview ? 'Imported CLI Plan JSON (Active)' : 'Import `terraform show -json` Plan (Optional)'));
+		const ta = el('textarea', 'cf-input cf-mono cf-textarea');
+		ta.rows = 4;
+		ta.placeholder = '{"resource_changes": [...]}';
+		ta.value = planJsonPasteInput;
+		ta.setAttribute('aria-label', 'Terraform show json plan input');
+		ta.addEventListener('input', () => { planJsonPasteInput = ta.value; });
+		const importRow = el('div', 'cf-action-row');
+		const parseBtn = el('button', 'cf-btn', 'Parse Plan JSON');
+		parseBtn.type = 'button';
+		parseBtn.addEventListener('click', () => {
+			const parsed = parseTerraformPlanJson(planJsonPasteInput, current.sourceRevision, current.nodes, {
+				environment: state.sampleContext?.environment ?? 'cli-plan',
+				region: state.sampleContext?.region ?? 'uksouth',
+			});
+			if (!parsed) {
+				planJsonParseError = 'Could not parse JSON: expected a Terraform `show -json` object containing `resource_changes`.';
+			} else {
+				importedPlanReview = parsed;
+				planJsonParseError = undefined;
+				planApproval = null;
+				highRiskAck = false;
+			}
+			render();
+		});
+		importRow.append(parseBtn);
+		if (importedPlanReview) {
+			const clearImp = el('button', 'cf-btn', 'Return to Draft Preview');
+			clearImp.type = 'button';
+			clearImp.addEventListener('click', () => {
+				importedPlanReview = undefined;
+				planApproval = null;
+				render();
+			});
+			importRow.append(clearImp);
+		}
+		importDetails.append(ta, importRow);
+		if (planJsonParseError) {
+			importDetails.append(el('div', 'cf-field-error', planJsonParseError));
+		}
+		body.append(importDetails);
+	} else if (reviewModalTab === 'policy') {
+		body.append(el('p', 'cf-muted', 'Deterministic offline security, governance, and provider-lock policy checks.'));
+		if (policies.length === 0) {
+			body.append(el('div', 'cf-save-preview-card', 'No offline policy findings detected for the current draft and provider locks.'));
+		} else {
+			const list = el('div', 'cf-dep-list');
+			for (const finding of policies) {
+				const item = el('div', `cf-diag cf-diag-${finding.severity}`);
+				item.append(
+					el('div', 'cf-diag-head cf-mono', `${finding.ruleId} · ${finding.severity.toUpperCase()} · ${finding.resourceLabel}`),
+					el('div', 'cf-diag-msg', finding.title),
+					el('div', 'cf-muted', `${finding.remediation} (${finding.provenance})`)
+				);
+				if (finding.nodeId) {
+					const targetId = finding.nodeId;
+					const focusBtn = el('button', 'cf-btn', 'Focus Resource');
+					focusBtn.type = 'button';
+					focusBtn.addEventListener('click', () => {
+						closeReviewModal();
+						selectNode(targetId, { focusInCanvas: true });
+					});
+					item.append(focusBtn);
+				}
+				list.append(item);
+			}
+			body.append(list);
+		}
+	} else if (reviewModalTab === 'cost') {
+		const summaryCard = el('div', 'cf-save-preview-card');
+		summaryCard.append(
+			el('strong', undefined, `Estimated Monthly Cost: $${cost.projectedTotalUsd.toFixed(2)} ${cost.currency}/mo (Delta: ${cost.deltaTotalUsd >= 0 ? '+' : ''}$${cost.deltaTotalUsd.toFixed(2)} vs baseline $${cost.baselineTotalUsd.toFixed(2)})`),
+			el('span', 'cf-muted', `${cost.pricingCatalog} · Region: ${cost.region} · ${cost.knownCount} priced, ${cost.unknownCount} unknown (unpriced types are never fabricated).`)
+		);
+		body.append(summaryCard);
+		const list = el('div', 'cf-dep-list');
+		for (const line of cost.lines) {
+			const row = el('div', 'cf-stage-card');
+			const topRow = el('div', 'cf-block-header');
+			const priceText = line.status === 'unknown'
+				? 'Unknown'
+				: line.status === 'free'
+					? '$0.00/mo'
+					: `$${(line.projectedMonthlyUsd ?? 0).toFixed(2)}/mo${(line.deltaMonthlyUsd ?? 0) !== 0 ? ` (${(line.deltaMonthlyUsd ?? 0) >= 0 ? '+' : ''}$${(line.deltaMonthlyUsd ?? 0).toFixed(2)})` : ''}`;
+			topRow.append(el('strong', 'cf-mono', line.resourceLabel), el('span', 'cf-pill cf-mono', priceText));
+			row.append(topRow, el('span', 'cf-muted', line.basis));
+			list.append(row);
+		}
+		body.append(list);
+	} else {
+		const recipeRow = el('div', 'cf-save-bar');
+		const recField = el('label', 'cf-save-field');
+		recField.append(el('span', undefined, 'Workflow recipe'));
+		const recSel = el('select', 'cf-select');
+		recSel.setAttribute('aria-label', 'Workflow recipe');
+		for (const r of WORKFLOW_RECIPES) {
+			const opt = el('option', undefined, r.name);
+			opt.value = r.id;
+			opt.selected = selectedRecipeId === r.id;
+			recSel.append(opt);
+		}
+		recSel.addEventListener('change', () => {
+			selectedRecipeId = recSel.value as WorkflowRecipeMeta['id'];
+			render();
+		});
+		recField.append(recSel);
+		recipeRow.append(recField);
+		body.append(recipeRow);
+
+		const steps = evaluateRecipeSteps(selectedRecipeId, {
+			graph: current,
+			validationRun: currentRun,
+			policyFindings: policies,
+			costEstimate: cost,
+			planReview: plan,
+			approval: planApproval,
+			approvalValid: approvalCheck.valid,
+		});
+		const stepList = el('div', 'cf-dep-list');
+		for (const step of steps) {
+			const card = el('div', 'cf-stage-card');
+			const row = el('div', 'cf-save-preview-meta');
+			const pillCls = step.status === 'passed' ? 'cf-pill-ok' : step.status === 'failed' || step.status === 'blocked' ? 'cf-pill-err' : step.status === 'warning' ? 'cf-pill-warn' : '';
+			const left = el('div', 'cf-header-group');
+			left.append(el('strong', undefined, step.label), el('span', `cf-pill ${pillCls}`, step.status));
+			row.append(left);
+			if (step.affectedNodeIds.length > 0) {
+				const hlBtn = el('button', 'cf-btn', `Select ${step.affectedNodeIds.length} resource(s)`);
+				hlBtn.type = 'button';
+				hlBtn.addEventListener('click', () => {
+					selectedIds.clear();
+					for (const id of step.affectedNodeIds) {
+						selectedIds.add(id);
+					}
+					state = { ...state, selectedId: step.affectedNodeIds[0] ?? null, inspectorOpen: step.affectedNodeIds.length === 1 };
+					closeReviewModal();
+				});
+				row.append(hlBtn);
+			}
+			card.append(row, el('span', 'cf-muted', step.detail));
+			stepList.append(card);
+		}
+		body.append(stepList);
+	}
+
+	dialog.append(body);
+	backdrop.append(dialog);
+	return backdrop;
+}
+
+function renderExplainModal(): HTMLElement | null {
+	const current = activeGraph();
+	if (!explainNodeId || !draftDoc || !current) {
+		return null;
+	}
+	const targetNode = nodeById(explainNodeId);
+	if (!targetNode) {
+		return null;
+	}
+	const policies = evaluateArchitecturePolicies(current, draftDoc.present.drafts, dependencyReport);
+	const cost = estimateArchitectureCost(draftDoc, state.sampleContext?.region ?? 'uksouth');
+	const info = explainResource(current, targetNode.id, {
+		schema: lookupEffectiveSchema(targetNode),
+		draft: draftDoc.present.drafts[targetNode.id],
+		policyFindings: policies,
+		costEstimate: cost,
+	});
+	if (!info) {
+		return null;
+	}
+
+	const backdrop = el('div', 'cf-modal-backdrop');
+	backdrop.addEventListener('click', event => {
+		if (event.target === backdrop) {
+			closeExplainModal();
+		}
+	});
+
+	const dialog = el('section', 'cf-modal cf-explain-modal');
+	dialog.setAttribute('role', 'dialog');
+	dialog.setAttribute('aria-modal', 'true');
+	dialog.setAttribute('aria-label', `Explain Resource: ${info.node.name}`);
+
+	const head = el('header', 'cf-modal-header');
+	const titleGroup = el('div', 'cf-header-group');
+	titleGroup.append(
+		el('strong', undefined, `Explain Resource: ${info.node.name}`),
+		el('span', 'cf-pill cf-mono', info.node.resourceType ?? info.node.kind)
+	);
+	const closeBtn = el('button', 'cf-btn cf-explain-close', 'Close');
+	closeBtn.type = 'button';
+	closeBtn.addEventListener('click', () => closeExplainModal());
+	head.append(titleGroup, closeBtn);
+	dialog.append(head);
+
+	const body = el('div', 'cf-modal-body');
+	body.append(
+		el('div', 'cf-save-preview-card', info.dataScopeDisclosure),
+		el('p', undefined, info.summary)
+	);
+
+	const dl = el('dl', 'cf-meta-grid');
+	for (const [k, v] of [
+		['Schema provenance', info.schemaProvenance],
+		['Upstream dependencies', info.upstreamNames.length > 0 ? info.upstreamNames.join(', ') : 'None'],
+		['Direct downstream', info.downstreamNames.length > 0 ? info.downstreamNames.join(', ') : 'None'],
+		['Transitive blast radius', `${info.transitiveImpactCount} dependent resource(s)`],
+		['Estimated monthly cost', info.estimatedMonthlyUsd !== null ? `$${info.estimatedMonthlyUsd.toFixed(2)} USD/mo (${info.costBasis})` : info.costBasis],
+	] as const) {
+		dl.append(el('dt', undefined, k), el('dd', undefined, v));
+	}
+	body.append(dl);
+
+	if (info.proposals.length > 0) {
+		const propSec = el('div', 'cf-inspector-section');
+		propSec.append(el('h3', 'cf-section-title', `Advisor Draft Proposals (${info.proposals.length})`));
+		for (const prop of info.proposals) {
+			const card = el('div', 'cf-stage-card');
+			const row = el('div', 'cf-save-preview-meta');
+			const left = el('div', 'cf-header-group');
+			left.append(el('strong', undefined, prop.title), el('span', 'cf-pill', prop.origin));
+			const applyBtn = el('button', 'cf-btn cf-btn-primary', 'Apply to Draft');
+			applyBtn.type = 'button';
+			applyBtn.title = 'Applies as an undoable in-memory draft edit; requires normal validation and guarded save';
+			applyBtn.addEventListener('click', () => {
+				applyAdvisorProposal(info.node.id, prop);
+				render();
+			});
+			row.append(left, applyBtn);
+			card.append(row, el('span', 'cf-muted', prop.rationale));
+			propSec.append(card);
+		}
+		body.append(propSec);
+	} else {
+		body.append(el('p', 'cf-muted', 'No automated draft proposals pending for this resource.'));
+	}
+
+	dialog.append(body);
+	backdrop.append(dialog);
+	return backdrop;
+}
+
 function render(): void {
 	root.dataset.theme = state.theme;
 	root.dataset.mode = state.mode;
@@ -4258,15 +4844,33 @@ function render(): void {
 	if (historyModal) {
 		root.append(historyModal);
 	}
+	const reviewModal = renderReviewModal();
+	if (reviewModal) {
+		root.append(reviewModal);
+	}
+	const explainModal = renderExplainModal();
+	if (explainModal) {
+		root.append(explainModal);
+	}
 }
 
 // Keyboard shortcuts: Ctrl/Cmd+Z (undo), Ctrl/Cmd+Shift+Z / Ctrl+Y (redo), Ctrl/Cmd+Shift+E (export),
-// Ctrl/Cmd+Shift+H (history/experiments), / (search), ArrowUp/ArrowDown (cycle resources),
-// Enter (open resource/module), O (open source), F (fit), Escape (close overlay).
+// Ctrl/Cmd+Shift+H (history/experiments), Ctrl/Cmd+Shift+R (plan/policy/recipes), / (search),
+// ArrowUp/ArrowDown (cycle resources), Enter (open resource/module), O (open source), F (fit), Escape (close overlay).
 window.addEventListener('keydown', event => {
 	const target = event.target;
 	const inInput = target instanceof HTMLElement && target.matches('input, textarea, select');
 	if (event.key === 'Escape') {
+		if (explainNodeId) {
+			event.preventDefault();
+			closeExplainModal();
+			return;
+		}
+		if (reviewModalOpen) {
+			event.preventDefault();
+			closeReviewModal();
+			return;
+		}
 		if (historyModalOpen) {
 			event.preventDefault();
 			closeHistoryModal();
@@ -4311,6 +4915,11 @@ window.addEventListener('keydown', event => {
 	if (mod && event.shiftKey && !event.altKey && event.key.toLowerCase() === 'h') {
 		event.preventDefault();
 		openHistoryModal('checkpoints');
+		return;
+	}
+	if (mod && event.shiftKey && !event.altKey && event.key.toLowerCase() === 'r') {
+		event.preventDefault();
+		openReviewModal('plan');
 		return;
 	}
 	if (mod && !event.altKey && event.key.toLowerCase() === 'z') {
@@ -4375,6 +4984,14 @@ window.addEventListener('message', event => {
 			exportModalOpen = false;
 			extractModuleModalOpen = false;
 			historyModalOpen = false;
+			reviewModalOpen = false;
+			explainNodeId = null;
+			importedPlanReview = undefined;
+			planApproval = null;
+			highRiskAck = false;
+			stopPlaybackTimer();
+			playbackActive = false;
+			playbackStep = 0;
 			drilledModuleId = null;
 			drilledModulePath = [];
 			moduleInspections.clear();
