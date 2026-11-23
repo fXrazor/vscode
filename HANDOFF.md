@@ -639,3 +639,26 @@ Completed on `fxrazor/continue-project-handoff-review` in `E:\Orca\CloudForge-Co
 2. **Startup window noise:** upstream Code OSS's Sessions window (`window1`, `sessions.desktop.main.js`) logs `TypeError: Cannot read properties of undefined (reading 'hasMaximizedView')` and does not activate `cloudforge.cloudforge` until a project/workspace is opened; review default window/onboarding startup in `product.json` / workbench config.
 3. **Push Rust `Z:\CloudForge` `main` (`9581a4d`)** to `origin/main` when ready (this session did not modify `Z:\CloudForge`).
 
+### Canvas-First Frontend Design Polish, Installer Rebuild & Installed Upgrade (2026-11-23)
+
+Completed on `fxrazor/continue-project-handoff-review` in `E:\Orca\CloudForge-Code\dace` (`ff70423bf38`, rebased onto `d4d23652223` Sessions startup guard and `9a7bf1728de` New Architecture / root `.tf` adoption, fast-forwarded to `Z:\CloudForge-Code` `main`, and pushed to `origin/main`). Zero edits to `extensions/cloudforge/studio/**` or `Z:\CloudForge`.
+
+- **Canvas-first UI & layout polish ([layout.ts](extensions/cloudforge/src/canvas/layout.ts), [protocol.ts](extensions/cloudforge/src/canvas/protocol.ts), [canvasModel.test.ts](extensions/cloudforge/test/canvasModel.test.ts), [canvas-src/index.ts](extensions/cloudforge/canvas-src/index.ts), [canvas-src/canvas.css](extensions/cloudforge/canvas-src/canvas.css)):**
+  - Compacted the header into a single 44px row (title + single scannable status chip + clickable validation pill, `Visual Design | Technical Design`, `+ Add`, contextual `Undo`/`Redo`/`Review HCL`/`Revert Draft`, `List`/`Inspector`, consolidated `View` popover, and `Validate`).
+  - Defaulted `inspectorOpen: false` so initial/unselected canvas views open 100% full-bleed; Inspector opens contextually on resource selection, collapses on empty-canvas click, and provides a focus-restoring `×` close button.
+  - Ordered provider groups by minimum topological layer (`Azure Resources → Azure Networking → Azure Storage → Azure Compute`) and added smart horizontal/vertical edge anchors (`orientation: 'horizontal' | 'vertical'`) so cross-group arrows flow cleanly top-to-bottom without U-turns.
+  - Added CSP-safe offline SVG category glyphs (`network`, `security`, `compute`, `storage`, `module`, `resource`) inside provider-tinted card and `+ Add` menu badges, frosted group headers, glassmorphic floating zoom bar, floating `?` keyboard-shortcuts popover, and an empty starter architecture welcome card.
+
+| Artifact or check | Verified result |
+| --- | --- |
+| Unit tests, TS 6 & TS 7, esbuild, oxlint, hygiene (`ff70423bf38`) | **38/38** extension tests passed (`0` skipped), TS 6 & TS 7 clean, `esbuild.mts` + `esbuild.webview.mts` clean, `oxlint` & `build/hygiene.ts` clean (`0` errors/warnings). |
+| Live Edge Playwright polish check (`frontend-polish-verify.mjs`) | **6/6 passed**, 0 console/page errors (`headerHeight: 44`, `inspectorInitial: 0`, `glyphCount: 6`; `01-visual-dark-fullbleed.png` & `02-technical-light-validated.png` inspected). |
+| Windows x64 installer (`ff70423bf38` + Rust `311ed18`) | [CloudForgeProofSetup-x64-ff70423bf38.exe](Z:/CFStage/CloudForgeProofSetup-x64-ff70423bf38.exe), unsigned, `321,748,485` bytes, SHA-256 `306c77327525e190b0bad36a8796c7f1fd95e8a07eba6908c1eec86f4f0b4721`; Rust `311ed186308236bd11ad86baf0d965699af34d19` (`1f69b077...`), VSIX `7accf785...`. |
+| Payload hygiene & manifest verify | `media/canvas.js` & `media/canvas-style.css` present; `studio/`, `canvas-src/`, `tsconfig.typecheck.tsbuildinfo` absent; `serviceArtifact.ts --verify` passed on both built payload and installed app. |
+| Live packaged-desktop smoke ([root-adopt-and-polish-smoke.mjs](Z:/CFStage/smoke/root-adopt-and-polish-smoke.mjs), [report-root-adopt-ff70423bf38.json](Z:/CFStage/smoke/report-root-adopt-ff70423bf38.json)) | **5/5 passed** (`01-adopted-fullbleed-canvas.png`, `02-adopted-validated.png`, `03-adopted-stage5-saved.png` inspected): automatic root `.tf`/`.tfvars` adoption prompt (`Create Architecture…`) moved files into `architectures/Hub` and opened full-bleed canvas (`headerHeight: 44`, `inspectorHidden: true`, top-to-bottom + left-to-right flow, 3 SVG glyphs); live Stage 4 Rust validation passed (3/3 `Passed` pills); live Stage 5 guarded save wrote `cloudforge_draft.tf` into `architectures/Hub` and refreshed to 4 clean resources; `0` payload sidecar orphans remained after quit. |
+| Silent per-user upgrade install (`%LOCALAPPDATA%\Programs\CloudForge Proof`) | Exit code `0`; installed `serviceArtifact.ts --verify` passed (`ff70423bf38` + Rust `311ed18`), `tsconfig.typecheck.tsbuildinfo` absent, `consent.json` preserved. |
+
+**Remaining next actions:**
+1. Push local `Z:\CloudForge` `main` (`01e1b4b`) to `origin/main` when ready (this session did not modify `Z:\CloudForge`).
+2. Add Authenticode signing prior to the pre-Inno `serviceArtifact.ts --verify` gate for signed releases, and consider adding a Stage 3 provider schema snapshot download/import workflow for providers beyond the 6 bundled offline Azure networking schemas.
+
