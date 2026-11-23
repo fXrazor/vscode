@@ -50,6 +50,28 @@ export interface CanvasAnnotation {
 	readonly width: number;
 }
 
+export interface ArchitectureCheckpoint {
+	readonly id: string;
+	readonly name: string;
+	readonly createdAtIso: string;
+	readonly baseSourceRevision: string;
+	readonly nodes: readonly CanvasNodeSummary[];
+	readonly edges: readonly CanvasEdgeSummary[];
+	readonly addedIds: readonly string[];
+	readonly deletedIds: readonly string[];
+	readonly modifiedDraftIds: readonly string[];
+	readonly note?: string;
+}
+
+export interface SampleValidationContext {
+	readonly label: string;
+	readonly environment: 'dev' | 'staging' | 'prod';
+	readonly region: string;
+	readonly capturedAtIso: string;
+	readonly sourceRevision: string;
+	readonly schemaVersion: string;
+}
+
 export interface CanvasCatalogueSnapshot {
 	readonly address: string;
 	readonly version: string;
@@ -176,6 +198,8 @@ export interface CanvasViewState {
 	readonly frames: readonly CanvasFrame[];
 	readonly annotations: readonly CanvasAnnotation[];
 	readonly nodePositions: Partial<Record<CanvasViewMode, Readonly<Record<string, CanvasPoint>>>>;
+	readonly checkpoints: readonly ArchitectureCheckpoint[];
+	readonly sampleContext: SampleValidationContext | null;
 }
 
 export type CanvasNoticeKind = 'stale' | 'unavailable' | 'info';
@@ -274,6 +298,9 @@ const MAX_EXPORT_CHARS = 8 * 1024 * 1024;
 const MAX_FRAMES = 48;
 const MAX_ANNOTATIONS = 64;
 const MAX_NODE_POSITIONS = 512;
+const MAX_CHECKPOINTS = 12;
+const MAX_CHECKPOINT_NODES = 256;
+const MAX_CHECKPOINT_EDGES = 512;
 
 export function isValidTfFileName(value: unknown): value is string {
 	return typeof value === 'string'
@@ -321,6 +348,8 @@ export function defaultCanvasViewState(): CanvasViewState {
 		frames: [],
 		annotations: [],
 		nodePositions: {},
+		checkpoints: [],
+		sampleContext: null,
 	};
 }
 
@@ -508,6 +537,102 @@ export function sanitizeViewState(value: unknown): CanvasViewState {
 		}
 	}
 
+	const checkpoints: ArchitectureCheckpoint[] = [];
+	if (Array.isArray(value.checkpoints)) {
+		const seen = new Set<string>();
+		for (const raw of value.checkpoints) {
+			if (checkpoints.length >= MAX_CHECKPOINTS) {
+				break;
+			}
+			if (
+				!isRecord(raw)
+				|| !isOpaqueId(raw.id)
+				|| seen.has(raw.id)
+				|| typeof raw.baseSourceRevision !== 'string'
+				|| !/^[0-9a-f]{64}$/.test(raw.baseSourceRevision)
+				|| !Array.isArray(raw.nodes)
+				|| raw.nodes.length > MAX_CHECKPOINT_NODES
+				|| !Array.isArray(raw.edges)
+				|| raw.edges.length > MAX_CHECKPOINT_EDGES
+			) {
+				continue;
+			}
+			const nodes: CanvasNodeSummary[] = [];
+			const nodeIdSet = new Set<string>();
+			for (const n of raw.nodes) {
+				if (
+					isRecord(n)
+					&& isOpaqueId(n.id)
+					&& !nodeIdSet.has(n.id)
+					&& typeof n.kind === 'string' && n.kind.length <= 64
+					&& (n.resourceType === null || (typeof n.resourceType === 'string' && n.resourceType.length <= 128))
+					&& typeof n.name === 'string' && n.name.length <= 128
+					&& typeof n.label === 'string' && n.label.length <= 256
+					&& typeof n.hasSource === 'boolean'
+				) {
+					nodeIdSet.add(n.id);
+					nodes.push({
+						id: n.id,
+						kind: n.kind,
+						resourceType: n.resourceType,
+						name: n.name,
+						label: n.label,
+						hasSource: n.hasSource,
+					});
+				}
+			}
+			const edges: CanvasEdgeSummary[] = [];
+			for (const e of raw.edges) {
+				if (
+					isRecord(e)
+					&& isOpaqueId(e.fromId) && nodeIdSet.has(e.fromId)
+					&& isOpaqueId(e.toId) && nodeIdSet.has(e.toId)
+					&& typeof e.kind === 'string' && e.kind.length <= 64
+				) {
+					edges.push({ fromId: e.fromId, toId: e.toId, kind: e.kind });
+				}
+			}
+			const sanitizeIdList = (arr: unknown): string[] => {
+				if (!Array.isArray(arr)) {
+					return [];
+				}
+				return arr.filter(isOpaqueId).slice(0, MAX_CHECKPOINT_NODES);
+			};
+			const cpName = sanitizeShortText(raw.name, 80) || 'Checkpoint';
+			const createdAtIso = sanitizeShortText(raw.createdAtIso, 40) || new Date(0).toISOString();
+			const note = sanitizeShortText(raw.note, 240);
+			seen.add(raw.id);
+			checkpoints.push({
+				id: raw.id,
+				name: cpName,
+				createdAtIso,
+				baseSourceRevision: raw.baseSourceRevision,
+				nodes,
+				edges,
+				addedIds: sanitizeIdList(raw.addedIds),
+				deletedIds: sanitizeIdList(raw.deletedIds),
+				modifiedDraftIds: sanitizeIdList(raw.modifiedDraftIds),
+				...(note ? { note } : {}),
+			});
+		}
+	}
+
+	let sampleContext: SampleValidationContext | null = null;
+	if (isRecord(value.sampleContext)) {
+		const sc = value.sampleContext;
+		const env = sc.environment === 'dev' || sc.environment === 'staging' || sc.environment === 'prod' ? sc.environment : undefined;
+		if (
+			env
+			&& typeof sc.sourceRevision === 'string' && /^[0-9a-f]{64}$/.test(sc.sourceRevision)
+		) {
+			const label = sanitizeShortText(sc.label, 80) || 'Sample Context';
+			const region = sanitizeShortText(sc.region, 64) || 'uksouth';
+			const capturedAtIso = sanitizeShortText(sc.capturedAtIso, 40) || new Date(0).toISOString();
+			const schemaVersion = sanitizeShortText(sc.schemaVersion, 64) || 'azurerm 5.14.0';
+			sampleContext = { label, environment: env, region, capturedAtIso, sourceRevision: sc.sourceRevision, schemaVersion };
+		}
+	}
+
 	return {
 		mode,
 		theme,
@@ -523,6 +648,8 @@ export function sanitizeViewState(value: unknown): CanvasViewState {
 		frames,
 		annotations,
 		nodePositions,
+		checkpoints,
+		sampleContext,
 	};
 }
 

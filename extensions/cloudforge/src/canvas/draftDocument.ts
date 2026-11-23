@@ -36,10 +36,12 @@ export interface DraftDocument {
 
 export type DraftEdit =
 	| { readonly type: 'addResource'; readonly node: CanvasNodeSummary; readonly initialDraft?: ResourceDraft }
+	| { readonly type: 'insertPattern'; readonly patternName: string; readonly nodes: readonly CanvasNodeSummary[]; readonly edges: readonly CanvasEdgeSummary[]; readonly drafts: Readonly<Record<string, ResourceDraft>> }
 	| { readonly type: 'duplicateResource'; readonly sourceNodeId: string; readonly newNodeId: string; readonly newName: string }
 	| { readonly type: 'deleteResource'; readonly nodeId: string }
 	| { readonly type: 'connectResources'; readonly fromId: string; readonly toId: string; readonly kind?: string }
-	| { readonly type: 'updateDraft'; readonly nodeId: string; readonly draft: ResourceDraft };
+	| { readonly type: 'updateDraft'; readonly nodeId: string; readonly draft: ResourceDraft }
+	| { readonly type: 'restoreSnapshot'; readonly reason: string; readonly snapshot: DraftState };
 
 export interface DraftChangeSummary {
 	readonly dirty: boolean;
@@ -153,6 +155,58 @@ function reduceState(state: DraftState, edit: DraftEdit): { readonly next: Draft
 					nodes: [...state.nodes, edit.node],
 					drafts: nextDrafts,
 					addedIds: [...state.addedIds, edit.node.id],
+				},
+			};
+		}
+		case 'insertPattern': {
+			if (edit.nodes.length === 0) {
+				return undefined;
+			}
+			const existingIds = new Set(state.nodes.map(n => n.id));
+			const validNodes = edit.nodes.filter(n => IDENTIFIER_PATTERN.test(n.name) && !existingIds.has(n.id));
+			if (validNodes.length === 0) {
+				return undefined;
+			}
+			const newIds = new Set(validNodes.map(n => n.id));
+			const allIds = new Set([...existingIds, ...newIds]);
+			const nextEdges = [...state.edges];
+			for (const edge of edit.edges) {
+				if (
+					allIds.has(edge.fromId)
+					&& allIds.has(edge.toId)
+					&& edge.fromId !== edge.toId
+					&& !nextEdges.some(e => e.fromId === edge.fromId && e.toId === edge.toId)
+					&& !wouldCreateCycle(nextEdges, edge.fromId, edge.toId)
+				) {
+					nextEdges.push(edge);
+				}
+			}
+			const nextDrafts: Record<string, ResourceDraft> = { ...state.drafts };
+			for (const [id, draft] of Object.entries(edit.drafts)) {
+				if (newIds.has(id)) {
+					nextDrafts[id] = draft;
+				}
+			}
+			return {
+				reason: `Insert pattern: ${edit.patternName}`,
+				next: {
+					...state,
+					nodes: [...state.nodes, ...validNodes],
+					edges: nextEdges,
+					drafts: nextDrafts,
+					addedIds: [...state.addedIds, ...validNodes.map(n => n.id)],
+				},
+			};
+		}
+		case 'restoreSnapshot': {
+			return {
+				reason: edit.reason,
+				next: {
+					nodes: [...edit.snapshot.nodes],
+					edges: [...edit.snapshot.edges],
+					drafts: { ...edit.snapshot.drafts },
+					addedIds: [...edit.snapshot.addedIds],
+					deletedIds: [...edit.snapshot.deletedIds],
 				},
 			};
 		}

@@ -14,6 +14,7 @@ import {
 	alignPositionedNodes,
 	buildCanvasProjection,
 	computeFrameForNodes,
+	computeLodLevel,
 	computeSnapGuides,
 	fitRectToStage,
 	inferProvider,
@@ -29,6 +30,21 @@ import {
 	type DiagramExportOptions,
 	type ExportScope
 } from '../src/canvas/exportDiagram';
+import {
+	buildExtractModulePreview,
+	inspectModuleBoundary,
+	instantiateStarterPattern,
+	STARTER_PATTERNS
+} from '../src/canvas/patterns';
+import {
+	appendCheckpoint,
+	captureCheckpoint,
+	checkpointToDraftState,
+	compareSemanticSnapshots,
+	isSampleContextStale,
+	startExperimentSession,
+	type ExperimentSession
+} from '../src/canvas/history';
 import {
 	buildReferenceCandidates,
 	createInitialDraft,
@@ -181,6 +197,24 @@ let exportIncludeProvenance = true;
 let exportBusy = false;
 let exportStatusMessage: { readonly ok: boolean; readonly text: string } | undefined;
 let nextPresentationSeq = 1;
+const expandedPaginatedGroups = new Set<string>();
+let drilledModuleId: string | null = null;
+let lastFocusBeforeModuleDrill: HTMLElement | null = null;
+let extractModuleModalOpen = false;
+let extractModuleName = 'network_core';
+let extractModuleTab: 'call' | 'moved' | 'variables' | 'outputs' = 'call';
+let lastFocusBeforeExtractModal: HTMLElement | null = null;
+let historyModalOpen = false;
+let historyModalTab: 'checkpoints' | 'experiments' | 'sample' = 'checkpoints';
+let lastFocusBeforeHistoryModal: HTMLElement | null = null;
+let checkpointNameInput = '';
+let checkpointNoteInput = '';
+let compareCheckpointId: string | null = null;
+let experimentNameInput = '';
+let activeExperiment: ExperimentSession | undefined;
+let sampleLabelInput = 'Staging Dry-Run';
+let sampleEnvInput: 'dev' | 'staging' | 'prod' = 'staging';
+let sampleRegionInput = 'uksouth';
 
 const FRAME_COLORS: readonly CanvasFrameColor[] = ['blue', 'emerald', 'amber', 'violet', 'slate'];
 const NOTE_COLORS: readonly CanvasAnnotationColor[] = ['amber', 'blue', 'emerald', 'rose'];
@@ -363,6 +397,7 @@ function applyViewportTransform(): void {
 	if (world) {
 		world.style.transform = `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})`;
 	}
+	root.dataset.lod = computeLodLevel(viewport.zoom, projection?.visibleNodes ?? 0);
 	const zoomReadout = root.querySelector<HTMLElement>('.cf-zoom-readout');
 	if (zoomReadout) {
 		zoomReadout.textContent = `${Math.round(viewport.zoom * 100)}%`;
@@ -457,10 +492,14 @@ function selectNode(nodeId: string | null, options?: { notifyExtension?: boolean
 }
 
 function openFocusedWorkspace(nodeId: string): void {
+	const node = nodeById(nodeId);
+	if (node && node.kind.toLowerCase() === 'module') {
+		openModuleDrillDown(nodeId);
+		return;
+	}
 	lastFocusBeforeWorkspace = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 	state = { ...state, selectedId: nodeId, focusedWorkspaceOpen: true };
 	post({ type: 'selectNode', nodeId });
-	const node = nodeById(nodeId);
 	if (node) {
 		maybeRequestLiveSchema(node);
 	}
@@ -468,6 +507,107 @@ function openFocusedWorkspace(nodeId: string): void {
 	schedulePersistViewState();
 	const backBtn = root.querySelector<HTMLButtonElement>('.cf-back-btn');
 	backBtn?.focus();
+}
+
+function openModuleDrillDown(moduleNodeId: string): void {
+	lastFocusBeforeModuleDrill = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+	drilledModuleId = moduleNodeId;
+	state = { ...state, selectedId: moduleNodeId, focusedWorkspaceOpen: false };
+	post({ type: 'selectNode', nodeId: moduleNodeId });
+	render();
+	schedulePersistViewState();
+	root.querySelector<HTMLButtonElement>('.cf-module-back-btn')?.focus();
+}
+
+function closeModuleDrillDown(): void {
+	if (!drilledModuleId) {
+		return;
+	}
+	const parentId = drilledModuleId;
+	drilledModuleId = null;
+	render();
+	applyViewportTransform();
+	schedulePersistViewState();
+	if (lastFocusBeforeModuleDrill?.isConnected) {
+		lastFocusBeforeModuleDrill.focus();
+	} else {
+		root.querySelector<HTMLElement>(`.cf-node[data-node-id="${CSS.escape(parentId)}"]`)?.focus();
+	}
+}
+
+function insertStarterPatternById(patternId: string): void {
+	if (!draftDoc) {
+		return;
+	}
+	const instantiated = instantiateStarterPattern(
+		patternId,
+		draftDoc.present.nodes,
+		draftDoc.baseSourceRevision,
+		lookupEffectiveSchema,
+		nextDraftNodeSeq
+	);
+	if (!instantiated) {
+		return;
+	}
+	nextDraftNodeSeq += instantiated.nodes.length + 1;
+	const firstId = instantiated.nodes[0]?.id ?? null;
+	commitDraftEdit(
+		{
+			type: 'insertPattern',
+			patternName: instantiated.template.name,
+			nodes: instantiated.nodes,
+			edges: instantiated.edges,
+			drafts: instantiated.drafts,
+		},
+		{ selectId: firstId }
+	);
+	fitGraph(true);
+}
+
+function openExtractModuleModal(): void {
+	if (selectedIds.size === 0) {
+		return;
+	}
+	lastFocusBeforeExtractModal = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+	extractModuleModalOpen = true;
+	extractModuleTab = 'call';
+	render();
+	root.querySelector<HTMLButtonElement>('.cf-extract-close')?.focus();
+}
+
+function closeExtractModuleModal(): void {
+	if (!extractModuleModalOpen) {
+		return;
+	}
+	extractModuleModalOpen = false;
+	render();
+	applyViewportTransform();
+	if (lastFocusBeforeExtractModal?.isConnected) {
+		lastFocusBeforeExtractModal.focus();
+	}
+}
+
+function openHistoryModal(tab: 'checkpoints' | 'experiments' | 'sample' = 'checkpoints'): void {
+	if (!draftDoc) {
+		return;
+	}
+	lastFocusBeforeHistoryModal = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+	historyModalOpen = true;
+	historyModalTab = tab;
+	render();
+	root.querySelector<HTMLButtonElement>('.cf-history-close')?.focus();
+}
+
+function closeHistoryModal(): void {
+	if (!historyModalOpen) {
+		return;
+	}
+	historyModalOpen = false;
+	render();
+	applyViewportTransform();
+	if (lastFocusBeforeHistoryModal?.isConnected) {
+		lastFocusBeforeHistoryModal.focus();
+	}
 }
 
 function closeFocusedWorkspace(): void {
@@ -641,9 +781,22 @@ function rebuildProjection(): void {
 		projection = undefined;
 		return;
 	}
+	const pinnedNodeIds = new Set<string>(selectedIds);
+	if (state.selectedId) {
+		pinnedNodeIds.add(state.selectedId);
+	}
+	if (currentRun) {
+		for (const [id, res] of Object.entries(currentRun.nodeResults)) {
+			if (res.status === 'failed' || res.status === 'warning') {
+				pinnedNodeIds.add(id);
+			}
+		}
+	}
 	projection = buildCanvasProjection(current, state.mode, searchQuery, new Set(state.collapsedGroups), {
 		hiddenLayers: new Set(state.hiddenLayers),
 		nodePositions: state.nodePositions[state.mode],
+		expandedPaginatedGroups,
+		pinnedNodeIds,
 	});
 }
 
@@ -1141,6 +1294,21 @@ function renderHeader(): HTMLElement {
 			hiddenBtn.addEventListener('click', () => showAllLayers());
 			left.append(hiddenBtn);
 		}
+		if (activeExperiment) {
+			const expPill = el('button', 'cf-pill cf-pill-btn cf-pill-warn', `Experiment: ${activeExperiment.name}`);
+			expPill.type = 'button';
+			expPill.title = 'Click to compare, promote, or discard this isolated local experiment';
+			expPill.addEventListener('click', () => openHistoryModal('experiments'));
+			left.append(expPill);
+		}
+		if (state.sampleContext) {
+			const staleCtx = isSampleContextStale(state.sampleContext, current.sourceRevision);
+			const samplePill = el('button', `cf-pill cf-pill-btn ${staleCtx ? 'cf-pill-warn' : ''}`, `Sample: ${state.sampleContext.environment}${staleCtx ? ' (stale)' : ''}`);
+			samplePill.type = 'button';
+			samplePill.title = `Sample validation context "${state.sampleContext.label}" (${state.sampleContext.region}) — click to manage`;
+			samplePill.addEventListener('click', () => openHistoryModal('sample'));
+			left.append(samplePill);
+		}
 	}
 	header.append(left);
 
@@ -1171,6 +1339,7 @@ function renderHeader(): HTMLElement {
 		addSummary.title = 'Add a schema-backed Azure resource to the unsaved draft';
 		addDetails.append(addSummary);
 		const addMenu = el('div', 'cf-popover cf-popover-menu');
+		addMenu.append(el('div', 'cf-menu-section-label', 'Azure Resources'));
 		for (const item of ADDABLE_RESOURCE_TYPES) {
 			const btn = el('button', 'cf-menu-item cf-menu-item-icon');
 			btn.type = 'button';
@@ -1185,6 +1354,25 @@ function renderHeader(): HTMLElement {
 			btn.addEventListener('click', () => {
 				addDetails.open = false;
 				addNewResource(item.typeName, item.defaultName);
+			});
+			addMenu.append(btn);
+		}
+		addMenu.append(el('div', 'cf-popover-divider'), el('div', 'cf-menu-section-label', 'Starter Patterns'));
+		for (const pattern of STARTER_PATTERNS) {
+			const btn = el('button', 'cf-menu-item cf-menu-item-icon');
+			btn.type = 'button';
+			const iconWrap = el('span', 'cf-menu-glyph cf-provider-module');
+			iconWrap.append(createGlyphSvg('module'));
+			const textWrap = el('span', 'cf-menu-text');
+			textWrap.append(
+				el('span', 'cf-dep-name', `${pattern.name} (${pattern.resourceCount})`),
+				el('span', 'cf-dep-meta', `v${pattern.version} · atomic undoable pattern`)
+			);
+			btn.append(iconWrap, textWrap);
+			btn.title = pattern.description;
+			btn.addEventListener('click', () => {
+				addDetails.open = false;
+				insertStarterPatternById(pattern.id);
 			});
 			addMenu.append(btn);
 		}
@@ -1340,7 +1528,14 @@ function renderHeader(): HTMLElement {
 			viewDetails.open = false;
 			openExportModal();
 		});
-		menuActions.append(addFrameBtn, addNoteBtn, exportMenuBtn);
+		const historyMenuBtn = el('button', 'cf-btn', `History & Experiments\u2026${state.checkpoints.length > 0 ? ` (${state.checkpoints.length})` : ''}`);
+		historyMenuBtn.type = 'button';
+		historyMenuBtn.title = 'Named checkpoints, semantic compare, experiments, and sample validation context (Ctrl+Shift+H)';
+		historyMenuBtn.addEventListener('click', () => {
+			viewDetails.open = false;
+			openHistoryModal('checkpoints');
+		});
+		menuActions.append(addFrameBtn, addNoteBtn, historyMenuBtn, exportMenuBtn);
 
 		const hasCustomPositions = Object.keys(state.nodePositions[state.mode] ?? {}).length > 0;
 		if (hasCustomPositions) {
@@ -1514,13 +1709,25 @@ function renderStage(): HTMLElement {
 			head.append(
 				el('span', 'cf-group-caret', group.collapsed ? '\u25b8' : '\u25be'),
 				el('span', 'cf-group-label', group.label),
-				el('span', 'cf-group-count', `${group.visibleCount}`)
+				el('span', 'cf-group-count', group.paginatedHiddenCount > 0 ? `${group.visibleCount}/${group.totalCount}` : `${group.visibleCount}`)
 			);
 			head.addEventListener('click', event => {
 				event.stopPropagation();
 				toggleGroupCollapsed(group.id);
 			});
 			box.append(head);
+			if (!group.collapsed && group.paginatedHiddenCount > 0) {
+				const expandBtn = el('button', 'cf-group-expand-btn', `+ Show ${group.paginatedHiddenCount} more`);
+				expandBtn.type = 'button';
+				expandBtn.addEventListener('click', event => {
+					event.stopPropagation();
+					expandedPaginatedGroups.add(group.id);
+					rebuildProjection();
+					render();
+					applyViewportTransform();
+				});
+				box.append(expandBtn);
+			}
 			world.append(box);
 		}
 
@@ -1612,6 +1819,15 @@ function renderStage(): HTMLElement {
 			});
 			bar.append(frameBtn);
 
+			const extractBtn = el('button', 'cf-icon-btn', 'Extract Module');
+			extractBtn.type = 'button';
+			extractBtn.title = 'Preview Terraform module refactoring and state moved {} blocks';
+			extractBtn.addEventListener('click', event => {
+				event.stopPropagation();
+				openExtractModuleModal();
+			});
+			bar.append(extractBtn);
+
 			const clearBtn = el('button', 'cf-icon-btn', 'Clear');
 			clearBtn.type = 'button';
 			clearBtn.addEventListener('click', event => {
@@ -1629,8 +1845,17 @@ function renderStage(): HTMLElement {
 		emptyCard.append(
 			createGlyphSvg('module'),
 			el('h2', 'cf-section-title', 'Empty architecture'),
-			el('p', 'cf-muted', 'Use + Add in the top bar to place your first schema-backed Azure resource, then review and save Terraform HCL.')
+			el('p', 'cf-muted', 'Start from a curated Azure pattern in one click or use + Add in the top bar, then review and save Terraform HCL.')
 		);
+		const starterRow = el('div', 'cf-action-row');
+		for (const pattern of STARTER_PATTERNS) {
+			const btn = el('button', 'cf-btn cf-btn-primary', `+ ${pattern.name}`);
+			btn.type = 'button';
+			btn.title = pattern.description;
+			btn.addEventListener('click', () => insertStarterPatternById(pattern.id));
+			starterRow.append(btn);
+		}
+		emptyCard.append(starterRow);
 		stage.append(emptyCard);
 	}
 
@@ -1647,6 +1872,7 @@ function renderStage(): HTMLElement {
 		['Enter', 'Open focused workspace'],
 		['O', 'Open Terraform source'],
 		['Shift+Click', 'Multi-select & align'],
+		['Ctrl+Shift+H', 'History & Experiments'],
 		['Ctrl+Shift+E', 'Export SVG / PNG / MD'],
 		['Ctrl+Z', 'Undo / Shift+Z Redo'],
 		['Esc', 'Close overlay'],
@@ -2159,7 +2385,8 @@ function renderInspector(): HTMLElement {
 	);
 
 	const actions = el('div', 'cf-action-row');
-	const openWs = el('button', 'cf-btn cf-btn-primary', 'Open Resource');
+	const isModule = selected.kind.toLowerCase() === 'module';
+	const openWs = el('button', 'cf-btn cf-btn-primary', isModule ? 'Inspect Module' : 'Open Resource');
 	openWs.type = 'button';
 	openWs.addEventListener('click', () => openFocusedWorkspace(selected.id));
 	actions.append(openWs);
@@ -2836,6 +3063,15 @@ function renderTimeline(): HTMLElement {
 	const head = el('div', 'cf-timeline-header');
 	const titleGroup = el('div', 'cf-header-group');
 	titleGroup.append(el('strong', undefined, 'Runner Timeline'));
+	if (state.sampleContext) {
+		const current = activeGraph();
+		const staleCtx = current ? isSampleContextStale(state.sampleContext, current.sourceRevision) : false;
+		titleGroup.append(el(
+			'span',
+			`cf-pill ${staleCtx ? 'cf-pill-warn' : ''}`,
+			`Sample context: ${state.sampleContext.label} (${state.sampleContext.environment} · ${state.sampleContext.region})${staleCtx ? ' · stale' : ''}`
+		));
+	}
 	if (currentRun) {
 		titleGroup.append(
 			el('span', 'cf-pill cf-mono', `${currentRun.runId} · ${currentRun.scope}`),
@@ -3251,6 +3487,513 @@ function renderExportModal(): HTMLElement | null {
 	return backdrop;
 }
 
+function renderModuleDrillDown(moduleId: string): HTMLElement | null {
+	const current = activeGraph();
+	if (!current) {
+		return null;
+	}
+	const info = inspectModuleBoundary(current, moduleId);
+	if (!info) {
+		return null;
+	}
+	const isStale = notice?.kind === 'stale';
+	const overlay = el('section', 'cf-workspace');
+	overlay.setAttribute('aria-label', `Module boundary view: ${info.moduleNode.name}`);
+
+	const top = el('header', 'cf-workspace-header');
+	const leftGroup = el('div', 'cf-header-group');
+	const backBtn = el('button', 'cf-btn cf-module-back-btn', '\u2190 Back to Parent');
+	backBtn.type = 'button';
+	backBtn.addEventListener('click', () => closeModuleDrillDown());
+	const crumb = el('nav', 'cf-breadcrumb');
+	crumb.setAttribute('aria-label', 'Module breadcrumb');
+	crumb.append(
+		el('span', 'cf-muted', current.architectureName),
+		el('span', 'cf-muted', '/'),
+		el('strong', 'cf-mono', info.moduleNode.label)
+	);
+	leftGroup.append(backBtn, crumb);
+
+	const actions = el('div', 'cf-header-group');
+	actions.append(el('span', 'cf-pill cf-mono', `rev ${current.sourceRevision.slice(0, 8)}`));
+	const openSrc = el('button', 'cf-btn cf-btn-primary', 'Open Module Call (Source)');
+	openSrc.type = 'button';
+	openSrc.disabled = !info.moduleNode.hasSource || isStale;
+	openSrc.addEventListener('click', () => post({ type: 'openSource', nodeId: info.moduleNode.id }));
+	actions.append(openSrc);
+	top.append(leftGroup, actions);
+	overlay.append(top);
+
+	const columns = el('div', 'cf-workspace-columns');
+
+	const inPane = el('aside', 'cf-ws-pane');
+	inPane.append(el('h2', 'cf-ws-pane-title', `Module Inputs (${info.inputs.length})`));
+	if (info.inputs.length === 0) {
+		inPane.append(el('p', 'cf-muted', 'No upstream root resources feed this module statically.'));
+	} else {
+		const list = el('div', 'cf-dep-list');
+		for (const item of info.inputs) {
+			const btn = el('button', 'cf-dep-btn');
+			btn.type = 'button';
+			btn.append(
+				el('span', 'cf-dep-name', item.node.name),
+				el('span', 'cf-dep-meta cf-mono', `${item.edgeKind} · ${item.node.resourceType ?? item.node.kind}`)
+			);
+			btn.addEventListener('click', () => {
+				drilledModuleId = null;
+				selectNode(item.node.id, { focusInCanvas: true });
+			});
+			list.append(btn);
+		}
+		inPane.append(list);
+	}
+	columns.append(inPane);
+
+	const centerPane = el('div', 'cf-ws-pane cf-ws-center');
+	centerPane.append(
+		el('h2', 'cf-ws-pane-title', 'Module Boundary'),
+		el('p', 'cf-muted', 'Terraform child module calls preserve explicit input/output boundaries separately from visual grouping. Open the module call in native source to inspect its source reference and variable bindings.')
+	);
+	const dl = el('dl', 'cf-meta-grid');
+	for (const [k, v] of [
+		['Module declaration', info.moduleNode.label],
+		['Upstream bindings', `${info.inputs.length} input connection(s)`],
+		['Downstream consumers', `${info.outputs.length} output consumer(s)`],
+		['Boundary diagnostics', `${info.diagnostics.length} finding(s)`],
+	] as const) {
+		dl.append(el('dt', undefined, k), el('dd', k === 'Module declaration' ? 'cf-mono' : undefined, v));
+	}
+	centerPane.append(dl);
+	if (info.diagnostics.length > 0) {
+		const diagSec = el('div', 'cf-inspector-section');
+		diagSec.append(el('h3', 'cf-section-title', `Boundary diagnostics (${info.diagnostics.length})`));
+		for (const diag of info.diagnostics) {
+			const card = el('div', `cf-diag cf-diag-${diag.severity.toLowerCase()}`);
+			card.append(el('div', 'cf-diag-head cf-mono', `${diag.code} · ${diag.severity}`), el('div', 'cf-diag-msg', diag.message));
+			diagSec.append(card);
+		}
+		centerPane.append(diagSec);
+	}
+	columns.append(centerPane);
+
+	const outPane = el('aside', 'cf-ws-pane');
+	outPane.append(el('h2', 'cf-ws-pane-title', `Module Outputs (${info.outputs.length})`));
+	if (info.outputs.length === 0) {
+		outPane.append(el('p', 'cf-muted', 'No downstream root resources reference this module statically.'));
+	} else {
+		const list = el('div', 'cf-dep-list');
+		for (const item of info.outputs) {
+			const btn = el('button', 'cf-dep-btn');
+			btn.type = 'button';
+			btn.append(
+				el('span', 'cf-dep-name', item.node.name),
+				el('span', 'cf-dep-meta cf-mono', `${item.edgeKind} · ${item.node.resourceType ?? item.node.kind}`)
+			);
+			btn.addEventListener('click', () => {
+				drilledModuleId = null;
+				selectNode(item.node.id, { focusInCanvas: true });
+			});
+			list.append(btn);
+		}
+		outPane.append(list);
+	}
+	columns.append(outPane);
+
+	overlay.append(columns);
+	return overlay;
+}
+
+function renderExtractModuleModal(): HTMLElement | null {
+	const current = activeGraph();
+	if (!extractModuleModalOpen || !current) {
+		return null;
+	}
+	const preview = buildExtractModulePreview(current, [...selectedIds], extractModuleName);
+	if (!preview) {
+		return null;
+	}
+
+	const backdrop = el('div', 'cf-modal-backdrop');
+	backdrop.addEventListener('click', event => {
+		if (event.target === backdrop) {
+			closeExtractModuleModal();
+		}
+	});
+
+	const dialog = el('section', 'cf-modal cf-extract-modal');
+	dialog.setAttribute('role', 'dialog');
+	dialog.setAttribute('aria-modal', 'true');
+	dialog.setAttribute('aria-label', 'Extract to Module Refactoring Preview');
+
+	const head = el('header', 'cf-modal-header');
+	const titleGroup = el('div', 'cf-header-group');
+	titleGroup.append(
+		el('strong', undefined, 'Extract to Module (Read-Only Preview)'),
+		el('span', 'cf-pill', `${preview.selectedNodes.length} resource(s)`),
+		el('span', 'cf-pill', `${preview.inferredInputs.length} input(s) · ${preview.inferredOutputs.length} output(s)`)
+	);
+	const closeBtn = el('button', 'cf-btn cf-extract-close', 'Close');
+	closeBtn.type = 'button';
+	closeBtn.addEventListener('click', () => closeExtractModuleModal());
+	head.append(titleGroup, closeBtn);
+	dialog.append(head);
+
+	const body = el('div', 'cf-modal-body');
+	const nameBar = el('div', 'cf-save-bar');
+	const nameField = el('label', 'cf-save-field');
+	nameField.append(el('span', undefined, 'Module name'));
+	const nameInput = el('input', 'cf-input cf-mono');
+	nameInput.type = 'text';
+	nameInput.value = extractModuleName;
+	nameInput.setAttribute('aria-label', 'Extracted module name');
+	nameInput.addEventListener('change', () => {
+		extractModuleName = nameInput.value.trim() || 'network_core';
+		render();
+	});
+	nameField.append(nameInput);
+	nameBar.append(nameField);
+	body.append(nameBar);
+
+	const tabs = el('div', 'cf-segmented');
+	for (const [id, label] of [
+		['call', 'module call'],
+		['moved', 'state moved {}'],
+		['variables', `variables.tf (${preview.inferredInputs.length})`],
+		['outputs', `outputs.tf (${preview.inferredOutputs.length})`],
+	] as const) {
+		const btn = el('button', 'cf-seg-btn', label);
+		btn.type = 'button';
+		btn.setAttribute('aria-pressed', String(extractModuleTab === id));
+		btn.addEventListener('click', () => {
+			extractModuleTab = id;
+			render();
+		});
+		tabs.append(btn);
+	}
+	body.append(tabs);
+
+	const codeText = extractModuleTab === 'call'
+		? preview.moduleCallHcl
+		: extractModuleTab === 'moved'
+			? preview.movedBlocksHcl
+			: extractModuleTab === 'variables'
+				? preview.variablesHcl
+				: preview.outputsHcl;
+	body.append(
+		el('pre', 'cf-hcl-preview cf-mono', codeText),
+		el('p', 'cf-muted', 'Review state migration moved {} blocks before refactoring live Terraform modules to avoid resource replacement.')
+	);
+	dialog.append(body);
+	backdrop.append(dialog);
+	return backdrop;
+}
+
+function renderHistoryModal(): HTMLElement | null {
+	const current = activeGraph();
+	if (!historyModalOpen || !draftDoc || !current) {
+		return null;
+	}
+	const doc = draftDoc;
+
+	const backdrop = el('div', 'cf-modal-backdrop');
+	backdrop.addEventListener('click', event => {
+		if (event.target === backdrop) {
+			closeHistoryModal();
+		}
+	});
+
+	const dialog = el('section', 'cf-modal cf-history-modal');
+	dialog.setAttribute('role', 'dialog');
+	dialog.setAttribute('aria-modal', 'true');
+	dialog.setAttribute('aria-label', 'Checkpoints, Experiments & Sample Validation Context');
+
+	const head = el('header', 'cf-modal-header');
+	const titleGroup = el('div', 'cf-header-group');
+	titleGroup.append(
+		el('strong', undefined, 'History, Experiments & Sample Context'),
+		el('span', 'cf-pill cf-mono', `rev ${current.sourceRevision.slice(0, 8)}`)
+	);
+	const closeBtn = el('button', 'cf-btn cf-history-close', 'Close');
+	closeBtn.type = 'button';
+	closeBtn.addEventListener('click', () => closeHistoryModal());
+	head.append(titleGroup, closeBtn);
+	dialog.append(head);
+
+	const body = el('div', 'cf-modal-body');
+
+	const tabs = el('div', 'cf-segmented');
+	for (const [id, label] of [
+		['checkpoints', `Checkpoints (${state.checkpoints.length})`],
+		['experiments', activeExperiment ? `Experiment: ${activeExperiment.name}` : 'Experiments'],
+		['sample', state.sampleContext ? 'Sample Context (Active)' : 'Sample Context'],
+	] as const) {
+		const btn = el('button', 'cf-seg-btn', label);
+		btn.type = 'button';
+		btn.setAttribute('aria-pressed', String(historyModalTab === id));
+		btn.addEventListener('click', () => {
+			historyModalTab = id;
+			render();
+		});
+		tabs.append(btn);
+	}
+	body.append(tabs);
+
+	if (historyModalTab === 'checkpoints') {
+		const bar = el('div', 'cf-save-bar');
+		const nameIn = el('input', 'cf-input');
+		nameIn.type = 'text';
+		nameIn.placeholder = 'Checkpoint name (e.g. Pre-firewall baseline)';
+		nameIn.value = checkpointNameInput;
+		nameIn.setAttribute('aria-label', 'Checkpoint name');
+		nameIn.addEventListener('input', () => { checkpointNameInput = nameIn.value; });
+
+		const noteIn = el('input', 'cf-input');
+		noteIn.type = 'text';
+		noteIn.placeholder = 'Optional note';
+		noteIn.value = checkpointNoteInput;
+		noteIn.setAttribute('aria-label', 'Checkpoint note');
+		noteIn.addEventListener('input', () => { checkpointNoteInput = noteIn.value; });
+
+		const saveCpBtn = el('button', 'cf-btn cf-btn-primary', 'Save Checkpoint');
+		saveCpBtn.type = 'button';
+		saveCpBtn.addEventListener('click', () => {
+			const cp = captureCheckpoint(doc, checkpointNameInput || `Checkpoint ${state.checkpoints.length + 1}`, {
+				note: checkpointNoteInput || undefined,
+			});
+			state = { ...state, checkpoints: appendCheckpoint(state.checkpoints, cp) };
+			checkpointNameInput = '';
+			checkpointNoteInput = '';
+			schedulePersistViewState();
+			render();
+		});
+		bar.append(nameIn, noteIn, saveCpBtn);
+		body.append(bar);
+
+		if (state.checkpoints.length === 0) {
+			body.append(el('p', 'cf-muted', 'No named checkpoints yet. Capture a semantic checkpoint before making major architecture changes; drag-only layout moves are never duplicated into checkpoints.'));
+		} else {
+			const list = el('div', 'cf-dep-list');
+			for (const cp of [...state.checkpoints].reverse()) {
+				const card = el('div', 'cf-stage-card');
+				const row = el('div', 'cf-save-preview-meta');
+				const meta = el('div', 'cf-header-group');
+				meta.append(
+					el('strong', undefined, cp.name),
+					el('span', 'cf-pill cf-mono', `rev ${cp.baseSourceRevision.slice(0, 8)}`),
+					el('span', 'cf-pill', `${cp.nodes.length} resources · ${cp.edges.length} edges`),
+					el('span', 'cf-muted', cp.createdAtIso.slice(0, 19).replace('T', ' '))
+				);
+				const acts = el('div', 'cf-header-group');
+				const cmpBtn = el('button', 'cf-btn', compareCheckpointId === cp.id ? 'Hide Diff' : 'Compare');
+				cmpBtn.type = 'button';
+				cmpBtn.addEventListener('click', () => {
+					compareCheckpointId = compareCheckpointId === cp.id ? null : cp.id;
+					render();
+				});
+				const restoreBtn = el('button', 'cf-btn cf-btn-primary', 'Restore');
+				restoreBtn.type = 'button';
+				restoreBtn.title = 'Automatically saves a backup checkpoint of current work before restoring';
+				restoreBtn.addEventListener('click', () => {
+					const backup = captureCheckpoint(doc, `Auto-backup before restoring "${cp.name}"`);
+					state = { ...state, checkpoints: appendCheckpoint(state.checkpoints, backup) };
+					schedulePersistViewState();
+					const restoredState = checkpointToDraftState(cp, doc);
+					commitDraftEdit({ type: 'restoreSnapshot', reason: `Restore checkpoint: ${cp.name}`, snapshot: restoredState });
+					render();
+				});
+				const delBtn = el('button', 'cf-btn cf-btn-danger', 'Delete');
+				delBtn.type = 'button';
+				delBtn.addEventListener('click', () => {
+					state = { ...state, checkpoints: state.checkpoints.filter(c => c.id !== cp.id) };
+					if (compareCheckpointId === cp.id) {
+						compareCheckpointId = null;
+					}
+					schedulePersistViewState();
+					render();
+				});
+				acts.append(cmpBtn, restoreBtn, delBtn);
+				row.append(meta, acts);
+				card.append(row);
+				if (cp.note) {
+					card.append(el('p', 'cf-muted', cp.note));
+				}
+				if (compareCheckpointId === cp.id) {
+					const diff = compareSemanticSnapshots(
+						{ nodes: cp.nodes, edges: cp.edges, modifiedDraftIds: cp.modifiedDraftIds },
+						{ nodes: doc.present.nodes, edges: doc.present.edges, modifiedDraftIds: Object.keys(doc.present.drafts) }
+					);
+					const diffBox = el('div', 'cf-save-preview-card');
+					if (!diff.hasChanges) {
+						diffBox.append(el('span', 'cf-muted', 'No semantic differences between this checkpoint and the current working draft.'));
+					} else {
+						diffBox.append(el('strong', undefined, `Diff vs Current Draft: +${diff.addedNodes.length} added, -${diff.removedNodes.length} removed, ~${diff.modifiedDraftIds.length} draft change(s), +${diff.addedEdges.length}/-${diff.removedEdges.length} edges`));
+						for (const n of diff.addedNodes) {
+							diffBox.append(el('div', 'cf-mono cf-diff-add', `+ ${n.label}`));
+						}
+						for (const n of diff.removedNodes) {
+							diffBox.append(el('div', 'cf-mono cf-diff-rem', `- ${n.label}`));
+						}
+					}
+					card.append(diffBox);
+				}
+				list.append(card);
+			}
+			body.append(list);
+		}
+	} else if (historyModalTab === 'experiments') {
+		if (!activeExperiment) {
+			body.append(el('p', 'cf-muted', 'Start an isolated local design experiment to explore topology changes, review the semantic diff against your baseline, and either promote or discard cleanly without touching disk or credentials.'));
+			const bar = el('div', 'cf-save-bar');
+			const expIn = el('input', 'cf-input');
+			expIn.type = 'text';
+			expIn.placeholder = 'Experiment name (e.g. Zero-Trust Spoke Split)';
+			expIn.value = experimentNameInput;
+			expIn.setAttribute('aria-label', 'Experiment name');
+			expIn.addEventListener('input', () => { experimentNameInput = expIn.value; });
+			const startBtn = el('button', 'cf-btn cf-btn-primary', 'Start Experiment');
+			startBtn.type = 'button';
+			startBtn.addEventListener('click', () => {
+				activeExperiment = startExperimentSession(doc, experimentNameInput || 'Topology Experiment');
+				experimentNameInput = '';
+				render();
+			});
+			bar.append(expIn, startBtn);
+			body.append(bar);
+		} else {
+			const exp = activeExperiment;
+			const diff = compareSemanticSnapshots(
+				{ nodes: exp.baselineState.nodes, edges: exp.baselineState.edges, modifiedDraftIds: Object.keys(exp.baselineState.drafts) },
+				{ nodes: doc.present.nodes, edges: doc.present.edges, modifiedDraftIds: Object.keys(doc.present.drafts) }
+			);
+			const card = el('div', 'cf-save-preview-card');
+			card.append(
+				el('strong', undefined, `Active Experiment: ${exp.name}`),
+				el('span', 'cf-muted', `Started ${exp.createdAtIso.slice(0, 19).replace('T', ' ')} UTC on base rev ${exp.baseSourceRevision.slice(0, 8)}.`),
+				el('div', 'cf-mono', diff.hasChanges
+					? `Changes vs baseline: +${diff.addedNodes.length} nodes, -${diff.removedNodes.length} nodes, +${diff.addedEdges.length}/-${diff.removedEdges.length} edges`
+					: 'No changes made in this experiment yet.')
+			);
+			const acts = el('div', 'cf-action-row');
+			const promoteBtn = el('button', 'cf-btn cf-btn-primary', 'Promote to Working Draft');
+			promoteBtn.type = 'button';
+			promoteBtn.addEventListener('click', () => {
+				const cp = captureCheckpoint(doc, `Promoted experiment: ${exp.name}`);
+				state = { ...state, checkpoints: appendCheckpoint(state.checkpoints, cp) };
+				activeExperiment = undefined;
+				schedulePersistViewState();
+				render();
+			});
+			const discardBtn = el('button', 'cf-btn cf-btn-danger', 'Discard Experiment');
+			discardBtn.type = 'button';
+			discardBtn.addEventListener('click', () => {
+				const baseline = exp.baselineState;
+				activeExperiment = undefined;
+				commitDraftEdit({ type: 'restoreSnapshot', reason: `Discard experiment: ${exp.name}`, snapshot: baseline });
+				render();
+			});
+			acts.append(promoteBtn, discardBtn);
+			card.append(acts);
+			body.append(card);
+		}
+	} else {
+		body.append(el('p', 'cf-muted', 'Pin a clearly labelled, non-secret sample validation context to record target environment, region, and captured source revision across draft validation runs.'));
+		const staleCtx = isSampleContextStale(state.sampleContext, current.sourceRevision);
+		if (state.sampleContext) {
+			const ctxCard = el('div', staleCtx ? 'cf-save-warnings' : 'cf-save-preview-card');
+			ctxCard.append(
+				el('strong', undefined, `${state.sampleContext.label} (${state.sampleContext.environment} · ${state.sampleContext.region})`),
+				el('span', 'cf-mono', `Pinned to rev ${state.sampleContext.sourceRevision.slice(0, 8)} · ${state.sampleContext.schemaVersion} · captured ${state.sampleContext.capturedAtIso.slice(0, 19).replace('T', ' ')} UTC`),
+				el('span', 'cf-muted', staleCtx ? 'Freshness: STALE — architecture source revision changed since capture.' : 'Freshness: CURRENT — matches active architecture revision.')
+			);
+			const row = el('div', 'cf-action-row');
+			if (staleCtx) {
+				const refreshBtn = el('button', 'cf-btn cf-btn-primary', 'Re-pin to Current Revision');
+				refreshBtn.type = 'button';
+				refreshBtn.addEventListener('click', () => {
+					if (state.sampleContext) {
+						state = { ...state, sampleContext: { ...state.sampleContext, sourceRevision: current.sourceRevision, capturedAtIso: new Date().toISOString() } };
+						schedulePersistViewState();
+						render();
+					}
+				});
+				row.append(refreshBtn);
+			}
+			const clearBtn = el('button', 'cf-btn cf-btn-danger', 'Clear Sample Context');
+			clearBtn.type = 'button';
+			clearBtn.addEventListener('click', () => {
+				state = { ...state, sampleContext: null };
+				schedulePersistViewState();
+				render();
+			});
+			row.append(clearBtn);
+			ctxCard.append(row);
+			body.append(ctxCard);
+		}
+
+		const form = el('div', 'cf-export-controls');
+		const lblField = el('label', 'cf-export-field');
+		lblField.append(el('span', undefined, 'Context label'));
+		const lblIn = el('input', 'cf-input');
+		lblIn.type = 'text';
+		lblIn.value = sampleLabelInput;
+		lblIn.setAttribute('aria-label', 'Sample context label');
+		lblIn.addEventListener('input', () => { sampleLabelInput = lblIn.value; });
+		lblField.append(lblIn);
+
+		const envField = el('label', 'cf-export-field');
+		envField.append(el('span', undefined, 'Environment'));
+		const envSel = el('select', 'cf-select');
+		envSel.setAttribute('aria-label', 'Sample environment');
+		for (const env of ['dev', 'staging', 'prod'] as const) {
+			const opt = el('option', undefined, env);
+			opt.value = env;
+			opt.selected = sampleEnvInput === env;
+			envSel.append(opt);
+		}
+		envSel.addEventListener('change', () => { sampleEnvInput = envSel.value as 'dev' | 'staging' | 'prod'; });
+		envField.append(envSel);
+
+		const regField = el('label', 'cf-export-field');
+		regField.append(el('span', undefined, 'Target region'));
+		const azureRegions = cloudRegionsByProvider.get('azure')?.regions.map(r => r.name) ?? ['uksouth', 'ukwest', 'eastus', 'westeurope', 'swedencentral'];
+		const regSel = el('select', 'cf-select');
+		regSel.setAttribute('aria-label', 'Sample target region');
+		for (const r of azureRegions) {
+			const opt = el('option', undefined, r);
+			opt.value = r;
+			opt.selected = sampleRegionInput === r;
+			regSel.append(opt);
+		}
+		regSel.addEventListener('change', () => { sampleRegionInput = regSel.value; });
+		regField.append(regSel);
+		form.append(lblField, envField, regField);
+		body.append(form);
+
+		const pinBtn = el('button', 'cf-btn cf-btn-primary', 'Pin Sample Context');
+		pinBtn.type = 'button';
+		pinBtn.addEventListener('click', () => {
+			state = {
+				...state,
+				sampleContext: {
+					label: sampleLabelInput.trim() || 'Sample Context',
+					environment: sampleEnvInput,
+					region: sampleRegionInput,
+					capturedAtIso: new Date().toISOString(),
+					sourceRevision: current.sourceRevision,
+					schemaVersion: 'hashicorp/azurerm 5.14.0',
+				},
+			};
+			schedulePersistViewState();
+			render();
+		});
+		body.append(pinBtn);
+	}
+
+	dialog.append(body);
+	backdrop.append(dialog);
+	return backdrop;
+}
+
 function render(): void {
 	root.dataset.theme = state.theme;
 	root.dataset.mode = state.mode;
@@ -3270,6 +4013,23 @@ function render(): void {
 		return;
 	}
 
+	if (drilledModuleId) {
+		const modView = renderModuleDrillDown(drilledModuleId);
+		if (modView) {
+			root.append(modView);
+			const hModal = renderHistoryModal();
+			if (hModal) {
+				root.append(hModal);
+			}
+			const eModal = renderExportModal();
+			if (eModal) {
+				root.append(eModal);
+			}
+			return;
+		}
+		drilledModuleId = null;
+	}
+
 	const selected = nodeById(state.selectedId);
 	if (state.focusedWorkspaceOpen && selected) {
 		root.append(renderFocusedWorkspace(selected));
@@ -3283,6 +4043,10 @@ function render(): void {
 		const exportModal = renderExportModal();
 		if (exportModal) {
 			root.append(exportModal);
+		}
+		const historyModal = renderHistoryModal();
+		if (historyModal) {
+			root.append(historyModal);
 		}
 		return;
 	}
@@ -3307,15 +4071,33 @@ function render(): void {
 	if (exportModal) {
 		root.append(exportModal);
 	}
+	const extractModal = renderExtractModuleModal();
+	if (extractModal) {
+		root.append(extractModal);
+	}
+	const historyModal = renderHistoryModal();
+	if (historyModal) {
+		root.append(historyModal);
+	}
 }
 
 // Keyboard shortcuts: Ctrl/Cmd+Z (undo), Ctrl/Cmd+Shift+Z / Ctrl+Y (redo), Ctrl/Cmd+Shift+E (export),
-// / (search), ArrowUp/ArrowDown (cycle resources), Enter (open resource), O (open source), F (fit),
-// Escape (close Export modal, HCL review modal, or focused workspace).
+// Ctrl/Cmd+Shift+H (history/experiments), / (search), ArrowUp/ArrowDown (cycle resources),
+// Enter (open resource/module), O (open source), F (fit), Escape (close overlay).
 window.addEventListener('keydown', event => {
 	const target = event.target;
 	const inInput = target instanceof HTMLElement && target.matches('input, textarea, select');
 	if (event.key === 'Escape') {
+		if (historyModalOpen) {
+			event.preventDefault();
+			closeHistoryModal();
+			return;
+		}
+		if (extractModuleModalOpen) {
+			event.preventDefault();
+			closeExtractModuleModal();
+			return;
+		}
 		if (exportModalOpen) {
 			event.preventDefault();
 			closeExportModal();
@@ -3324,6 +4106,11 @@ window.addEventListener('keydown', event => {
 		if (hclReviewOpen) {
 			event.preventDefault();
 			closeHclReviewModal();
+			return;
+		}
+		if (drilledModuleId) {
+			event.preventDefault();
+			closeModuleDrillDown();
 			return;
 		}
 		if (state.focusedWorkspaceOpen) {
@@ -3340,6 +4127,11 @@ window.addEventListener('keydown', event => {
 	if (mod && event.shiftKey && !event.altKey && event.key.toLowerCase() === 'e') {
 		event.preventDefault();
 		openExportModal();
+		return;
+	}
+	if (mod && event.shiftKey && !event.altKey && event.key.toLowerCase() === 'h') {
+		event.preventDefault();
+		openHistoryModal('checkpoints');
 		return;
 	}
 	if (mod && !event.altKey && event.key.toLowerCase() === 'z') {
@@ -3402,6 +4194,11 @@ window.addEventListener('message', event => {
 			dependencyReport = null;
 			hclReviewOpen = false;
 			exportModalOpen = false;
+			extractModuleModalOpen = false;
+			historyModalOpen = false;
+			drilledModuleId = null;
+			activeExperiment = undefined;
+			expandedPaginatedGroups.clear();
 			exportBusy = false;
 			exportStatusMessage = undefined;
 			connectFeedback = undefined;

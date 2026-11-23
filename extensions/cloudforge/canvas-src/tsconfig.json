@@ -17,6 +17,8 @@
 		"../src/canvas/schemaForm.ts",
 		"../src/canvas/validationRunner.ts",
 		"../src/canvas/draftDocument.ts",
-		"../src/canvas/exportDiagram.ts"
+		"../src/canvas/exportDiagram.ts",
+		"../src/canvas/patterns.ts",
+		"../src/canvas/history.ts"
 	]
 }

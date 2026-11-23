@@ -25,6 +25,7 @@ export interface CanvasGroupLayout {
 	readonly collapsed: boolean;
 	readonly totalCount: number;
 	readonly visibleCount: number;
+	readonly paginatedHiddenCount: number;
 	readonly x: number;
 	readonly y: number;
 	readonly width: number;
@@ -71,9 +72,25 @@ export interface CanvasProjection {
 	readonly bounds: { readonly minX: number; readonly minY: number; readonly maxX: number; readonly maxY: number };
 }
 
+export type CanvasLodLevel = 'full' | 'compact' | 'minimal';
+
 export interface CanvasProjectionOptions {
 	readonly hiddenLayers?: ReadonlySet<ArchitectureLayer>;
 	readonly nodePositions?: Readonly<Record<string, CanvasPoint>>;
+	readonly maxNodesPerGroup?: number;
+	readonly expandedPaginatedGroups?: ReadonlySet<string>;
+	readonly pinnedNodeIds?: ReadonlySet<string>;
+}
+
+/** Computes responsive card detail level from zoom and visible node density for smooth large-graph panning. */
+export function computeLodLevel(zoom: number, visibleNodes: number): CanvasLodLevel {
+	if (zoom < 0.45 || (zoom < 0.65 && visibleNodes > 120)) {
+		return 'minimal';
+	}
+	if (zoom < 0.72 || visibleNodes > 80) {
+		return 'compact';
+	}
+	return 'full';
 }
 
 export interface NodeMetrics {
@@ -524,6 +541,7 @@ export function buildCanvasProjection(
 				collapsed: true,
 				totalCount: bucket.totalCount,
 				visibleCount: bucket.matched.length,
+				paginatedHiddenCount: 0,
 				x: 48,
 				y: cursorY,
 				width: COLLAPSED_W,
@@ -535,9 +553,39 @@ export function buildCanvasProjection(
 			continue;
 		}
 
+		// Bounded group pagination: keep large groups snappy while always preserving pinned/selected nodes.
+		const groupPageLimit = options?.maxNodesPerGroup ?? 24;
+		const isExpandedGroup = options?.expandedPaginatedGroups?.has(groupId) ?? false;
+		let renderNodes = bucket.matched;
+		let paginatedHiddenCount = 0;
+		if (!isExpandedGroup && bucket.matched.length > groupPageLimit) {
+			const pinned = options?.pinnedNodeIds;
+			const kept: CanvasNodeSummary[] = [];
+			const keptIds = new Set<string>();
+			if (pinned) {
+				for (const node of bucket.matched) {
+					if (pinned.has(node.id) && kept.length < groupPageLimit) {
+						kept.push(node);
+						keptIds.add(node.id);
+					}
+				}
+			}
+			for (const node of bucket.matched) {
+				if (kept.length >= groupPageLimit) {
+					break;
+				}
+				if (!keptIds.has(node.id)) {
+					kept.push(node);
+					keptIds.add(node.id);
+				}
+			}
+			renderNodes = kept;
+			paginatedHiddenCount = Math.max(0, bucket.matched.length - renderNodes.length);
+		}
+
 		// Arrange nodes in columns by topological layer within the group, capped cleanly per column.
 		const byLayer = new Map<number, CanvasNodeSummary[]>();
-		for (const node of bucket.matched) {
+		for (const node of renderNodes) {
 			const col = layers.get(node.id) ?? 0;
 			let list = byLayer.get(col);
 			if (!list) {
@@ -568,7 +616,8 @@ export function buildCanvasProjection(
 			provider: bucket.provider,
 			collapsed: false,
 			totalCount: bucket.totalCount,
-			visibleCount: bucket.matched.length,
+			visibleCount: renderNodes.length,
+			paginatedHiddenCount,
 			x: 48,
 			y: cursorY,
 			width: groupW,
