@@ -9,7 +9,9 @@ import {
 	l10n,
 	TreeItem,
 	TreeItemCollapsibleState,
+	Uri,
 	window,
+	workspace,
 	type Event,
 	type ExtensionContext,
 	type TreeDataProvider,
@@ -734,6 +736,39 @@ export function activate(context: ExtensionContext): void {
 		onLoadResourceSchema: loadResourceSchema,
 		onLoadCloudRegions: loadCloudRegions,
 		onInspectDependencies: inspectArchitectureDependencies,
+		async onExportArtifact(format, suggestedFileName, content, encoding) {
+			const folder = workspace.workspaceFolders?.[0]?.uri;
+			const defaultUri = folder ? Uri.joinPath(folder, suggestedFileName) : Uri.file(suggestedFileName);
+			const filters: Record<string, string[]> = format === 'svg'
+				? { 'SVG Diagram': ['svg'] }
+				: format === 'png'
+					? { 'PNG Image': ['png'] }
+					: { 'Markdown Report': ['md'] };
+			const target = await window.showSaveDialog({
+				defaultUri,
+				filters,
+				saveLabel: l10n.t('Export'),
+				title: l10n.t('Export CloudForge Architecture'),
+			});
+			if (!target) {
+				return { ok: false, message: l10n.t('Export cancelled.') };
+			}
+			try {
+				const bytes = encoding === 'base64'
+					? Buffer.from(content, 'base64')
+					: Buffer.from(content, 'utf8');
+				await workspace.fs.writeFile(target, bytes);
+				const openAction = l10n.t('Open File');
+				void window.showInformationMessage(l10n.t('Exported {0}.', suggestedFileName), openAction).then(choice => {
+					if (choice === openAction) {
+						void commands.executeCommand('vscode.open', target);
+					}
+				});
+				return { ok: true, message: l10n.t('Saved {0}.', target.path.split('/').pop() ?? suggestedFileName) };
+			} catch {
+				return { ok: false, message: l10n.t('Could not write the exported file.') };
+			}
+		},
 	});
 
 	context.subscriptions.push(provider, treeView, canvas);
@@ -763,6 +798,14 @@ export function activate(context: ExtensionContext): void {
 	}));
 	context.subscriptions.push(commands.registerCommand('cloudforge.cancelValidation', () => {
 		canvas.cancelValidation();
+	}));
+	context.subscriptions.push(commands.registerCommand('cloudforge.exportCanvas', () => {
+		const graph = provider.getGraph();
+		if (!graph) {
+			void window.showInformationMessage(l10n.t('Open an architecture before exporting a diagram or report.'));
+			return;
+		}
+		canvas.openExport(toCanvasSnapshot(graph, currentArchitectureName));
 	}));
 	let opening: Promise<void> | undefined;
 	context.subscriptions.push(commands.registerCommand('cloudforge.openWorkspace', () => {

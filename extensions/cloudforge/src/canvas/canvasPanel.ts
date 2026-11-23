@@ -18,6 +18,7 @@ import {
 	type DraftSaveApplyResult,
 	type DraftSaveError,
 	type DraftSavePreviewResult,
+	type ExportFormat,
 	type ExtensionToWebviewMessage
 } from './protocol';
 import type { FormSchema } from './schemaForm';
@@ -56,6 +57,12 @@ export interface CanvasPanelHost {
 	onLoadResourceSchema?(kind: 'resource' | 'dataSource', typeName: string): Promise<FormSchema | null>;
 	onLoadCloudRegions?(provider: 'azure' | 'aws' | 'google'): Promise<CanvasCloudRegionsPayload | undefined>;
 	onInspectDependencies?(workspaceId: string, architectureId: string, sourceRevision: string): Promise<CanvasDependencyReport | undefined>;
+	onExportArtifact?(
+		format: ExportFormat,
+		suggestedFileName: string,
+		content: string,
+		encoding: 'utf8' | 'base64'
+	): Promise<{ readonly ok: boolean; readonly message: string }>;
 }
 
 /**
@@ -132,6 +139,18 @@ export class CloudForgeCanvasPanel implements Disposable {
 			this.post({ type: 'runValidation', scope, ...(nodeId ? { nodeId } : {}) });
 		} else {
 			this.pendingValidation = { scope, ...(nodeId ? { nodeId } : {}) };
+		}
+	}
+
+	/** Opens the Architecture Canvas Export modal. */
+	openExport(graph: CanvasGraphSnapshot | undefined): void {
+		if (!this.panel) {
+			this.show(graph, false);
+		} else {
+			this.panel.reveal(this.panel.viewColumn ?? ViewColumn.One, false);
+		}
+		if (this.ready) {
+			this.post({ type: 'openExport' });
 		}
 	}
 
@@ -316,6 +335,22 @@ export class CloudForgeCanvasPanel implements Disposable {
 				const schema = await this.host.onLoadResourceSchema(message.kind, message.typeName);
 				if (this.panel && this.ready) {
 					this.post({ type: 'liveSchema', typeName: message.typeName, schema });
+				}
+				return;
+			}
+			case 'exportArtifact': {
+				if (!this.host.onExportArtifact) {
+					this.post({ type: 'exportResult', ok: false, message: l10n.t('Export is not available in this window.') });
+					return;
+				}
+				const result = await this.host.onExportArtifact(
+					message.format,
+					message.suggestedFileName,
+					message.content,
+					message.encoding
+				);
+				if (this.panel && this.ready) {
+					this.post({ type: 'exportResult', ok: result.ok, message: result.message });
 				}
 				return;
 			}

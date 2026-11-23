@@ -104,6 +104,12 @@
 				"title": "%command.cancelValidation%",
 				"category": "%displayName%",
 				"icon": "$(debug-stop)"
+			},
+			{
+				"command": "cloudforge.exportCanvas",
+				"title": "%command.exportCanvas%",
+				"category": "%displayName%",
+				"icon": "$(export)"
 			}
 		],
 		"views": {

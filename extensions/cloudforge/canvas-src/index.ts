@@ -11,13 +11,24 @@
 
 import {
 	adaptiveGridStep,
+	alignPositionedNodes,
 	buildCanvasProjection,
+	computeFrameForNodes,
+	computeSnapGuides,
 	fitRectToStage,
 	inferProvider,
+	layerDisplayName,
 	providerDisplayName,
+	snapCoordinate,
 	type CanvasProjection,
 	type PositionedNode
 } from '../src/canvas/layout';
+import {
+	renderArchitectureMarkdownReport,
+	renderArchitectureSvg,
+	type DiagramExportOptions,
+	type ExportScope
+} from '../src/canvas/exportDiagram';
 import {
 	buildReferenceCandidates,
 	createInitialDraft,
@@ -52,21 +63,29 @@ import {
 	type DraftEdit
 } from '../src/canvas/draftDocument';
 import {
+	ARCHITECTURE_LAYERS,
 	defaultCanvasViewState,
 	isValidTfFileName,
+	type ArchitectureLayer,
+	type CanvasAnnotation,
+	type CanvasAnnotationColor,
 	type CanvasCatalogueSnapshot,
 	type CanvasCloudRegionsPayload,
 	type CanvasDependencyReport,
+	type CanvasFrame,
+	type CanvasFrameColor,
 	type CanvasGraphSnapshot,
 	type CanvasGridMode,
 	type CanvasNodeSummary,
 	type CanvasNotice,
+	type CanvasPoint,
 	type CanvasTheme,
 	type CanvasViewMode,
 	type CanvasViewport,
 	type CanvasViewState,
 	type DraftSaveError,
 	type DraftSavePreviewResult,
+	type ExportFormat,
 	type ExtensionToWebviewMessage,
 	type WebviewToExtensionMessage
 } from '../src/canvas/protocol';
@@ -120,6 +139,51 @@ let savePhase: 'idle' | 'previewing' | 'previewReady' | 'applying' = 'idle';
 let savePreview: DraftSavePreviewResult | undefined;
 let savePreviewHcl: string | undefined;
 let saveError: DraftSaveError | undefined;
+const selectedIds = new Set<string>();
+let activeGuideX: number | undefined;
+let activeGuideY: number | undefined;
+let nodeDrag: {
+	readonly nodeId: string;
+	readonly startClientX: number;
+	readonly startClientY: number;
+	readonly originX: number;
+	readonly originY: number;
+	readonly width: number;
+	readonly height: number;
+	moved: boolean;
+} | undefined;
+let frameDrag: {
+	readonly frameId: string;
+	readonly startClientX: number;
+	readonly startClientY: number;
+	readonly originX: number;
+	readonly originY: number;
+	readonly memberOrigins: ReadonlyArray<{ readonly id: string; readonly x: number; readonly y: number }>;
+	moved: boolean;
+} | undefined;
+let noteDrag: {
+	readonly noteId: string;
+	readonly startClientX: number;
+	readonly startClientY: number;
+	readonly originX: number;
+	readonly originY: number;
+	moved: boolean;
+} | undefined;
+let exportModalOpen = false;
+let lastFocusBeforeExport: HTMLElement | null = null;
+let exportFormat: ExportFormat = 'svg';
+let exportScope: ExportScope = 'architecture';
+let exportFrameId: string | undefined;
+let exportTheme: 'light' | 'dark' = 'dark';
+let exportIncludeValidation = true;
+let exportIncludeAnnotations = true;
+let exportIncludeProvenance = true;
+let exportBusy = false;
+let exportStatusMessage: { readonly ok: boolean; readonly text: string } | undefined;
+let nextPresentationSeq = 1;
+
+const FRAME_COLORS: readonly CanvasFrameColor[] = ['blue', 'emerald', 'amber', 'violet', 'slate'];
+const NOTE_COLORS: readonly CanvasAnnotationColor[] = ['amber', 'blue', 'emerald', 'rose'];
 
 function resetSavePreviewState(): void {
 	savePhase = 'idle';
@@ -346,7 +410,33 @@ function setGrid(grid: CanvasGridMode): void {
 	schedulePersistViewState();
 }
 
-function selectNode(nodeId: string | null, options?: { notifyExtension?: boolean; focusInCanvas?: boolean }): void {
+function selectNode(nodeId: string | null, options?: { notifyExtension?: boolean; focusInCanvas?: boolean; additive?: boolean }): void {
+	if (options?.additive && nodeId !== null) {
+		if (selectedIds.has(nodeId)) {
+			selectedIds.delete(nodeId);
+		} else {
+			selectedIds.add(nodeId);
+		}
+		const primary = selectedIds.size > 0 ? [...selectedIds].at(-1)! : null;
+		const changed = state.selectedId !== primary;
+		state = {
+			...state,
+			selectedId: primary,
+			focusedWorkspaceOpen: primary !== null ? state.focusedWorkspaceOpen : false,
+			inspectorOpen: selectedIds.size === 1,
+		};
+		if (changed && options.notifyExtension !== false) {
+			post({ type: 'selectNode', nodeId: primary });
+		}
+		render();
+		applyViewportTransform();
+		schedulePersistViewState();
+		return;
+	}
+	selectedIds.clear();
+	if (nodeId !== null) {
+		selectedIds.add(nodeId);
+	}
 	const changed = state.selectedId !== nodeId;
 	state = {
 		...state,
@@ -551,7 +641,258 @@ function rebuildProjection(): void {
 		projection = undefined;
 		return;
 	}
-	projection = buildCanvasProjection(current, state.mode, searchQuery, new Set(state.collapsedGroups));
+	projection = buildCanvasProjection(current, state.mode, searchQuery, new Set(state.collapsedGroups), {
+		hiddenLayers: new Set(state.hiddenLayers),
+		nodePositions: state.nodePositions[state.mode],
+	});
+}
+
+function countHiddenFindings(): number {
+	if (!currentRun || !projection) {
+		return 0;
+	}
+	const visibleIds = new Set(projection.nodes.map(n => n.node.id));
+	let hidden = 0;
+	for (const [nodeId, res] of Object.entries(currentRun.nodeResults)) {
+		if (!visibleIds.has(nodeId) && (res.status === 'failed' || res.status === 'warning' || res.findings.length > 0)) {
+			hidden += Math.max(1, res.findings.length);
+		}
+	}
+	return hidden;
+}
+
+function toggleLayerVisibility(layer: ArchitectureLayer): void {
+	const next = new Set(state.hiddenLayers);
+	if (next.has(layer)) {
+		next.delete(layer);
+	} else {
+		next.add(layer);
+	}
+	state = { ...state, hiddenLayers: [...next] };
+	rebuildProjection();
+	render();
+	applyViewportTransform();
+	schedulePersistViewState();
+}
+
+function showAllLayers(): void {
+	if (state.hiddenLayers.length === 0) {
+		return;
+	}
+	state = { ...state, hiddenLayers: [] };
+	rebuildProjection();
+	render();
+	applyViewportTransform();
+	schedulePersistViewState();
+}
+
+function updateModeNodePositions(updates: Readonly<Record<string, CanvasPoint>>): void {
+	const existing = state.nodePositions[state.mode] ?? {};
+	state = {
+		...state,
+		nodePositions: {
+			...state.nodePositions,
+			[state.mode]: { ...existing, ...updates },
+		},
+	};
+	rebuildProjection();
+	render();
+	applyViewportTransform();
+	schedulePersistViewState();
+}
+
+function resetModeLayout(): void {
+	const nextPositions = { ...state.nodePositions };
+	delete nextPositions[state.mode];
+	state = { ...state, nodePositions: nextPositions };
+	rebuildProjection();
+	render();
+	fitGraph(true);
+}
+
+function addVisualFrame(targetNodes?: readonly PositionedNode[]): void {
+	const nodes = targetNodes && targetNodes.length > 0
+		? targetNodes
+		: projection?.nodes.filter(n => selectedIds.has(n.node.id)) ?? [];
+	const seq = nextPresentationSeq++;
+	const id = `frame-${Date.now()}-${seq}`;
+	const title = nodes.length > 0 ? `Section ${state.frames.length + 1}` : `Area ${state.frames.length + 1}`;
+	const color = FRAME_COLORS[state.frames.length % FRAME_COLORS.length];
+	const frame = nodes.length > 0
+		? computeFrameForNodes(nodes, title, id, color)
+		: {
+			id,
+			title,
+			color,
+			x: Math.round((projection?.bounds.minX ?? 48) + state.frames.length * 24),
+			y: Math.round((projection?.bounds.minY ?? 48) + state.frames.length * 24),
+			width: 360,
+			height: 220,
+		};
+	state = { ...state, frames: [...state.frames, frame] };
+	render();
+	applyViewportTransform();
+	schedulePersistViewState();
+}
+
+function addStickyAnnotation(): void {
+	const seq = nextPresentationSeq++;
+	const id = `note-${Date.now()}-${seq}`;
+	const anchorX = projection ? Math.round(projection.bounds.maxX + 36) : 80;
+	const anchorY = projection ? Math.round(projection.bounds.minY + state.annotations.length * 100) : 80;
+	const note: CanvasAnnotation = {
+		id,
+		text: 'Architecture note…',
+		color: NOTE_COLORS[state.annotations.length % NOTE_COLORS.length],
+		x: anchorX,
+		y: anchorY,
+		width: 210,
+	};
+	state = { ...state, annotations: [...state.annotations, note] };
+	render();
+	applyViewportTransform();
+	schedulePersistViewState();
+}
+
+function openExportModal(): void {
+	const current = activeGraph();
+	if (!current || !projection) {
+		return;
+	}
+	lastFocusBeforeExport = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+	exportModalOpen = true;
+	exportStatusMessage = undefined;
+	exportBusy = false;
+	exportTheme = state.theme === 'light' ? 'light' : 'dark';
+	if (exportScope === 'selection' && selectedIds.size === 0) {
+		exportScope = 'architecture';
+	}
+	if (exportScope === 'frame' && !state.frames.some(f => f.id === exportFrameId)) {
+		exportScope = state.frames.length > 0 ? 'frame' : 'architecture';
+		exportFrameId = state.frames[0]?.id;
+	}
+	render();
+	root.querySelector<HTMLButtonElement>('.cf-export-close')?.focus();
+}
+
+function closeExportModal(): void {
+	if (!exportModalOpen) {
+		return;
+	}
+	exportModalOpen = false;
+	exportBusy = false;
+	render();
+	applyViewportTransform();
+	if (lastFocusBeforeExport?.isConnected) {
+		lastFocusBeforeExport.focus();
+	}
+}
+
+function buildExportOptions(): DiagramExportOptions {
+	return {
+		scope: exportScope,
+		frameId: exportScope === 'frame' ? exportFrameId : undefined,
+		selectedIds: exportScope === 'selection' ? [...selectedIds] : undefined,
+		theme: exportTheme,
+		mode: state.mode,
+		includeValidation: exportIncludeValidation,
+		includeAnnotations: exportIncludeAnnotations,
+		includeProvenance: exportIncludeProvenance,
+		frames: state.frames,
+		annotations: state.annotations,
+		hiddenLayers: state.hiddenLayers,
+		validationRun: currentRun,
+		dependencyReport,
+	};
+}
+
+function sanitizeExportBaseName(name: string): string {
+	const cleaned = name.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48);
+	return cleaned || 'cloudforge-architecture';
+}
+
+function renderSvgToPngBase64(svgText: string, width: number, height: number): Promise<string> {
+	return new Promise((resolve, reject) => {
+		const scale = 2;
+		const canvas = document.createElement('canvas');
+		canvas.width = Math.min(4096, Math.max(1, Math.round(width * scale)));
+		canvas.height = Math.min(4096, Math.max(1, Math.round(height * scale)));
+		const ctx = canvas.getContext('2d');
+		if (!ctx) {
+			reject(new Error('Canvas 2D context unavailable'));
+			return;
+		}
+		const img = new Image();
+		img.onload = () => {
+			ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+			try {
+				const dataUrl = canvas.toDataURL('image/png');
+				const idx = dataUrl.indexOf(',');
+				if (idx < 0) {
+					reject(new Error('PNG serialization failed'));
+					return;
+				}
+				resolve(dataUrl.slice(idx + 1));
+			} catch (err) {
+				reject(err);
+			}
+		};
+		img.onerror = () => reject(new Error('Could not rasterize SVG'));
+		const utf8Bytes = new TextEncoder().encode(svgText);
+		let binary = '';
+		for (let i = 0; i < utf8Bytes.length; i++) {
+			binary += String.fromCharCode(utf8Bytes[i]);
+		}
+		img.src = `data:image/svg+xml;base64,${btoa(binary)}`;
+	});
+}
+
+async function triggerExportSave(): Promise<void> {
+	const current = activeGraph();
+	if (!current || !projection || exportBusy) {
+		return;
+	}
+	exportBusy = true;
+	exportStatusMessage = undefined;
+	render();
+	const opts = buildExportOptions();
+	const base = `${sanitizeExportBaseName(current.architectureName)}-${current.sourceRevision.slice(0, 8)}`;
+	try {
+		if (exportFormat === 'markdown') {
+			const md = renderArchitectureMarkdownReport(current, projection, opts);
+			post({
+				type: 'exportArtifact',
+				format: 'markdown',
+				suggestedFileName: `${base}.md`,
+				content: md,
+				encoding: 'utf8',
+			});
+			return;
+		}
+		const rendered = renderArchitectureSvg(current, projection, opts);
+		if (exportFormat === 'svg') {
+			post({
+				type: 'exportArtifact',
+				format: 'svg',
+				suggestedFileName: `${base}.svg`,
+				content: rendered.svg,
+				encoding: 'utf8',
+			});
+			return;
+		}
+		const pngBase64 = await renderSvgToPngBase64(rendered.svg, rendered.width, rendered.height);
+		post({
+			type: 'exportArtifact',
+			format: 'png',
+			suggestedFileName: `${base}.png`,
+			content: pngBase64,
+			encoding: 'base64',
+		});
+	} catch {
+		exportBusy = false;
+		exportStatusMessage = { ok: false, text: 'Could not generate PNG image in this environment. Try SVG or Markdown export.' };
+		render();
+	}
 }
 
 function nodeById(id: string | null): CanvasNodeSummary | undefined {
@@ -789,6 +1130,17 @@ function renderHeader(): HTMLElement {
 			});
 			left.append(runPill);
 		}
+		const hiddenFindings = countHiddenFindings();
+		if (state.hiddenLayers.length > 0 || hiddenFindings > 0) {
+			const hiddenLabel = hiddenFindings > 0
+				? `! ${hiddenFindings} hidden finding${hiddenFindings === 1 ? '' : 's'}`
+				: `${state.hiddenLayers.length} layer${state.hiddenLayers.length === 1 ? '' : 's'} hidden`;
+			const hiddenBtn = el('button', `cf-pill cf-pill-btn ${hiddenFindings > 0 ? 'cf-pill-warn' : ''}`, hiddenLabel);
+			hiddenBtn.type = 'button';
+			hiddenBtn.title = 'Click to show all architectural layers';
+			hiddenBtn.addEventListener('click', () => showAllLayers());
+			left.append(hiddenBtn);
+		}
 	}
 	header.append(left);
 
@@ -932,8 +1284,75 @@ function renderHeader(): HTMLElement {
 	gridSelect.addEventListener('change', () => setGrid(gridSelect.value as CanvasGridMode));
 	gridLabel.append(gridSelect);
 
+	const snapRow = el('label', 'cf-field-row cf-check-row');
+	snapRow.append(el('span', undefined, 'Snap to grid'));
+	const snapCb = el('input');
+	snapCb.type = 'checkbox';
+	snapCb.checked = state.snapToGrid;
+	snapCb.setAttribute('aria-label', 'Snap to grid');
+	snapCb.addEventListener('change', () => {
+		state = { ...state, snapToGrid: snapCb.checked };
+		schedulePersistViewState();
+	});
+	snapRow.append(snapCb);
+
+	const layersSection = el('div', 'cf-layers-section');
+	const layersHead = el('div', 'cf-layers-head');
+	layersHead.append(el('span', 'cf-layers-title', 'Layers'));
+	if (state.hiddenLayers.length > 0) {
+		const showAllBtn = el('button', 'cf-link-btn', 'Show all');
+		showAllBtn.type = 'button';
+		showAllBtn.addEventListener('click', () => showAllLayers());
+		layersHead.append(showAllBtn);
+	}
+	layersSection.append(layersHead);
+	const layersList = el('div', 'cf-layers-grid');
+	for (const layer of ARCHITECTURE_LAYERS) {
+		const visible = !state.hiddenLayers.includes(layer);
+		const count = projection?.layerCounts[layer] ?? 0;
+		const chip = el('button', `cf-layer-chip${visible ? ' active' : ''}`, `${layerDisplayName(layer)} (${count})`);
+		chip.type = 'button';
+		chip.setAttribute('aria-pressed', String(visible));
+		chip.addEventListener('click', () => toggleLayerVisibility(layer));
+		layersList.append(chip);
+	}
+	layersSection.append(layersList);
+
 	const menuDivider = el('div', 'cf-popover-divider');
 	const menuActions = el('div', 'cf-popover-actions');
+
+	if (current) {
+		const addFrameBtn = el('button', 'cf-btn', '+ Add Visual Frame');
+		addFrameBtn.type = 'button';
+		addFrameBtn.addEventListener('click', () => {
+			viewDetails.open = false;
+			addVisualFrame();
+		});
+		const addNoteBtn = el('button', 'cf-btn', '+ Add Sticky Note');
+		addNoteBtn.type = 'button';
+		addNoteBtn.addEventListener('click', () => {
+			viewDetails.open = false;
+			addStickyAnnotation();
+		});
+		const exportMenuBtn = el('button', 'cf-btn cf-btn-primary', 'Export Diagram / Report\u2026');
+		exportMenuBtn.type = 'button';
+		exportMenuBtn.addEventListener('click', () => {
+			viewDetails.open = false;
+			openExportModal();
+		});
+		menuActions.append(addFrameBtn, addNoteBtn, exportMenuBtn);
+
+		const hasCustomPositions = Object.keys(state.nodePositions[state.mode] ?? {}).length > 0;
+		if (hasCustomPositions) {
+			const resetLayoutBtn = el('button', 'cf-btn', 'Reset Auto-Layout');
+			resetLayoutBtn.type = 'button';
+			resetLayoutBtn.addEventListener('click', () => {
+				viewDetails.open = false;
+				resetModeLayout();
+			});
+			menuActions.append(resetLayoutBtn);
+		}
+	}
 
 	const timelineMenuBtn = el('button', 'cf-btn', timelineOpen ? 'Hide Timeline' : 'Show Timeline');
 	timelineMenuBtn.type = 'button';
@@ -960,7 +1379,7 @@ function renderHeader(): HTMLElement {
 	});
 
 	menuActions.append(timelineMenuBtn, fitMenuBtn, refreshMenuBtn);
-	viewMenu.append(themeLabel, gridLabel, menuDivider, menuActions);
+	viewMenu.append(themeLabel, gridLabel, snapRow, el('div', 'cf-popover-divider'), layersSection, menuDivider, menuActions);
 	if (catalogueSnapshots.length > 0) {
 		viewMenu.append(el('div', 'cf-field-help', `${catalogueSnapshots.length} verified provider catalogue${catalogueSnapshots.length === 1 ? '' : 's'} active`));
 	}
@@ -1076,6 +1495,11 @@ function renderStage(): HTMLElement {
 
 	const world = el('div', 'cf-world');
 	if (projection) {
+		// Persisted visual frames / sections (presentation metadata only)
+		for (const frame of state.frames) {
+			world.append(renderVisualFrame(frame));
+		}
+
 		// Groups layer
 		for (const group of projection.groups) {
 			const box = el('section', `cf-group cf-provider-${group.provider}${group.collapsed ? ' collapsed' : ''}`);
@@ -1136,8 +1560,68 @@ function renderStage(): HTMLElement {
 		for (const item of projection.nodes) {
 			world.append(renderNodeCard(item));
 		}
+
+		// Sticky annotations layer (presentation metadata only)
+		for (const note of state.annotations) {
+			world.append(renderStickyNote(note));
+		}
+
+		// Magnetic alignment guides during drag
+		if (activeGuideX !== undefined) {
+			const gx = el('div', 'cf-guide-x');
+			gx.style.left = `${activeGuideX}px`;
+			world.append(gx);
+		}
+		if (activeGuideY !== undefined) {
+			const gy = el('div', 'cf-guide-y');
+			gy.style.top = `${activeGuideY}px`;
+			world.append(gy);
+		}
 	}
 	stage.append(world);
+
+	// Contextual multi-selection alignment bar (only when 2+ nodes are selected)
+	if (projection && selectedIds.size >= 2) {
+		const multiNodes = projection.nodes.filter(n => selectedIds.has(n.node.id));
+		if (multiNodes.length >= 2) {
+			const bar = el('div', 'cf-multi-bar');
+			bar.setAttribute('role', 'toolbar');
+			bar.setAttribute('aria-label', 'Multi-selection alignment tools');
+			bar.append(el('span', 'cf-multi-count', `${multiNodes.length} selected`));
+
+			for (const [kind, label] of [
+				['left', 'Align Left'],
+				['top', 'Align Top'],
+				['centerY', 'Center Y'],
+				['distributeH', 'Distribute'],
+			] as const) {
+				const btn = el('button', 'cf-icon-btn', label);
+				btn.type = 'button';
+				btn.addEventListener('click', event => {
+					event.stopPropagation();
+					updateModeNodePositions(alignPositionedNodes(multiNodes, kind));
+				});
+				bar.append(btn);
+			}
+
+			const frameBtn = el('button', 'cf-icon-btn', 'Wrap Frame');
+			frameBtn.type = 'button';
+			frameBtn.addEventListener('click', event => {
+				event.stopPropagation();
+				addVisualFrame(multiNodes);
+			});
+			bar.append(frameBtn);
+
+			const clearBtn = el('button', 'cf-icon-btn', 'Clear');
+			clearBtn.type = 'button';
+			clearBtn.addEventListener('click', event => {
+				event.stopPropagation();
+				selectNode(null);
+			});
+			bar.append(clearBtn);
+			stage.append(bar);
+		}
+	}
 
 	// Empty architecture welcome card (e.g. brand-new starter architecture)
 	if (projection && projection.totalNodes === 0) {
@@ -1162,6 +1646,8 @@ function renderStage(): HTMLElement {
 		['F', 'Fit graph or selection'],
 		['Enter', 'Open focused workspace'],
 		['O', 'Open Terraform source'],
+		['Shift+Click', 'Multi-select & align'],
+		['Ctrl+Shift+E', 'Export SVG / PNG / MD'],
 		['Ctrl+Z', 'Undo / Shift+Z Redo'],
 		['Esc', 'Close overlay'],
 	] as const) {
@@ -1199,9 +1685,9 @@ function renderStage(): HTMLElement {
 	controls.append(zoomOut, zoomReadout, zoomIn, fitAll);
 	stage.append(controls);
 
-	// Pointer pan & wheel zoom
+	// Pointer pan & wheel zoom (plus node, frame, and sticky-note drag handling)
 	stage.addEventListener('pointerdown', event => {
-		if (event.button !== 0 || (event.target as HTMLElement).closest('.cf-node, .cf-group-header, .cf-zoom-bar, .cf-shortcuts-bar')) {
+		if (event.button !== 0 || (event.target as HTMLElement).closest('.cf-node, .cf-group-header, .cf-frame, .cf-note, .cf-multi-bar, .cf-zoom-bar, .cf-shortcuts-bar')) {
 			return;
 		}
 		stage.setPointerCapture(event.pointerId);
@@ -1209,6 +1695,89 @@ function renderStage(): HTMLElement {
 		stage.classList.add('dragging');
 	});
 	stage.addEventListener('pointermove', event => {
+		if (nodeDrag && projection) {
+			const dx = (event.clientX - nodeDrag.startClientX) / viewport.zoom;
+			const dy = (event.clientY - nodeDrag.startClientY) / viewport.zoom;
+			if (!nodeDrag.moved && Math.hypot(event.clientX - nodeDrag.startClientX, event.clientY - nodeDrag.startClientY) < 4) {
+				return;
+			}
+			nodeDrag.moved = true;
+			let nextX = nodeDrag.originX + dx;
+			let nextY = nodeDrag.originY + dy;
+			if (state.snapToGrid) {
+				nextX = snapCoordinate(nextX, 16);
+				nextY = snapCoordinate(nextY, 16);
+			}
+			const peers = projection.nodes.filter(n => n.node.id !== nodeDrag!.nodeId);
+			const snapped = computeSnapGuides({ x: nextX, y: nextY, width: nodeDrag.width, height: nodeDrag.height }, peers);
+			activeGuideX = snapped.guideX;
+			activeGuideY = snapped.guideY;
+			const existing = state.nodePositions[state.mode] ?? {};
+			state = {
+				...state,
+				nodePositions: {
+					...state.nodePositions,
+					[state.mode]: { ...existing, [nodeDrag.nodeId]: { x: Math.round(snapped.x), y: Math.round(snapped.y) } },
+				},
+			};
+			rebuildProjection();
+			render();
+			applyViewportTransform();
+			return;
+		}
+		if (frameDrag) {
+			const dx = (event.clientX - frameDrag.startClientX) / viewport.zoom;
+			const dy = (event.clientY - frameDrag.startClientY) / viewport.zoom;
+			if (!frameDrag.moved && Math.hypot(event.clientX - frameDrag.startClientX, event.clientY - frameDrag.startClientY) < 4) {
+				return;
+			}
+			frameDrag.moved = true;
+			let nextX = frameDrag.originX + dx;
+			let nextY = frameDrag.originY + dy;
+			if (state.snapToGrid) {
+				nextX = snapCoordinate(nextX, 16);
+				nextY = snapCoordinate(nextY, 16);
+			}
+			const appliedDx = Math.round(nextX) - frameDrag.originX;
+			const appliedDy = Math.round(nextY) - frameDrag.originY;
+			const nextFrames = state.frames.map(f => f.id === frameDrag!.frameId ? { ...f, x: frameDrag!.originX + appliedDx, y: frameDrag!.originY + appliedDy } : f);
+			const existing = { ...(state.nodePositions[state.mode] ?? {}) };
+			for (const member of frameDrag.memberOrigins) {
+				existing[member.id] = { x: member.x + appliedDx, y: member.y + appliedDy };
+			}
+			state = {
+				...state,
+				frames: nextFrames,
+				nodePositions: frameDrag.memberOrigins.length > 0
+					? { ...state.nodePositions, [state.mode]: existing }
+					: state.nodePositions,
+			};
+			rebuildProjection();
+			render();
+			applyViewportTransform();
+			return;
+		}
+		if (noteDrag) {
+			const dx = (event.clientX - noteDrag.startClientX) / viewport.zoom;
+			const dy = (event.clientY - noteDrag.startClientY) / viewport.zoom;
+			if (!noteDrag.moved && Math.hypot(event.clientX - noteDrag.startClientX, event.clientY - noteDrag.startClientY) < 4) {
+				return;
+			}
+			noteDrag.moved = true;
+			let nextX = noteDrag.originX + dx;
+			let nextY = noteDrag.originY + dy;
+			if (state.snapToGrid) {
+				nextX = snapCoordinate(nextX, 16);
+				nextY = snapCoordinate(nextY, 16);
+			}
+			state = {
+				...state,
+				annotations: state.annotations.map(n => n.id === noteDrag!.noteId ? { ...n, x: Math.round(nextX), y: Math.round(nextY) } : n),
+			};
+			render();
+			applyViewportTransform();
+			return;
+		}
 		if (!dragging) {
 			return;
 		}
@@ -1220,6 +1789,34 @@ function renderStage(): HTMLElement {
 		applyViewportTransform();
 	});
 	stage.addEventListener('pointerup', event => {
+		if (nodeDrag) {
+			const wasMoved = nodeDrag.moved;
+			nodeDrag = undefined;
+			activeGuideX = undefined;
+			activeGuideY = undefined;
+			if (wasMoved) {
+				render();
+				applyViewportTransform();
+				schedulePersistViewState();
+			}
+			return;
+		}
+		if (frameDrag) {
+			const wasMoved = frameDrag.moved;
+			frameDrag = undefined;
+			if (wasMoved) {
+				schedulePersistViewState();
+			}
+			return;
+		}
+		if (noteDrag) {
+			const wasMoved = noteDrag.moved;
+			noteDrag = undefined;
+			if (wasMoved) {
+				schedulePersistViewState();
+			}
+			return;
+		}
 		if (!dragging) {
 			return;
 		}
@@ -1268,8 +1865,160 @@ function zoomBy(factor: number): void {
 	schedulePersistViewState();
 }
 
+function renderVisualFrame(frame: CanvasFrame): HTMLElement {
+	const box = el('section', `cf-frame cf-frame-${frame.color}`);
+	box.dataset.frameId = frame.id;
+	box.style.left = `${frame.x}px`;
+	box.style.top = `${frame.y}px`;
+	box.style.width = `${frame.width}px`;
+	box.style.height = `${frame.height}px`;
+
+	const bar = el('div', 'cf-frame-header');
+	const titleInput = el('input', 'cf-frame-title');
+	titleInput.type = 'text';
+	titleInput.value = frame.title;
+	titleInput.setAttribute('aria-label', 'Frame title');
+	titleInput.addEventListener('pointerdown', e => e.stopPropagation());
+	titleInput.addEventListener('change', () => {
+		const nextTitle = titleInput.value.trim() || 'Section';
+		state = {
+			...state,
+			frames: state.frames.map(f => f.id === frame.id ? { ...f, title: nextTitle } : f),
+		};
+		schedulePersistViewState();
+	});
+
+	const colorBtn = el('button', 'cf-frame-action', '\u25cf');
+	colorBtn.type = 'button';
+	colorBtn.title = 'Cycle frame accent color';
+	colorBtn.setAttribute('aria-label', 'Cycle frame accent color');
+	colorBtn.addEventListener('pointerdown', e => e.stopPropagation());
+	colorBtn.addEventListener('click', event => {
+		event.stopPropagation();
+		const nextColor = FRAME_COLORS[(FRAME_COLORS.indexOf(frame.color) + 1) % FRAME_COLORS.length];
+		state = {
+			...state,
+			frames: state.frames.map(f => f.id === frame.id ? { ...f, color: nextColor } : f),
+		};
+		render();
+		applyViewportTransform();
+		schedulePersistViewState();
+	});
+
+	const delBtn = el('button', 'cf-frame-action', '\u00d7');
+	delBtn.type = 'button';
+	delBtn.title = 'Remove visual frame (keeps all resources)';
+	delBtn.setAttribute('aria-label', 'Remove visual frame');
+	delBtn.addEventListener('pointerdown', e => e.stopPropagation());
+	delBtn.addEventListener('click', event => {
+		event.stopPropagation();
+		state = { ...state, frames: state.frames.filter(f => f.id !== frame.id) };
+		render();
+		applyViewportTransform();
+		schedulePersistViewState();
+	});
+
+	bar.addEventListener('pointerdown', event => {
+		if (event.button !== 0 || (event.target as HTMLElement).closest('input, button')) {
+			return;
+		}
+		event.stopPropagation();
+		const members = (projection?.nodes ?? [])
+			.filter(n => n.x >= frame.x && n.y >= frame.y && n.x + n.width <= frame.x + frame.width && n.y + n.height <= frame.y + frame.height)
+			.map(n => ({ id: n.node.id, x: n.x, y: n.y }));
+		frameDrag = {
+			frameId: frame.id,
+			startClientX: event.clientX,
+			startClientY: event.clientY,
+			originX: frame.x,
+			originY: frame.y,
+			memberOrigins: members,
+			moved: false,
+		};
+	});
+
+	bar.append(titleInput, colorBtn, delBtn);
+	box.append(bar);
+	return box;
+}
+
+function renderStickyNote(note: CanvasAnnotation): HTMLElement {
+	const card = el('aside', `cf-note cf-note-${note.color}`);
+	card.dataset.noteId = note.id;
+	card.style.left = `${note.x}px`;
+	card.style.top = `${note.y}px`;
+	card.style.width = `${note.width}px`;
+
+	const head = el('div', 'cf-note-head');
+	head.append(el('span', 'cf-note-label', 'Note'));
+
+	const actions = el('div', 'cf-note-actions');
+	const colorBtn = el('button', 'cf-frame-action', '\u25cf');
+	colorBtn.type = 'button';
+	colorBtn.title = 'Cycle note color';
+	colorBtn.setAttribute('aria-label', 'Cycle note color');
+	colorBtn.addEventListener('pointerdown', e => e.stopPropagation());
+	colorBtn.addEventListener('click', event => {
+		event.stopPropagation();
+		const nextColor = NOTE_COLORS[(NOTE_COLORS.indexOf(note.color) + 1) % NOTE_COLORS.length];
+		state = {
+			...state,
+			annotations: state.annotations.map(n => n.id === note.id ? { ...n, color: nextColor } : n),
+		};
+		render();
+		applyViewportTransform();
+		schedulePersistViewState();
+	});
+
+	const delBtn = el('button', 'cf-frame-action', '\u00d7');
+	delBtn.type = 'button';
+	delBtn.title = 'Delete note';
+	delBtn.setAttribute('aria-label', 'Delete note');
+	delBtn.addEventListener('pointerdown', e => e.stopPropagation());
+	delBtn.addEventListener('click', event => {
+		event.stopPropagation();
+		state = { ...state, annotations: state.annotations.filter(n => n.id !== note.id) };
+		render();
+		applyViewportTransform();
+		schedulePersistViewState();
+	});
+	actions.append(colorBtn, delBtn);
+	head.append(actions);
+
+	head.addEventListener('pointerdown', event => {
+		if (event.button !== 0 || (event.target as HTMLElement).closest('button')) {
+			return;
+		}
+		event.stopPropagation();
+		noteDrag = {
+			noteId: note.id,
+			startClientX: event.clientX,
+			startClientY: event.clientY,
+			originX: note.x,
+			originY: note.y,
+			moved: false,
+		};
+	});
+
+	const textarea = el('textarea', 'cf-note-input');
+	textarea.rows = 3;
+	textarea.value = note.text;
+	textarea.setAttribute('aria-label', 'Annotation text');
+	textarea.addEventListener('pointerdown', e => e.stopPropagation());
+	textarea.addEventListener('change', () => {
+		state = {
+			...state,
+			annotations: state.annotations.map(n => n.id === note.id ? { ...n, text: textarea.value } : n),
+		};
+		schedulePersistViewState();
+	});
+
+	card.append(head, textarea);
+	return card;
+}
+
 function renderNodeCard(item: PositionedNode): HTMLElement {
-	const selected = item.node.id === state.selectedId;
+	const selected = item.node.id === state.selectedId || selectedIds.has(item.node.id);
 	const isDraftAdded = !!draftDoc && draftDoc.present.addedIds.includes(item.node.id);
 	const runResult = currentRun?.nodeResults[item.node.id];
 	const statusCls = runResult ? ` cf-status-${runResult.status}` : '';
@@ -1301,7 +2050,9 @@ function renderNodeCard(item: PositionedNode): HTMLElement {
 		}
 		card.append(top);
 		card.append(el('div', 'cf-node-name', item.node.name));
-		card.append(el('div', 'cf-node-type cf-mono', item.node.resourceType ?? item.node.label));
+		const typeEl = el('div', 'cf-node-type cf-mono', item.node.resourceType ?? item.node.label);
+		typeEl.title = item.node.resourceType ?? item.node.label;
+		card.append(typeEl);
 	} else {
 		const head = el('div', 'cf-tech-head');
 		const providerRow = el('span', 'cf-node-provider-row');
@@ -1325,9 +2076,25 @@ function renderNodeCard(item: PositionedNode): HTMLElement {
 		card.append(ports);
 	}
 
+	card.addEventListener('pointerdown', event => {
+		if (event.button !== 0) {
+			return;
+		}
+		event.stopPropagation();
+		nodeDrag = {
+			nodeId: item.node.id,
+			startClientX: event.clientX,
+			startClientY: event.clientY,
+			originX: item.x,
+			originY: item.y,
+			width: item.width,
+			height: item.height,
+			moved: false,
+		};
+	});
 	card.addEventListener('click', event => {
 		event.stopPropagation();
-		selectNode(item.node.id);
+		selectNode(item.node.id, { additive: event.shiftKey || event.ctrlKey || event.metaKey });
 	});
 	card.addEventListener('dblclick', event => {
 		event.stopPropagation();
@@ -2316,6 +3083,174 @@ function renderHclReviewModal(): HTMLElement | null {
 	return backdrop;
 }
 
+function renderExportModal(): HTMLElement | null {
+	const current = activeGraph();
+	if (!exportModalOpen || !current || !projection) {
+		return null;
+	}
+	const opts = buildExportOptions();
+	const svgPreview = exportFormat !== 'markdown' ? renderArchitectureSvg(current, projection, opts) : undefined;
+	const mdPreview = exportFormat === 'markdown' ? renderArchitectureMarkdownReport(current, projection, opts) : undefined;
+
+	const backdrop = el('div', 'cf-modal-backdrop');
+	backdrop.addEventListener('click', event => {
+		if (event.target === backdrop && !exportBusy) {
+			closeExportModal();
+		}
+	});
+
+	const dialog = el('section', 'cf-modal cf-export-modal');
+	dialog.setAttribute('role', 'dialog');
+	dialog.setAttribute('aria-modal', 'true');
+	dialog.setAttribute('aria-label', 'Export Architecture Diagram or Report');
+
+	const head = el('header', 'cf-modal-header');
+	const titleGroup = el('div', 'cf-header-group');
+	titleGroup.append(
+		el('strong', undefined, 'Export Architecture'),
+		el('span', 'cf-pill cf-mono', `rev ${current.sourceRevision.slice(0, 8)}`)
+	);
+	if (svgPreview) {
+		titleGroup.append(el('span', 'cf-pill', `${svgPreview.width}\u00d7${svgPreview.height}px \u00b7 ${svgPreview.nodeCount} resource(s)`));
+	}
+	const closeBtn = el('button', 'cf-btn cf-export-close', 'Close');
+	closeBtn.type = 'button';
+	closeBtn.disabled = exportBusy;
+	closeBtn.addEventListener('click', () => closeExportModal());
+	head.append(titleGroup, closeBtn);
+	dialog.append(head);
+
+	const body = el('div', 'cf-modal-body');
+
+	const controls = el('div', 'cf-export-controls');
+
+	const fmtField = el('label', 'cf-export-field');
+	fmtField.append(el('span', undefined, 'Format'));
+	const fmtSelect = el('select', 'cf-select');
+	fmtSelect.setAttribute('aria-label', 'Export format');
+	for (const [val, label] of [['svg', 'SVG Diagram (Vector)'], ['png', 'PNG Image (2\u00d7 Retina)'], ['markdown', 'Markdown Architecture Report']] as const) {
+		const opt = el('option', undefined, label);
+		opt.value = val;
+		opt.selected = exportFormat === val;
+		fmtSelect.append(opt);
+	}
+	fmtSelect.addEventListener('change', () => {
+		exportFormat = fmtSelect.value as ExportFormat;
+		exportStatusMessage = undefined;
+		render();
+	});
+	fmtField.append(fmtSelect);
+
+	const scopeField = el('label', 'cf-export-field');
+	scopeField.append(el('span', undefined, 'Scope'));
+	const scopeSelect = el('select', 'cf-select');
+	scopeSelect.setAttribute('aria-label', 'Export scope');
+	const fullOpt = el('option', undefined, 'Full Architecture');
+	fullOpt.value = 'architecture';
+	fullOpt.selected = exportScope === 'architecture';
+	scopeSelect.append(fullOpt);
+	if (selectedIds.size > 0) {
+		const selOpt = el('option', undefined, `Selection (${selectedIds.size})`);
+		selOpt.value = 'selection';
+		selOpt.selected = exportScope === 'selection';
+		scopeSelect.append(selOpt);
+	}
+	for (const frame of state.frames) {
+		const fOpt = el('option', undefined, `Frame: ${frame.title}`);
+		fOpt.value = `frame:${frame.id}`;
+		fOpt.selected = exportScope === 'frame' && exportFrameId === frame.id;
+		scopeSelect.append(fOpt);
+	}
+	scopeSelect.addEventListener('change', () => {
+		if (scopeSelect.value.startsWith('frame:')) {
+			exportScope = 'frame';
+			exportFrameId = scopeSelect.value.slice('frame:'.length);
+		} else {
+			exportScope = scopeSelect.value as ExportScope;
+			exportFrameId = undefined;
+		}
+		render();
+	});
+	scopeField.append(scopeSelect);
+
+	const themeField = el('label', 'cf-export-field');
+	themeField.append(el('span', undefined, 'Theme'));
+	const themeSel = el('select', 'cf-select');
+	themeSel.setAttribute('aria-label', 'Export theme');
+	for (const [val, label] of [['dark', 'Dark'], ['light', 'Light']] as const) {
+		const opt = el('option', undefined, label);
+		opt.value = val;
+		opt.selected = exportTheme === val;
+		themeSel.append(opt);
+	}
+	themeSel.disabled = exportFormat === 'markdown';
+	themeSel.addEventListener('change', () => {
+		exportTheme = themeSel.value as 'light' | 'dark';
+		render();
+	});
+	themeField.append(themeSel);
+
+	controls.append(fmtField, scopeField, themeField);
+	body.append(controls);
+
+	const toggles = el('div', 'cf-export-toggles');
+	const makeCheck = (labelText: string, checked: boolean, onChange: (val: boolean) => void) => {
+		const lbl = el('label', 'cf-export-check');
+		const cb = el('input');
+		cb.type = 'checkbox';
+		cb.checked = checked;
+		cb.addEventListener('change', () => {
+			onChange(cb.checked);
+			render();
+		});
+		lbl.append(cb, el('span', undefined, labelText));
+		return lbl;
+	};
+	toggles.append(
+		makeCheck('Include validation status', exportIncludeValidation, v => { exportIncludeValidation = v; }),
+		makeCheck('Include annotations', exportIncludeAnnotations, v => { exportIncludeAnnotations = v; }),
+		makeCheck('Include revision provenance footer', exportIncludeProvenance, v => { exportIncludeProvenance = v; })
+	);
+	body.append(toggles);
+
+	if (exportStatusMessage) {
+		const msgBox = el('div', exportStatusMessage.ok ? 'cf-save-preview-card' : 'cf-save-error');
+		msgBox.setAttribute('role', 'status');
+		msgBox.textContent = exportStatusMessage.text;
+		body.append(msgBox);
+	}
+
+	if (svgPreview) {
+		const previewBox = el('div', 'cf-export-preview-stage');
+		try {
+			const parsed = new DOMParser().parseFromString(svgPreview.svg, 'image/svg+xml');
+			const svgNode = parsed.documentElement;
+			if (svgNode && svgNode.nodeName.toLowerCase() === 'svg') {
+				const imported = document.importNode(svgNode, true);
+				imported.setAttribute('class', 'cf-export-preview-svg');
+				previewBox.append(imported);
+			}
+		} catch {
+			previewBox.append(el('p', 'cf-muted', 'SVG preview ready to export.'));
+		}
+		body.append(previewBox);
+	} else if (mdPreview !== undefined) {
+		body.append(el('pre', 'cf-hcl-preview cf-mono', mdPreview));
+	}
+
+	const footer = el('div', 'cf-modal-header');
+	footer.append(el('span', 'cf-muted', 'Exports are rendered offline from the captured source revision with no external network requests.'));
+	const saveExportBtn = el('button', 'cf-btn cf-btn-primary cf-export-save-btn', exportBusy ? 'Exporting\u2026' : 'Save Export\u2026');
+	saveExportBtn.type = 'button';
+	saveExportBtn.disabled = exportBusy;
+	saveExportBtn.addEventListener('click', () => { void triggerExportSave(); });
+	footer.append(saveExportBtn);
+
+	dialog.append(body, footer);
+	backdrop.append(dialog);
+	return backdrop;
+}
+
 function render(): void {
 	root.dataset.theme = state.theme;
 	root.dataset.mode = state.mode;
@@ -2345,6 +3280,10 @@ function render(): void {
 		if (modal) {
 			root.append(modal);
 		}
+		const exportModal = renderExportModal();
+		if (exportModal) {
+			root.append(exportModal);
+		}
 		return;
 	}
 
@@ -2364,15 +3303,24 @@ function render(): void {
 	if (modal) {
 		root.append(modal);
 	}
+	const exportModal = renderExportModal();
+	if (exportModal) {
+		root.append(exportModal);
+	}
 }
 
-// Keyboard shortcuts: Ctrl/Cmd+Z (undo), Ctrl/Cmd+Shift+Z / Ctrl+Y (redo), / (search),
-// ArrowUp/ArrowDown (cycle resources), Enter (open resource), O (open source), F (fit),
-// Escape (close HCL review modal or focused workspace).
+// Keyboard shortcuts: Ctrl/Cmd+Z (undo), Ctrl/Cmd+Shift+Z / Ctrl+Y (redo), Ctrl/Cmd+Shift+E (export),
+// / (search), ArrowUp/ArrowDown (cycle resources), Enter (open resource), O (open source), F (fit),
+// Escape (close Export modal, HCL review modal, or focused workspace).
 window.addEventListener('keydown', event => {
 	const target = event.target;
 	const inInput = target instanceof HTMLElement && target.matches('input, textarea, select');
 	if (event.key === 'Escape') {
+		if (exportModalOpen) {
+			event.preventDefault();
+			closeExportModal();
+			return;
+		}
 		if (hclReviewOpen) {
 			event.preventDefault();
 			closeHclReviewModal();
@@ -2389,6 +3337,11 @@ window.addEventListener('keydown', event => {
 		return;
 	}
 	const mod = event.ctrlKey || event.metaKey;
+	if (mod && event.shiftKey && !event.altKey && event.key.toLowerCase() === 'e') {
+		event.preventDefault();
+		openExportModal();
+		return;
+	}
 	if (mod && !event.altKey && event.key.toLowerCase() === 'z') {
 		event.preventDefault();
 		if (event.shiftKey) {
@@ -2448,10 +3401,17 @@ window.addEventListener('message', event => {
 			draftDoc = createDraftDocument(message.graph);
 			dependencyReport = null;
 			hclReviewOpen = false;
+			exportModalOpen = false;
+			exportBusy = false;
+			exportStatusMessage = undefined;
 			connectFeedback = undefined;
 			validationInFlight = false;
 			resetSavePreviewState();
 			state = message.viewState;
+			selectedIds.clear();
+			if (state.selectedId) {
+				selectedIds.add(state.selectedId);
+			}
 			notice = message.notice;
 			currentRun = currentRun && currentRun.architectureId === message.graph.architectureId
 				? syncRunWithRevision(currentRun, message.graph.sourceRevision)
@@ -2536,10 +3496,18 @@ window.addEventListener('message', event => {
 			break;
 		case 'dependencyReport':
 			dependencyReport = message.report;
-			if (state.inspectorOpen) {
+			if (state.inspectorOpen || exportModalOpen) {
 				render();
 				applyViewportTransform();
 			}
+			break;
+		case 'openExport':
+			openExportModal();
+			break;
+		case 'exportResult':
+			exportBusy = false;
+			exportStatusMessage = { ok: message.ok, text: message.message };
+			render();
 			break;
 	}
 });

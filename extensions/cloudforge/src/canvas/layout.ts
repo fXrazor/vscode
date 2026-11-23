@@ -7,9 +7,13 @@
 // CloudForge Architecture Canvas. Shared by both the Webview renderer and unit tests.
 
 import type {
+	ArchitectureLayer,
 	CanvasEdgeSummary,
+	CanvasFrame,
+	CanvasFrameColor,
 	CanvasGraphSnapshot,
 	CanvasNodeSummary,
+	CanvasPoint,
 	CanvasViewMode,
 	CanvasViewport
 } from './protocol';
@@ -31,6 +35,7 @@ export interface PositionedNode {
 	readonly node: CanvasNodeSummary;
 	readonly groupId: string;
 	readonly provider: string;
+	readonly layer: ArchitectureLayer;
 	readonly x: number;
 	readonly y: number;
 	readonly width: number;
@@ -59,9 +64,16 @@ export interface CanvasProjection {
 	readonly totalNodes: number;
 	readonly visibleNodes: number;
 	readonly hiddenByFilterOrCollapse: number;
+	readonly hiddenByLayerCount: number;
+	readonly layerCounts: Readonly<Record<ArchitectureLayer, number>>;
 	readonly totalEdges: number;
 	readonly visibleEdges: number;
 	readonly bounds: { readonly minX: number; readonly minY: number; readonly maxX: number; readonly maxY: number };
+}
+
+export interface CanvasProjectionOptions {
+	readonly hiddenLayers?: ReadonlySet<ArchitectureLayer>;
+	readonly nodePositions?: Readonly<Record<string, CanvasPoint>>;
 }
 
 export interface NodeMetrics {
@@ -74,7 +86,7 @@ export interface NodeMetrics {
 export function metricsForMode(mode: CanvasViewMode): NodeMetrics {
 	return mode === 'technical'
 		? { width: 264, height: 118, gapX: 68, gapY: 40 }
-		: { width: 212, height: 88, gapX: 56, gapY: 36 };
+		: { width: 224, height: 94, gapX: 56, gapY: 36 };
 }
 
 export function inferProvider(node: CanvasNodeSummary): string {
@@ -136,6 +148,154 @@ export function providerDisplayName(provider: string): string {
 		case 'module': return 'Modules';
 		default: return 'Terraform';
 	}
+}
+
+/** Classifies a resource into one of the five architectural layers for visibility filtering. */
+export function layerForNode(node: CanvasNodeSummary): ArchitectureLayer {
+	const type = (node.resourceType ?? '').toLowerCase();
+	if (/(security_group|key_vault|kms|iam|role|policy|secret|identity|managed_identity|rbac|cert|firewall|waf|defender|guardduty|sentinel)/.test(type)) {
+		return 'security';
+	}
+	if (/(monitor|log|insight|metric|alarm|alert|cloudwatch|diagnostic|telemetry|trace|dashboard)/.test(type)) {
+		return 'operations';
+	}
+	if (/(kubernetes|aks|eks|gke|cluster|sql|database|db|postgres|mysql|cosmos|dynamo|rds|redis|spanner|bigquery|service_plan|eventhub|servicebus|kafka|mq)/.test(type)) {
+		return 'platforms';
+	}
+	if (node.kind.toLowerCase() === 'module' || /(app_service|web_app|function|lambda|container|ecs|cloud_run|vm|virtual_machine|instance|compute|api_management|static_web_app)/.test(type)) {
+		return 'applications';
+	}
+	return 'infrastructure';
+}
+
+export function layerDisplayName(layer: ArchitectureLayer): string {
+	switch (layer) {
+		case 'infrastructure': return 'Infrastructure';
+		case 'platforms': return 'Platforms';
+		case 'applications': return 'Applications';
+		case 'security': return 'Security';
+		case 'operations': return 'Operations';
+	}
+}
+
+export function snapCoordinate(value: number, step = 16): number {
+	return Math.round(value / step) * step;
+}
+
+export function computeSnapGuides(
+	moving: { readonly x: number; readonly y: number; readonly width: number; readonly height: number },
+	peers: readonly PositionedNode[],
+	threshold = 6
+): { readonly x: number; readonly y: number; readonly guideX?: number; readonly guideY?: number } {
+	let snappedX = moving.x;
+	let snappedY = moving.y;
+	let guideX: number | undefined;
+	let guideY: number | undefined;
+	let bestDx = threshold + 1;
+	let bestDy = threshold + 1;
+	const movingCx = moving.x + moving.width / 2;
+	const movingCy = moving.y + moving.height / 2;
+
+	for (const peer of peers) {
+		const dxLeft = Math.abs(peer.x - moving.x);
+		if (dxLeft < bestDx) {
+			bestDx = dxLeft;
+			snappedX = peer.x;
+			guideX = peer.x;
+		}
+		const peerCx = peer.x + peer.width / 2;
+		const dxCenter = Math.abs(peerCx - movingCx);
+		if (dxCenter < bestDx) {
+			bestDx = dxCenter;
+			snappedX = peerCx - moving.width / 2;
+			guideX = peerCx;
+		}
+		const dyTop = Math.abs(peer.y - moving.y);
+		if (dyTop < bestDy) {
+			bestDy = dyTop;
+			snappedY = peer.y;
+			guideY = peer.y;
+		}
+		const peerCy = peer.y + peer.height / 2;
+		const dyCenter = Math.abs(peerCy - movingCy);
+		if (dyCenter < bestDy) {
+			bestDy = dyCenter;
+			snappedY = peerCy - moving.height / 2;
+			guideY = peerCy;
+		}
+	}
+	return { x: snappedX, y: snappedY, guideX, guideY };
+}
+
+export function alignPositionedNodes(
+	nodes: readonly PositionedNode[],
+	kind: 'left' | 'top' | 'centerY' | 'distributeH'
+): Readonly<Record<string, CanvasPoint>> {
+	if (nodes.length < 2) {
+		return {};
+	}
+	const updates: Record<string, CanvasPoint> = {};
+	if (kind === 'left') {
+		const minX = Math.min(...nodes.map(n => n.x));
+		for (const n of nodes) {
+			updates[n.node.id] = { x: minX, y: n.y };
+		}
+		return updates;
+	}
+	if (kind === 'top') {
+		const minY = Math.min(...nodes.map(n => n.y));
+		for (const n of nodes) {
+			updates[n.node.id] = { x: n.x, y: minY };
+		}
+		return updates;
+	}
+	if (kind === 'centerY') {
+		const avgCenter = nodes.reduce((sum, n) => sum + n.y + n.height / 2, 0) / nodes.length;
+		for (const n of nodes) {
+			updates[n.node.id] = { x: n.x, y: Math.round(avgCenter - n.height / 2) };
+		}
+		return updates;
+	}
+	// distributeH
+	const sorted = [...nodes].sort((a, b) => a.x - b.x || a.y - b.y);
+	const first = sorted[0];
+	const last = sorted[sorted.length - 1];
+	const totalWidth = sorted.reduce((sum, n) => sum + n.width, 0);
+	const span = (last.x + last.width) - first.x;
+	const gap = Math.max(36, (span - totalWidth) / Math.max(1, sorted.length - 1));
+	let cursorX = first.x;
+	for (const n of sorted) {
+		updates[n.node.id] = { x: Math.round(cursorX), y: n.y };
+		cursorX += n.width + gap;
+	}
+	return updates;
+}
+
+export function computeFrameForNodes(
+	nodes: readonly PositionedNode[],
+	title: string,
+	id: string,
+	color: CanvasFrameColor = 'blue'
+): CanvasFrame {
+	if (nodes.length === 0) {
+		return { id, title, color, x: 40, y: 40, width: 340, height: 220 };
+	}
+	const padX = 36;
+	const padTop = 76;
+	const padBottom = 34;
+	const minX = Math.min(...nodes.map(n => n.x));
+	const minY = Math.min(...nodes.map(n => n.y));
+	const maxX = Math.max(...nodes.map(n => n.x + n.width));
+	const maxY = Math.max(...nodes.map(n => n.y + n.height));
+	return {
+		id,
+		title,
+		color,
+		x: Math.round(minX - padX),
+		y: Math.round(minY - padTop),
+		width: Math.max(220, Math.round((maxX - minX) + padX * 2)),
+		height: Math.max(160, Math.round((maxY - minY) + padTop + padBottom)),
+	};
 }
 
 /**
@@ -275,9 +435,12 @@ export function buildCanvasProjection(
 	graph: CanvasGraphSnapshot,
 	mode: CanvasViewMode,
 	searchQuery: string,
-	collapsedGroupIds: ReadonlySet<string>
+	collapsedGroupIds: ReadonlySet<string>,
+	options?: CanvasProjectionOptions
 ): CanvasProjection {
 	const metrics = metricsForMode(mode);
+	const hiddenLayers = options?.hiddenLayers;
+	const nodePositions = options?.nodePositions;
 	const incomingCounts = new Map<string, number>();
 	const outgoingCounts = new Map<string, number>();
 	for (const edge of graph.edges) {
@@ -285,7 +448,31 @@ export function buildCanvasProjection(
 		incomingCounts.set(edge.toId, (incomingCounts.get(edge.toId) ?? 0) + 1);
 	}
 
-	const matchedNodes = graph.nodes.filter(node => matchesSearch(node, searchQuery));
+	const layerCountsMut: Record<ArchitectureLayer, number> = {
+		infrastructure: 0,
+		platforms: 0,
+		applications: 0,
+		security: 0,
+		operations: 0,
+	};
+	const nodeLayerMap = new Map<string, ArchitectureLayer>();
+	let hiddenByLayerCount = 0;
+	for (const node of graph.nodes) {
+		const layer = layerForNode(node);
+		nodeLayerMap.set(node.id, layer);
+		layerCountsMut[layer]++;
+		if (hiddenLayers?.has(layer)) {
+			hiddenByLayerCount++;
+		}
+	}
+
+	const matchedNodes = graph.nodes.filter(node => {
+		const layer = nodeLayerMap.get(node.id) ?? 'infrastructure';
+		if (hiddenLayers?.has(layer)) {
+			return false;
+		}
+		return matchesSearch(node, searchQuery);
+	});
 	const groupBuckets = new Map<string, { label: string; provider: string; totalCount: number; matched: CanvasNodeSummary[] }>();
 	for (const node of graph.nodes) {
 		const info = groupKeyForNode(node);
@@ -393,12 +580,14 @@ export function buildCanvasProjection(
 		sortedCols.forEach((col, colIndex) => {
 			const list = byLayer.get(col)!;
 			list.forEach((node, rowIndex) => {
+				const override = nodePositions?.[node.id];
 				const positioned: PositionedNode = {
 					node,
 					groupId,
 					provider: bucket.provider,
-					x: group.x + GROUP_PAD_X + colIndex * (metrics.width + metrics.gapX),
-					y: group.y + GROUP_HEADER_H + rowIndex * (metrics.height + metrics.gapY),
+					layer: nodeLayerMap.get(node.id) ?? 'infrastructure',
+					x: override ? override.x : group.x + GROUP_PAD_X + colIndex * (metrics.width + metrics.gapX),
+					y: override ? override.y : group.y + GROUP_HEADER_H + rowIndex * (metrics.height + metrics.gapY),
 					width: metrics.width,
 					height: metrics.height,
 					incomingCount: incomingCounts.get(node.id) ?? 0,
@@ -466,6 +655,12 @@ export function buildCanvasProjection(
 		if (group.x + group.width > maxX) { maxX = group.x + group.width; }
 		if (group.y + group.height > maxY) { maxY = group.y + group.height; }
 	}
+	for (const node of positionedNodes) {
+		if (node.x < minX) { minX = node.x; }
+		if (node.y < minY) { minY = node.y; }
+		if (node.x + node.width > maxX) { maxX = node.x + node.width; }
+		if (node.y + node.height > maxY) { maxY = node.y + node.height; }
+	}
 	if (!Number.isFinite(minX)) {
 		minX = 0;
 		minY = 0;
@@ -480,6 +675,8 @@ export function buildCanvasProjection(
 		totalNodes: graph.nodes.length,
 		visibleNodes: positionedNodes.length,
 		hiddenByFilterOrCollapse: Math.max(0, graph.nodes.length - positionedNodes.length),
+		hiddenByLayerCount,
+		layerCounts: layerCountsMut,
 		totalEdges: graph.edges.length,
 		visibleEdges: edges.length,
 		bounds: { minX, minY, maxX, maxY },

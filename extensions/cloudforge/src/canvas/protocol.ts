@@ -13,6 +13,42 @@ import type { ValidationRun } from './validationRunner';
 export type CanvasViewMode = 'visual' | 'technical';
 export type CanvasTheme = 'workbench' | 'light' | 'dark';
 export type CanvasGridMode = 'lines' | 'dots' | 'none';
+export type ArchitectureLayer = 'infrastructure' | 'platforms' | 'applications' | 'security' | 'operations';
+export type CanvasFrameColor = 'blue' | 'emerald' | 'amber' | 'violet' | 'slate';
+export type CanvasAnnotationColor = 'amber' | 'blue' | 'emerald' | 'rose';
+export type ExportFormat = 'svg' | 'png' | 'markdown';
+
+export const ARCHITECTURE_LAYERS: readonly ArchitectureLayer[] = [
+	'infrastructure',
+	'platforms',
+	'applications',
+	'security',
+	'operations',
+];
+
+export interface CanvasPoint {
+	readonly x: number;
+	readonly y: number;
+}
+
+export interface CanvasFrame {
+	readonly id: string;
+	readonly title: string;
+	readonly color: CanvasFrameColor;
+	readonly x: number;
+	readonly y: number;
+	readonly width: number;
+	readonly height: number;
+}
+
+export interface CanvasAnnotation {
+	readonly id: string;
+	readonly text: string;
+	readonly color: CanvasAnnotationColor;
+	readonly x: number;
+	readonly y: number;
+	readonly width: number;
+}
 
 export interface CanvasCatalogueSnapshot {
 	readonly address: string;
@@ -135,6 +171,11 @@ export interface CanvasViewState {
 	readonly listOpen: boolean;
 	readonly collapsedGroups: readonly string[];
 	readonly viewports: Partial<Record<CanvasViewMode, CanvasViewport>>;
+	readonly hiddenLayers: readonly ArchitectureLayer[];
+	readonly snapToGrid: boolean;
+	readonly frames: readonly CanvasFrame[];
+	readonly annotations: readonly CanvasAnnotation[];
+	readonly nodePositions: Partial<Record<CanvasViewMode, Readonly<Record<string, CanvasPoint>>>>;
 }
 
 export type CanvasNoticeKind = 'stale' | 'unavailable' | 'info';
@@ -204,6 +245,14 @@ export type ExtensionToWebviewMessage =
 	| {
 		readonly type: 'dependencyReport';
 		readonly report: CanvasDependencyReport | null;
+	}
+	| {
+		readonly type: 'openExport';
+	}
+	| {
+		readonly type: 'exportResult';
+		readonly ok: boolean;
+		readonly message: string;
 	};
 
 export type WebviewToExtensionMessage =
@@ -216,10 +265,15 @@ export type WebviewToExtensionMessage =
 	| { readonly type: 'cancelValidation' }
 	| { readonly type: 'requestDraftSavePreview'; readonly fileName: string; readonly contents: string }
 	| { readonly type: 'applyDraftSave'; readonly fileName: string; readonly contents: string; readonly previewToken: string }
-	| { readonly type: 'requestSchema'; readonly kind: 'resource' | 'dataSource'; readonly typeName: string };
+	| { readonly type: 'requestSchema'; readonly kind: 'resource' | 'dataSource'; readonly typeName: string }
+	| { readonly type: 'exportArtifact'; readonly format: ExportFormat; readonly suggestedFileName: string; readonly content: string; readonly encoding: 'utf8' | 'base64' };
 
 const MAX_COLLAPSED_GROUPS = 256;
 const MAX_DRAFT_SAVE_CHARS = 512 * 1024;
+const MAX_EXPORT_CHARS = 8 * 1024 * 1024;
+const MAX_FRAMES = 48;
+const MAX_ANNOTATIONS = 64;
+const MAX_NODE_POSITIONS = 512;
 
 export function isValidTfFileName(value: unknown): value is string {
 	return typeof value === 'string'
@@ -228,6 +282,23 @@ export function isValidTfFileName(value: unknown): value is string {
 		&& !value.startsWith('.')
 		&& !/[<>:"/\\|?*\u0000-\u001f\u007f]/.test(value)
 		&& value.toLowerCase().endsWith('.tf');
+}
+
+export function isValidExportFileName(value: unknown, format: ExportFormat): value is string {
+	if (typeof value !== 'string' || value.length < 4 || value.length > 255 || value.startsWith('.')) {
+		return false;
+	}
+	if (/[<>:"/\\|?*\u0000-\u001f\u007f]/.test(value)) {
+		return false;
+	}
+	const lower = value.toLowerCase();
+	if (format === 'svg') {
+		return lower.endsWith('.svg');
+	}
+	if (format === 'png') {
+		return lower.endsWith('.png');
+	}
+	return lower.endsWith('.md');
 }
 
 function isTypeName(value: unknown): value is string {
@@ -245,6 +316,11 @@ export function defaultCanvasViewState(): CanvasViewState {
 		listOpen: false,
 		collapsedGroups: [],
 		viewports: {},
+		hiddenLayers: [],
+		snapToGrid: true,
+		frames: [],
+		annotations: [],
+		nodePositions: {},
 	};
 }
 
@@ -265,6 +341,52 @@ function isSafeViewport(value: unknown): value is CanvasViewport {
 		&& typeof value.zoom === 'number' && Number.isFinite(value.zoom) && value.zoom >= 0.05 && value.zoom <= 8;
 }
 
+function isSafePoint(value: unknown): value is CanvasPoint {
+	if (!isRecord(value)) {
+		return false;
+	}
+	return typeof value.x === 'number' && Number.isFinite(value.x) && Math.abs(value.x) <= 1_000_000
+		&& typeof value.y === 'number' && Number.isFinite(value.y) && Math.abs(value.y) <= 1_000_000;
+}
+
+function isArchitectureLayer(value: unknown): value is ArchitectureLayer {
+	return value === 'infrastructure' || value === 'platforms' || value === 'applications' || value === 'security' || value === 'operations';
+}
+
+function isFrameColor(value: unknown): value is CanvasFrameColor {
+	return value === 'blue' || value === 'emerald' || value === 'amber' || value === 'violet' || value === 'slate';
+}
+
+function isAnnotationColor(value: unknown): value is CanvasAnnotationColor {
+	return value === 'amber' || value === 'blue' || value === 'emerald' || value === 'rose';
+}
+
+function sanitizeShortText(value: unknown, maxLen: number): string | undefined {
+	if (typeof value !== 'string') {
+		return undefined;
+	}
+	const cleaned = value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').slice(0, maxLen);
+	return cleaned;
+}
+
+function sanitizeNodePositionMap(value: unknown): Readonly<Record<string, CanvasPoint>> | undefined {
+	if (!isRecord(value)) {
+		return undefined;
+	}
+	const out: Record<string, CanvasPoint> = {};
+	let count = 0;
+	for (const [key, pt] of Object.entries(value)) {
+		if (count >= MAX_NODE_POSITIONS) {
+			break;
+		}
+		if (isOpaqueId(key) && isSafePoint(pt)) {
+			out[key] = { x: pt.x, y: pt.y };
+			count++;
+		}
+	}
+	return count > 0 ? out : undefined;
+}
+
 export function sanitizeViewState(value: unknown): CanvasViewState {
 	const fallback = defaultCanvasViewState();
 	if (!isRecord(value)) {
@@ -277,6 +399,7 @@ export function sanitizeViewState(value: unknown): CanvasViewState {
 	const focusedWorkspaceOpen = typeof value.focusedWorkspaceOpen === 'boolean' && selectedId !== null ? value.focusedWorkspaceOpen : false;
 	const inspectorOpen = typeof value.inspectorOpen === 'boolean' ? value.inspectorOpen : fallback.inspectorOpen;
 	const listOpen = typeof value.listOpen === 'boolean' ? value.listOpen : fallback.listOpen;
+	const snapToGrid = typeof value.snapToGrid === 'boolean' ? value.snapToGrid : fallback.snapToGrid;
 
 	const collapsedGroups: string[] = [];
 	if (Array.isArray(value.collapsedGroups)) {
@@ -292,6 +415,17 @@ export function sanitizeViewState(value: unknown): CanvasViewState {
 		}
 	}
 
+	const hiddenLayers: ArchitectureLayer[] = [];
+	if (Array.isArray(value.hiddenLayers)) {
+		const seen = new Set<ArchitectureLayer>();
+		for (const item of value.hiddenLayers) {
+			if (isArchitectureLayer(item) && !seen.has(item)) {
+				seen.add(item);
+				hiddenLayers.push(item);
+			}
+		}
+	}
+
 	const viewports: Partial<Record<CanvasViewMode, CanvasViewport>> = {};
 	if (isRecord(value.viewports)) {
 		if (isSafeViewport(value.viewports.visual)) {
@@ -299,6 +433,78 @@ export function sanitizeViewState(value: unknown): CanvasViewState {
 		}
 		if (isSafeViewport(value.viewports.technical)) {
 			viewports.technical = { x: value.viewports.technical.x, y: value.viewports.technical.y, zoom: value.viewports.technical.zoom };
+		}
+	}
+
+	const frames: CanvasFrame[] = [];
+	if (Array.isArray(value.frames)) {
+		const seen = new Set<string>();
+		for (const raw of value.frames) {
+			if (frames.length >= MAX_FRAMES) {
+				break;
+			}
+			if (
+				isRecord(raw)
+				&& isOpaqueId(raw.id)
+				&& !seen.has(raw.id)
+				&& typeof raw.x === 'number' && Number.isFinite(raw.x) && Math.abs(raw.x) <= 1_000_000
+				&& typeof raw.y === 'number' && Number.isFinite(raw.y) && Math.abs(raw.y) <= 1_000_000
+				&& typeof raw.width === 'number' && Number.isFinite(raw.width) && raw.width >= 160 && raw.width <= 12_000
+				&& typeof raw.height === 'number' && Number.isFinite(raw.height) && raw.height >= 100 && raw.height <= 12_000
+			) {
+				const title = sanitizeShortText(raw.title, 120) ?? 'Section';
+				seen.add(raw.id);
+				frames.push({
+					id: raw.id,
+					title: title || 'Section',
+					color: isFrameColor(raw.color) ? raw.color : 'blue',
+					x: raw.x,
+					y: raw.y,
+					width: raw.width,
+					height: raw.height,
+				});
+			}
+		}
+	}
+
+	const annotations: CanvasAnnotation[] = [];
+	if (Array.isArray(value.annotations)) {
+		const seen = new Set<string>();
+		for (const raw of value.annotations) {
+			if (annotations.length >= MAX_ANNOTATIONS) {
+				break;
+			}
+			if (
+				isRecord(raw)
+				&& isOpaqueId(raw.id)
+				&& !seen.has(raw.id)
+				&& typeof raw.x === 'number' && Number.isFinite(raw.x) && Math.abs(raw.x) <= 1_000_000
+				&& typeof raw.y === 'number' && Number.isFinite(raw.y) && Math.abs(raw.y) <= 1_000_000
+			) {
+				const text = sanitizeShortText(raw.text, 600) ?? '';
+				const width = typeof raw.width === 'number' && Number.isFinite(raw.width) && raw.width >= 140 && raw.width <= 480 ? raw.width : 200;
+				seen.add(raw.id);
+				annotations.push({
+					id: raw.id,
+					text,
+					color: isAnnotationColor(raw.color) ? raw.color : 'amber',
+					x: raw.x,
+					y: raw.y,
+					width,
+				});
+			}
+		}
+	}
+
+	const nodePositions: Partial<Record<CanvasViewMode, Readonly<Record<string, CanvasPoint>>>> = {};
+	if (isRecord(value.nodePositions)) {
+		const visualPos = sanitizeNodePositionMap(value.nodePositions.visual);
+		if (visualPos) {
+			nodePositions.visual = visualPos;
+		}
+		const techPos = sanitizeNodePositionMap(value.nodePositions.technical);
+		if (techPos) {
+			nodePositions.technical = techPos;
 		}
 	}
 
@@ -312,6 +518,11 @@ export function sanitizeViewState(value: unknown): CanvasViewState {
 		listOpen,
 		collapsedGroups,
 		viewports,
+		hiddenLayers,
+		snapToGrid,
+		frames,
+		annotations,
+		nodePositions,
 	};
 }
 
@@ -374,6 +585,30 @@ export function parseWebviewMessage(value: unknown): WebviewToExtensionMessage |
 				return undefined;
 			}
 			return { type: 'requestSchema', kind: value.kind, typeName: value.typeName };
+		case 'exportArtifact': {
+			if (value.format !== 'svg' && value.format !== 'png' && value.format !== 'markdown') {
+				return undefined;
+			}
+			if (!isValidExportFileName(value.suggestedFileName, value.format)) {
+				return undefined;
+			}
+			if (value.encoding !== 'utf8' && value.encoding !== 'base64') {
+				return undefined;
+			}
+			if (value.format === 'png' && value.encoding !== 'base64') {
+				return undefined;
+			}
+			if (typeof value.content !== 'string' || value.content.length === 0 || value.content.length > MAX_EXPORT_CHARS) {
+				return undefined;
+			}
+			return {
+				type: 'exportArtifact',
+				format: value.format,
+				suggestedFileName: value.suggestedFileName,
+				content: value.content,
+				encoding: value.encoding,
+			};
+		}
 		default:
 			return undefined;
 	}

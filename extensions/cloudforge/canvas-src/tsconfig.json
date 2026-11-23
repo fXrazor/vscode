@@ -16,6 +16,7 @@
 		"../src/canvas/layout.ts",
 		"../src/canvas/schemaForm.ts",
 		"../src/canvas/validationRunner.ts",
-		"../src/canvas/draftDocument.ts"
+		"../src/canvas/draftDocument.ts",
+		"../src/canvas/exportDiagram.ts"
 	]
 }
