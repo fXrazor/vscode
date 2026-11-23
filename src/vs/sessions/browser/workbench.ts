@@ -1828,6 +1828,9 @@ export abstract class Workbench extends Disposable implements IAgentWorkbenchLay
 		const scheduler = this._register(new MutableDisposable());
 		const apply = () => {
 			scheduler.clear();
+			if (!this.workbenchGrid) {
+				return;
+			}
 			const visible = column.occupied.get();
 			if (!this.workbenchGrid.hasMaximizedView() && this.workbenchGrid.isViewVisible(column) !== visible) {
 				this.workbenchGrid.setViewVisible(column, visible);
@@ -2808,6 +2811,10 @@ export abstract class Workbench extends Disposable implements IAgentWorkbenchLay
 
 	private setPanelHidden(hidden: boolean): void {
 		if (this.partVisibility.panel === !hidden) {
+			return;
+		}
+		if (!this.workbenchGrid) {
+			this.partVisibility.panel = !hidden;
 			return;
 		}
 
