@@ -381,6 +381,14 @@ suite('CloudForgeServiceChannel', () => {
 		assert.strictEqual(validateCloudForgeServiceParams('readModule', { workspaceId, architectureId: `${workspaceId}-architecture-1`, modulePath: [] }), undefined);
 		assert.strictEqual(validateCloudForgeServiceParams('readModule', { workspaceId, architectureId: `${workspaceId}-architecture-1`, modulePath: ['../outside'] }), undefined);
 		assert.strictEqual(validateCloudForgeServiceParams('readModule', { workspaceId, architectureId: `${workspaceId}-architecture-1`, modulePath: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i'] }), undefined);
+		const keyV2 = { ...key, version: '6.0.0', sha256: 'b'.repeat(64) };
+		assert.ok(validateCloudForgeServiceParams('diffCatalogueSnapshots', { fromKey: key, toKey: keyV2 }));
+		assert.ok(validateCloudForgeServiceParams('diffCatalogueSnapshots', { fromKey: key, toKey: keyV2, workspaceId, architectureId: `${workspaceId}-architecture-1`, expectedSourceRevision: sha256 }));
+		assert.strictEqual(validateCloudForgeServiceParams('diffCatalogueSnapshots', { fromKey: key, toKey: keyV2, workspaceId }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('diffCatalogueSnapshots', { fromKey: key, toKey: keyV2, expectedSourceRevision: sha256 }), undefined);
+		assert.ok(validateCloudForgeServiceParams('auditExportReadiness', { workspaceId, architectureId: `${workspaceId}-architecture-1`, expectedSourceRevision: sha256, engine: 'openTofu' }));
+		assert.strictEqual(validateCloudForgeServiceParams('auditExportReadiness', { workspaceId, architectureId: `${workspaceId}-architecture-1`, engine: 'pulumi' }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('auditExportReadiness', { workspaceId, architectureId: `${workspaceId}-architecture-1`, rootPath: 'C:\\Windows' }), undefined);
 		assert.ok(validateCloudForgeServiceParams('listCloudRegions', {
 			provider: 'azure',
 			scope: { provider: 'azure', cloud: 'AzureCloud', tenantId: 'tenant-1', subscriptionId: 'sub-1' },

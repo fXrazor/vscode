@@ -1232,3 +1232,127 @@ export function parseModuleInspection(value: unknown, architectureName: string):
 		graph,
 	};
 }
+
+// ============================================================================
+// Stage 8: Schema Upgrade Impact Diff & Reproducible Export Readiness Adapters
+// ============================================================================
+
+export interface CanvasSchemaImpactedItem {
+	readonly resourceAddress: string;
+	readonly kind: 'resource' | 'dataSource';
+	readonly typeName: string;
+	readonly path?: string;
+	readonly breaking: boolean;
+	readonly summary: string;
+}
+
+export interface CanvasSchemaDiffReport {
+	readonly provider: string;
+	readonly fromVersion: string;
+	readonly toVersion: string;
+	readonly addedTypeCount: number;
+	readonly removedTypeCount: number;
+	readonly pathChangeCount: number;
+	readonly impactedArchitectureItems: readonly CanvasSchemaImpactedItem[];
+	readonly hasBreakingChanges: boolean;
+	readonly hasArchitectureBreakingChanges: boolean;
+	readonly truncated: boolean;
+}
+
+export function parseSchemaDiffReport(value: unknown): CanvasSchemaDiffReport | undefined {
+	if (
+		!isRecord(value) ||
+		!isNonEmptyString(value.provider, 256) ||
+		!isNonEmptyString(value.fromVersion, 128) ||
+		!isNonEmptyString(value.toVersion, 128) ||
+		!Array.isArray(value.addedTypes) ||
+		!Array.isArray(value.removedTypes) ||
+		!Array.isArray(value.pathChanges) ||
+		!Array.isArray(value.impactedArchitectureItems) ||
+		typeof value.hasBreakingChanges !== 'boolean' ||
+		typeof value.hasArchitectureBreakingChanges !== 'boolean' ||
+		typeof value.truncated !== 'boolean'
+	) {
+		return undefined;
+	}
+	const impactedArchitectureItems: CanvasSchemaImpactedItem[] = [];
+	for (const item of value.impactedArchitectureItems) {
+		if (
+			!isRecord(item) ||
+			!isNonEmptyString(item.resourceAddress, 256) ||
+			(item.kind !== 'resource' && item.kind !== 'dataSource') ||
+			!isNonEmptyString(item.typeName, 256) ||
+			typeof item.breaking !== 'boolean' ||
+			!isNonEmptyString(item.summary, 512)
+		) {
+			continue;
+		}
+		impactedArchitectureItems.push({
+			resourceAddress: item.resourceAddress,
+			kind: item.kind,
+			typeName: item.typeName,
+			...(isNonEmptyString(item.path, 256) ? { path: item.path } : {}),
+			breaking: item.breaking,
+			summary: item.summary,
+		});
+	}
+	return {
+		provider: value.provider,
+		fromVersion: value.fromVersion,
+		toVersion: value.toVersion,
+		addedTypeCount: value.addedTypes.length,
+		removedTypeCount: value.removedTypes.length,
+		pathChangeCount: value.pathChanges.length,
+		impactedArchitectureItems,
+		hasBreakingChanges: value.hasBreakingChanges,
+		hasArchitectureBreakingChanges: value.hasArchitectureBreakingChanges,
+		truncated: value.truncated,
+	};
+}
+
+export interface CanvasExportAuditReport {
+	readonly sourceRevision: string;
+	readonly engine: 'openTofu' | 'terraform';
+	readonly engineInferred: boolean;
+	readonly reproducible: boolean;
+	readonly lockState: 'absent' | 'valid' | 'invalid' | 'unreadable';
+	readonly lockEntryCount: number;
+	readonly moduleCount: number;
+	readonly unresolvedReasonKinds: readonly string[];
+}
+
+export function parseExportAuditReport(value: unknown): CanvasExportAuditReport | undefined {
+	if (
+		!isRecord(value) ||
+		!isSha256(value.sourceRevision) ||
+		(value.engine !== 'openTofu' && value.engine !== 'terraform') ||
+		typeof value.engineInferred !== 'boolean' ||
+		typeof value.reproducible !== 'boolean' ||
+		!isRecord(value.lockFile) ||
+		!Array.isArray(value.moduleProvenance) ||
+		!Array.isArray(value.unresolvedReasons)
+	) {
+		return undefined;
+	}
+	const lockState = value.lockFile.state;
+	if (lockState !== 'absent' && lockState !== 'valid' && lockState !== 'invalid' && lockState !== 'unreadable') {
+		return undefined;
+	}
+	const lockEntryCount = Array.isArray(value.lockFile.entries) ? value.lockFile.entries.length : 0;
+	const unresolvedReasonKinds: string[] = [];
+	for (const reason of value.unresolvedReasons) {
+		if (isRecord(reason) && isNonEmptyString(reason.kind, 64)) {
+			unresolvedReasonKinds.push(reason.kind);
+		}
+	}
+	return {
+		sourceRevision: value.sourceRevision,
+		engine: value.engine,
+		engineInferred: value.engineInferred,
+		reproducible: value.reproducible,
+		lockState,
+		lockEntryCount,
+		moduleCount: value.moduleProvenance.length,
+		unresolvedReasonKinds,
+	};
+}

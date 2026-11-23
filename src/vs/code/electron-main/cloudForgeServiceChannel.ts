@@ -38,7 +38,8 @@ const cloudForgeMethods: ReadonlySet<string> = new Set<CloudForgeServiceMethod>(
 	'listCatalogueSnapshots', 'listCatalogueTypes', 'getResourceFormSchema', 'renderResourceDraft',
 	'startValidationRun', 'pollValidationRun', 'cancelValidationRun',
 	'previewDraftSave', 'applyDraftSave',
-	'inspectDependencies', 'listCloudRegions', 'readModule'
+	'inspectDependencies', 'listCloudRegions', 'readModule',
+	'diffCatalogueSnapshots', 'auditExportReadiness'
 ]);
 
 /** The service allows `installGit` 10 minutes; the broker waits a little longer for its reply. */
@@ -472,6 +473,52 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 				architectureId: value.architectureId,
 				...(value.expectedSourceRevision === undefined ? {} : { expectedSourceRevision: value.expectedSourceRevision }),
 				modulePath
+			};
+		}
+		case 'diffCatalogueSnapshots': {
+			if (!hasOnlyKeys(value, ['fromKey', 'toKey', 'workspaceId', 'architectureId', 'expectedSourceRevision'])) {
+				return undefined;
+			}
+			const fromKey = validateSnapshotKey(value.fromKey);
+			const toKey = validateSnapshotKey(value.toKey);
+			if (!fromKey || !toKey) {
+				return undefined;
+			}
+			const hasWs = value.workspaceId !== undefined;
+			const hasArch = value.architectureId !== undefined;
+			if (hasWs !== hasArch) {
+				return undefined;
+			}
+			if (hasWs && (!isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId))) {
+				return undefined;
+			}
+			if (value.expectedSourceRevision !== undefined) {
+				if (!hasWs || typeof value.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(value.expectedSourceRevision)) {
+					return undefined;
+				}
+			}
+			return {
+				fromKey,
+				toKey,
+				...(hasWs ? { workspaceId: value.workspaceId, architectureId: value.architectureId } : {}),
+				...(value.expectedSourceRevision === undefined ? {} : { expectedSourceRevision: value.expectedSourceRevision })
+			};
+		}
+		case 'auditExportReadiness': {
+			if (!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'expectedSourceRevision', 'engine']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId)) {
+				return undefined;
+			}
+			if (value.expectedSourceRevision !== undefined && (typeof value.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(value.expectedSourceRevision))) {
+				return undefined;
+			}
+			if (value.engine !== undefined && value.engine !== 'openTofu' && value.engine !== 'terraform') {
+				return undefined;
+			}
+			return {
+				workspaceId: value.workspaceId,
+				architectureId: value.architectureId,
+				...(value.expectedSourceRevision === undefined ? {} : { expectedSourceRevision: value.expectedSourceRevision }),
+				...(value.engine === undefined ? {} : { engine: value.engine })
 			};
 		}
 		case 'listCloudRegions': {

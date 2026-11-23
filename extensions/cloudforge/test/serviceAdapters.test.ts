@@ -15,7 +15,9 @@ import {
 	parseDependencyReport,
 	parseDraftSaveApply,
 	parseDraftSavePreview,
+	parseExportAuditReport,
 	parseModuleInspection,
+	parseSchemaDiffReport,
 	parseValidationPoll,
 	parseValidationStart,
 	selectBestSnapshotForType
@@ -319,4 +321,39 @@ test('Stage 7 module inspection adapter and Webview requestModule validation san
 	assert.ok(parsed.graph);
 	assert.equal(parsed.graph.nodes.length, 2);
 	assert.deepStrictEqual(parsed.graph.edges[0], { fromId: 'node-1', toId: 'node-2', kind: 'reference' });
+});
+
+test('Stage 8 schema upgrade impact diff and reproducible export audit adapters sanitize payloads', () => {
+	const diff = parseSchemaDiffReport({
+		provider: 'registry.terraform.io/hashicorp/azurerm',
+		fromVersion: '5.14.0',
+		toVersion: '6.0.0',
+		addedTypes: [{ kind: 'resource', typeName: 'azurerm_public_ip' }],
+		removedTypes: [],
+		pathChanges: [{ kind: 'resource', typeName: 'azurerm_resource_group', path: 'legacy_tag', change: { kind: 'removed' }, breaking: true }],
+		impactedArchitectureItems: [
+			{ resourceAddress: 'azurerm_resource_group.hub', kind: 'resource', typeName: 'azurerm_resource_group', path: 'legacy_tag', breaking: true, summary: 'legacy_tag was removed' },
+		],
+		hasBreakingChanges: true,
+		hasArchitectureBreakingChanges: true,
+		truncated: false,
+	});
+	assert.ok(diff);
+	assert.equal(diff.addedTypeCount, 1);
+	assert.equal(diff.impactedArchitectureItems.length, 1);
+	assert.equal(diff.hasArchitectureBreakingChanges, true);
+
+	const audit = parseExportAuditReport({
+		sourceRevision: 'a'.repeat(64),
+		engine: 'openTofu',
+		engineInferred: true,
+		reproducible: false,
+		lockFile: { state: 'valid', entries: [{ address: 'registry.opentofu.org/hashicorp/azurerm', version: '5.14.0', hashCount: 0, hasH1Hash: false, hasZhHash: false }] },
+		moduleProvenance: [{ name: 'net' }],
+		unresolvedReasons: [{ kind: 'missingLockHashes' }, { kind: 'unpinnedModule' }],
+	});
+	assert.ok(audit);
+	assert.equal(audit.reproducible, false);
+	assert.equal(audit.lockEntryCount, 1);
+	assert.deepStrictEqual(audit.unresolvedReasonKinds, ['missingLockHashes', 'unpinnedModule']);
 });
