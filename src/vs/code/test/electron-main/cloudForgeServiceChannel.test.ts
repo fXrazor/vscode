@@ -455,4 +455,26 @@ suite('CloudForgeServiceChannel', () => {
 
 		await Promise.all([cancelled, unc, local].map(item => item.broker.stop()));
 	});
+
+	test('validates Stage 9 detectEngines and runEngineValidate parameters and rejects extra fields', () => {
+		const rev = 'a'.repeat(64);
+		assert.deepStrictEqual(validateCloudForgeServiceParams('detectEngines', {}), {});
+		assert.strictEqual(validateCloudForgeServiceParams('detectEngines', { path: 'C:\\Tools' }), undefined);
+		assert.deepStrictEqual(validateCloudForgeServiceParams('runEngineValidate', {
+			workspaceId: 'workspace-1',
+			architectureId: 'workspace-1-architecture-1',
+			expectedSourceRevision: rev,
+			engine: 'openTofu'
+		}), {
+			workspaceId: 'workspace-1',
+			architectureId: 'workspace-1-architecture-1',
+			expectedSourceRevision: rev,
+			engine: 'openTofu'
+		});
+		assert.strictEqual(validateCloudForgeServiceParams('runEngineValidate', {
+			workspaceId: 'workspace-1',
+			architectureId: 'workspace-1-architecture-1',
+			engine: 'bash'
+		}), undefined);
+	});
 });

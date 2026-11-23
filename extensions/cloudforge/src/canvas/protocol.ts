@@ -212,6 +212,37 @@ export interface CanvasExportAuditReport {
 	readonly unresolvedReasonKinds: readonly string[];
 }
 
+export interface CanvasDetectedEngine {
+	readonly engine: 'openTofu' | 'terraform';
+	readonly status: 'available' | 'missing' | 'failed';
+	readonly version?: string;
+	readonly platform?: string;
+	readonly message?: string;
+}
+
+export interface CanvasEngineValidateDiagnostic {
+	readonly severity: 'error' | 'warning';
+	readonly summary: string;
+	readonly detail?: string;
+	readonly address?: string;
+	readonly filename?: string;
+	readonly line?: number;
+	readonly column?: number;
+}
+
+export interface CanvasEngineValidateReport {
+	readonly sourceRevision: string;
+	readonly engine: 'openTofu' | 'terraform';
+	readonly engineVersion: string;
+	readonly engineInferred: boolean;
+	readonly valid: boolean;
+	readonly errorCount: number;
+	readonly warningCount: number;
+	readonly durationMs: number;
+	readonly diagnostics: readonly CanvasEngineValidateDiagnostic[];
+	readonly truncated: boolean;
+}
+
 export interface CanvasViewport {
 	readonly x: number;
 	readonly y: number;
@@ -353,6 +384,15 @@ export type ExtensionToWebviewMessage =
 		readonly error?: string;
 	}
 	| {
+		readonly type: 'detectedEngines';
+		readonly engines: readonly CanvasDetectedEngine[];
+	}
+	| {
+		readonly type: 'engineValidateReport';
+		readonly report: CanvasEngineValidateReport | null;
+		readonly error?: string;
+	}
+	| {
 		readonly type: 'openExport';
 	}
 	| {
@@ -378,6 +418,7 @@ export type WebviewToExtensionMessage =
 		readonly fromKey: { readonly address: string; readonly version: string; readonly formatVersion: string; readonly sha256: string };
 		readonly toKey: { readonly address: string; readonly version: string; readonly formatVersion: string; readonly sha256: string };
 	}
+	| { readonly type: 'requestEngineValidate'; readonly engine?: 'openTofu' | 'terraform' }
 	| { readonly type: 'exportArtifact'; readonly format: ExportFormat; readonly suggestedFileName: string; readonly content: string; readonly encoding: 'utf8' | 'base64' };
 
 const MAX_COLLAPSED_GROUPS = 256;
@@ -828,6 +869,12 @@ export function parseWebviewMessage(value: unknown): WebviewToExtensionMessage |
 			const fromKey = parseKey(value.fromKey);
 			const toKey = parseKey(value.toKey);
 			return fromKey && toKey ? { type: 'requestSchemaDiff', fromKey, toKey } : undefined;
+		}
+		case 'requestEngineValidate': {
+			if (value.engine !== undefined && value.engine !== 'openTofu' && value.engine !== 'terraform') {
+				return undefined;
+			}
+			return value.engine ? { type: 'requestEngineValidate', engine: value.engine } : { type: 'requestEngineValidate' };
 		}
 		case 'exportArtifact': {
 			if (value.format !== 'svg' && value.format !== 'png' && value.format !== 'markdown') {

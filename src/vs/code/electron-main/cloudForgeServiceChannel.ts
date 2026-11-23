@@ -39,7 +39,8 @@ const cloudForgeMethods: ReadonlySet<string> = new Set<CloudForgeServiceMethod>(
 	'startValidationRun', 'pollValidationRun', 'cancelValidationRun',
 	'previewDraftSave', 'applyDraftSave',
 	'inspectDependencies', 'listCloudRegions', 'readModule',
-	'diffCatalogueSnapshots', 'auditExportReadiness'
+	'diffCatalogueSnapshots', 'auditExportReadiness',
+	'detectEngines', 'runEngineValidate'
 ]);
 
 /** The service allows `installGit` 10 minutes; the broker waits a little longer for its reply. */
@@ -504,7 +505,8 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 				...(value.expectedSourceRevision === undefined ? {} : { expectedSourceRevision: value.expectedSourceRevision })
 			};
 		}
-		case 'auditExportReadiness': {
+		case 'auditExportReadiness':
+		case 'runEngineValidate': {
 			if (!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'expectedSourceRevision', 'engine']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId)) {
 				return undefined;
 			}
@@ -521,6 +523,8 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 				...(value.engine === undefined ? {} : { engine: value.engine })
 			};
 		}
+		case 'detectEngines':
+			return hasOnlyKeys(value, []) ? {} : undefined;
 		case 'listCloudRegions': {
 			if (!hasOnlyKeys(value, ['provider', 'scope', 'configuredRegions'])) {
 				return undefined;

@@ -106,6 +106,8 @@ import {
 	type CanvasCatalogueSnapshot,
 	type CanvasCloudRegionsPayload,
 	type CanvasDependencyReport,
+	type CanvasDetectedEngine,
+	type CanvasEngineValidateReport,
 	type CanvasExportAuditReport,
 	type CanvasFrame,
 	type CanvasFrameColor,
@@ -178,6 +180,10 @@ let schemaDiffBusy = false;
 let diffProviderAddress: string | undefined;
 let diffFromIdx = 0;
 let diffToIdx = 1;
+let detectedEngines: readonly CanvasDetectedEngine[] = [];
+let engineValidateReport: CanvasEngineValidateReport | null = null;
+let engineValidateError: string | undefined;
+let engineValidateBusy = false;
 let saveFileName = 'cloudforge_draft.tf';
 let savePhase: 'idle' | 'previewing' | 'previewReady' | 'applying' = 'idle';
 let savePreview: DraftSavePreviewResult | undefined;
@@ -3292,9 +3298,28 @@ function renderTimeline(): HTMLElement {
 			titleGroup.append(el('span', 'cf-pill cf-pill-warn', 'Stale revision'));
 		}
 	}
+	const availableEngines = detectedEngines.filter(e => e.status === 'available');
+	for (const eng of availableEngines) {
+		const label = eng.engine === 'openTofu' ? 'tofu' : 'terraform';
+		titleGroup.append(el('span', 'cf-pill cf-mono', `${label} ${eng.version ?? ''}`.trim()));
+	}
 	head.append(titleGroup);
 
 	const actions = el('div', 'cf-header-group');
+	if (availableEngines.length > 0 && activeGraph()) {
+		const cliBtn = el('button', 'cf-btn', engineValidateBusy ? 'Running CLI Validate…' : 'CLI Validate');
+		cliBtn.type = 'button';
+		cliBtn.disabled = engineValidateBusy;
+		cliBtn.title = 'Run strictly local, credential-free OpenTofu/Terraform validate -json in the active architecture';
+		cliBtn.addEventListener('click', () => {
+			engineValidateBusy = true;
+			engineValidateError = undefined;
+			post({ type: 'requestEngineValidate' });
+			render();
+			applyViewportTransform();
+		});
+		actions.append(cliBtn);
+	}
 	if (currentRun && currentRun.events.length > 0) {
 		const pbBtn = el('button', 'cf-btn', playbackActive ? 'Exit Playback' : 'Playback');
 		pbBtn.type = 'button';
@@ -3335,6 +3360,49 @@ function renderTimeline(): HTMLElement {
 	actions.append(closeBtn);
 	head.append(actions);
 	panel.append(head);
+
+	if (engineValidateError || engineValidateReport) {
+		const cliCard = el('div', 'cf-stage-card');
+		if (engineValidateError) {
+			cliCard.append(
+				el('strong', undefined, 'Local CLI Validation'),
+				el('div', 'cf-field-error', engineValidateError)
+			);
+		} else if (engineValidateReport) {
+			const cliHead = el('div', 'cf-save-preview-meta');
+			const engLabel = engineValidateReport.engine === 'openTofu' ? 'OpenTofu' : 'Terraform';
+			cliHead.append(
+				el('strong', undefined, `${engLabel} ${engineValidateReport.engineVersion} validate -json`),
+				el(
+					'span',
+					`cf-pill ${engineValidateReport.valid ? 'cf-pill-ok' : 'cf-pill-err'}`,
+					engineValidateReport.valid
+						? `Valid (${engineValidateReport.durationMs}ms)`
+						: `${engineValidateReport.errorCount} error(s) · ${engineValidateReport.warningCount} warning(s) · ${engineValidateReport.durationMs}ms`
+				)
+			);
+			cliCard.append(cliHead);
+			if (engineValidateReport.diagnostics.length > 0) {
+				const diagList = el('div', 'cf-dep-list');
+				for (const diag of engineValidateReport.diagnostics) {
+					const loc = diag.filename
+						? `${diag.filename}${diag.line ? `:${diag.line}` : ''}`
+						: diag.address ?? '';
+					const row = el('div', `cf-diag cf-diag-${diag.severity}`);
+					row.append(
+						el('div', 'cf-diag-head cf-mono', `${diag.severity.toUpperCase()}${loc ? ` · ${loc}` : ''}`),
+						el('div', 'cf-diag-msg', diag.summary)
+					);
+					if (diag.detail) {
+						row.append(el('div', 'cf-muted', diag.detail));
+					}
+					diagList.append(row);
+				}
+				cliCard.append(diagList);
+			}
+		}
+		panel.append(cliCard);
+	}
 
 	if (!currentRun) {
 		panel.append(el('p', 'cf-empty-note', 'No validation run yet. Click Validate Architecture or Validate Resource to run deterministic offline checks.'));
@@ -5162,6 +5230,9 @@ window.addEventListener('message', event => {
 			schemaDiffReport = null;
 			schemaDiffError = undefined;
 			schemaDiffBusy = false;
+			engineValidateReport = null;
+			engineValidateError = undefined;
+			engineValidateBusy = false;
 			hclReviewOpen = false;
 			exportModalOpen = false;
 			extractModuleModalOpen = false;
@@ -5216,6 +5287,9 @@ window.addEventListener('message', event => {
 			schemaDiffReport = null;
 			schemaDiffError = undefined;
 			schemaDiffBusy = false;
+			engineValidateReport = null;
+			engineValidateError = undefined;
+			engineValidateBusy = false;
 			validationInFlight = false;
 			hclReviewOpen = false;
 			connectFeedback = undefined;
@@ -5298,6 +5372,21 @@ window.addEventListener('message', event => {
 			if (reviewModalOpen) {
 				render();
 			}
+			break;
+		case 'detectedEngines':
+			detectedEngines = message.engines;
+			if (timelineOpen) {
+				render();
+				applyViewportTransform();
+			}
+			break;
+		case 'engineValidateReport':
+			engineValidateBusy = false;
+			engineValidateReport = message.report;
+			engineValidateError = message.error;
+			timelineOpen = true;
+			render();
+			applyViewportTransform();
 			break;
 		case 'moduleInspection': {
 			const key = modulePathKey(message.modulePath);

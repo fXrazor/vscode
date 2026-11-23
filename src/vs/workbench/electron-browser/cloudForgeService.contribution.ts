@@ -31,12 +31,12 @@ type CloudForgeServiceMethod =
 	| 'chooseTerraformRoot' | 'selectArchitecture' | 'readArchitecture'
 	| 'startValidationRun' | 'pollValidationRun' | 'cancelValidationRun'
 	| 'previewDraftSave' | 'applyDraftSave'
-	| 'inspectDependencies' | 'readModule' | 'auditExportReadiness';
-type CloudForgeCatalogueMethod = 'inspectCatalogueSchemaFile' | 'importCatalogueSnapshot' | 'listCatalogueSnapshots' | 'listCatalogueTypes' | 'getResourceFormSchema' | 'renderResourceDraft' | 'listCloudRegions' | 'diffCatalogueSnapshots';
+	| 'inspectDependencies' | 'readModule' | 'auditExportReadiness' | 'runEngineValidate';
+type CloudForgeCatalogueMethod = 'inspectCatalogueSchemaFile' | 'importCatalogueSnapshot' | 'listCatalogueSnapshots' | 'listCatalogueTypes' | 'getResourceFormSchema' | 'renderResourceDraft' | 'listCloudRegions' | 'diffCatalogueSnapshots' | 'detectEngines';
 type CloudForgeProjectMethod = 'createProject' | 'openProject' | 'grantProject' | 'forgetProjectAccess' | 'createWorkspaceFile' | 'inspectRepository' | 'importRepository' | 'removeRepository' | 'installGit';
 
 const catalogueMethods: ReadonlySet<string> = new Set<CloudForgeCatalogueMethod>([
-	'inspectCatalogueSchemaFile', 'importCatalogueSnapshot', 'listCatalogueSnapshots', 'listCatalogueTypes', 'getResourceFormSchema', 'renderResourceDraft', 'listCloudRegions', 'diffCatalogueSnapshots'
+	'inspectCatalogueSchemaFile', 'importCatalogueSnapshot', 'listCatalogueSnapshots', 'listCatalogueTypes', 'getResourceFormSchema', 'renderResourceDraft', 'listCloudRegions', 'diffCatalogueSnapshots', 'detectEngines'
 ]);
 
 /**
@@ -283,7 +283,7 @@ CommandsRegistry.registerCommand('_cloudforge.callService', async (accessor, met
 		method !== 'chooseTerraformRoot' && method !== 'selectArchitecture' && method !== 'readArchitecture' &&
 		method !== 'startValidationRun' && method !== 'pollValidationRun' && method !== 'cancelValidationRun' &&
 		method !== 'previewDraftSave' && method !== 'applyDraftSave' && method !== 'inspectDependencies' &&
-		method !== 'readModule' && method !== 'auditExportReadiness'
+		method !== 'readModule' && method !== 'auditExportReadiness' && method !== 'runEngineValidate'
 	) {
 		return failure('INVALID_PARAMS', 'The CloudForge request is invalid.');
 	}
@@ -307,6 +307,7 @@ CommandsRegistry.registerCommand('_cloudforge.callService', async (accessor, met
 		case 'inspectDependencies':
 		case 'readModule':
 		case 'auditExportReadiness':
+		case 'runEngineValidate':
 			if (!isOpaqueId(params.architectureId) || params.architectureId !== activeArchitectureId || (params.expectedSourceRevision !== undefined && (typeof params.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(params.expectedSourceRevision)))) {
 				return failure('SCOPE_DENIED', 'The requested architecture is not active in this window.');
 			}

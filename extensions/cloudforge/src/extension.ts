@@ -29,8 +29,10 @@ import {
 	parseCatalogueSnapshots,
 	parseCloudRegionsPayload,
 	parseDependencyReport,
+	parseDetectedEngines,
 	parseDraftSaveApply,
 	parseDraftSavePreview,
+	parseEngineValidateReport,
 	parseExportAuditReport,
 	parseModuleInspection,
 	parseSchemaDiffReport,
@@ -601,6 +603,43 @@ export function activate(context: ExtensionContext): void {
 		return { ok: true as const, report };
 	}
 
+	async function detectLocalEngines() {
+		const result = await callService<unknown>('detectEngines', {});
+		if (!result.ok) {
+			return [];
+		}
+		return parseDetectedEngines(result.value);
+	}
+
+	async function runArchitectureEngineValidate(
+		workspaceId: string,
+		architectureId: string,
+		sourceRevision: string,
+		engine?: 'openTofu' | 'terraform'
+	) {
+		const result = await callService<unknown>('runEngineValidate', {
+			workspaceId,
+			architectureId,
+			expectedSourceRevision: sourceRevision,
+			...(engine ? { engine } : {}),
+		});
+		if (!result.ok) {
+			const message = result.error.code === 'STALE_SOURCE'
+				? l10n.t('The Terraform source changed on disk. Refresh the graph before running CLI validation.')
+				: result.error.code === 'WORKSPACE_UNAVAILABLE'
+					? l10n.t('No compatible local OpenTofu or Terraform CLI engine was found or validation returned unusable output.')
+					: result.error.code === 'LIMIT_EXCEEDED'
+						? l10n.t('CLI validation exceeded its time or output limit.')
+						: l10n.t('Local CLI validation could not complete.');
+			return { ok: false as const, message };
+		}
+		const report = parseEngineValidateReport(result.value);
+		if (!report) {
+			return { ok: false as const, message: l10n.t('The CloudForge service returned an invalid CLI validation report.') };
+		}
+		return { ok: true as const, report };
+	}
+
 	async function cancelServiceValidation(): Promise<void> {
 		const active = activeValidation;
 		if (!active) {
@@ -802,6 +841,8 @@ export function activate(context: ExtensionContext): void {
 		onReadModule: readArchitectureModule,
 		onAuditExportReadiness: auditArchitectureExportReadiness,
 		onDiffCatalogueSnapshots: diffArchitectureCatalogueSnapshots,
+		onDetectEngines: detectLocalEngines,
+		onRunEngineValidate: runArchitectureEngineValidate,
 		async onExportArtifact(format, suggestedFileName, content, encoding) {
 			const folder = workspace.workspaceFolders?.[0]?.uri;
 			const defaultUri = folder ? Uri.joinPath(folder, suggestedFileName) : Uri.file(suggestedFileName);

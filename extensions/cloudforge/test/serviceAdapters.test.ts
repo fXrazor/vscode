@@ -13,8 +13,10 @@ import {
 	parseCatalogueSnapshots,
 	parseCloudRegionsPayload,
 	parseDependencyReport,
+	parseDetectedEngines,
 	parseDraftSaveApply,
 	parseDraftSavePreview,
+	parseEngineValidateReport,
 	parseExportAuditReport,
 	parseModuleInspection,
 	parseSchemaDiffReport,
@@ -379,4 +381,42 @@ test('Stage 8 schema upgrade impact diff and reproducible export audit adapters 
 	assert.equal(audit.reproducible, false);
 	assert.equal(audit.lockEntryCount, 1);
 	assert.deepStrictEqual(audit.unresolvedReasonKinds, ['missingLockHashes', 'unpinnedModule']);
+});
+
+test('Stage 9A local engine discovery and CLI validate adapters sanitize payloads', () => {
+	assert.deepStrictEqual(parseWebviewMessage({ type: 'requestEngineValidate' }), { type: 'requestEngineValidate' });
+	assert.deepStrictEqual(parseWebviewMessage({ type: 'requestEngineValidate', engine: 'openTofu' }), { type: 'requestEngineValidate', engine: 'openTofu' });
+	assert.equal(parseWebviewMessage({ type: 'requestEngineValidate', engine: 'bash' }), undefined);
+
+	const engines = parseDetectedEngines({
+		engines: [
+			{ engine: 'openTofu', status: 'available', version: '1.11.4', platform: 'windows_amd64' },
+			{ engine: 'terraform', status: 'missing', message: 'terraform.exe was not found.' },
+			{ engine: 'bad', status: 'available' },
+		],
+	});
+	assert.equal(engines.length, 2);
+	assert.equal(engines[0].engine, 'openTofu');
+	assert.equal(engines[0].version, '1.11.4');
+	assert.equal(engines[1].status, 'missing');
+
+	const report = parseEngineValidateReport({
+		sourceRevision: 'a'.repeat(64),
+		engine: 'openTofu',
+		engineVersion: '1.11.4',
+		engineInferred: true,
+		valid: false,
+		errorCount: 1,
+		warningCount: 0,
+		durationMs: 120,
+		diagnostics: [
+			{ severity: 'error', summary: 'Missing required argument', detail: 'location is required', filename: 'main.tf', line: 3, column: 2 },
+		],
+		truncated: false,
+	});
+	assert.ok(report);
+	assert.equal(report.valid, false);
+	assert.equal(report.errorCount, 1);
+	assert.equal(report.diagnostics[0].filename, 'main.tf');
+	assert.equal(report.diagnostics[0].line, 3);
 });

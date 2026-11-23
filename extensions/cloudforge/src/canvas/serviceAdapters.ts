@@ -13,8 +13,11 @@ import type {
 	CanvasCloudRegion,
 	CanvasCloudRegionsPayload,
 	CanvasDependencyReport,
+	CanvasDetectedEngine,
 	CanvasDiagnosticSummary,
 	CanvasEdgeSummary,
+	CanvasEngineValidateDiagnostic,
+	CanvasEngineValidateReport,
 	CanvasExportAuditReport,
 	CanvasGraphSnapshot,
 	CanvasModuleInspection,
@@ -1324,5 +1327,84 @@ export function parseExportAuditReport(value: unknown): CanvasExportAuditReport 
 		lockEntryCount,
 		moduleCount: value.moduleProvenance.length,
 		unresolvedReasonKinds,
+	};
+}
+
+// ============================================================================
+// Stage 9A: Local Engine Discovery & Managed `validate -json` Adapters
+// ============================================================================
+
+export function parseDetectedEngines(value: unknown): readonly CanvasDetectedEngine[] {
+	if (!isRecord(value) || !Array.isArray(value.engines)) {
+		return [];
+	}
+	const engines: CanvasDetectedEngine[] = [];
+	for (const entry of value.engines) {
+		if (
+			!isRecord(entry) ||
+			(entry.engine !== 'openTofu' && entry.engine !== 'terraform') ||
+			(entry.status !== 'available' && entry.status !== 'missing' && entry.status !== 'failed')
+		) {
+			continue;
+		}
+		engines.push({
+			engine: entry.engine,
+			status: entry.status,
+			...(isNonEmptyString(entry.version, 64) ? { version: entry.version } : {}),
+			...(isNonEmptyString(entry.platform, 64) ? { platform: entry.platform } : {}),
+			...(isNonEmptyString(entry.message, 256) ? { message: entry.message } : {}),
+		});
+	}
+	return engines;
+}
+
+export function parseEngineValidateReport(value: unknown): CanvasEngineValidateReport | undefined {
+	if (
+		!isRecord(value) ||
+		!isSha256(value.sourceRevision) ||
+		(value.engine !== 'openTofu' && value.engine !== 'terraform') ||
+		!isNonEmptyString(value.engineVersion, 64) ||
+		typeof value.engineInferred !== 'boolean' ||
+		typeof value.valid !== 'boolean' ||
+		typeof value.errorCount !== 'number' || !Number.isSafeInteger(value.errorCount) || value.errorCount < 0 ||
+		typeof value.warningCount !== 'number' || !Number.isSafeInteger(value.warningCount) || value.warningCount < 0 ||
+		typeof value.durationMs !== 'number' || !Number.isSafeInteger(value.durationMs) || value.durationMs < 0 ||
+		!Array.isArray(value.diagnostics) ||
+		typeof value.truncated !== 'boolean'
+	) {
+		return undefined;
+	}
+	const diagnostics: CanvasEngineValidateDiagnostic[] = [];
+	for (const item of value.diagnostics) {
+		if (
+			!isRecord(item) ||
+			(item.severity !== 'error' && item.severity !== 'warning') ||
+			!isNonEmptyString(item.summary, 300)
+		) {
+			continue;
+		}
+		const line = typeof item.line === 'number' && Number.isSafeInteger(item.line) && item.line >= 1 ? item.line : undefined;
+		const column = typeof item.column === 'number' && Number.isSafeInteger(item.column) && item.column >= 1 ? item.column : undefined;
+		diagnostics.push({
+			severity: item.severity,
+			summary: item.summary,
+			...(isNonEmptyString(item.detail, 600) ? { detail: item.detail } : {}),
+			...(isNonEmptyString(item.address, 256) ? { address: item.address } : {}),
+			...(isNonEmptyString(item.filename, 255) ? { filename: item.filename } : {}),
+			...(line !== undefined ? { line } : {}),
+			...(column !== undefined ? { column } : {}),
+		});
+	}
+	return {
+		sourceRevision: value.sourceRevision,
+		engine: value.engine,
+		engineVersion: value.engineVersion,
+		engineInferred: value.engineInferred,
+		valid: value.valid,
+		errorCount: value.errorCount,
+		warningCount: value.warningCount,
+		durationMs: value.durationMs,
+		diagnostics,
+		truncated: value.truncated,
 	};
 }

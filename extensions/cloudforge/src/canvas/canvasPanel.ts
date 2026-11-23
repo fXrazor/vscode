@@ -12,6 +12,8 @@ import {
 	type CanvasCatalogueSnapshot,
 	type CanvasCloudRegionsPayload,
 	type CanvasDependencyReport,
+	type CanvasDetectedEngine,
+	type CanvasEngineValidateReport,
 	type CanvasExportAuditReport,
 	type CanvasGraphSnapshot,
 	type CanvasModuleInspection,
@@ -74,6 +76,13 @@ export interface CanvasPanelHost {
 		architectureId: string,
 		sourceRevision: string
 	): Promise<{ readonly ok: true; readonly report: CanvasSchemaDiffReport } | { readonly ok: false; readonly message: string }>;
+	onDetectEngines?(): Promise<readonly CanvasDetectedEngine[]>;
+	onRunEngineValidate?(
+		workspaceId: string,
+		architectureId: string,
+		sourceRevision: string,
+		engine?: 'openTofu' | 'terraform'
+	): Promise<{ readonly ok: true; readonly report: CanvasEngineValidateReport } | { readonly ok: false; readonly message: string }>;
 	onExportArtifact?(
 		format: ExportFormat,
 		suggestedFileName: string,
@@ -242,6 +251,13 @@ export class CloudForgeCanvasPanel implements Disposable {
 						});
 					}
 				}
+				if (this.host.onDetectEngines) {
+					void this.host.onDetectEngines().then(engines => {
+						if (this.ready) {
+							this.post({ type: 'detectedEngines', engines });
+						}
+					});
+				}
 				if (this.pendingValidation) {
 					const pending = this.pendingValidation;
 					this.pendingValidation = undefined;
@@ -394,6 +410,27 @@ export class CloudForgeCanvasPanel implements Disposable {
 						this.post({ type: 'schemaDiffReport', report: outcome.report });
 					} else {
 						this.post({ type: 'schemaDiffReport', report: null, error: outcome.message });
+					}
+				}
+				return;
+			}
+			case 'requestEngineValidate': {
+				const graph = this.graph;
+				if (!graph || !this.host.onRunEngineValidate) {
+					this.post({ type: 'engineValidateReport', report: null, error: l10n.t('Local CLI engine validation is not available in this window.') });
+					return;
+				}
+				const outcome = await this.host.onRunEngineValidate(
+					graph.workspaceId,
+					graph.architectureId,
+					graph.sourceRevision,
+					message.engine
+				);
+				if (this.panel && this.ready) {
+					if (outcome.ok) {
+						this.post({ type: 'engineValidateReport', report: outcome.report });
+					} else {
+						this.post({ type: 'engineValidateReport', report: null, error: outcome.message });
 					}
 				}
 				return;
