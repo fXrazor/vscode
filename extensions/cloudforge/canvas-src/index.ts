@@ -106,6 +106,7 @@ import {
 	type CanvasCatalogueSnapshot,
 	type CanvasCloudRegionsPayload,
 	type CanvasDependencyReport,
+	type CanvasExportAuditReport,
 	type CanvasFrame,
 	type CanvasFrameColor,
 	type CanvasGraphSnapshot,
@@ -114,6 +115,7 @@ import {
 	type CanvasNodeSummary,
 	type CanvasNotice,
 	type CanvasPoint,
+	type CanvasSchemaDiffReport,
 	type CanvasTheme,
 	type CanvasViewMode,
 	type CanvasViewport,
@@ -169,6 +171,13 @@ const liveSchemas = new Map<string, FormSchema | null>();
 const pendingSchemaRequests = new Set<string>();
 const cloudRegionsByProvider = new Map<'azure' | 'aws' | 'google', CanvasCloudRegionsPayload>();
 let dependencyReport: CanvasDependencyReport | null = null;
+let exportAuditReport: CanvasExportAuditReport | null = null;
+let schemaDiffReport: CanvasSchemaDiffReport | null = null;
+let schemaDiffError: string | undefined;
+let schemaDiffBusy = false;
+let diffProviderAddress: string | undefined;
+let diffFromIdx = 0;
+let diffToIdx = 1;
 let saveFileName = 'cloudforge_draft.tf';
 let savePhase: 'idle' | 'previewing' | 'previewReady' | 'applying' = 'idle';
 let savePreview: DraftSavePreviewResult | undefined;
@@ -4559,7 +4568,176 @@ function renderReviewModal(): HTMLElement | null {
 		}
 		body.append(importDetails);
 	} else if (reviewModalTab === 'policy') {
-		body.append(el('p', 'cf-muted', 'Deterministic offline security, governance, and provider-lock policy checks.'));
+		body.append(el('p', 'cf-muted', 'Deterministic offline security, governance, reproducible export, and schema upgrade checks.'));
+
+		// Live Stage 8 Reproducible Export & Lock Audit (from Rust cloudforge-service)
+		const auditCard = el('div', 'cf-save-preview-card');
+		const auditTop = el('div', 'cf-save-preview-meta');
+		auditTop.append(el('strong', undefined, 'Reproducible Export & Lock Audit'));
+		if (exportAuditReport) {
+			const badge = exportAuditReport.reproducible
+				? el('span', 'cf-pill cf-pill-ok', 'Reproducible')
+				: el('span', 'cf-pill cf-pill-warn', `Unresolved (${exportAuditReport.unresolvedReasonKinds.length})`);
+			auditTop.append(badge);
+			auditCard.append(
+				auditTop,
+				el('span', 'cf-muted', `Engine: ${exportAuditReport.engine}${exportAuditReport.engineInferred ? ' (inferred)' : ''} · Lock file: ${exportAuditReport.lockState} (${exportAuditReport.lockEntryCount} ${exportAuditReport.lockEntryCount === 1 ? 'entry' : 'entries'}) · Modules: ${exportAuditReport.moduleCount}`)
+			);
+			if (exportAuditReport.unresolvedReasonKinds.length > 0) {
+				const reasonRow = el('div', 'cf-header-group');
+				for (const kind of exportAuditReport.unresolvedReasonKinds) {
+					reasonRow.append(el('span', 'cf-pill cf-mono', kind));
+				}
+				auditCard.append(reasonRow);
+			}
+		} else {
+			auditTop.append(el('span', 'cf-pill', 'Offline'));
+			auditCard.append(
+				auditTop,
+				el('span', 'cf-muted', 'Live Rust export readiness audit is unavailable for this view.')
+			);
+		}
+		body.append(auditCard);
+
+		// Live Stage 8 Provider Schema Upgrade Impact Diff
+		const byProvider = new Map<string, CanvasCatalogueSnapshot[]>();
+		for (const snap of catalogueSnapshots) {
+			const bucket = byProvider.get(snap.address) ?? [];
+			bucket.push(snap);
+			byProvider.set(snap.address, bucket);
+		}
+		const multiVersionProviders = [...byProvider.entries()].filter(([, list]) => list.length >= 2);
+		const diffCard = el('div', 'cf-stage-card');
+		diffCard.append(el('strong', undefined, 'Provider Schema Upgrade Impact'));
+		if (multiVersionProviders.length === 0) {
+			diffCard.append(el('span', 'cf-muted', 'Import two versions of a provider schema via "CloudForge: Import Provider Schema Snapshot…" to compare breaking attribute changes against this architecture.'));
+		} else {
+			if (!diffProviderAddress || !byProvider.has(diffProviderAddress) || (byProvider.get(diffProviderAddress)?.length ?? 0) < 2) {
+				diffProviderAddress = multiVersionProviders[0][0];
+				diffFromIdx = 0;
+				diffToIdx = 1;
+			}
+			const versions = byProvider.get(diffProviderAddress) ?? [];
+			const safeFrom = Math.min(diffFromIdx, Math.max(0, versions.length - 1));
+			const safeTo = Math.min(diffToIdx, Math.max(0, versions.length - 1));
+			const diffControls = el('div', 'cf-save-bar');
+			if (multiVersionProviders.length > 1) {
+				const provField = el('label', 'cf-save-field');
+				provField.append(el('span', undefined, 'Provider'));
+				const provSel = el('select', 'cf-select');
+				provSel.setAttribute('aria-label', 'Schema diff provider');
+				for (const [address] of multiVersionProviders) {
+					const opt = el('option', undefined, address);
+					opt.value = address;
+					opt.selected = address === diffProviderAddress;
+					provSel.append(opt);
+				}
+				provSel.addEventListener('change', () => {
+					diffProviderAddress = provSel.value;
+					diffFromIdx = 0;
+					diffToIdx = 1;
+					schemaDiffReport = null;
+					schemaDiffError = undefined;
+					render();
+				});
+				provField.append(provSel);
+				diffControls.append(provField);
+			}
+			const fromField = el('label', 'cf-save-field');
+			fromField.append(el('span', undefined, 'From'));
+			const fromSel = el('select', 'cf-select');
+			fromSel.setAttribute('aria-label', 'From schema version');
+			versions.forEach((snap, idx) => {
+				const opt = el('option', undefined, `${snap.version} (${snap.sha256.slice(0, 8)})`);
+				opt.value = String(idx);
+				opt.selected = idx === safeFrom;
+				fromSel.append(opt);
+			});
+			fromSel.addEventListener('change', () => {
+				diffFromIdx = Number(fromSel.value) || 0;
+				render();
+			});
+			fromField.append(fromSel);
+
+			const toField = el('label', 'cf-save-field');
+			toField.append(el('span', undefined, 'To'));
+			const toSel = el('select', 'cf-select');
+			toSel.setAttribute('aria-label', 'To schema version');
+			versions.forEach((snap, idx) => {
+				const opt = el('option', undefined, `${snap.version} (${snap.sha256.slice(0, 8)})`);
+				opt.value = String(idx);
+				opt.selected = idx === safeTo;
+				toSel.append(opt);
+			});
+			toSel.addEventListener('change', () => {
+				diffToIdx = Number(toSel.value) || 0;
+				render();
+			});
+			toField.append(toSel);
+
+			const runDiffBtn = el('button', 'cf-btn cf-btn-primary', schemaDiffBusy ? 'Checking…' : 'Check Upgrade Impact');
+			runDiffBtn.type = 'button';
+			runDiffBtn.disabled = schemaDiffBusy || safeFrom === safeTo;
+			runDiffBtn.addEventListener('click', () => {
+				const fromSnap = versions[safeFrom];
+				const toSnap = versions[safeTo];
+				if (!fromSnap || !toSnap) {
+					return;
+				}
+				schemaDiffBusy = true;
+				schemaDiffError = undefined;
+				post({
+					type: 'requestSchemaDiff',
+					fromKey: {
+						address: fromSnap.address,
+						version: fromSnap.version,
+						formatVersion: fromSnap.formatVersion,
+						sha256: fromSnap.sha256,
+					},
+					toKey: {
+						address: toSnap.address,
+						version: toSnap.version,
+						formatVersion: toSnap.formatVersion,
+						sha256: toSnap.sha256,
+					},
+				});
+				render();
+			});
+			diffControls.append(fromField, toField, runDiffBtn);
+			diffCard.append(diffControls);
+
+			if (schemaDiffError) {
+				diffCard.append(el('div', 'cf-field-error', schemaDiffError));
+			} else if (schemaDiffReport) {
+				const diffSummary = el('div', 'cf-save-preview-meta');
+				diffSummary.append(
+					el('span', 'cf-mono', `${schemaDiffReport.provider}: ${schemaDiffReport.fromVersion} -> ${schemaDiffReport.toVersion}`),
+					el(
+						'span',
+						`cf-pill ${schemaDiffReport.hasArchitectureBreakingChanges ? 'cf-pill-err' : 'cf-pill-ok'}`,
+						schemaDiffReport.hasArchitectureBreakingChanges ? 'Breaking Impact' : 'No Architecture Breaks'
+					)
+				);
+				diffCard.append(
+					diffSummary,
+					el('span', 'cf-muted', `+${schemaDiffReport.addedTypeCount} added · -${schemaDiffReport.removedTypeCount} removed types · ${schemaDiffReport.pathChangeCount} attribute changes · ${schemaDiffReport.impactedArchitectureItems.length} impacted architecture items${schemaDiffReport.truncated ? ' (truncated)' : ''}`)
+				);
+				if (schemaDiffReport.impactedArchitectureItems.length > 0) {
+					const impactList = el('div', 'cf-dep-list');
+					for (const item of schemaDiffReport.impactedArchitectureItems) {
+						const row = el('div', `cf-diag ${item.breaking ? 'cf-diag-error' : 'cf-diag-warning'}`);
+						row.append(
+							el('div', 'cf-diag-head cf-mono', `${item.resourceAddress}${item.path ? `.${item.path}` : ''} · ${item.breaking ? 'BREAKING' : 'INFO'}`),
+							el('div', 'cf-diag-msg', item.summary)
+						);
+						impactList.append(row);
+					}
+					diffCard.append(impactList);
+				}
+			}
+		}
+		body.append(diffCard);
+
 		if (policies.length === 0) {
 			body.append(el('div', 'cf-save-preview-card', 'No offline policy findings detected for the current draft and provider locks.'));
 		} else {
@@ -4980,6 +5158,10 @@ window.addEventListener('message', event => {
 		case 'graph':
 			draftDoc = createDraftDocument(message.graph);
 			dependencyReport = null;
+			exportAuditReport = null;
+			schemaDiffReport = null;
+			schemaDiffError = undefined;
+			schemaDiffBusy = false;
 			hclReviewOpen = false;
 			exportModalOpen = false;
 			extractModuleModalOpen = false;
@@ -5029,6 +5211,11 @@ window.addEventListener('message', event => {
 			draftDoc = undefined;
 			projection = undefined;
 			currentRun = undefined;
+			dependencyReport = null;
+			exportAuditReport = null;
+			schemaDiffReport = null;
+			schemaDiffError = undefined;
+			schemaDiffBusy = false;
 			validationInFlight = false;
 			hclReviewOpen = false;
 			connectFeedback = undefined;
@@ -5093,9 +5280,23 @@ window.addEventListener('message', event => {
 			break;
 		case 'dependencyReport':
 			dependencyReport = message.report;
-			if (state.inspectorOpen || exportModalOpen) {
+			if (state.inspectorOpen || exportModalOpen || reviewModalOpen) {
 				render();
 				applyViewportTransform();
+			}
+			break;
+		case 'exportAuditReport':
+			exportAuditReport = message.report;
+			if (reviewModalOpen) {
+				render();
+			}
+			break;
+		case 'schemaDiffReport':
+			schemaDiffBusy = false;
+			schemaDiffReport = message.report;
+			schemaDiffError = message.error;
+			if (reviewModalOpen) {
+				render();
 			}
 			break;
 		case 'moduleInspection': {

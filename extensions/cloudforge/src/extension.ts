@@ -31,7 +31,9 @@ import {
 	parseDependencyReport,
 	parseDraftSaveApply,
 	parseDraftSavePreview,
+	parseExportAuditReport,
 	parseModuleInspection,
+	parseSchemaDiffReport,
 	parseValidationPoll,
 	parseValidationStart,
 	selectBestSnapshotForType,
@@ -563,6 +565,42 @@ export function activate(context: ExtensionContext): void {
 		return { ok: true as const, inspection };
 	}
 
+	async function auditArchitectureExportReadiness(workspaceId: string, architectureId: string, sourceRevision: string) {
+		const result = await callService<unknown>('auditExportReadiness', {
+			workspaceId,
+			architectureId,
+			expectedSourceRevision: sourceRevision,
+		});
+		if (!result.ok) {
+			return undefined;
+		}
+		return parseExportAuditReport(result.value);
+	}
+
+	async function diffArchitectureCatalogueSnapshots(
+		fromKey: { readonly address: string; readonly version: string; readonly formatVersion: string; readonly sha256: string },
+		toKey: { readonly address: string; readonly version: string; readonly formatVersion: string; readonly sha256: string },
+		workspaceId: string,
+		architectureId: string,
+		sourceRevision: string
+	) {
+		const result = await callService<unknown>('diffCatalogueSnapshots', {
+			fromKey,
+			toKey,
+			workspaceId,
+			architectureId,
+			expectedSourceRevision: sourceRevision,
+		});
+		if (!result.ok) {
+			return { ok: false as const, message: l10n.t('Could not diff the selected provider schema snapshots.') };
+		}
+		const report = parseSchemaDiffReport(result.value);
+		if (!report) {
+			return { ok: false as const, message: l10n.t('The CloudForge service returned an invalid schema diff.') };
+		}
+		return { ok: true as const, report };
+	}
+
 	async function cancelServiceValidation(): Promise<void> {
 		const active = activeValidation;
 		if (!active) {
@@ -762,6 +800,8 @@ export function activate(context: ExtensionContext): void {
 		onLoadCloudRegions: loadCloudRegions,
 		onInspectDependencies: inspectArchitectureDependencies,
 		onReadModule: readArchitectureModule,
+		onAuditExportReadiness: auditArchitectureExportReadiness,
+		onDiffCatalogueSnapshots: diffArchitectureCatalogueSnapshots,
 		async onExportArtifact(format, suggestedFileName, content, encoding) {
 			const folder = workspace.workspaceFolders?.[0]?.uri;
 			const defaultUri = folder ? Uri.joinPath(folder, suggestedFileName) : Uri.file(suggestedFileName);

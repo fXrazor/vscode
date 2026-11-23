@@ -12,9 +12,11 @@ import {
 	type CanvasCatalogueSnapshot,
 	type CanvasCloudRegionsPayload,
 	type CanvasDependencyReport,
+	type CanvasExportAuditReport,
 	type CanvasGraphSnapshot,
 	type CanvasModuleInspection,
 	type CanvasNotice,
+	type CanvasSchemaDiffReport,
 	type CanvasViewState,
 	type DraftSaveApplyResult,
 	type DraftSaveError,
@@ -64,6 +66,14 @@ export interface CanvasPanelHost {
 		sourceRevision: string,
 		modulePath: readonly string[]
 	): Promise<{ readonly ok: true; readonly inspection: CanvasModuleInspection } | { readonly ok: false; readonly message: string }>;
+	onAuditExportReadiness?(workspaceId: string, architectureId: string, sourceRevision: string): Promise<CanvasExportAuditReport | undefined>;
+	onDiffCatalogueSnapshots?(
+		fromKey: { readonly address: string; readonly version: string; readonly formatVersion: string; readonly sha256: string },
+		toKey: { readonly address: string; readonly version: string; readonly formatVersion: string; readonly sha256: string },
+		workspaceId: string,
+		architectureId: string,
+		sourceRevision: string
+	): Promise<{ readonly ok: true; readonly report: CanvasSchemaDiffReport } | { readonly ok: false; readonly message: string }>;
 	onExportArtifact?(
 		format: ExportFormat,
 		suggestedFileName: string,
@@ -366,6 +376,28 @@ export class CloudForgeCanvasPanel implements Disposable {
 				}
 				return;
 			}
+			case 'requestSchemaDiff': {
+				const graph = this.graph;
+				if (!graph || !this.host.onDiffCatalogueSnapshots) {
+					this.post({ type: 'schemaDiffReport', report: null, error: l10n.t('Provider schema diffing is not available in this window.') });
+					return;
+				}
+				const outcome = await this.host.onDiffCatalogueSnapshots(
+					message.fromKey,
+					message.toKey,
+					graph.workspaceId,
+					graph.architectureId,
+					graph.sourceRevision
+				);
+				if (this.panel && this.ready) {
+					if (outcome.ok) {
+						this.post({ type: 'schemaDiffReport', report: outcome.report });
+					} else {
+						this.post({ type: 'schemaDiffReport', report: null, error: outcome.message });
+					}
+				}
+				return;
+			}
 			case 'exportArtifact': {
 				if (!this.host.onExportArtifact) {
 					this.post({ type: 'exportResult', ok: false, message: l10n.t('Export is not available in this window.') });
@@ -432,6 +464,14 @@ export class CloudForgeCanvasPanel implements Disposable {
 			void this.host.onInspectDependencies(snapshot.workspaceId, snapshot.architectureId, snapshot.sourceRevision).then(report => {
 				if (this.ready && this.graph?.workspaceId === snapshot.workspaceId && this.graph?.architectureId === snapshot.architectureId && this.graph?.sourceRevision === snapshot.sourceRevision) {
 					this.post({ type: 'dependencyReport', report: report ?? null });
+				}
+			});
+		}
+		if (this.host.onAuditExportReadiness) {
+			const snapshot = this.graph;
+			void this.host.onAuditExportReadiness(snapshot.workspaceId, snapshot.architectureId, snapshot.sourceRevision).then(report => {
+				if (this.ready && this.graph?.workspaceId === snapshot.workspaceId && this.graph?.architectureId === snapshot.architectureId && this.graph?.sourceRevision === snapshot.sourceRevision) {
+					this.post({ type: 'exportAuditReport', report: report ?? null });
 				}
 			});
 		}

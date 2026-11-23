@@ -179,6 +179,39 @@ export interface CanvasModuleInspection {
 	readonly graph: CanvasGraphSnapshot | null;
 }
 
+export interface CanvasSchemaImpactedItem {
+	readonly resourceAddress: string;
+	readonly kind: 'resource' | 'dataSource';
+	readonly typeName: string;
+	readonly path?: string;
+	readonly breaking: boolean;
+	readonly summary: string;
+}
+
+export interface CanvasSchemaDiffReport {
+	readonly provider: string;
+	readonly fromVersion: string;
+	readonly toVersion: string;
+	readonly addedTypeCount: number;
+	readonly removedTypeCount: number;
+	readonly pathChangeCount: number;
+	readonly impactedArchitectureItems: readonly CanvasSchemaImpactedItem[];
+	readonly hasBreakingChanges: boolean;
+	readonly hasArchitectureBreakingChanges: boolean;
+	readonly truncated: boolean;
+}
+
+export interface CanvasExportAuditReport {
+	readonly sourceRevision: string;
+	readonly engine: 'openTofu' | 'terraform';
+	readonly engineInferred: boolean;
+	readonly reproducible: boolean;
+	readonly lockState: 'absent' | 'valid' | 'invalid' | 'unreadable';
+	readonly lockEntryCount: number;
+	readonly moduleCount: number;
+	readonly unresolvedReasonKinds: readonly string[];
+}
+
 export interface CanvasViewport {
 	readonly x: number;
 	readonly y: number;
@@ -311,6 +344,15 @@ export type ExtensionToWebviewMessage =
 		readonly error?: string;
 	}
 	| {
+		readonly type: 'exportAuditReport';
+		readonly report: CanvasExportAuditReport | null;
+	}
+	| {
+		readonly type: 'schemaDiffReport';
+		readonly report: CanvasSchemaDiffReport | null;
+		readonly error?: string;
+	}
+	| {
 		readonly type: 'openExport';
 	}
 	| {
@@ -331,6 +373,11 @@ export type WebviewToExtensionMessage =
 	| { readonly type: 'applyDraftSave'; readonly fileName: string; readonly contents: string; readonly previewToken: string }
 	| { readonly type: 'requestSchema'; readonly kind: 'resource' | 'dataSource'; readonly typeName: string }
 	| { readonly type: 'requestModule'; readonly modulePath: readonly string[] }
+	| {
+		readonly type: 'requestSchemaDiff';
+		readonly fromKey: { readonly address: string; readonly version: string; readonly formatVersion: string; readonly sha256: string };
+		readonly toKey: { readonly address: string; readonly version: string; readonly formatVersion: string; readonly sha256: string };
+	}
 	| { readonly type: 'exportArtifact'; readonly format: ExportFormat; readonly suggestedFileName: string; readonly content: string; readonly encoding: 'utf8' | 'base64' };
 
 const MAX_COLLAPSED_GROUPS = 256;
@@ -765,6 +812,22 @@ export function parseWebviewMessage(value: unknown): WebviewToExtensionMessage |
 				modulePath.push(segment);
 			}
 			return { type: 'requestModule', modulePath };
+		}
+		case 'requestSchemaDiff': {
+			const parseKey = (raw: unknown) => {
+				if (!isRecord(raw) || typeof raw.address !== 'string' || typeof raw.version !== 'string' || typeof raw.formatVersion !== 'string' || typeof raw.sha256 !== 'string') {
+					return undefined;
+				}
+				const segOk = (s: string) => s.length > 0 && s.length <= 256 && s !== '.' && s !== '..' && /^[A-Za-z0-9._+-]+$/.test(s);
+				const parts = raw.address.split('/');
+				if (parts.length !== 3 || !parts.every(segOk) || !segOk(raw.version) || !segOk(raw.formatVersion) || !/^[0-9a-f]{64}$/.test(raw.sha256)) {
+					return undefined;
+				}
+				return { address: raw.address, version: raw.version, formatVersion: raw.formatVersion, sha256: raw.sha256 };
+			};
+			const fromKey = parseKey(value.fromKey);
+			const toKey = parseKey(value.toKey);
+			return fromKey && toKey ? { type: 'requestSchemaDiff', fromKey, toKey } : undefined;
 		}
 		case 'exportArtifact': {
 			if (value.format !== 'svg' && value.format !== 'png' && value.format !== 'markdown') {

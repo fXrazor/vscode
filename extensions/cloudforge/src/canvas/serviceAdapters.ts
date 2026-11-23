@@ -15,12 +15,15 @@ import type {
 	CanvasDependencyReport,
 	CanvasDiagnosticSummary,
 	CanvasEdgeSummary,
+	CanvasExportAuditReport,
 	CanvasGraphSnapshot,
 	CanvasModuleInspection,
 	CanvasModuleOutput,
 	CanvasModuleVariable,
 	CanvasNodeSummary,
 	CanvasProviderDependency,
+	CanvasSchemaDiffReport,
+	CanvasSchemaImpactedItem,
 	DraftSaveApplyResult,
 	DraftSaveError,
 	DraftSaveFinding,
@@ -1237,28 +1240,6 @@ export function parseModuleInspection(value: unknown, architectureName: string):
 // Stage 8: Schema Upgrade Impact Diff & Reproducible Export Readiness Adapters
 // ============================================================================
 
-export interface CanvasSchemaImpactedItem {
-	readonly resourceAddress: string;
-	readonly kind: 'resource' | 'dataSource';
-	readonly typeName: string;
-	readonly path?: string;
-	readonly breaking: boolean;
-	readonly summary: string;
-}
-
-export interface CanvasSchemaDiffReport {
-	readonly provider: string;
-	readonly fromVersion: string;
-	readonly toVersion: string;
-	readonly addedTypeCount: number;
-	readonly removedTypeCount: number;
-	readonly pathChangeCount: number;
-	readonly impactedArchitectureItems: readonly CanvasSchemaImpactedItem[];
-	readonly hasBreakingChanges: boolean;
-	readonly hasArchitectureBreakingChanges: boolean;
-	readonly truncated: boolean;
-}
-
 export function parseSchemaDiffReport(value: unknown): CanvasSchemaDiffReport | undefined {
 	if (
 		!isRecord(value) ||
@@ -1308,17 +1289,6 @@ export function parseSchemaDiffReport(value: unknown): CanvasSchemaDiffReport | 
 		hasArchitectureBreakingChanges: value.hasArchitectureBreakingChanges,
 		truncated: value.truncated,
 	};
-}
-
-export interface CanvasExportAuditReport {
-	readonly sourceRevision: string;
-	readonly engine: 'openTofu' | 'terraform';
-	readonly engineInferred: boolean;
-	readonly reproducible: boolean;
-	readonly lockState: 'absent' | 'valid' | 'invalid' | 'unreadable';
-	readonly lockEntryCount: number;
-	readonly moduleCount: number;
-	readonly unresolvedReasonKinds: readonly string[];
 }
 
 export function parseExportAuditReport(value: unknown): CanvasExportAuditReport | undefined {

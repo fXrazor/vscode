@@ -324,6 +324,29 @@ test('Stage 7 module inspection adapter and Webview requestModule validation san
 });
 
 test('Stage 8 schema upgrade impact diff and reproducible export audit adapters sanitize payloads', () => {
+	const shaA = 'a'.repeat(64);
+	const shaB = 'b'.repeat(64);
+	assert.deepStrictEqual(
+		parseWebviewMessage({
+			type: 'requestSchemaDiff',
+			fromKey: { address: 'registry.terraform.io/hashicorp/azurerm', version: '5.14.0', formatVersion: '1.0', sha256: shaA },
+			toKey: { address: 'registry.terraform.io/hashicorp/azurerm', version: '6.0.0', formatVersion: '1.0', sha256: shaB },
+		}),
+		{
+			type: 'requestSchemaDiff',
+			fromKey: { address: 'registry.terraform.io/hashicorp/azurerm', version: '5.14.0', formatVersion: '1.0', sha256: shaA },
+			toKey: { address: 'registry.terraform.io/hashicorp/azurerm', version: '6.0.0', formatVersion: '1.0', sha256: shaB },
+		}
+	);
+	assert.equal(
+		parseWebviewMessage({
+			type: 'requestSchemaDiff',
+			fromKey: { address: 'registry.terraform.io/hashicorp/azurerm', version: '5.14.0', formatVersion: '1.0', sha256: 'not-a-sha' },
+			toKey: { address: 'registry.terraform.io/hashicorp/azurerm', version: '6.0.0', formatVersion: '1.0', sha256: shaB },
+		}),
+		undefined
+	);
+
 	const diff = parseSchemaDiffReport({
 		provider: 'registry.terraform.io/hashicorp/azurerm',
 		fromVersion: '5.14.0',
