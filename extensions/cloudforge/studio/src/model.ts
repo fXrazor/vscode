@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 import { variableError, variableUses, type VariableDefinition } from './variables.ts';
+import { canConnect } from './designConnections.ts';
 import type { ShapeId } from './shapes.ts';
 export type DesignMode = 'visual' | 'technical';
 export type ResourceKind = 'network' | 'subnet' | 'gateway' | 'cluster' | 'storage' | 'monitor' | 'group' | 'compute' | 'database' | 'module' | 'generic';
@@ -193,7 +194,7 @@ function editArchitecture(architecture: Architecture, action: Edit): Architectur
 			if (![action.width, action.height, action.position.x, action.position.y].every(Number.isFinite) || action.width <= 0 || action.height <= 0) { return architecture; }
 			return editArchitecture(editArchitecture(architecture, { type: 'moveItem', id: action.id, mode: action.mode, position: action.position }), { type: 'updateItem', id: action.id, patch: { width: action.width, height: action.height } });
 		case 'deleteItem':
-			return { ...architecture, items: architecture.items.filter(item => item.id !== action.id) };
+			return architecture.items.some(item => item.id === action.id) ? { ...architecture, items: architecture.items.filter(item => item.id !== action.id), connections: architecture.connections.filter(connection => connection.source !== action.id && connection.target !== action.id) } : architecture;
 		case 'moveItem': {
 			const moved = architecture.items.find(item => item.id === action.id);
 			if (!moved) { return architecture; }
@@ -216,10 +217,7 @@ function editArchitecture(architecture: Architecture, action: Edit): Architectur
 			};
 		}
 		case 'connect':
-			if (action.source === action.target
-				|| !architecture.resources.some(resource => resource.id === action.source)
-				|| !architecture.resources.some(resource => resource.id === action.target)
-				|| architecture.connections.some(connection => connection.source === action.source && connection.target === action.target)) {
+			if (!canConnect(architecture, action.source, action.target)) {
 				return architecture;
 			}
 			return {

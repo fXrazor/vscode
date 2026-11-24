@@ -38,7 +38,7 @@ export const ResourceNode = memo(function ResourceNode({ data, selected }: NodeP
 					{Object.entries(data.resource.settings).slice(0, 2).map(([name, value]) => (
 						<label key={name}><span>{name}</span><input className="nodrag nopan" aria-label={name + ' on ' + data.resource.name} value={value} onChange={event => data.dispatch({ type: 'update', id: data.resource.id, patch: { settings: { ...data.resource.settings, [name]: event.target.value } } })} /></label>
 					))}
-				<details className="nodrag nopan"><summary>{data.dependencies.length} incoming dependencies</summary>{data.dependencies.length ? data.dependencies.map(name => <p key={name}>{name}</p>) : <p>No incoming design links</p>}</details><span className={data.findings.length ? "node-warning" : "node-check"}>{data.findings.length ? data.findings.join(" · ") : "Name check passed"}</span><span className="node-cost" title="Pricing service is not connected">Cost · Not estimated</span></div>
+				<details className="nodrag nopan"><summary>{data.dependencies.length} incoming design links</summary>{data.dependencies.length ? data.dependencies.map(name => <p key={name}>{name}</p>) : <p>No incoming design links</p>}</details><span className={data.findings.length ? "node-warning" : "node-check"}>{data.findings.length ? data.findings.join(" · ") : "Name check passed"}</span><span className="node-cost" title="Pricing service is not connected">Cost · Not estimated</span></div>
 			)}
 			<Handle type="source" position={Position.Right} id="output" aria-label="Design link output" />
 		</div>
@@ -50,6 +50,7 @@ export const BoardNode = memo(function BoardNode({ data, selected }: NodeProps<B
 	return (
 		<div className={'board-item ' + item.kind + (selected ? ' is-selected' : '')}
    style={{ background: item.kind === 'shape' ? undefined : item.fill, fontSize: item.fontSize, fontWeight: item.bold ? 700 : undefined }}>
+   {item.kind !== 'frame' && <Handle className="drawing-port" type="target" position={Position.Left} id="input" aria-label="Drawing connection input"/>}
    <NodeToolbar isVisible={selected} position={Position.Top} offset={18}>
     <CanvasEditbar item={item} mode={data.mode}>
      {item.kind === 'shape' && <select aria-label="Shape type" value={item.shape ?? 'rectangle'} onChange={event => dispatch({ type: 'updateItem', id: item.id, patch: { shape: event.target.value as typeof item.shape } })}>{shapeDefinitions.map(shape => <option key={shape.id} value={shape.id}>{shape.label}</option>)}</select>}
@@ -66,6 +67,7 @@ export const BoardNode = memo(function BoardNode({ data, selected }: NodeProps<B
 				onResizeEnd={(_, size) => dispatch({ type: 'resizeItem', id: item.id, mode: data.mode, position: { x: size.x, y: size.y }, width: size.width / (item.kind === 'frame' && data.mode === 'technical' ? 1.7 : 1), height: size.height / (item.kind === 'frame' && data.mode === 'technical' ? 1.3 : 1) })} />
 			{item.kind === 'shape' && <svg className="board-shape-geometry" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path d={shapeDefinition(item.shape).path} fill={item.fill ?? '#eef2ff'} stroke={item.strokeColor ?? '#7565bd'} strokeWidth={item.strokeWidth ?? 1.5} strokeDasharray={shapeStrokeDash(item.strokeStyle, item.strokeWidth)} strokeLinecap="round" vectorEffect="non-scaling-stroke" /></svg>}
 			{item.kind === 'frame' ? <span className="frame-label">{item.text}</span> : <span className={item.kind === 'shape' ? 'board-shape-label' : undefined} style={item.kind === 'shape' ? { color: shapeTextColor(item.fill ?? '#eef2ff') } : undefined}>{item.text}</span>}
+   {item.kind !== 'frame' && <Handle className="drawing-port" type="source" position={Position.Right} id="output" aria-label="Drawing connection output"/>}
 		</div>
 	);
 });

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { Architecture, DesignMode } from './model.ts';
 import { exportPresentation } from './exportPresentation.ts';
-import { Download, PanelLeft, PanelRight, Pencil, Waypoints, Moon, Sun, Undo2, Redo2 } from 'lucide-react';
+import { Download, PanelLeft, PanelRight, Pencil, Waypoints, Moon, Sun, Undo2, Redo2, Menu } from 'lucide-react';
 
 export function VisualTopbar({ mode, onMode, architecture, name, onRename, onTechnical, onExport, onToggleLibrary, onToggleInspector, revisions, onUndo, onRedo, canRedo, theme, onTheme }: {
  mode: DesignMode; onMode: (mode: DesignMode) => void; architecture: Architecture; name: string;
@@ -35,5 +35,13 @@ export function VisualTopbar({ mode, onMode, architecture, name, onRename, onTec
     <button onClick={() => { void exportPresentation(architecture, 'pdf'); }}>Print / Save PDF</button>
    </div></details>
   </div>
+  <details className="shell-compact-menu" onKeyDown={event => { if (event.key === 'Escape') { event.currentTarget.open = false; event.currentTarget.querySelector('summary')?.focus(); } }}><summary aria-label="Workspace actions"><Menu size={18}/></summary><div onClick={event => { const menu = event.currentTarget.parentElement as HTMLDetailsElement; menu.open = false; menu.querySelector('summary')?.focus(); }}>
+   <button disabled={!revisions} onClick={onUndo}>Undo</button><button disabled={!canRedo} onClick={onRedo}>Redo</button>
+   <button onClick={onToggleLibrary}>Toggle resource library</button><button onClick={onToggleInspector}>Toggle resource inspector</button>
+   <button onClick={() => onMode('visual')}>Architecture view</button><button onClick={onTechnical}>Configuration view</button>
+   <button onClick={onTheme}>Switch to {theme === 'dark' ? 'light' : 'dark'} theme</button>
+   <button onClick={onExport}>Export graph JSON</button><button onClick={() => { void exportPresentation(architecture, 'svg'); }}>Export SVG</button>
+   <button onClick={() => { void exportPresentation(architecture, 'png'); }}>Export PNG</button><button onClick={() => { void exportPresentation(architecture, 'pdf'); }}>Print / Save PDF</button>
+  </div></details>
  </header>;
 }

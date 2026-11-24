@@ -1,5 +1,6 @@
 import { shapeDefinition, shapeTextColor, shapeStrokeDash } from './shapes.ts';
 import { connectionPath, connectionDash } from './connectionGeometry.ts';
+import { connectionAnchor } from './designConnections.ts';
 import type { Architecture } from './model.ts';
 import { resourceDefinition } from './fixture.ts';
 
@@ -28,9 +29,9 @@ export async function presentationSvg(architecture: Architecture): Promise<strin
   return `<g><rect x="${x}" y="${y}" width="${item.width}" height="${item.height}" rx="8" fill="${escape(item.fill ?? (item.kind === 'note' ? '#fff0b5' : item.kind === 'frame' ? '#f7faff' : '#ffffff'))}" stroke="#b8c6dc"/><text x="${x + 12}" y="${y + 24}" font-size="${item.fontSize ?? 13}" font-weight="${item.bold ? 700 : 400}">${escape(item.text)}</text></g>`;
  }).join('');
  const edges = architecture.connections.map((edge, index) => {
-  const source = architecture.resources.find(resource => resource.id === edge.source); const target = architecture.resources.find(resource => resource.id === edge.target);
+  const source = connectionAnchor(architecture, edge.source, 'source', 'visual'); const target = connectionAnchor(architecture, edge.target, 'target', 'visual');
   if (!source || !target) { return ''; }
-  const [path, labelX, labelY] = connectionPath(edge, source.positions.visual.x + 78, source.positions.visual.y + 20, target.positions.visual.x + 18, target.positions.visual.y + 20);
+  const [path, labelX, labelY] = connectionPath(edge, source.x, source.y, target.x, target.y);
   const colour = escape(edge.stroke ?? '#7565bd'); const dash = connectionDash(edge);
   return `<g><defs><marker id="connection-arrow-${index}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="${colour}"/></marker></defs><path d="${path}" stroke="${colour}" stroke-width="${edge.width ?? 1.5}" ${dash ? `stroke-dasharray="${dash}"` : ''} stroke-linecap="round" fill="none" ${edge.startArrow ? `marker-start="url(#connection-arrow-${index})"` : ''} ${edge.endArrow === false ? '' : `marker-end="url(#connection-arrow-${index})"`}/>${edge.label ? `<text x="${labelX}" y="${labelY - 8}" text-anchor="middle" font-size="11">${escape(edge.label)}</text>` : ''}</g>`;
  }).join('');

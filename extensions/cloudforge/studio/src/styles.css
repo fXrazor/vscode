@@ -222,6 +222,22 @@ h1 { font-size: 19px; font-weight: 650; letter-spacing: -0.4px; display: flex; a
 .connection-tool-fields .connection-checkbox { display: flex; align-items: center; gap: 4px; padding-bottom: 4px; }
 .connection-checkbox input { width: 14px; min-height: 14px; }
 .connection-tool-fields input[type=color] { width: 36px; padding: 2px; }
+.connection-create .connection-tool-fields > label { flex: 1 1 160px; min-width: 0; }
+.connection-create .field-help { margin-top: 10px; font-size: 11px; }
+.shell-compact-menu { display: none; }
+@media (max-width: 580px) {
+ .cloudlab-topbar { gap: 8px; min-width: 0; }
+ .cloudlab-topbar > input { flex: 1; min-width: 0; width: 0; }
+ .cloudlab-topbar .shell-actions { display: none; }
+ .cloudlab-topbar .shell-compact-menu { display: block; flex: none; }
+ .shell-compact-menu > summary { list-style: none; display: grid; place-items: center; width: 36px; height: 36px; cursor: pointer; border: 1px solid var(--border); border-radius: 4px; }
+ .shell-compact-menu > div { position: fixed; top: 48px; right: 8px; width: min(260px, calc(100vw - 16px)); max-height: calc(100dvh - 64px); overflow: auto; z-index: 100; background: var(--panel-solid); border: 1px solid var(--border); padding: 6px; border-radius: 6px; }
+ .shell-compact-menu button { display: block; width: 100%; min-height: 40px; text-align: left; padding: 8px 10px; color: var(--text); background: transparent; border: 0; }
+ .shell-compact-menu button:hover { background: var(--hover); }
+}
+.board-item .drawing-port { width: 10px; height: 10px; background: var(--accent); border: 2px solid var(--surface); opacity: 0; transition: opacity 100ms ease-out; }
+.board-item:hover .drawing-port, .board-item.is-selected .drawing-port, .react-flow__node:focus-within .drawing-port { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .board-item .drawing-port { transition: none; } }
 .nested-block > summary { justify-content: flex-start; flex-wrap: wrap; }
 .nested-block > summary > span { margin-left: auto; font-size: 10px; color: var(--muted); font-weight: 400; }
 .nested-block-body { display: grid; gap: 16px; padding: 12px 0; }

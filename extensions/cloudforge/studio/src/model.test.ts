@@ -13,6 +13,36 @@ import { createHistory, historyReducer, checkDraft } from './model.ts';
 import { sampleArchitecture } from './fixture.ts';
 import { additionalBlocks, blockDefinitions, fieldIssue, resourceFormIssues } from './formDefinition.ts';
 import { connectionDash, connectionPath } from './connectionGeometry.ts';
+import { canConnect, connectionAnchor, connectableElements } from './designConnections.ts';
+
+test('drawings connect by stable IDs and delete with attached links in one undo step', () => {
+	const shape = (id: string, x: number): BoardItem => ({ id, kind: 'shape', text: id, shape: 'rectangle', width: 200, height: 100, members: [], positions: { visual: { x, y: 100 }, technical: { x, y: 200 } } });
+	const architecture = { ...sampleArchitecture(), items: [shape('a', 50), shape('b', 400)] };
+	const initial = createHistory(architecture);
+	const connected = historyReducer(initial, { type: 'connect', source: 'a', target: 'b' });
+	assert.equal(connected.present.connections.length, initial.present.connections.length + 1);
+	assert.equal(canConnect(connected.present, 'a', 'b'), false);
+	assert.ok(canConnect(connected.present, 'a', 'network'));
+	assert.equal(canConnect(connected.present, 'a', 'a'), false);
+	const moved = historyReducer(connected, { type: 'moveItem', id: 'a', mode: 'visual', position: { x: 75, y: 125 } });
+	assert.deepEqual(connectionAnchor(moved.present, 'a', 'source', 'visual'), { x: 275, y: 175 });
+	assert.deepEqual(connectionAnchor(moved.present, 'a', 'source', 'technical'), { x: 250, y: 250 });
+	const resized = historyReducer(moved, { type: 'resizeItem', id: 'a', mode: 'visual', position: { x: 75, y: 125 }, width: 300, height: 120 });
+	assert.deepEqual(connectionAnchor(resized.present, 'a', 'source', 'visual'), { x: 375, y: 185 });
+	assert.deepEqual(resized.present.connections, moved.present.connections);
+	const deleted = historyReducer(moved, { type: 'deleteItem', id: 'a' });
+	assert.equal(deleted.past.length, moved.past.length + 1);
+	assert.ok(!deleted.present.connections.some(link => link.source === 'a' || link.target === 'a'));
+	assert.deepEqual(historyReducer(deleted, { type: 'undo' }).present, moved.present);
+	assert.ok(!connectableElements(sampleArchitecture()).some(element => sampleArchitecture().items.some(item => item.kind === 'frame' && item.id === element.id)));
+});
+
+test('drawing connectors retain geometry and escaped labels in presentation export', async () => {
+	const item = (id: string, x: number): BoardItem => ({ id, kind: 'note', text: id, width: 200, height: 100, members: [], positions: { visual: { x, y: 100 }, technical: { x, y: 200 } } });
+	const svg = await presentationSvg({ name: 'Drawing flow', resources: [], items: [item('a', 50), item('b', 400)], connections: [{ id: 'a-b', source: 'a', target: 'b', routing: 'straight', label: '<Review>' }] });
+	assert.ok(svg.includes('M 250,150L 400,150') || svg.includes('M250,150L400,150') || svg.includes('M 250 150L 400 150'), svg);
+	assert.ok(svg.includes('&lt;Review&gt;'));
+});
 
 test('connection appearance and deletion use shared history without changing Terraform configuration', () => {
 	const initial = createHistory(sampleArchitecture()); const id = initial.present.connections[0].id;

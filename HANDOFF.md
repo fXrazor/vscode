@@ -1,5 +1,9 @@
 # CloudForge Code OSS handoff
 
+## Connected drawing and design review — 24 November 2026
+
+Continued in the same worktree/branch `codex/infrastructure-studio-preview`, base `2c1f658f0b0`. Added shape/note/text connections, stable-ID bounds-based export, atomic attached-link deletion/Undo, keyboard connection creation and compact phone-width workspace actions. Reference UI and AFFiNE source findings, design direction, resolved review issues and limitations are in [CANVAS-DESIGN-REFINEMENT.md](extensions/cloudforge/studio/CANVAS-DESIGN-REFINEMENT.md). One canonical graph/history; source checkouts, Rust, protocol and installed desktop are unchanged. Fresh verification: TypeScript, 31 tests, preview build, browser drawing links/movement/deletion/Undo/focus, both themes, no page overflow at 320/390/768/1024px with panels collapsed. Full provider constraints, typed inheritance/references and grouped manipulation remain open. Next: selection/group manipulation and precision attachment geometry without conflating visual frames with provider containment.
+
 ## Canvas connector follow-up — 24 November 2026
 
 Codex continued in the same isolated worktree/branch `codex/infrastructure-studio-preview`, base `b84a8191783`. Inspected live Brainboard node/grid view menus and AFFiNE connector model/toolbar source; adapted selection-only connection tools, shared geometry/export, labels, stroke, arrowheads and local visibility controls. Same Architecture/history across renderers. No Rust, protocol, source-checkout or installed Workbench changes. Fresh preview TypeScript, 29 tests, production build, browser editing/Undo/mode/visibility checks and SVG download inspection passed. See [CANVAS-CONNECTIONS-PASS.md](extensions/cloudforge/studio/CANVAS-CONNECTIONS-PASS.md) for the evidence ledger, paths, screenshots and remaining gaps. Exact next action: stable-ID shape connections and grouped manipulation; provider constraint/reference work remains open.

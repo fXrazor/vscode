@@ -23,6 +23,8 @@ export function ResourceWorkspace({ resource, architecture, findings, dispatch, 
 		.filter(connection => connection.target === resource.id)
 		.map(connection => architecture.resources.find(item => item.id === connection.source))
 		.filter(item => item !== undefined);
+	const upstreamDrawings = architecture.connections.filter(connection => connection.target === resource.id)
+		.map(connection => architecture.items.find(item => item.id === connection.source)).filter(item => item !== undefined);
 	const resourceFindings = findings?.filter(finding => finding.resourceId === resource.id);
 	return (
 		<dialog ref={dialog} className="resource-workspace" onCancel={onClose} aria-labelledby="resource-workspace-title">
@@ -34,14 +36,15 @@ export function ResourceWorkspace({ resource, architecture, findings, dispatch, 
 			<div className="workspace-columns">
 				<aside className="workspace-inputs">
 					<h2>Inputs</h2>
-					<p className="muted">Connected resources</p>
-					{upstream.length === 0 && <p>This resource has no incoming design links.</p>}
+					<p className="muted">Connected elements</p>
+					{upstream.length === 0 && upstreamDrawings.length === 0 && <p>This resource has no incoming design links.</p>}
 					{upstream.map(input => (
 						<div className="input-resource" key={input.id}>
 							<img src={'./assets/' + resourceDefinition(input).icon} alt="" />
 							<div><strong>{input.name}</strong><small>{resourceDefinition(input).label}</small></div>
 						</div>
 					))}
+					{upstreamDrawings.map(item => <div className="input-resource" key={item.id}><div><strong>{item.text || 'Untitled drawing'}</strong><small>{item.kind} · visual link</small></div></div>)}
 					<div className="context-note"><h3>About this resource</h3><p>{metadata.description}</p><p>Connections in this preview describe design relationships.</p></div>
 				</aside>
 				<section className="workspace-parameters">

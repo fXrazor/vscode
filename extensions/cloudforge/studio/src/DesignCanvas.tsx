@@ -5,6 +5,8 @@
 import { shapeDefinitions, type ShapeId } from './shapes.ts';
 import { DesignEdge, type DesignEdgeType } from './DesignEdge.tsx';
 import { ConnectionTools } from './ConnectionTools.tsx';
+import { ConnectionCreate } from './ConnectionCreate.tsx';
+import { canConnect } from './designConnections.ts';
 import { memo, useEffect, useMemo, useRef, useState, type Dispatch, type RefObject } from 'react';
 import {
 	Background, BackgroundVariant, MarkerType, MiniMap, ReactFlow, SelectionMode,
@@ -14,7 +16,7 @@ import { BoardNode, ResourceNode, type CanvasNode } from './ResourceNode.tsx';
 import type { Action, Architecture, BoardItem, DesignMode, Provider, ResourceKind, Position } from './model.ts';
 import { checkDraft } from './model.ts';
 import { resourceDefinition, resourceTypes, providerNames } from './fixture.ts';
-import { MousePointer2, Hand, Type, StickyNote, Shapes, Frame, Minus, Plus, Scan } from 'lucide-react';
+import { MousePointer2, Hand, Type, StickyNote, Shapes, Frame, Minus, Plus, Scan, Cable } from 'lucide-react';
 
 const nodeTypes = { resource: ResourceNode, board: BoardNode };
 const edgeTypes = { design: DesignEdge };
@@ -59,6 +61,8 @@ export const DesignCanvas = memo(function DesignCanvas({
 	const [selectedConnectionId, setSelectedConnectionId] = useState('');
 	const [showConnections, setShowConnections] = useState(true);
 	const [showLabels, setShowLabels] = useState(false);
+	const [creatingConnection, setCreatingConnection] = useState(false);
+	const [connectionSourceId, setConnectionSourceId] = useState('');
 	const selectedConnection = architecture.connections.find(connection => connection.id === selectedConnectionId);
 	const bounds = useRef<HTMLDivElement>(null);
 	useEffect(() => { if (selectedId) { setSelectedConnectionId(''); } }, [selectedId]);
@@ -69,7 +73,7 @@ export const DesignCanvas = memo(function DesignCanvas({
 		return {
 			id: resource.id, type: 'resource', parentId: parent?.id,
 			position: { x: resource.positions[mode].x - parentPosition.x, y: resource.positions[mode].y - parentPosition.y },
-			data: { resource, mode, dispatch, dependencies: architecture.connections.filter(edge => edge.target === resource.id).map(edge => architecture.resources.find(candidate => candidate.id === edge.source)?.name ?? edge.source), findings: checkDraft(architecture).filter(finding => finding.resourceId === resource.id).map(finding => finding.message) }, ariaLabel: resource.name + ', ' + resourceDefinition(resource).label
+			data: { resource, mode, dispatch, dependencies: architecture.connections.filter(edge => edge.target === resource.id).map(edge => architecture.resources.find(candidate => candidate.id === edge.source)?.name ?? architecture.items.find(item => item.id === edge.source)?.text ?? edge.source), findings: checkDraft(architecture).filter(finding => finding.resourceId === resource.id).map(finding => finding.message) }, ariaLabel: resource.name + ', ' + resourceDefinition(resource).label
 		};
 	}), [architecture, mode, dispatch]);
 
@@ -144,16 +148,18 @@ export const DesignCanvas = memo(function DesignCanvas({
 				<button aria-label="Add sticky note" title="Add sticky note" onClick={() => createItem('note')}><StickyNote /></button>
 				<button aria-label="Add shape" title="Add shape" onClick={onOpenShapes}><Shapes /></button>
 				<button aria-label="Add frame" title="Add frame" onClick={() => createItem('frame')}><Frame /></button>
+				<button aria-label="Connect elements" title="Connect elements" aria-expanded={creatingConnection} onClick={() => { setSelectedConnectionId(''); if (!creatingConnection) { setConnectionSourceId(selectedId); onSelect(''); } setCreatingConnection(value => !value); }}><Cable /></button>
 			</div>
 			<ReactFlow<CanvasNode, DesignEdgeType>
 				forceColorMode={theme}
 				nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange}
 				onInit={instance => { setFlow(instance); onInit(instance); }}
 				onConnect={connection => dispatch({ type: 'connect', source: connection.source, target: connection.target })}
+				isValidConnection={connection => canConnect(architecture, connection.source, connection.target)}
 				minZoom={0.1} maxZoom={20}
-				onNodeClick={(_, node) => { setSelectedConnectionId(''); onSelect(node.id); }}
+				onNodeClick={(_, node) => { if (!creatingConnection) { setSelectedConnectionId(''); onSelect(node.id); } }}
 				onPaneClick={() => { setSelectedConnectionId(''); onSelect(''); }}
-				onEdgeClick={(_, edge) => { setSelectedConnectionId(edge.id); onSelect(''); }}
+				onEdgeClick={(_, edge) => { setCreatingConnection(false); setSelectedConnectionId(edge.id); onSelect(''); }}
 				onNodeDoubleClick={(_, node) => { if (node.type === 'resource') { onOpen(node.id); } }}
 				onNodeDragStop={(_, node) => {
 					if (node.type === 'board') {
@@ -173,7 +179,7 @@ export const DesignCanvas = memo(function DesignCanvas({
 				<CanvasBackground grid={grid} />
 				{minimap && <MiniMap<CanvasNode> pannable zoomable nodeColor={node => node.type === 'board' && node.data.item.kind === 'frame' ? 'transparent' : '#8e79d9'} />}
 			</ReactFlow>
-			{selectedConnection && showConnections && <ConnectionTools connection={selectedConnection} dispatch={dispatch} onClose={() => { setSelectedConnectionId(''); bounds.current?.focus(); }}/>}
+			{creatingConnection ? <ConnectionCreate architecture={architecture} selectedId={connectionSourceId} dispatch={dispatch} onClose={() => { setCreatingConnection(false); bounds.current?.querySelector<HTMLButtonElement>('[aria-label="Connect elements"]')?.focus(); }}/> : selectedConnection && showConnections && <ConnectionTools connection={selectedConnection} dispatch={dispatch} onClose={() => { setSelectedConnectionId(''); bounds.current?.focus(); }}/>}
 			<details className="canvas-options"><summary>View</summary><div className="view-options-content">
 				<label>Theme<select aria-label="Canvas theme" value={theme} onChange={event => onThemeChange(event.target.value as 'light' | 'dark')}><option value="light">Light</option><option value="dark">Dark</option></select></label>
 				<label>Grid<select aria-label="Canvas grid" value={grid} onChange={event => setGrid(event.target.value as typeof grid)}><option value="dots">Dots</option><option value="lines">Lines</option><option value="none">None</option></select></label>
