@@ -23,6 +23,8 @@ Persistent chrome must directly support the current workflow. The authoring layo
 
 ## Export
 
+Resource design connections now have selection-only label, path, stroke and arrow controls. View can hide connections or reveal all labels without changing the graph. Connection edits share Undo/Redo across both renderers and retain their appearance in presentation export. They remain visual links, not verified Terraform dependencies. See [CANVAS-CONNECTIONS-PASS.md](CANVAS-CONNECTIONS-PASS.md).
+
 Workspace offers SVG, PNG and Print / Save PDF. Export projects the architecture presentation layout even while Configuration View is active. Provider icon bytes are embedded, so exported images have no external asset dependency. Chrome, selection highlights and configuration controls are excluded. PNG is capped at 8192 pixels on its longest side. PDF opens the browser print flow; the user chooses Save as PDF. This flow requires a permitted popup. Export currently uses a simple orthogonal connection projection and single-line labels; long labels and large multi-page layouts need further refinement.
 
 ## Boundaries

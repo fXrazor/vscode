@@ -1,5 +1,9 @@
 # CloudForge Code OSS handoff
 
+## Canvas connector follow-up — 24 November 2026
+
+Codex continued in the same isolated worktree/branch `codex/infrastructure-studio-preview`, base `b84a8191783`. Inspected live Brainboard node/grid view menus and AFFiNE connector model/toolbar source; adapted selection-only connection tools, shared geometry/export, labels, stroke, arrowheads and local visibility controls. Same Architecture/history across renderers. No Rust, protocol, source-checkout or installed Workbench changes. Fresh preview TypeScript, 29 tests, production build, browser editing/Undo/mode/visibility checks and SVG download inspection passed. See [CANVAS-CONNECTIONS-PASS.md](extensions/cloudforge/studio/CANVAS-CONNECTIONS-PASS.md) for the evidence ledger, paths, screenshots and remaining gaps. Exact next action: stable-ID shape connections and grouped manipulation; provider constraint/reference work remains open.
+
 ## Resource form follow-up — 23 November 2026
 
 On `codex/infrastructure-studio-preview`, starting at `4c813511c4f`, extended the shared right-hand form with schema-derived nested blocks, required prompts, typed fields, optional advanced properties and canvas warnings derived from the same resource. All 4,078 bundled resource entries pass descriptor coverage. This implements catalogue-backed constraints, not complete version-matched provider validation. See [RESOURCE-CONSTRAINTS-PASS.md](extensions/cloudforge/studio/RESOURCE-CONSTRAINTS-PASS.md) for source correlations, runtime limitations, checks, screenshots and exact remaining work. Source/Rust/protocol files remain unchanged. Next work is full schema coverage plus typed inheritance/reference semantics; nested block UI is no longer merely sample-only.

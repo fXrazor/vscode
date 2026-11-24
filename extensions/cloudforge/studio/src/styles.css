@@ -211,6 +211,17 @@ h1 { font-size: 19px; font-weight: 650; letter-spacing: -0.4px; display: flex; a
 .required-block-notice { padding: 8px 0; border-bottom: 1px solid var(--border); }
 .schema-field-error::before { content: 'Review: '; font-weight: 600; }
 .node-form-review { display: inline-flex; color: var(--accent); margin-left: 4px; }
+.connection-tools { position: absolute; z-index: 15; top: 12px; left: 64px; right: 68px; padding: 12px; background: var(--panel-solid); border: 1px solid var(--border); border-radius: 8px; color: var(--text); max-height: calc(100% - 88px); overflow: auto; }
+.connection-tools header { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; font-size: 12px; }
+.connection-tools header span { color: var(--muted); font-size: 10px; flex: 1; }
+.connection-tools button { display: inline-flex; align-items: center; justify-content: center; background: var(--panel-2); border: 1px solid var(--border); padding: 6px; color: var(--text); border-radius: 4px; }
+.connection-tool-fields { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+.connection-tool-fields label { display: grid; gap: 4px; font-size: 11px; }
+.connection-tool-fields label:first-child { flex: 1 1 160px; }
+.connection-tool-fields input, .connection-tool-fields select { color: var(--text); background: var(--input); border: 1px solid var(--border); border-radius: 4px; min-height: 30px; padding: 4px 6px; min-width: 0; width: 100%; }
+.connection-tool-fields .connection-checkbox { display: flex; align-items: center; gap: 4px; padding-bottom: 4px; }
+.connection-checkbox input { width: 14px; min-height: 14px; }
+.connection-tool-fields input[type=color] { width: 36px; padding: 2px; }
 .nested-block > summary { justify-content: flex-start; flex-wrap: wrap; }
 .nested-block > summary > span { margin-left: auto; font-size: 10px; color: var(--muted); font-weight: 400; }
 .nested-block-body { display: grid; gap: 16px; padding: 12px 0; }

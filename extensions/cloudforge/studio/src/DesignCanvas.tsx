@@ -3,6 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 import { shapeDefinitions, type ShapeId } from './shapes.ts';
+import { DesignEdge, type DesignEdgeType } from './DesignEdge.tsx';
+import { ConnectionTools } from './ConnectionTools.tsx';
 import { memo, useEffect, useMemo, useRef, useState, type Dispatch, type RefObject } from 'react';
 import {
 	Background, BackgroundVariant, MarkerType, MiniMap, ReactFlow, SelectionMode,
@@ -15,6 +17,7 @@ import { resourceDefinition, resourceTypes, providerNames } from './fixture.ts';
 import { MousePointer2, Hand, Type, StickyNote, Shapes, Frame, Minus, Plus, Scan } from 'lucide-react';
 
 const nodeTypes = { resource: ResourceNode, board: BoardNode };
+const edgeTypes = { design: DesignEdge };
 /** Isolate live zoom subscription from graph projections and parameter editors. */
 function CanvasBackground({ grid }: { grid: 'dots' | 'lines' | 'none' }) {
  const { zoom } = useViewport();
@@ -39,7 +42,7 @@ export const DesignCanvas = memo(function DesignCanvas({
 	dispatch: Dispatch<Action>;
 	onSelect: (id: string) => void;
 	onOpen: (id: string) => void;
-	onInit: (instance: ReactFlowInstance<CanvasNode>) => void;
+	onInit: (instance: ReactFlowInstance<CanvasNode, DesignEdgeType>) => void;
 	viewports: RefObject<Partial<Record<DesignMode, Viewport>>>;
  onOpenShapes: () => void;
 	onAddItem: (kind: BoardItem['kind'], position: { x: number; y: number }, caption?: string, shape?: ShapeId) => void;
@@ -47,13 +50,18 @@ export const DesignCanvas = memo(function DesignCanvas({
  onAddCatalogue: (type:string, provider:Provider, position:Position) => void;
 }) {
 	const [nodes, setNodes, onNodesChange] = useNodesState<CanvasNode>([]);
-	const [flow, setFlow] = useState<ReactFlowInstance<CanvasNode>>();
+	const [flow, setFlow] = useState<ReactFlowInstance<CanvasNode, DesignEdgeType>>();
 	const [grid, setGrid] = useState<'dots' | 'lines' | 'none'>('lines');
 	const [snap, setSnap] = useState(false);
 	const [hand, setHand] = useState(false);
 	const [minimap, setMinimap] = useState(false);
 	const [zoom, setZoom] = useState(1);
+	const [selectedConnectionId, setSelectedConnectionId] = useState('');
+	const [showConnections, setShowConnections] = useState(true);
+	const [showLabels, setShowLabels] = useState(false);
+	const selectedConnection = architecture.connections.find(connection => connection.id === selectedConnectionId);
 	const bounds = useRef<HTMLDivElement>(null);
+	useEffect(() => { if (selectedId) { setSelectedConnectionId(''); } }, [selectedId]);
 
 	const resourceNodes = useMemo<CanvasNode[]>(() => architecture.resources.map(resource => {
 		const parent = architecture.items.find(item => item.kind === 'frame' && item.members.includes(resource.id));
@@ -92,11 +100,13 @@ export const DesignCanvas = memo(function DesignCanvas({
 		return () => cancelAnimationFrame(frame);
 	}, [mode, flow, viewports]);
 
-	const edges = useMemo(() => architecture.connections.map(connection => ({
+	const edges = useMemo<DesignEdgeType[]>(() => architecture.connections.map(connection => ({
 		...connection, sourceHandle: 'output', targetHandle: 'input',
-		type: 'smoothstep', markerEnd: { type: MarkerType.ArrowClosed, width: 15, height: 15 },
-		label: mode === 'technical' ? 'design link' : undefined
-	})), [architecture.connections, mode]);
+		type: 'design', selected: connection.id === selectedConnectionId, hidden: !showConnections,
+		markerStart: connection.startArrow ? { type: MarkerType.ArrowClosed, color: connection.stroke ?? '#7565bd', width: 15, height: 15 } : undefined,
+		markerEnd: connection.endArrow === false ? undefined : { type: MarkerType.ArrowClosed, color: connection.stroke ?? '#7565bd', width: 15, height: 15 },
+		data: { connection, showLabel: showLabels }, ariaLabel: 'Design connection: ' + (connection.label || connection.source + ' to ' + connection.target)
+	})), [architecture.connections, selectedConnectionId, showConnections, showLabels]);
 
 	function createItem(kind: BoardItem['kind']) {
 		const rectangle = bounds.current?.getBoundingClientRect();
@@ -106,7 +116,7 @@ export const DesignCanvas = memo(function DesignCanvas({
 	}
 
 	return (
-		<main ref={bounds} className="canvas" aria-label={mode === 'visual' ? 'Visual design canvas' : 'Technical design canvas'}
+		<main ref={bounds} tabIndex={-1} className="canvas" aria-label={mode === 'visual' ? 'Visual design canvas' : 'Technical design canvas'}
 			onDragOver={event => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }}
 			onDrop={event => {
 				event.preventDefault();
@@ -135,14 +145,15 @@ export const DesignCanvas = memo(function DesignCanvas({
 				<button aria-label="Add shape" title="Add shape" onClick={onOpenShapes}><Shapes /></button>
 				<button aria-label="Add frame" title="Add frame" onClick={() => createItem('frame')}><Frame /></button>
 			</div>
-			<ReactFlow<CanvasNode>
+			<ReactFlow<CanvasNode, DesignEdgeType>
 				forceColorMode={theme}
-				nodes={nodes} edges={edges} nodeTypes={nodeTypes} onNodesChange={onNodesChange}
+				nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange}
 				onInit={instance => { setFlow(instance); onInit(instance); }}
 				onConnect={connection => dispatch({ type: 'connect', source: connection.source, target: connection.target })}
 				minZoom={0.1} maxZoom={20}
-				onNodeClick={(_, node) => onSelect(node.id)}
-				onPaneClick={() => onSelect('')}
+				onNodeClick={(_, node) => { setSelectedConnectionId(''); onSelect(node.id); }}
+				onPaneClick={() => { setSelectedConnectionId(''); onSelect(''); }}
+				onEdgeClick={(_, edge) => { setSelectedConnectionId(edge.id); onSelect(''); }}
 				onNodeDoubleClick={(_, node) => { if (node.type === 'resource') { onOpen(node.id); } }}
 				onNodeDragStop={(_, node) => {
 					if (node.type === 'board') {
@@ -154,6 +165,7 @@ export const DesignCanvas = memo(function DesignCanvas({
 					}
 				}}
 				onMoveEnd={(_, next) => { viewports.current[mode] = next; setZoom(next.zoom); }}
+				onViewportChange={next => { viewports.current[mode] = next; setZoom(next.zoom); }}
 				panOnDrag={hand ? true : [1, 2]} panActivationKeyCode="Space"
 				nodesDraggable={!hand} selectionOnDrag={!hand} selectionMode={SelectionMode.Partial}
 				deleteKeyCode={null} snapToGrid={snap} snapGrid={[20, 20]} onlyRenderVisibleElements
@@ -161,10 +173,13 @@ export const DesignCanvas = memo(function DesignCanvas({
 				<CanvasBackground grid={grid} />
 				{minimap && <MiniMap<CanvasNode> pannable zoomable nodeColor={node => node.type === 'board' && node.data.item.kind === 'frame' ? 'transparent' : '#8e79d9'} />}
 			</ReactFlow>
+			{selectedConnection && showConnections && <ConnectionTools connection={selectedConnection} dispatch={dispatch} onClose={() => { setSelectedConnectionId(''); bounds.current?.focus(); }}/>}
 			<details className="canvas-options"><summary>View</summary><div className="view-options-content">
 				<label>Theme<select aria-label="Canvas theme" value={theme} onChange={event => onThemeChange(event.target.value as 'light' | 'dark')}><option value="light">Light</option><option value="dark">Dark</option></select></label>
 				<label>Grid<select aria-label="Canvas grid" value={grid} onChange={event => setGrid(event.target.value as typeof grid)}><option value="dots">Dots</option><option value="lines">Lines</option><option value="none">None</option></select></label>
 				<label><input type="checkbox" checked={snap} onChange={event => setSnap(event.target.checked)} />Snap</label>
+				<label><input type="checkbox" checked={showConnections} onChange={event => setShowConnections(event.target.checked)} />Show connections</label>
+				<label><input type="checkbox" checked={showLabels} onChange={event => setShowLabels(event.target.checked)} />Always show connection labels</label>
 				<button aria-pressed={minimap} onClick={() => setMinimap(value => !value)}>Minimap</button>
 			</div></details>
 			<div className="canvas-navigation" role="group" aria-label="Zoom and navigation">

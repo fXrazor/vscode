@@ -44,7 +44,18 @@ export interface Architecture {
 	variables?: VariableDefinition[];
 	resources: Resource[];
 	items: BoardItem[];
-	connections: { id: string; source: string; target: string }[];
+	connections: DesignConnection[];
+}
+
+export interface DesignConnection {
+	id: string; source: string; target: string;
+	label?: string;
+	routing?: 'straight' | 'elbow' | 'curve';
+	stroke?: string;
+	width?: number;
+	pattern?: 'solid' | 'dashed' | 'dotted';
+	startArrow?: boolean;
+	endArrow?: boolean;
 }
 
 export interface BoardItem {
@@ -71,6 +82,8 @@ export interface History {
 }
 
 export type Edit =
+	| { type: 'updateConnection'; id: string; patch: Partial<Omit<DesignConnection, 'id' | 'source' | 'target'>> }
+	| { type: 'deleteConnection'; id: string }
 	| { type: 'update'; id: string; patch: Partial<Pick<Resource, 'name' | 'terraformName' | 'label' | 'iconKind' | 'region' | 'settings' | 'blocks'>> }
 	| { type: 'move'; id: string; mode: DesignMode; position: Position }
 	| { type: 'applyResourceCode'; resources: Resource[] }
@@ -97,6 +110,20 @@ export function createHistory(architecture: Architecture): History {
 
 function editArchitecture(architecture: Architecture, action: Edit): Architecture {
 	switch (action.type) {
+		case 'updateConnection': {
+			const connection = architecture.connections.find(connection => connection.id === action.id);
+			if (!connection) { return architecture; }
+			const patch = action.patch;
+			if (patch.width !== undefined && (!Number.isFinite(patch.width) || patch.width < 1 || patch.width > 8)
+				|| patch.stroke !== undefined && !/^#[0-9a-f]{6}$/i.test(patch.stroke)
+				|| patch.routing !== undefined && !['straight', 'elbow', 'curve'].includes(patch.routing)
+				|| patch.pattern !== undefined && !['solid', 'dashed', 'dotted'].includes(patch.pattern)
+				|| patch.label !== undefined && patch.label.length > 200) { return architecture; }
+			if (Object.entries(patch).every(([key, value]) => connection[key as keyof DesignConnection] === value)) { return architecture; }
+			return { ...architecture, connections: architecture.connections.map(item => item.id === action.id ? { ...item, ...patch } : item) };
+		}
+		case 'deleteConnection':
+			return architecture.connections.some(connection => connection.id === action.id) ? { ...architecture, connections: architecture.connections.filter(connection => connection.id !== action.id) } : architecture;
 		case 'importVariables': {
 			const variables = [...(architecture.variables ?? [])];
 			for (const imported of action.variables) {

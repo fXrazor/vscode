@@ -13,6 +13,7 @@ import {
 } from './model.ts';
 import { providerNames, providerRegions, resourceDefinition, sampleArchitecture } from './fixture.ts';
 import type { CanvasNode } from './ResourceNode.tsx';
+import type { DesignEdgeType } from './DesignEdge.tsx';
 import { ResourceFields } from './ResourceFields.tsx';
 import { ResourceWorkspace } from './ResourceWorkspace.tsx';
 import { ResourceCatalogue } from './ResourceCatalogue.tsx';
@@ -45,7 +46,7 @@ export function Studio() {
  const [detailsWidth, setDetailsWidth] = useState(440);
 	const [checkRequested, setCheckRequested] = useState(false);
 	const [message, setMessage] = useState('Sample architecture loaded');
-	const [flow, setFlow] = useState<ReactFlowInstance<CanvasNode>>();
+	const [flow, setFlow] = useState<ReactFlowInstance<CanvasNode, DesignEdgeType>>();
 	const viewport = useRef<Partial<Record<DesignMode, Viewport>>>({});
 	const architecture = history.present;
 	const selected = architecture.resources.find(resource => resource.id === selectedId);

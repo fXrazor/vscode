@@ -1,4 +1,5 @@
 import { shapeDefinition, shapeTextColor, shapeStrokeDash } from './shapes.ts';
+import { connectionPath, connectionDash } from './connectionGeometry.ts';
 import type { Architecture } from './model.ts';
 import { resourceDefinition } from './fixture.ts';
 
@@ -26,7 +27,13 @@ export async function presentationSvg(architecture: Architecture): Promise<strin
   }
   return `<g><rect x="${x}" y="${y}" width="${item.width}" height="${item.height}" rx="8" fill="${escape(item.fill ?? (item.kind === 'note' ? '#fff0b5' : item.kind === 'frame' ? '#f7faff' : '#ffffff'))}" stroke="#b8c6dc"/><text x="${x + 12}" y="${y + 24}" font-size="${item.fontSize ?? 13}" font-weight="${item.bold ? 700 : 400}">${escape(item.text)}</text></g>`;
  }).join('');
- const edges = architecture.connections.map(edge => { const source = architecture.resources.find(resource => resource.id === edge.source); const target = architecture.resources.find(resource => resource.id === edge.target); return source && target ? `<path d="M ${source.positions.visual.x + 78} ${source.positions.visual.y + 20} H ${(source.positions.visual.x + target.positions.visual.x + 96) / 2} V ${target.positions.visual.y + 20} H ${target.positions.visual.x + 18}" stroke="#7565bd" fill="none" marker-end="url(#arrow)"/>` : ''; }).join('');
+ const edges = architecture.connections.map((edge, index) => {
+  const source = architecture.resources.find(resource => resource.id === edge.source); const target = architecture.resources.find(resource => resource.id === edge.target);
+  if (!source || !target) { return ''; }
+  const [path, labelX, labelY] = connectionPath(edge, source.positions.visual.x + 78, source.positions.visual.y + 20, target.positions.visual.x + 18, target.positions.visual.y + 20);
+  const colour = escape(edge.stroke ?? '#7565bd'); const dash = connectionDash(edge);
+  return `<g><defs><marker id="connection-arrow-${index}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="${colour}"/></marker></defs><path d="${path}" stroke="${colour}" stroke-width="${edge.width ?? 1.5}" ${dash ? `stroke-dasharray="${dash}"` : ''} stroke-linecap="round" fill="none" ${edge.startArrow ? `marker-start="url(#connection-arrow-${index})"` : ''} ${edge.endArrow === false ? '' : `marker-end="url(#connection-arrow-${index})"`}/>${edge.label ? `<text x="${labelX}" y="${labelY - 8}" text-anchor="middle" font-size="11">${escape(edge.label)}</text>` : ''}</g>`;
+ }).join('');
  const nodes = architecture.resources.map((resource, index) => `<g transform="translate(${resource.positions.visual.x},${resource.positions.visual.y})"><image href="${icons[index]}" x="28" y="0" width="40" height="40"/><text x="48" y="60" text-anchor="middle" font-size="12">${escape(resource.label || resource.name)}</text></g>`).join('');
  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="${x} ${y} ${width} ${height}" font-family="Segoe UI, sans-serif" fill="#203049"><defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#7565bd"/></marker></defs><rect x="${x}" y="${y}" width="${width}" height="${height}" fill="white"/><text x="${x + 20}" y="${y + 30}" font-size="20">${escape(architecture.name)}</text>${items}${edges}${nodes}</svg>`;
 }

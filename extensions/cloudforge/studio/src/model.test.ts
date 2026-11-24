@@ -12,6 +12,28 @@ import { test } from 'node:test';
 import { createHistory, historyReducer, checkDraft } from './model.ts';
 import { sampleArchitecture } from './fixture.ts';
 import { additionalBlocks, blockDefinitions, fieldIssue, resourceFormIssues } from './formDefinition.ts';
+import { connectionDash, connectionPath } from './connectionGeometry.ts';
+
+test('connection appearance and deletion use shared history without changing Terraform configuration', () => {
+	const initial = createHistory(sampleArchitecture()); const id = initial.present.connections[0].id;
+	const updated = historyReducer(initial, { type: 'updateConnection', id, patch: { label: 'HTTPS', routing: 'curve', pattern: 'dotted', width: 3, startArrow: true, endArrow: false } });
+	assert.equal(updated.past.length, 1); assert.equal(updated.present.connections[0].routing, 'curve');
+	assert.equal(connectionDash(updated.present.connections[0]), '3 9');
+	assert.equal(terraformCode(updated.present), terraformCode(initial.present));
+	assert.deepEqual(historyReducer(updated, { type: 'undo' }).present, initial.present);
+	assert.equal(historyReducer(updated, { type: 'updateConnection', id, patch: { width: 3 } }), updated);
+	assert.equal(historyReducer(updated, { type: 'updateConnection', id, patch: { width: NaN } }), updated);
+	const deleted = historyReducer(updated, { type: 'deleteConnection', id });
+	assert.equal(deleted.present.connections.length, initial.present.connections.length - 1);
+	assert.deepEqual(historyReducer(deleted, { type: 'undo' }).present, updated.present);
+});
+
+test('connection geometry uses distinct straight, elbow and curve projections', () => {
+	const connection = { id: 'link', source: 'a', target: 'b' };
+	const paths = (['straight','elbow','curve'] as const).map(routing => connectionPath({ ...connection, routing }, 0, 0, 200, 100)[0]);
+	assert.equal(new Set(paths).size, 3); assert.ok(paths[2].includes('C'));
+	assert.equal(connectionDash(connection), undefined);
+});
 
 test('node form findings derive from current nested block values and clear with correction', () => {
 	const network = sampleArchitecture().resources[0];
