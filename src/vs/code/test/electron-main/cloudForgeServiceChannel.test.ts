@@ -188,6 +188,10 @@ suite('CloudForgeServiceChannel', () => {
 	test('accepts createArchitecture names and .tf starter files and rejects anything else', () => {
 		const starter = { fileName: 'main.tf', contents: '# Hub\n' };
 		assert.deepStrictEqual(validateCloudForgeServiceParams('createArchitecture', { workspaceId, name: 'Network' }), { workspaceId, name: 'Network' });
+		assert.deepStrictEqual(validateCloudForgeServiceParams('createArchitecture', { workspaceId, name: 'Legacy', adoptRootFiles: ['main.tf', 'outputs.tf'] }), { workspaceId, name: 'Legacy', adoptRootFiles: ['main.tf', 'outputs.tf'] });
+		assert.strictEqual(validateCloudForgeServiceParams('createArchitecture', { workspaceId, name: 'Legacy', adoptRootFiles: ['..\\x.tf'] }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('createArchitecture', { workspaceId, name: 'Legacy', adoptRootFiles: ['notes.txt'] }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('createArchitecture', { workspaceId, name: 'Legacy', adoptRootFiles: [] }), undefined);
 		assert.deepStrictEqual(
 			validateCloudForgeServiceParams('createArchitecture', { workspaceId, name: 'Network', files: [starter, { fileName: 'variables.tf.json', contents: '{}' }] }),
 			{ workspaceId, name: 'Network', files: [starter, { fileName: 'variables.tf.json', contents: '{}' }] }

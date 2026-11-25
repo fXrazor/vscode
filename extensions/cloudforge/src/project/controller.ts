@@ -36,8 +36,6 @@ import { SecretFindings } from './secretFindings';
 import { callProjectService, projectErrorMessage, showProjectError } from './service';
 
 const PROJECT_MARKER = 'cloudforge.project.json';
-const ARCHITECTURES_FOLDER = 'architectures';
-const ARCHITECTURE_MARKER = 'cloudforge.architecture.json';
 const REPOSITORIES_FOLDER = 'repos';
 const IGNORED_FOLDERS_KEY = 'cloudforge.ignoredImportFolders';
 const IGNORED_ROOT_TERRAFORM_KEY = 'cloudforge.ignoredRootTerraform';
@@ -412,41 +410,30 @@ export class ProjectController implements Disposable {
 			return;
 		}
 		const name = rawName.trim();
-		if (!(shouldAdopt && rootFiles.length > 0)) {
-			// The Rust service owns the write: it publishes the folder, marker, and starter main.tf atomically.
-			await this.createArchitectureInService(project.workspaceId, name);
-			return;
-		}
-
-		// Adopting existing root files moves them, which the service does not offer yet (see HANDOFF.md).
-		const archDir = Uri.joinPath(folder, ARCHITECTURES_FOLDER, name);
-		if (await exists(archDir)) {
-			void window.showErrorMessage(l10n.t('A folder named architectures/{0} already exists.', name));
-			return;
-		}
-		await workspace.fs.createDirectory(archDir);
-		const markerBytes = new TextEncoder().encode(JSON.stringify({ formatVersion: 1, name }, null, 2) + '\n');
-		await workspace.fs.writeFile(Uri.joinPath(archDir, ARCHITECTURE_MARKER), markerBytes);
-		for (const fileName of rootFiles) {
-			await workspace.fs.rename(Uri.joinPath(folder, fileName), Uri.joinPath(archDir, fileName), { overwrite: false });
-		}
-
-		await this.refresh();
-		const created = this.project?.architectures.find(a => a.displayName.toLowerCase() === name.toLowerCase());
-		if (created) {
-			await this.openArchitecture(created.architectureId);
-		}
+		// The Rust service owns the write: it publishes the folder, marker, and starter files
+		// atomically, and when adopting, moves the root files in and removes the originals.
+		await this.createArchitectureInService(project.workspaceId, name, undefined, shouldAdopt && rootFiles.length > 0 ? rootFiles : undefined);
 	}
 
 	/**
 	 * Asks the Rust service to create `architectures/<name>/` with its marker and starter files, then
 	 * opens the new architecture. The extension never writes the folder itself.
 	 */
-	private async createArchitectureInService(workspaceId: string, name: string, files?: readonly { readonly fileName: string; readonly contents: string }[]): Promise<void> {
-		const result = await callProjectService('createArchitecture', { workspaceId, name, ...(files ? { files } : {}) });
+	private async createArchitectureInService(workspaceId: string, name: string, files?: readonly { readonly fileName: string; readonly contents: string }[], adoptRootFiles?: readonly string[]): Promise<void> {
+		const result = await callProjectService('createArchitecture', {
+			workspaceId,
+			name,
+			...(files ? { files } : {}),
+			...(adoptRootFiles?.length ? { adoptRootFiles: adoptRootFiles.slice(0, 16) } : {}),
+		});
 		const project = this.handleProjectChange(result);
 		if (!project || !result.ok) {
 			return;
+		}
+		const notRemoved = (result.value as { notRemoved?: unknown }).notRemoved;
+		if (Array.isArray(notRemoved) && notRemoved.length > 0) {
+			const names = notRemoved.filter((item): item is string => typeof item === 'string').slice(0, 8);
+			void window.showWarningMessage(l10n.t('Copied into architectures/{0}, but these root files were left in place because they changed or could not be removed: {1}', name, names.join(', ')));
 		}
 		const createdId = (result.value as { createdArchitectureId?: unknown }).createdArchitectureId;
 		const created = project.architectures.find(item => item.architectureId === createdId)

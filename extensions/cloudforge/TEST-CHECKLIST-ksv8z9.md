@@ -4,7 +4,7 @@ Covers everything built in both repos on 25 November 2026 (updated for three-way
 
 ## 0. Build and automated checks (Windows)
 
-- [ ] Rust: in a checkout of the branch, from `service/`, with a **fresh** `CARGO_TARGET_DIR` (a stale one gives bogus `hcl-edit` E0599 errors), run `cargo test`. Expect everything to pass, including the `focused_save` (14) and `resource_values` (1) unit tests and, in `tests/draft_save.rs`, `focused_save_rewrites_only_changed_values_and_keeps_comments`, `read_resource_values_returns_file_values_without_secrets` and `focused_batch_saves_several_files_under_one_token`. `tests/stdio.rs` now expects the 2 MiB request limit.
+- [ ] Rust: in a checkout of the branch, from `service/`, with a **fresh** `CARGO_TARGET_DIR` (a stale one gives bogus `hcl-edit` E0599 errors), run `cargo test`. Expect everything to pass, including the `focused_save` (14) and `resource_values` (1) unit tests and, in `tests/draft_save.rs`, `focused_save_rewrites_only_changed_values_and_keeps_comments`, `read_resource_values_returns_file_values_without_secrets` and `focused_batch_saves_several_files_under_one_token`. `fixtures.rs` expects 22 Stage 2 fixtures, including `create-architecture-adopt-root-files`. `tests/stdio.rs` now expects the 2 MiB request limit.
 - [ ] Rust: `node docs/protocol/fixtures/check-fixtures.mjs` reports the fixtures consistent.
 - [ ] Code OSS: build with the new service binary staged, then run the electron-main test `src/vs/code/test/electron-main/cloudForgeServiceChannel.test.ts`.
 - [ ] Code OSS: full type-check (`npm run compile` or the usual watch build). This covers `cloudForgeService.contribution.ts`, which couldn't be checked in the cloud.
@@ -21,6 +21,12 @@ Use a test project with at least two architectures and one `.tf` file that has c
 - [ ] Gallery search (by name, repository, provider), the three sort options, and Refresh all work.
 - [ ] Clicking a card opens that architecture. New Architecture and Templates buttons work from the gallery.
 - [ ] An empty architecture shows "No Terraform files yet". A deleted folder shows as unavailable, without an error dialog.
+
+## 1b. Moving root Terraform files into an architecture
+
+- [ ] Put `main.tf` and `outputs.tf` in a project's root folder, then run New Architecture and pick "Move 2 Terraform file(s) from project root". The files appear in `architectures/<name>/`, are gone from the root, and the new architecture opens on the canvas.
+- [ ] Repeat, but edit a root file while the name prompt is open and save it before confirming. The architecture gets the old copy and the edited root file stays, with a warning naming it.
+- [ ] The "Terraform files found in the root" prompt's Create Architecture… button does the same move.
 
 ## 2. Clickable warnings and errors (Issues panel)
 
@@ -85,6 +91,7 @@ Use a test project with at least two architectures and one `.tf` file that has c
 - [ ] Change the same field in both places: the file value wins on the canvas.
 - [ ] After saving, the top bar no longer shows unsaved changes once the refresh arrives, including for fields written as expressions.
 - [ ] Undo after a refresh: your canvas steps undo, and the file change stays.
+- [ ] Change a `.tf` file outside Code OSS (for example `git checkout` of another version, or edit it in Notepad). The canvas refreshes on its own within a second.
 
 ## 8. Known gaps (not bugs)
 

@@ -308,11 +308,17 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 			return hasOnlyKeys(value, ['workspaceId']) && isOpaqueId(value.workspaceId) ? { workspaceId: value.workspaceId } : undefined;
 		}
 		case 'createArchitecture': {
-			if (!hasOnlyKeys(value, ['workspaceId', 'name', 'files']) || !isOpaqueId(value.workspaceId) || !isPathComponent(value.name)) {
+			if (!hasOnlyKeys(value, ['workspaceId', 'name', 'files', 'adoptRootFiles']) || !isOpaqueId(value.workspaceId) || !isPathComponent(value.name)) {
 				return undefined;
 			}
+			const adopt = value.adoptRootFiles;
+			if (adopt !== undefined && (!Array.isArray(adopt) || adopt.length === 0 || adopt.length > maxStarterFiles ||
+				!adopt.every(name => isPathComponent(name) && /\.tf(\.json)?$/i.test(name)))) {
+				return undefined;
+			}
+			const adoptRootFiles = adopt === undefined ? {} : { adoptRootFiles: [...adopt as string[]] };
 			if (value.files === undefined) {
-				return { workspaceId: value.workspaceId, name: value.name };
+				return { workspaceId: value.workspaceId, name: value.name, ...adoptRootFiles };
 			}
 			if (!Array.isArray(value.files) || value.files.length > maxStarterFiles) {
 				return undefined;
@@ -328,7 +334,7 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 				}
 				files.push({ fileName: file.fileName, contents: file.contents });
 			}
-			return { workspaceId: value.workspaceId, name: value.name, files };
+			return { workspaceId: value.workspaceId, name: value.name, files, ...adoptRootFiles };
 		}
 		case 'inspectCatalogueSchemaFile':
 		case 'listCatalogueSnapshots': {
