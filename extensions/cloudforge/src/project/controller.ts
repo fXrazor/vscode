@@ -412,27 +412,45 @@ export class ProjectController implements Disposable {
 			return;
 		}
 		const name = rawName.trim();
+		if (!(shouldAdopt && rootFiles.length > 0)) {
+			// The Rust service owns the write: it publishes the folder, marker, and starter main.tf atomically.
+			await this.createArchitectureInService(project.workspaceId, name);
+			return;
+		}
+
+		// Adopting existing root files moves them, which the service does not offer yet (see HANDOFF.md).
 		const archDir = Uri.joinPath(folder, ARCHITECTURES_FOLDER, name);
 		if (await exists(archDir)) {
 			void window.showErrorMessage(l10n.t('A folder named architectures/{0} already exists.', name));
 			return;
 		}
-
 		await workspace.fs.createDirectory(archDir);
 		const markerBytes = new TextEncoder().encode(JSON.stringify({ formatVersion: 1, name }, null, 2) + '\n');
 		await workspace.fs.writeFile(Uri.joinPath(archDir, ARCHITECTURE_MARKER), markerBytes);
-
-		if (shouldAdopt && rootFiles.length > 0) {
-			for (const fileName of rootFiles) {
-				await workspace.fs.rename(Uri.joinPath(folder, fileName), Uri.joinPath(archDir, fileName), { overwrite: false });
-			}
-		} else {
-			const starter = new TextEncoder().encode(`# CloudForge architecture: ${name}\n`);
-			await workspace.fs.writeFile(Uri.joinPath(archDir, 'main.tf'), starter);
+		for (const fileName of rootFiles) {
+			await workspace.fs.rename(Uri.joinPath(folder, fileName), Uri.joinPath(archDir, fileName), { overwrite: false });
 		}
 
 		await this.refresh();
 		const created = this.project?.architectures.find(a => a.displayName.toLowerCase() === name.toLowerCase());
+		if (created) {
+			await this.openArchitecture(created.architectureId);
+		}
+	}
+
+	/**
+	 * Asks the Rust service to create `architectures/<name>/` with its marker and starter files, then
+	 * opens the new architecture. The extension never writes the folder itself.
+	 */
+	private async createArchitectureInService(workspaceId: string, name: string, files?: readonly { readonly fileName: string; readonly contents: string }[]): Promise<void> {
+		const result = await callProjectService('createArchitecture', { workspaceId, name, ...(files ? { files } : {}) });
+		const project = this.handleProjectChange(result);
+		if (!project || !result.ok) {
+			return;
+		}
+		const createdId = (result.value as { createdArchitectureId?: unknown }).createdArchitectureId;
+		const created = project.architectures.find(item => item.architectureId === createdId)
+			?? project.architectures.find(item => item.displayName.toLowerCase() === name.toLowerCase());
 		if (created) {
 			await this.openArchitecture(created.architectureId);
 		}
@@ -472,22 +490,7 @@ export class ProjectController implements Disposable {
 			return;
 		}
 		const name = rawName.trim();
-		const archDir = Uri.joinPath(folder, ARCHITECTURES_FOLDER, name);
-		if (await exists(archDir)) {
-			void window.showErrorMessage(l10n.t('A folder named architectures/{0} already exists.', name));
-			return;
-		}
-
-		await workspace.fs.createDirectory(archDir);
-		const markerBytes = new TextEncoder().encode(JSON.stringify({ formatVersion: 1, name }, null, 2) + '\n');
-		await workspace.fs.writeFile(Uri.joinPath(archDir, ARCHITECTURE_MARKER), markerBytes);
-		await workspace.fs.writeFile(Uri.joinPath(archDir, 'main.tf'), new TextEncoder().encode(starterMainTf));
-
-		await this.refresh();
-		const created = this.project?.architectures.find(a => a.displayName.toLowerCase() === name.toLowerCase());
-		if (created) {
-			await this.openArchitecture(created.architectureId);
-		}
+		await this.createArchitectureInService(project.workspaceId, name, [{ fileName: 'main.tf', contents: starterMainTf }]);
 	}
 
 	private async readProjectRootTerraformFiles(folder: Uri): Promise<string[]> {

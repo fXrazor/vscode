@@ -33,7 +33,7 @@ type CloudForgeServiceMethod =
 	| 'previewDraftSave' | 'applyDraftSave'
 	| 'inspectDependencies' | 'readModule' | 'auditExportReadiness' | 'runEngineValidate';
 type CloudForgeCatalogueMethod = 'inspectCatalogueSchemaFile' | 'importCatalogueSnapshot' | 'listCatalogueSnapshots' | 'listCatalogueTypes' | 'getResourceFormSchema' | 'renderResourceDraft' | 'listCloudRegions' | 'diffCatalogueSnapshots' | 'detectEngines';
-type CloudForgeProjectMethod = 'createProject' | 'openProject' | 'grantProject' | 'forgetProjectAccess' | 'createWorkspaceFile' | 'inspectRepository' | 'importRepository' | 'removeRepository' | 'installGit';
+type CloudForgeProjectMethod = 'createProject' | 'openProject' | 'grantProject' | 'forgetProjectAccess' | 'createWorkspaceFile' | 'inspectRepository' | 'importRepository' | 'removeRepository' | 'createArchitecture' | 'installGit';
 
 const catalogueMethods: ReadonlySet<string> = new Set<CloudForgeCatalogueMethod>([
 	'inspectCatalogueSchemaFile', 'importCatalogueSnapshot', 'listCatalogueSnapshots', 'listCatalogueTypes', 'getResourceFormSchema', 'renderResourceDraft', 'listCloudRegions', 'diffCatalogueSnapshots', 'detectEngines'
@@ -46,9 +46,9 @@ const catalogueMethods: ReadonlySet<string> = new Set<CloudForgeCatalogueMethod>
  */
 const projectMethods: ReadonlySet<string> = new Set<CloudForgeProjectMethod>([
 	'createProject', 'openProject', 'grantProject', 'forgetProjectAccess', 'createWorkspaceFile',
-	'inspectRepository', 'importRepository', 'removeRepository', 'installGit'
+	'inspectRepository', 'importRepository', 'removeRepository', 'createArchitecture', 'installGit'
 ]);
-const scopedProjectMethods: ReadonlySet<string> = new Set<CloudForgeProjectMethod>(['createWorkspaceFile', 'inspectRepository', 'importRepository', 'removeRepository']);
+const scopedProjectMethods: ReadonlySet<string> = new Set<CloudForgeProjectMethod>(['createWorkspaceFile', 'inspectRepository', 'importRepository', 'removeRepository', 'createArchitecture']);
 
 interface WorkspaceChoice {
 	readonly workspaceId: string;
@@ -202,6 +202,7 @@ async function callProjectMethod(accessor: ServicesAccessor, method: CloudForgeP
 		case 'grantProject':
 		case 'importRepository':
 		case 'removeRepository':
+		case 'createArchitecture':
 			if (!applyProjectResult(workspaceContext, result.value)) {
 				clearActiveGrant();
 				return failure('SERVICE_ERROR', 'The CloudForge service returned an invalid project.');

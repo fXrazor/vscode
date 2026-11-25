@@ -1,5 +1,11 @@
 # CloudForge Code OSS handoff
 
+## Rust spec gap work — branch `claude/project-thread-ksv8z9` — 25 November 2026
+
+Claude is working through the gaps between the Rust repo's `design.md` and what is built, in both repos on branch `claude/project-thread-ksv8z9` (not merged). The gap list, recommended order and verification table are in the Rust repo's [HANDOFF.md, "Spec gap review and Stage 10A"](https://github.com/fXrazor/CloudForge/blob/claude/project-thread-ksv8z9/HANDOFF.md).
+
+First slice here: **New Architecture** and **Use Template** now ask the Rust service (`createArchitecture`) to write `architectures/<name>/`, instead of the extension writing it with `workspace.fs`. Touched: `src/vs/code/electron-main/cloudForgeService{,Channel}.ts` (+ test), `src/vs/workbench/electron-browser/cloudForgeService.contribution.ts`, `extensions/cloudforge/src/project/{controller,service}.ts`. Moving project-root `.tf` files into a new architecture is still extension-side. Not yet run: `cloudForgeServiceChannel.test.ts`, extension `tsc`/tests (run in `Z:\CloudForge-Code`). This branch avoids `studio/src` whiteboard files that Codex is changing on `codex/studio-whiteboard-2`.
+
 ## Studio continuation — read first — 25 November 2026
 
 **15:00 update:** branch `claude/project-thread-dnlp5o` (PR #1) now also has equal-spacing guides, a drag handle to resize a multi-selection, and a freehand pen (`ink` drawings). **15:40:** rotation for drawings and a quick-create menu when a connector is dropped on empty canvas (99/99 tests). Details and file list: "Whiteboard pass" and "Rotation and connector-drop pass" in [STUDIO-CONTINUATION-2026-11-25.md](extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md). 91/91 tests.

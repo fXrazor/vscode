@@ -33,7 +33,7 @@ export type CloudForgeCallResult = CloudForgeCallSuccess | CloudForgeCallFailure
 const cloudForgeMethods: ReadonlySet<string> = new Set<CloudForgeServiceMethod>([
 	'openWorkspace', 'chooseTerraformRoot', 'selectArchitecture', 'readArchitecture',
 	'createProject', 'openProject', 'grantProject', 'forgetProjectAccess', 'createWorkspaceFile',
-	'inspectRepository', 'importRepository', 'removeRepository', 'installGit',
+	'inspectRepository', 'importRepository', 'removeRepository', 'createArchitecture', 'installGit',
 	'inspectCatalogueSchemaFile', 'importCatalogueSnapshot',
 	'listCatalogueSnapshots', 'listCatalogueTypes', 'getResourceFormSchema', 'renderResourceDraft',
 	'startValidationRun', 'pollValidationRun', 'cancelValidationRun',
@@ -52,6 +52,8 @@ const maxSelections = 32;
 const maxWorkspaceFolders = 1024;
 const maxPollEvents = 512;
 const maxDraftBytes = 512 * 1024;
+const maxStarterFiles = 16;
+const maxStarterBytes = 2 * 1024 * 1024;
 const maxConfiguredRegions = 128;
 const maxScopeFieldLength = 128;
 
@@ -298,6 +300,29 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 				return undefined;
 			}
 			return { workspaceId: value.workspaceId, repositoryId: value.repositoryId };
+		}
+		case 'createArchitecture': {
+			if (!hasOnlyKeys(value, ['workspaceId', 'name', 'files']) || !isOpaqueId(value.workspaceId) || !isPathComponent(value.name)) {
+				return undefined;
+			}
+			if (value.files === undefined) {
+				return { workspaceId: value.workspaceId, name: value.name };
+			}
+			if (!Array.isArray(value.files) || value.files.length > maxStarterFiles) {
+				return undefined;
+			}
+			const files: { fileName: string; contents: string }[] = [];
+			for (const file of value.files) {
+				if (
+					!isRecord(file) || !hasOnlyKeys(file, ['fileName', 'contents']) ||
+					!isPathComponent(file.fileName) || !/\.tf(\.json)?$/i.test(file.fileName) ||
+					typeof file.contents !== 'string' || Buffer.byteLength(file.contents, 'utf8') > maxStarterBytes
+				) {
+					return undefined;
+				}
+				files.push({ fileName: file.fileName, contents: file.contents });
+			}
+			return { workspaceId: value.workspaceId, name: value.name, files };
 		}
 		case 'inspectCatalogueSchemaFile':
 		case 'listCatalogueSnapshots': {

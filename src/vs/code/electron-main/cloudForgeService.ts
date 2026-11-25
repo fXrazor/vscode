@@ -50,7 +50,7 @@ export function cloudForgeServiceEnvironment(source: NodeJS.ProcessEnv): Record<
 export type CloudForgeServiceMethod =
 	| 'openWorkspace' | 'chooseTerraformRoot' | 'selectArchitecture' | 'readArchitecture'
 	| 'createProject' | 'openProject' | 'grantProject' | 'forgetProjectAccess' | 'createWorkspaceFile'
-	| 'inspectRepository' | 'importRepository' | 'removeRepository' | 'installGit'
+	| 'inspectRepository' | 'importRepository' | 'removeRepository' | 'createArchitecture' | 'installGit'
 	| 'inspectCatalogueSchemaFile' | 'importCatalogueSnapshot'
 	| 'listCatalogueSnapshots' | 'listCatalogueTypes' | 'getResourceFormSchema' | 'renderResourceDraft'
 	| 'startValidationRun' | 'pollValidationRun' | 'cancelValidationRun'

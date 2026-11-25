@@ -185,6 +185,26 @@ suite('CloudForgeServiceChannel', () => {
 		assert.deepStrictEqual(rejected.map(([method, params]) => validateCloudForgeServiceParams(method, params)), rejected.map(() => undefined));
 	});
 
+	test('accepts createArchitecture names and .tf starter files and rejects anything else', () => {
+		const starter = { fileName: 'main.tf', contents: '# Hub\n' };
+		assert.deepStrictEqual(validateCloudForgeServiceParams('createArchitecture', { workspaceId, name: 'Network' }), { workspaceId, name: 'Network' });
+		assert.deepStrictEqual(
+			validateCloudForgeServiceParams('createArchitecture', { workspaceId, name: 'Network', files: [starter, { fileName: 'variables.tf.json', contents: '{}' }] }),
+			{ workspaceId, name: 'Network', files: [starter, { fileName: 'variables.tf.json', contents: '{}' }] }
+		);
+		const rejected: unknown[] = [
+			{ workspaceId, name: '..' },
+			{ workspaceId, name: 'nested\\name' },
+			{ workspaceId, name: 'Network', path: 'C:\\Elsewhere' },
+			{ workspaceId, name: 'Network', files: [{ fileName: 'notes.txt', contents: '' }] },
+			{ workspaceId, name: 'Network', files: [{ fileName: '..\\main.tf', contents: '' }] },
+			{ workspaceId, name: 'Network', files: [{ fileName: 'main.tf', contents: 'x'.repeat(2 * 1024 * 1024 + 1) }] },
+			{ workspaceId, name: 'Network', files: [{ fileName: 'main.tf', contents: '', mode: 'overwrite' }] },
+			{ workspaceId, name: 'Network', files: Array.from({ length: 17 }, (_, index) => ({ fileName: `f${index}.tf`, contents: '' })) },
+		];
+		assert.deepStrictEqual(rejected.map(params => validateCloudForgeServiceParams('createArchitecture', params)), rejected.map(() => undefined));
+	});
+
 	test('resolves the project scope from the window, never from the request', async () => {
 		const contosoFolders = contosoWindow.resolved!.folders.map(folder => folder.uri.fsPath);
 		const single = URI.file('C:\\Projects\\Single');
