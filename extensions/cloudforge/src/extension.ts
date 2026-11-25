@@ -1197,11 +1197,11 @@ export function activate(context: ExtensionContext): void {
 	});
 	// Live reverse sync: saving a Terraform source file in Code OSS refreshes the open CloudForge Canvas.
 	let tfSaveRefreshTimer: ReturnType<typeof setTimeout> | undefined;
-	context.subscriptions.push(workspace.onDidSaveTextDocument(doc => {
-		const lower = doc.uri.path.toLowerCase();
-		if (!lower.endsWith('.tf') && !lower.endsWith('.tf.json')) {
-			return;
-		}
+	const isTerraformUri = (uri: Uri) => {
+		const lower = uri.path.toLowerCase();
+		return lower.endsWith('.tf') || lower.endsWith('.tf.json');
+	};
+	const scheduleTfRefresh = () => {
 		const current = provider.getGraph();
 		if (!current) {
 			return;
@@ -1223,7 +1223,21 @@ export function activate(context: ExtensionContext): void {
 				}
 			});
 		}, 250);
+	};
+	context.subscriptions.push(workspace.onDidSaveTextDocument(doc => {
+		if (isTerraformUri(doc.uri)) {
+			scheduleTfRefresh();
+		}
 	}));
+	// Changes from outside the editor (git pull, another tool, a file deleted in Explorer) refresh
+	// the canvas too. Rust re-reads the architecture, so a change outside it is a cheap no-op.
+	const tfWatcher = workspace.createFileSystemWatcher('**/*.{tf,tf.json}');
+	context.subscriptions.push(
+		tfWatcher,
+		tfWatcher.onDidChange(uri => { if (isTerraformUri(uri)) { scheduleTfRefresh(); } }),
+		tfWatcher.onDidCreate(uri => { if (isTerraformUri(uri)) { scheduleTfRefresh(); } }),
+		tfWatcher.onDidDelete(uri => { if (isTerraformUri(uri)) { scheduleTfRefresh(); } }),
+	);
 	context.subscriptions.push({
 		dispose() {
 			if (tfSaveRefreshTimer) {
