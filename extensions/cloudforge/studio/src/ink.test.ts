@@ -4,7 +4,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { strokePath, strokeToInk, thinStroke } from './ink.ts';
+import { inkDefaults, normaliseInkStyle, strokePath, strokeToInk, thinStroke } from './ink.ts';
 import { createHistory, historyReducer } from './model.ts';
 import { presentationSvg } from './exportPresentation.ts';
 
@@ -37,4 +37,32 @@ test('an ink drawing is one undoable step and exports as an SVG path', async () 
 	assert.ok(svg.includes('aria-label="Freehand drawing"') && svg.includes(ink.path));
 	h = historyReducer(h, { type: 'undo' });
 	assert.equal(h.present.items.length, 0);
+});
+
+test('pen presets reject invalid colours and keep weight inside drawing style limits', () => {
+	assert.deepEqual(normaliseInkStyle({}), { strokeColor: inkDefaults.strokeColor, strokeWidth: inkDefaults.strokeWidth });
+	assert.deepEqual(normaliseInkStyle({ strokeColor: '#1274ab', strokeWidth: 6 }), { strokeColor: '#1274ab', strokeWidth: 6 });
+	for (const weight of [-10, 0, 1, 4.5, 8, 99]) {
+		const preset = normaliseInkStyle({ strokeColor: 'url(secret)', strokeWidth: weight });
+		assert.equal(preset.strokeColor, inkDefaults.strokeColor);
+		assert.ok(Number.isInteger(preset.strokeWidth) && preset.strokeWidth >= 1 && preset.strokeWidth <= 8);
+	}
+	assert.equal(normaliseInkStyle({ strokeWidth: NaN }).strokeWidth, inkDefaults.strokeWidth);
+});
+
+test('a chosen pen weight pads the stroke and persists through export and one-step undo/redo', async () => {
+	const preset = normaliseInkStyle({ strokeColor: '#1274ab', strokeWidth: 8 });
+	const ink = strokeToInk([{ x: 0, y: 0 }, { x: 100, y: 50 }], preset.strokeWidth)!;
+	assert.equal(ink.width, 116);
+	assert.equal(ink.height, 66);
+	let h = createHistory({ name: 'Ink', resources: [], items: [], connections: [] } as never);
+	h = historyReducer(h, { type: 'addItem', item: { id: 'ink-1', kind: 'ink', text: '', path: ink.path, ...preset, width: ink.width, height: ink.height, positions: { visual: ink.position, technical: ink.position }, members: [] } });
+	assert.equal(h.past.length, 1);
+	const svg = await presentationSvg(h.present);
+	assert.ok(svg.includes('stroke="#1274ab"') && svg.includes('stroke-width="8"'));
+	const drawing = h.present.items[0];
+	h = historyReducer(h, { type: 'undo' });
+	assert.equal(h.present.items.length, 0);
+	h = historyReducer(h, { type: 'redo' });
+	assert.deepEqual(h.present.items[0], drawing);
 });

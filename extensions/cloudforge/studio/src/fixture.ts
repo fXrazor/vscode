@@ -2,6 +2,7 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
+import { elementEndpoint } from './connectionEndpoints.ts';
 import type { Architecture, Resource, ResourceKind, Provider } from './model.ts';
 
 export const resourceTypes: Record<ResourceKind, {
@@ -103,11 +104,11 @@ export function sampleArchitecture(): Architecture {
 			{...resource('nic','generic','nic-application',167,355),parentId:'subnet',catalogue:{type:'azurerm_network_interface',label:'Network interface',service:'Network Interface',category:'Network',icon:'catalog-icons/azure/azure-network-interfaces.svg',fields:[]},blocks:[{id:'sample-ip',type:'ip_configuration',values:{name:'internal',private_ip_address_allocation:'Dynamic'},blocks:[]}]}
 		],
 		connections: [
-			{ id: 'network-subnet', source: 'network', target: 'subnet' },
-			{ id: 'subnet-gateway', source: 'subnet', target: 'gateway' },
-			{ id: 'subnet-cluster', source: 'subnet', target: 'cluster' },
-			{ id: 'cluster-storage', source: 'cluster', target: 'storage' },
-			{ id: 'cluster-monitor', source: 'cluster', target: 'monitor' }
+			{ id: 'network-subnet', source: elementEndpoint('network'), target: elementEndpoint('subnet') },
+			{ id: 'subnet-gateway', source: elementEndpoint('subnet'), target: elementEndpoint('gateway') },
+			{ id: 'subnet-cluster', source: elementEndpoint('subnet'), target: elementEndpoint('cluster') },
+			{ id: 'cluster-storage', source: elementEndpoint('cluster'), target: elementEndpoint('storage') },
+			{ id: 'cluster-monitor', source: elementEndpoint('cluster'), target: elementEndpoint('monitor') }
 		]
 	};
 }

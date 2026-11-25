@@ -4,17 +4,22 @@
  *--------------------------------------------------------------------------------------------*/
 import { shapeDefinitions, type ShapeId } from './shapes.ts';
 import { DesignEdge, type DesignEdgeType } from './DesignEdge.tsx';
-import { ConnectionTools } from './ConnectionTools.tsx';
+import { ConnectionOverlays } from './ConnectionOverlays.tsx';
 import { ConnectionCreate } from './ConnectionCreate.tsx';
-import { canConnect } from './designConnections.ts';
+import { canConnect, connectionAnchor } from './designConnections.ts';
 import { memo, useEffect, useMemo, useRef, useState, type Dispatch, type RefObject, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { canvasElements, expandGroups, sceneOrder, selectionFragment } from './canvasOperations.ts';
+import { canvasElements, expandGroups, resizeSelectionBoxes, sceneOrder, selectionFragment } from './canvasOperations.ts';
 import { layoutSelection, type Alignment } from './selectionGeometry.ts';
 import { CanvasActionMenu, SelectionControls, resizable, type SelectionAction } from './SelectionControls.tsx';
 import { SelectionResizeHandle } from './SelectionResizeHandle.tsx';
 import { InkCapture } from './InkCapture.tsx';
+import { PenOptions } from './PenOptions.tsx';
+import { normaliseInkStyle } from './ink.ts';
 import { ConnectorDropMenu } from './ConnectorDropMenu.tsx';
 import { droppedItem } from './connectorDrop.ts';
+import { elementEndpoint, endpointElementId, needsConnectionOverlay, pointEndpoint } from './connectionEndpoints.ts';
+import { connectionPathBounds } from './connectionGeometry.ts';
+import { resizeBounds } from './resizeGeometry.ts';
 import { resourceIconSize } from './resourceGeometry.ts';
 import { inheritedDependencies, isResourceContainer, resourceAncestors, resourceDescendants, resourceDimensions, resourcePlacement } from './resourceHierarchy.ts';
 import { architectureDiagnostics } from './diagnostics.ts';
@@ -78,6 +83,8 @@ export const DesignCanvas = memo(function DesignCanvas({
 	const [guideLines, setGuideLines] = useState<GuideLine[]>([]);
 	const [hand, setHand] = useState(false);
 	const [pen, setPen] = useState(false);
+	const [ink, setInk] = useState(() => normaliseInkStyle({}));
+	const resizeBoxes = resizeSelectionBoxes(architecture, selectedIds, mode);
 	const [connectorDrop, setConnectorDrop] = useState<{ source: string; point: Position; left: number; top: number }>();
 	const [additiveSelection, setAdditiveSelection] = useState(false);
 	const [minimap, setMinimap] = useState(false);
@@ -163,15 +170,16 @@ export const DesignCanvas = memo(function DesignCanvas({
 		setNodes(next);
 	};
 
-	const edges = useMemo<DesignEdgeType[]>(() => [...architecture.connections.map(connection => ({
-		...connection, sourceHandle: 'output', targetHandle: 'input',
+	const edges = useMemo<DesignEdgeType[]>(() => [...architecture.connections.filter(connection => !needsConnectionOverlay(connection) && connection.id !== selectedConnectionId).map(connection => ({
+		...connection, source: endpointElementId(connection.source)!, target: endpointElementId(connection.target)!,
+		sourceHandle: connection.source.kind === 'element' ? connection.source.port ?? 'output' : 'output', targetHandle: connection.target.kind === 'element' ? connection.target.port ?? 'input' : 'input',
 		type: 'design' as const, selected: connection.id === selectedConnectionId, hidden: !showConnections || mode==='technical'&&!technicalDesignLinks,
 		markerStart: connection.startArrow ? { type: MarkerType.ArrowClosed, color: connection.stroke ?? '#7565bd', width: 15, height: 15 } : undefined,
 		markerEnd: connection.endArrow === false ? undefined : { type: MarkerType.ArrowClosed, color: connection.stroke ?? '#7565bd', width: 15, height: 15 },
-		data: { connection, showLabel: showLabels }, ariaLabel: 'Design connection: ' + (connection.label || connection.source + ' to ' + connection.target)
+		data: { connection, showLabel: showLabels }, ariaLabel: 'Design connection: ' + (connection.label || endpointElementId(connection.source) + ' to ' + endpointElementId(connection.target))
 	})), ...dependencies.map(dependency=>{
 		const active=selectedIds.includes(dependency.source)||selectedIds.includes(dependency.target);
-			return {...dependency,sourceHandle:'output',targetHandle:'input',type:'design' as const,hidden:!showConnections||!active&&!allDependencies,animated:mode==='technical'&&active,className:'infrastructure-dependency',data:{connection:{...dependency,pattern:'dotted' as const,label:dependency.fields.join(', '),endArrow:false},showLabel:showLabels||active,dependency:true},ariaLabel:'Inherited dependency: '+dependency.fields.join(', ')};
+			return {...dependency,sourceHandle:'output',targetHandle:'input',type:'design' as const,hidden:!showConnections||!active&&!allDependencies,animated:mode==='technical'&&active,className:'infrastructure-dependency',data:{connection:{...dependency,source:elementEndpoint(dependency.source),target:elementEndpoint(dependency.target),pattern:'dotted' as const,label:dependency.fields.join(', '),endArrow:false},showLabel:showLabels||active,dependency:true},ariaLabel:'Inherited dependency: '+dependency.fields.join(', ')};
 	})], [architecture.connections, selectedConnectionId, showConnections, showLabels, dependencies, mode, technicalDesignLinks, allDependencies, selectedIds]);
 
 	function createItem(kind: BoardItem['kind']) {
@@ -182,13 +190,27 @@ export const DesignCanvas = memo(function DesignCanvas({
 	}
 
 	function copySelection() {
-		if (!selectedIds.length) { return; }
-		clipboard.current = selectionFragment(architecture, selectedIds); setHasClipboard(true);
+		if (!selectedIds.length && !selectedConnectionId) { return; }
+		clipboard.current = selectionFragment(architecture, selectedIds, selectedConnectionId ? [selectedConnectionId] : [], mode); setHasClipboard(true);
 	}
 	function insertCopy(fragment: Architecture) {
-		const idMap = Object.fromEntries([...canvasElements(fragment), ...(fragment.groups ?? [])].map(item => [item.id, crypto.randomUUID()]));
+		const idMap = Object.fromEntries([...canvasElements(fragment), ...(fragment.groups ?? []), ...fragment.connections].map(item => [item.id, crypto.randomUUID()]));
 		dispatch({ type: 'canvas', command: { kind: 'duplicate', fragment, idMap, offset: 30 } });
 		onSelectionChange(canvasElements(fragment).map(item => idMap[item.id]));
+		if (!canvasElements(fragment).length && fragment.connections.length === 1) { setSelectedConnectionId(idMap[fragment.connections[0].id]); }
+	}
+	function fitConnectionsAndNodes(connectionId?: string) {
+		if (!flow) { return; }
+		const links = architecture.connections.filter(link => connectionId ? link.id === connectionId : needsConnectionOverlay(link));
+		const linkBounds = links.flatMap(link => {
+			const source = connectionAnchor(architecture, link.source, 'source', mode); const target = connectionAnchor(architecture, link.target, 'target', mode);
+			return source && target ? [connectionPathBounds(link, source.x, source.y, target.x, target.y)] : [];
+		});
+		if (!linkBounds.length) { void flow.fitView({ padding: canvasFitPadding, maxZoom: 1 }); return; }
+		const current = new Map(flow.getNodes().map(node => [node.id, node]));
+		const boxes = connectionId ? linkBounds : [...linkBounds, ...[...current.values()].map(node => ({ ...absolutePosition(node, current), width: node.measured?.width ?? (Number(node.style?.width) || 48), height: node.measured?.height ?? (Number(node.style?.height) || 48) }))];
+		const box = resizeBounds(boxes);
+		if (box) { void flow.fitBounds({ ...box, width: Math.max(1, box.width), height: Math.max(1, box.height) }, { padding: canvasFitPadding }); }
 	}
 	function run(action: SelectionAction) {
 		const ids = expandGroups(architecture, selectedIds);
@@ -196,13 +218,13 @@ export const DesignCanvas = memo(function DesignCanvas({
 		else if (action === 'selectAll') { onSelectionChange(canvasElements(architecture).map(item => item.id)); }
 		else if (action === 'copy') { copySelection(); }
 		else if (action === 'paste') { if (clipboard.current) { insertCopy(clipboard.current); } }
-		else if (action === 'duplicate') { if (ids.length) { insertCopy(selectionFragment(architecture, ids)); } }
+		else if (action === 'duplicate') { if (ids.length || selectedConnectionId) { insertCopy(selectionFragment(architecture, ids, selectedConnectionId ? [selectedConnectionId] : [], mode)); } }
 		else if (action === 'delete') { dispatch({ type: 'canvas', command: { kind: 'delete', ids } }); }
 		else if (action === 'lock' || action === 'unlock') { dispatch({ type: 'canvas', command: { kind: 'lock', ids, locked: action === 'lock' } }); }
 		else if (action === 'group') { dispatch({ type: 'canvas', command: { kind: 'group', ids, id: crypto.randomUUID() } }); }
 		else if (action === 'ungroup') { dispatch({ type: 'canvas', command: { kind: 'ungroup', ids } }); }
 		else if (action === 'front' || action === 'forward' || action === 'backward' || action === 'back') { dispatch({ type: 'canvas', command: { kind: 'arrange', ids, direction: action } }); }
-		else if (action === 'fit') { if (ids.length) { void flow?.fitView({ nodes: ids.map(id => ({ id })), padding: 0.25, maxZoom: 2 }); } }
+		else if (action === 'fit') { if (selectedConnectionId) { fitConnectionsAndNodes(selectedConnectionId); } else if (ids.length) { void flow?.fitView({ nodes: ids.map(id => ({ id })), padding: 0.25, maxZoom: 2 }); } }
 		else if (action === 'edit') {
 			if (ids.length !== 1 || canvasElements(architecture).find(item => item.id === ids[0])?.canvasLocked) { return; }
 			if (architecture.resources.some(item => item.id === ids[0])) { onOpenDetails(ids[0]); }
@@ -329,7 +351,7 @@ export const DesignCanvas = memo(function DesignCanvas({
 				<button aria-label="Extend selection" title="Select multiple elements (Ctrl / Cmd + click)" aria-pressed={additiveSelection} onClick={() => { setHand(false); setAdditiveSelection(value => !value); }}><SquareDashedMousePointer /></button>
 				<span className="tool-divider" />
 				<button aria-label="Add text" title="Add text" onClick={() => createItem('text')}><Type /></button>
-				<button aria-label="Draw freehand" title="Pen (P) · draw freehand, Escape to stop" aria-pressed={pen} onClick={() => { setHand(false); setPen(value => !value); }}><PenLine /></button>
+				<div className="pen-tool"><button aria-label="Draw freehand" title="Pen (P) · draw freehand, Escape to stop" aria-pressed={pen} onClick={() => { setHand(false); setPen(value => !value); }}><PenLine /></button>{pen && <PenOptions ink={ink} onChange={setInk} container={bounds.current}/>}</div>
 				<button aria-label="Add sticky note" title="Add sticky note" onClick={() => createItem('note')}><StickyNote /></button>
 				<button aria-label="Add shape" title="Add shape" onClick={onOpenShapes}><Shapes /></button>
 				<button aria-label="Add frame" title="Add frame" onClick={() => createItem('frame')}><Frame /></button>
@@ -338,6 +360,7 @@ export const DesignCanvas = memo(function DesignCanvas({
 			<ReactFlow<CanvasNode, DesignEdgeType>
 				key={mode} defaultViewport={viewports.current[mode]} fitView={!viewports.current[mode]} fitViewOptions={{padding:canvasFitPadding,maxZoom:1}}
 				forceColorMode={theme}
+				zIndexMode="manual"
 				nodes={(nodes[0]?.data.mode===mode ? nodes : displayNodes).map(node=>({...node,className:dropFeedback?.target===node.id?'container-drop-'+(dropFeedback.ok?'valid':'invalid'):undefined}))} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange}
 				onInit={instance => { setFlow(instance); setZoom(instance.getZoom()); onInit(instance); if(!viewports.current[mode]){autoFit.current={mode,at:performance.now()};requestAnimationFrame(()=>{void instance.fitView({padding:canvasFitPadding,maxZoom:1}).then(()=>{viewports.current[mode]=instance.getViewport();setZoom(instance.getZoom());});});} }}
 				onMoveStart={event => { if (event) { autoFit.current = { at: 0 }; } }}
@@ -377,15 +400,19 @@ export const DesignCanvas = memo(function DesignCanvas({
 			>
 				<CanvasBackground grid={grid} />
 				<AlignmentGuides lines={guideLines}/>
-				{!hand && !creatingConnection && selectedIds.length > 1 && !canvasElements(architecture).some(item => selectedIds.includes(item.id) && item.canvasLocked) && resizable(architecture, selectedIds, mode) > 0 && <SelectionResizeHandle ids={selectedIds} onScale={scale => run(('size-' + scale) as SelectionAction)}/>}
+				{flow && showConnections && (mode === 'visual' || technicalDesignLinks) && <ConnectionOverlays architecture={architecture} mode={mode} selectedId={selectedConnectionId} showLabels={showLabels} canvas={bounds} flow={flow} dispatch={dispatch} onSelect={id => { setCreatingConnection(false); onSelectionChange([]); setSelectedConnectionId(id); }} onClose={() => { setSelectedConnectionId(''); bounds.current?.focus(); }}/>}
+				{!hand && !pen && !creatingConnection && selectedIds.length > 1 && resizeBoxes.length > 0 && <SelectionResizeHandle boxes={resizeBoxes} onScale={(scale, anchor) => dispatch({ type: 'canvas', command: { kind: 'resize', ids: selectedIds, mode, scale, anchor } })}/>}
 				{minimap && <MiniMap<CanvasNode> pannable zoomable nodeColor={node => node.type === 'board' && node.data.item.kind === 'frame' ? 'transparent' : '#8e79d9'} />}
-				{!creatingConnection && (selectedConnection && showConnections ? <SelectionAnchor ids={[selectedConnection.source,selectedConnection.target]} canvas={bounds}><ConnectionTools connection={selectedConnection} dispatch={dispatch} onClose={() => { setSelectedConnectionId(''); bounds.current?.focus(); }}/></SelectionAnchor> : selectedIds.some(id=>canvasElements(architecture).some(item=>item.id===id)) && <SelectionAnchor ids={selectedIds.filter(id=>canvasElements(architecture).some(item=>item.id===id))} canvas={bounds}><SelectionControls architecture={architecture} ids={selectedIds} dispatch={dispatch} run={run} hasClipboard={hasClipboard} mode={mode} onInspect={onOpen} container={bounds.current}/></SelectionAnchor>)}
+				{!creatingConnection && !selectedConnection && selectedIds.some(id=>canvasElements(architecture).some(item=>item.id===id)) && <SelectionAnchor ids={selectedIds.filter(id=>canvasElements(architecture).some(item=>item.id===id))} canvas={bounds}><SelectionControls architecture={architecture} ids={selectedIds} dispatch={dispatch} run={run} hasClipboard={hasClipboard} mode={mode} onInspect={onOpen} container={bounds.current}/></SelectionAnchor>}
 			</ReactFlow>
-			{connectorDrop && <ConnectorDropMenu at={connectorDrop} onClose={() => { setConnectorDrop(undefined); bounds.current?.focus(); }} onPick={choice => {
+			{connectorDrop && <ConnectorDropMenu at={connectorDrop} onClose={() => { setConnectorDrop(undefined); bounds.current?.focus(); }} onKeepLooseEnd={() => {
+				const id = crypto.randomUUID(); dispatch({ type: 'connectEndpoints', id, source: elementEndpoint(connectorDrop.source), target: pointEndpoint(connectorDrop.point) });
+				setConnectorDrop(undefined); onSelectionChange([]); setSelectedConnectionId(id); setShowConnections(true); if (mode === 'technical') { setTechnicalDesignLinks(true); } bounds.current?.focus();
+			}} onPick={choice => {
 				const id = crypto.randomUUID(); dispatch({ type: 'addConnectedItem', source: connectorDrop.source, item: droppedItem(choice, id, connectorDrop.point) });
 				setConnectorDrop(undefined); onSelectionChange([id]); bounds.current?.focus();
 			}}/>}
-			{pen && flow && <InkCapture flow={flow} zoom={zoom} onStroke={(position, size, path, ink) => { const id = crypto.randomUUID(); dispatch({ type: 'addItem', item: { id, kind: 'ink', text: '', path, strokeColor: ink.strokeColor, strokeWidth: ink.strokeWidth, positions: { visual: position, technical: position }, width: size.width, height: size.height, members: [] } }); }}/>}
+			{pen && flow && <InkCapture flow={flow} zoom={zoom} ink={ink} onStroke={(position, size, path, ink) => { const id = crypto.randomUUID(); dispatch({ type: 'addItem', item: { id, kind: 'ink', text: '', path, strokeColor: ink.strokeColor, strokeWidth: ink.strokeWidth, positions: { visual: position, technical: position }, width: size.width, height: size.height, members: [] } }); }}/>}
 			{creatingConnection ? <ConnectionCreate architecture={architecture} selectedId={connectionSourceId} dispatch={dispatch} onClose={() => { setCreatingConnection(false); bounds.current?.querySelector<HTMLButtonElement>('[aria-label="Connect elements"]')?.focus(); }}/> : null}
 			<details className="canvas-options"><summary>View</summary><div className="view-options-content">
 				<label>Theme<select aria-label="Canvas theme" value={theme} onChange={event => onThemeChange(event.target.value as 'light' | 'dark')}><option value="light">Light</option><option value="dark">Dark</option></select></label>
@@ -407,7 +434,7 @@ export const DesignCanvas = memo(function DesignCanvas({
 					{zoomPresets.map(value => <option key={value} value={value.toFixed(3)}>{Math.round(value * 100)}%</option>)}
 				</select>
 				<button aria-label="Zoom in" title="Zoom in" onClick={() => { autoFit.current = { at: 0 }; void flow?.zoomIn(); }}><Plus /></button>
-				<button aria-label="Fit architecture to view" title="Fit architecture to view" onClick={() => { autoFit.current = { at: 0 }; void flow?.fitView({ padding: canvasFitPadding }); }}><Scan /></button>
+				<button aria-label="Fit architecture to view" title="Fit architecture to view" onClick={() => { autoFit.current = { at: 0 }; fitConnectionsAndNodes(); }}><Scan /></button>
 			</div>
 		</main>
 		</CanvasActionMenu>

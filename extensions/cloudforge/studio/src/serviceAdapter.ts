@@ -18,6 +18,7 @@
 
 import { getDef } from './cloudlab-core/catalog/index.ts';
 import type { Architecture, DesignConnection, Position, Provider, Resource, ResourceBlock, ResourceKind } from './model.ts';
+import { elementEndpoint, endpointExists, endpointKey } from './connectionEndpoints.ts';
 import type { Diagnostic } from './diagnostics.ts';
 import { providerRegions, resourceDefinition, resourceTypes } from './fixture.ts';
 import { bindingKey, type ResourceRefBinding } from './fieldBindings.ts';
@@ -35,6 +36,7 @@ import type {
 } from './webviewBridge.ts';
 
 export interface ProjectGraphOptions {
+	/** Only supply the previous model for a refresh of the same architecture (enforced by App). */
 	readonly previousArchitecture?: Architecture;
 	readonly viewState?: Partial<HostViewState>;
 }
@@ -475,7 +477,9 @@ export function projectGraphSnapshotToArchitecture(
 	// Assign the most specific compatible container first (e.g. Subnet > VNet > Resource Group),
 	// verifying cycle safety via `resourcePlacement`.
 	const baseArch: Architecture = {
-		name: snapshot.architectureName || 'CloudForge Architecture',
+		// Like edge appearance, a locally edited title survives service refreshes. A different
+		// architecture is projected without previousArchitecture and takes its service title.
+		name: options.previousArchitecture?.name ?? (snapshot.architectureName || 'CloudForge Architecture'),
 		variables: options.previousArchitecture?.variables ? structuredClone(options.previousArchitecture.variables) : [],
 		resources,
 		items: options.previousArchitecture?.items ? structuredClone(options.previousArchitecture.items) : [],
@@ -528,8 +532,8 @@ export function projectGraphSnapshotToArchitecture(
 				...(edge.kind && edge.kind !== 'reference' ? { label: edge.kind } : {}),
 				...(styled ? structuredClone(styled) : {}),
 				id: edgeId,
-				source: from.id,
-				target: to.id,
+				source: elementEndpoint(from.id),
+				target: elementEndpoint(to.id),
 			});
 		}
 	}
@@ -537,12 +541,12 @@ export function projectGraphSnapshotToArchitecture(
 	// Studio-only presentation state is not in the service graph: carry the user's drawing links,
 	// groups and layer order through the refresh, pruned to elements that still exist.
 	const elementIds = new Set([...resources.map(resource => resource.id), ...baseArch.items.map(item => item.id)]);
-	const serviceEndpoints = new Set(connections.map(connection => connection.source + '\u0000' + connection.target));
+	const serviceEndpoints = new Set(connections.map(connection => endpointKey(connection.source, 'source') + '\u0000' + endpointKey(connection.target, 'target')));
 	for (const previous of options.previousArchitecture?.connections ?? []) {
-		if (isServiceEdgeId(previous.id) || !elementIds.has(previous.source) || !elementIds.has(previous.target)) {
+		if (isServiceEdgeId(previous.id) || !endpointExists(previous.source, elementIds) || !endpointExists(previous.target, elementIds)) {
 			continue;
 		}
-		if (serviceEndpoints.has(previous.source + '\u0000' + previous.target) || connections.some(connection => connection.id === previous.id)) {
+		if (serviceEndpoints.has(endpointKey(previous.source, 'source') + '\u0000' + endpointKey(previous.target, 'target')) || connections.some(connection => connection.id === previous.id)) {
 			continue;
 		}
 		connections.push(structuredClone(previous));

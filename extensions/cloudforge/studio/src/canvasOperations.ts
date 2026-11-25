@@ -6,6 +6,10 @@ import type { Architecture, BoardItem, DesignMode, Position, ResourceBlock } fro
 import { bindingKey, bindingTarget } from './fieldBindings.ts';
 import { fitResourceContainers, isResourceContainer, resourceAncestors, resourceDescendants } from './resourceHierarchy.ts';
 import { iconSizeLimits, resourceIconSize } from './resourceGeometry.ts';
+import { connectionElementIds, endpointElementId, pointEndpoint, remapEndpoint } from './connectionEndpoints.ts';
+import { connectionAnchor } from './designConnections.ts';
+import { projectResize, resizeAnchors, resizeLimits, type ResizeAnchor, type ResizeBox } from './resizeGeometry.ts';
+export { resizeAnchorPoint, resizeAnchors, resizeLimits, type ResizeAnchor } from './resizeGeometry.ts';
 
 export type TextAppearance = Pick<BoardItem, 'fontSize' | 'bold' | 'italic' | 'underline' | 'textColor' | 'fontFamily' | 'textAlign' | 'verticalAlign' | 'fill' | 'opacity' | 'strokeColor' | 'strokeWidth' | 'strokeStyle'>;
 export type CanvasCommand =
@@ -17,8 +21,8 @@ export type CanvasCommand =
 	| { kind: 'ungroup'; ids: string[] }
 	| { kind: 'arrange'; ids: string[]; direction: 'front' | 'forward' | 'backward' | 'back' }
 	| { kind: 'duplicate'; fragment: Architecture; idMap: Record<string, string>; offset: number }
-	/** Multi-object resize in one undo step: scale about the selection's top-left, or match the largest element. */
-	| { kind: 'resize'; ids: string[]; mode: DesignMode; scale?: number; match?: 'width' | 'height' | 'size' }
+	/** Multi-object resize in one undo step, keeping the chosen corner fixed (top-left by default). */
+	| { kind: 'resize'; ids: string[]; mode: DesignMode; scale?: number; match?: 'width' | 'height' | 'size'; anchor?: ResizeAnchor }
 	/** Rotate drawings about their centres: `angle` sets an absolute angle, `by` turns each one. Resources stay upright. */
 	| { kind: 'rotate'; ids: string[]; angle?: number; by?: number };
 
@@ -28,14 +32,29 @@ export function normaliseRotation(degrees: number): number | undefined {
 	return value === 0 || value === 360 ? undefined : value;
 }
 
-export const resizeLimits = { minScale: 0.25, maxScale: 4, minItem: 24, maxItem: 4000 };
-
 export function canvasElements(architecture: Architecture) { return [...architecture.resources, ...architecture.items]; }
 
 export function expandGroups(architecture: Architecture, ids: string[]): string[] {
 	const selected = new Set(ids.filter(id => canvasElements(architecture).some(element => element.id === id)));
 	for (const group of architecture.groups ?? []) { if (group.members.some(id => selected.has(id))) { group.members.forEach(id => selected.add(id)); } }
 	return [...selected];
+}
+
+/** One eligibility policy for the command, Size menu and selection resize frame. */
+export function resizeTargets(architecture: Architecture, ids: string[], mode: DesignMode) {
+	const selected = new Set(expandGroups(architecture, ids));
+	return {
+		items: architecture.items.filter(item => selected.has(item.id) && !item.canvasLocked),
+		icons: mode === 'visual' ? architecture.resources.filter(resource => selected.has(resource.id) && !resource.canvasLocked && !isResourceContainer(resource)) : []
+	};
+}
+
+export function resizeSelectionBoxes(architecture: Architecture, ids: string[], mode: DesignMode): ResizeBox[] {
+	const { items, icons } = resizeTargets(architecture, ids, mode);
+	return [
+		...items.map(item => ({ id: item.id, ...item.positions[mode], width: item.width, height: item.height, min: resizeLimits.minItem, max: resizeLimits.maxItem })),
+		...icons.map(icon => ({ id: icon.id, ...icon.positions.visual, width: resourceIconSize(icon), height: resourceIconSize(icon), min: iconSizeLimits.min, max: iconSizeLimits.max }))
+	];
 }
 
 export function sceneOrder(architecture: Architecture): string[] {
@@ -46,11 +65,19 @@ export function sceneOrder(architecture: Architecture): string[] {
 	return [...frames,...containers,...new Set([...(architecture.layerOrder ?? []).filter(id => known.has(id)&&!containers.includes(id)), ...defaultOrder.filter(id=>!containers.includes(id))])];
 }
 
-export function selectionFragment(architecture: Architecture, ids: string[]): Architecture {
+export function selectionFragment(architecture: Architecture, ids: string[], connectionIds: string[] = [], mode: DesignMode = 'visual'): Architecture {
 	const selected = new Set(expandGroups(architecture, ids));
 	for (const frame of architecture.items.filter(item => item.kind === 'frame' && selected.has(item.id))) { frame.members.forEach(id => selected.add(id)); }
 	for (const resource of architecture.resources.filter(item=>selected.has(item.id))) { resourceDescendants(architecture,resource.id).forEach(item=>selected.add(item.id)); }
-	return structuredClone({ name: architecture.name, resources: architecture.resources.filter(item => selected.has(item.id)), items: architecture.items.filter(item => selected.has(item.id)), connections: architecture.connections.filter(link => selected.has(link.source) && selected.has(link.target)), groups: (architecture.groups ?? []).filter(group => group.members.every(id => selected.has(id))), layerOrder: sceneOrder(architecture).filter(id => selected.has(id)) });
+	const connections = architecture.connections.flatMap(link => {
+		const endpoints = connectionElementIds(link);
+		if (endpoints.length && endpoints.every(id => selected.has(id))) { return [link]; }
+		if (!connectionIds.includes(link.id)) { return []; }
+		// Copying a line alone copies its geometry, without duplicating infrastructure resources.
+		const source = connectionAnchor(architecture, link.source, 'source', mode); const target = connectionAnchor(architecture, link.target, 'target', mode);
+		return source && target ? [{ ...link, source: pointEndpoint(source), target: pointEndpoint(target) }] : [];
+	});
+	return structuredClone({ name: architecture.name, resources: architecture.resources.filter(item => selected.has(item.id)), items: architecture.items.filter(item => selected.has(item.id)), connections, groups: (architecture.groups ?? []).filter(group => group.members.every(id => selected.has(id))), layerOrder: sceneOrder(architecture).filter(id => selected.has(id)) });
 }
 
 export function applyCanvasCommand(architecture: Architecture, command: CanvasCommand): Architecture {
@@ -119,7 +146,7 @@ export function applyCanvasCommand(architecture: Architecture, command: CanvasCo
 				else { descendants.forEach(item=>editable.add(item.id)); }
 			}
 			if (!editable.size) { return architecture; }
-			return { ...architecture, resources: architecture.resources.filter(item => !editable.has(item.id)), items: architecture.items.filter(item => !editable.has(item.id)).map(item => ({ ...item, members: item.members.filter(id => !editable.has(id)) })), connections: architecture.connections.filter(link => !editable.has(link.source) && !editable.has(link.target)), groups: (architecture.groups ?? []).map(group => ({ ...group, members: group.members.filter(id => !editable.has(id)) })).filter(group => group.members.length > 1), layerOrder: sceneOrder(architecture).filter(id => !editable.has(id)) };
+			return { ...architecture, resources: architecture.resources.filter(item => !editable.has(item.id)), items: architecture.items.filter(item => !editable.has(item.id)).map(item => ({ ...item, members: item.members.filter(id => !editable.has(id)) })), connections: architecture.connections.filter(link => !connectionElementIds(link).some(id => editable.has(id))), groups: (architecture.groups ?? []).map(group => ({ ...group, members: group.members.filter(id => !editable.has(id)) })).filter(group => group.members.length > 1), layerOrder: sceneOrder(architecture).filter(id => !editable.has(id)) };
 		}
 		case 'group': {
 			if (expanded.length < 2 || expanded.some(id => byId.get(id)?.canvasLocked) || !command.id || (architecture.groups ?? []).some(group => group.id === command.id)) { return architecture; }
@@ -142,10 +169,10 @@ export function applyCanvasCommand(architecture: Architecture, command: CanvasCo
 		}
 		case 'resize': {
 			const scale = command.scale;
+			if (command.anchor !== undefined && !resizeAnchors.includes(command.anchor)) { return architecture; }
 			if (!command.match && (scale === undefined || !Number.isFinite(scale) || scale < resizeLimits.minScale || scale > resizeLimits.maxScale || scale === 1)) { return architecture; }
 			// Containers fit their children and technical-view cards have fixed widths, so only drawings and visual icons resize.
-			const items = architecture.items.filter(item => editable.has(item.id));
-			const icons = command.mode === 'visual' ? architecture.resources.filter(resource => editable.has(resource.id) && !isResourceContainer(resource)) : [];
+			const { items, icons } = resizeTargets(architecture, command.ids, command.mode);
 			if (items.length + icons.length < (command.match ? 2 : 1)) { return architecture; }
 			const clampItem = (value: number) => Math.round(Math.max(resizeLimits.minItem, Math.min(resizeLimits.maxItem, value)));
 			const clampIcon = (value: number) => Math.round(Math.max(iconSizeLimits.min, Math.min(iconSizeLimits.max, value)));
@@ -157,10 +184,14 @@ export function applyCanvasCommand(architecture: Architecture, command: CanvasCo
 				const side = command.match === 'height' ? height : command.match === 'width' ? width : Math.max(width, height);
 				for (const icon of icons) { iconPatch.set(icon.id, { iconSize: clampIcon(side) }); }
 			} else {
-				const origin = { x: Math.min(...items.map(item => item.positions[command.mode].x), ...icons.map(icon => icon.positions.visual.x)), y: Math.min(...items.map(item => item.positions[command.mode].y), ...icons.map(icon => icon.positions.visual.y)) };
-				const place = (position: Position): Position => ({ x: Math.round(origin.x + (position.x - origin.x) * scale!), y: Math.round(origin.y + (position.y - origin.y) * scale!) });
-				for (const item of items) { const position = place(item.positions[command.mode]); itemPatch.set(item.id, { width: clampItem(item.width * scale!), height: clampItem(item.height * scale!), positions: { visual: position, technical: position } }); }
-				for (const icon of icons) { iconPatch.set(icon.id, { iconSize: clampIcon(resourceIconSize(icon) * scale!), position: place(icon.positions.visual) }); }
+				const projection = projectResize(resizeSelectionBoxes(architecture, command.ids, command.mode), scale!, command.anchor);
+				if (!projection) { return architecture; }
+				const boxes = new Map(projection.boxes.map(box => [box.id, box]));
+				for (const item of items) {
+					const box = boxes.get(item.id)!; const position = { x: box.x, y: box.y };
+					itemPatch.set(item.id, { width: box.width, height: box.height, positions: { visual: position, technical: position } });
+				}
+				for (const icon of icons) { const box = boxes.get(icon.id)!; iconPatch.set(icon.id, { iconSize: box.width, position: { x: box.x, y: box.y } }); }
 			}
 			let changed = false;
 			const nextItems = architecture.items.map(item => {
@@ -180,7 +211,7 @@ export function applyCanvasCommand(architecture: Architecture, command: CanvasCo
 		case 'duplicate': {
 			const fragment = command.fragment; const idMap = command.idMap;
 			const source = canvasElements(fragment); const newIds = source.map(item => idMap[item.id]);
-			if (!source.length || newIds.some(id => !id || byId.has(id)) || new Set(newIds).size !== newIds.length || !Number.isFinite(command.offset)) { return architecture; }
+			if (newIds.some(id => !id || byId.has(id)) || new Set(newIds).size !== newIds.length || !Number.isFinite(command.offset)) { return architecture; }
 			const names = new Set(architecture.resources.map(resource => resource.name)); const terraformNames = new Set(architecture.resources.map(resource => resource.terraformName ?? resource.name));
 			const offset = (positions: Record<DesignMode, Position>) => Object.fromEntries(Object.entries(positions).map(([mode, position]) => [mode, { x: position.x + command.offset, y: position.y + command.offset }])) as Record<DesignMode, Position>;
 			const resources = structuredClone(fragment.resources).map(resource => {
@@ -194,7 +225,13 @@ export function applyCanvasCommand(architecture: Architecture, command: CanvasCo
 			});
 			const items = structuredClone(fragment.items).map(item => ({ ...item, id: idMap[item.id], canvasLocked: false, positions: offset(item.positions), members: item.members.map(id => idMap[id]).filter(Boolean) }));
 			const groups = (fragment.groups ?? []).map(group => ({ ...group, id: idMap[group.id], members: group.members.map(id => idMap[id]).filter(Boolean) })).filter(group => group.id && group.members.length > 1);
-			const connections = fragment.connections.filter(link => idMap[link.source] && idMap[link.target]).map(link => ({ ...link, id: idMap[link.source] + '-' + idMap[link.target], source: idMap[link.source], target: idMap[link.target] }));
+			const connections = fragment.connections.flatMap(link => {
+				const source = remapEndpoint(link.source, idMap, command.offset); const target = remapEndpoint(link.target, idMap, command.offset);
+				if (!source || !target) { return []; }
+				const sourceId = endpointElementId(source); const targetId = endpointElementId(target);
+				return [{ ...link, id: idMap[link.id] ?? (sourceId && targetId ? sourceId + '-' + targetId : link.id + '-copy'), source, target }];
+			});
+			if ((!source.length && !connections.length) || new Set(connections.map(link => link.id)).size !== connections.length || connections.some(link => architecture.connections.some(existing => existing.id === link.id))) { return architecture; }
 			return { ...architecture, resources: [...architecture.resources, ...resources], items: [...architecture.items, ...items], groups: [...(architecture.groups ?? []), ...groups], connections: [...architecture.connections, ...connections], layerOrder: [...sceneOrder(architecture), ...sceneOrder(fragment).map(id => idMap[id])] };
 		}
 	}

@@ -2,6 +2,7 @@
  *  A connector dropped on empty canvas creates and links a drawing in one undo step.
  *--------------------------------------------------------------------------------------------*/
 
+import { elementEndpoint, endpointElementId } from './connectionEndpoints.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { dropChoices, droppedItem } from './connectorDrop.ts';
@@ -21,7 +22,7 @@ test('create-and-connect is one undo step', () => {
 	let h = createHistory(board);
 	h = historyReducer(h, { type: 'addConnectedItem', source: 'note-1', item: droppedItem(dropChoices[0], 'n-2', { x: 500, y: 70 }) });
 	assert.equal(h.present.items.length, 2);
-	assert.deepEqual(h.present.connections.map(link => [link.source, link.target]), [['note-1', 'n-2']]);
+	assert.deepEqual(h.present.connections.map(link => [endpointElementId(link.source), endpointElementId(link.target)]), [['note-1', 'n-2']]);
 	assert.equal(h.past.length, 1);
 	h = historyReducer(h, { type: 'undo' });
 	assert.equal(h.present.items.length, 1);

@@ -4,9 +4,8 @@
  *--------------------------------------------------------------------------------------------*/
 import { useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import type { Position } from './model.ts';
-import { inkDefaults, strokePath, strokeToInk } from './ink.ts';
+import { strokePath, strokeToInk, type InkStyle } from './ink.ts';
 
-type Ink = { strokeColor: string; strokeWidth: number };
 type Projector = { screenToFlowPosition: (point: Position) => Position };
 
 /**
@@ -14,11 +13,11 @@ type Projector = { screenToFlowPosition: (point: Position) => Position };
  * stroke is drawn in screen space; on release it becomes one `ink` drawing (one undo step).
  * Wheel events pass through to the canvas so zoom and scroll keep working while drawing.
  */
-export function InkCapture({ flow, zoom, onStroke }: { flow: Projector; zoom: number; onStroke: (position: Position, size: { width: number; height: number }, path: string, ink: Ink) => void }) {
+export function InkCapture({ flow, zoom, ink, onStroke }: { flow: Projector; zoom: number; ink: InkStyle; onStroke: (position: Position, size: { width: number; height: number }, path: string, ink: InkStyle) => void }) {
 	const layer = useRef<HTMLDivElement>(null);
 	const points = useRef<Position[]>([]);
 	const [live, setLive] = useState('');
-	const ink: Ink = { strokeColor: inkDefaults.strokeColor, strokeWidth: inkDefaults.strokeWidth };
+	const strokeInk = useRef(ink);
 	const local = (event: ReactPointerEvent) => { const box = layer.current!.getBoundingClientRect(); return { x: event.clientX - box.left, y: event.clientY - box.top }; };
 
 	const down = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -26,6 +25,7 @@ export function InkCapture({ flow, zoom, onStroke }: { flow: Projector; zoom: nu
 		event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId);
 		layer.current?.closest<HTMLElement>('main')?.focus({ preventScroll: true }); // keyboard shortcuts keep working while drawing
 		points.current = [{ x: event.clientX, y: event.clientY }];
+		strokeInk.current = { ...ink };
 		const start = local(event); setLive(strokePath([start]));
 	};
 	const move = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -38,8 +38,8 @@ export function InkCapture({ flow, zoom, onStroke }: { flow: Projector; zoom: nu
 	const up = () => {
 		const stroke = points.current; points.current = []; setLive('');
 		if (!stroke.length) { return; }
-		const result = strokeToInk(stroke.map(point => flow.screenToFlowPosition(point)), ink.strokeWidth, zoom);
-		if (result) { onStroke(result.position, { width: result.width, height: result.height }, result.path, ink); }
+		const result = strokeToInk(stroke.map(point => flow.screenToFlowPosition(point)), strokeInk.current.strokeWidth, zoom);
+		if (result) { onStroke(result.position, { width: result.width, height: result.height }, result.path, strokeInk.current); }
 	};
 
 	return <div ref={layer} className="ink-capture nodrag nopan" aria-hidden="true"
@@ -50,6 +50,6 @@ export function InkCapture({ flow, zoom, onStroke }: { flow: Projector; zoom: nu
 			pane?.dispatchEvent(new WheelEvent('wheel', event.nativeEvent));
 		}}>
 		<span className="ink-hint">Pen · draw on the canvas · Esc or V to stop</span>
-		<svg><path d={live} stroke={ink.strokeColor} strokeWidth={ink.strokeWidth * zoom}/></svg>
+		<svg><path d={live} stroke={strokeInk.current.strokeColor} strokeWidth={strokeInk.current.strokeWidth * zoom}/></svg>
 	</div>;
 }

@@ -3,8 +3,18 @@ import type { DesignConnection } from './model.ts';
 
 /** One geometry implementation for screen and presentation export. */
 export function connectionPath(connection: DesignConnection, sourceX: number, sourceY: number, targetX: number, targetY: number) {
-	const points = { sourceX, sourceY, targetX, targetY, sourcePosition: Position.Right, targetPosition: Position.Left };
+	const points = { sourceX, sourceY, targetX, targetY,
+		sourcePosition: connection.source.kind === 'element' ? connection.source.port === 'input' ? Position.Left : Position.Right : sourceX <= targetX ? Position.Right : Position.Left,
+		targetPosition: connection.target.kind === 'element' ? connection.target.port === 'output' ? Position.Right : Position.Left : sourceX <= targetX ? Position.Left : Position.Right };
 	return connection.routing === 'straight' ? getStraightPath(points) : connection.routing === 'curve' ? getBezierPath(points) : getSmoothStepPath({ ...points, borderRadius: 5 });
+}
+
+/** Conservative SVG path bounds include curve control points, used by export and focus. */
+export function connectionPathBounds(connection: DesignConnection, sourceX: number, sourceY: number, targetX: number, targetY: number) {
+	const values = connectionPath(connection, sourceX, sourceY, targetX, targetY)[0].match(/[-+]?(?:\d*\.?\d+)(?:e[-+]?\d+)?/gi)?.map(Number) ?? [];
+	const xs = values.filter((_, index) => index % 2 === 0); const ys = values.filter((_, index) => index % 2 === 1);
+	const x = Math.min(sourceX, targetX, ...xs); const y = Math.min(sourceY, targetY, ...ys);
+	return { x, y, width: Math.max(sourceX, targetX, ...xs) - x, height: Math.max(sourceY, targetY, ...ys) - y };
 }
 
 export function connectionDash(connection: DesignConnection) {
