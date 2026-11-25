@@ -12,13 +12,14 @@ import path from 'node:path';
 
 // Use `playwright` when installed; otherwise the repository root's `playwright-core` with an installed browser channel.
 function loadChromium() {
-	const roots = [import.meta.url, path.join(process.cwd(), 'package.json'), new URL('../../../../package.json', import.meta.url)];
+	// PLAYWRIGHT_DIR: a folder whose node_modules holds playwright or playwright-core (e.g. a scratch `npm install --prefix`).
+	const roots = [...(process.env.PLAYWRIGHT_DIR ? [path.join(process.env.PLAYWRIGHT_DIR, 'package.json')] : []), import.meta.url, path.join(process.cwd(), 'package.json'), new URL('../../../../package.json', import.meta.url)];
 	for (const root of roots) {
 		for (const name of ['playwright', 'playwright-core']) {
 			try { return createRequire(root)(name).chromium; } catch { /* try the next location */ }
 		}
 	}
-	throw new Error('Install playwright, or run from a checkout whose root has playwright-core, and pass --channel=msedge.');
+	throw new Error('Playwright not found: set PLAYWRIGHT_DIR to a folder with playwright-core installed (npm install --prefix <dir> playwright-core) and pass --channel=msedge.');
 }
 const chromium = loadChromium();
 const url = process.argv[2];
