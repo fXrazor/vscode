@@ -7,6 +7,7 @@ import {
 	commands,
 	EventEmitter,
 	l10n,
+	StatusBarAlignment,
 	TreeItem,
 	TreeItemCollapsibleState,
 	Uri,
@@ -22,6 +23,7 @@ import { CloudForgeCanvasPanel } from './canvas/canvasPanel';
 import { orientServiceEdgesForCanvas } from './canvas/layout';
 import type { CanvasCatalogueSnapshot, CanvasCloudRegionsPayload, CanvasGraphSnapshot } from './canvas/protocol';
 import { lookupBundledSchema, type FormSchema } from './canvas/schemaForm';
+import { findTemplateById } from './canvas/templateLibrary';
 import {
 	draftSaveErrorMessage,
 	mapRustFormSchemaToCanvasFormSchema,
@@ -493,7 +495,26 @@ function toCanvasSnapshot(graph: ArchitectureGraph, architectureName: string): C
 export function activate(context: ExtensionContext): void {
 	const provider = new CloudForgeGraphProvider();
 	const treeView = window.createTreeView('cloudforge.resources', { treeDataProvider: provider });
+	const statusBar = window.createStatusBarItem(StatusBarAlignment.Left, 100);
+	statusBar.command = 'cloudforge.openCanvas';
+	statusBar.name = l10n.t('CloudForge Architecture');
 	let currentArchitectureName = l10n.t('Architecture');
+	const projectControllerRef: { current?: ReturnType<typeof activateProjects> } = {};
+
+	function updateStatusBar(graph: ArchitectureGraph | undefined): void {
+		if (!graph) {
+			statusBar.hide();
+			return;
+		}
+		statusBar.text = `$(type-hierarchy) CloudForge: ${currentArchitectureName} · rev ${graph.sourceRevision.slice(0, 8)}`;
+		statusBar.tooltip = l10n.t(
+			'{0} ({1} resources, {2} diagnostics) — Click to open Architecture Canvas',
+			currentArchitectureName,
+			graph.nodes.length,
+			graph.diagnostics.length
+		);
+		statusBar.show();
+	}
 
 	async function openNodeSource(workspaceId: string, architectureId: string, sourceRevision: string, nodeId: string): Promise<string | undefined> {
 		try {
@@ -706,6 +727,7 @@ export function activate(context: ExtensionContext): void {
 			await cancelServiceValidation();
 			const refreshed = await showGraph(provider, treeView, workspaceId, architectureId);
 			if (refreshed) {
+				updateStatusBar(refreshed);
 				canvas.updateIfOpen(toCanvasSnapshot(refreshed, currentArchitectureName));
 			}
 		},
@@ -826,6 +848,7 @@ export function activate(context: ExtensionContext): void {
 			// the newly saved file and updated sourceRevision.
 			const refreshed = await showGraph(provider, treeView, workspaceId, architectureId);
 			if (refreshed) {
+				updateStatusBar(refreshed);
 				canvas.updateIfOpen(toCanvasSnapshot(refreshed, currentArchitectureName));
 				canvas.setNotice({
 					kind: 'info',
@@ -850,7 +873,15 @@ export function activate(context: ExtensionContext): void {
 				? { 'SVG Diagram': ['svg'] }
 				: format === 'png'
 					? { 'PNG Image': ['png'] }
-					: { 'Markdown Report': ['md'] };
+					: format === 'bicep'
+						? { 'Azure Bicep': ['bicep'] }
+						: format === 'arm'
+							? { 'Azure ARM JSON': ['json'] }
+							: format === 'cloudformation'
+								? { 'CloudFormation YAML': ['yaml', 'yml'] }
+								: format === 'k8s'
+									? { 'Kubernetes YAML': ['yaml', 'yml'] }
+									: { 'Markdown Report': ['md'] };
 			const target = await window.showSaveDialog({
 				defaultUri,
 				filters,
@@ -876,9 +907,16 @@ export function activate(context: ExtensionContext): void {
 				return { ok: false, message: l10n.t('Could not write the exported file.') };
 			}
 		},
+		async onUseTemplateAsArchitecture(templateId) {
+			const template = findTemplateById(templateId);
+			if (!template) {
+				return;
+			}
+			await projectControllerRef.current?.createArchitectureFromTemplate(template.defaultArchName, template.starterMainTf);
+		},
 	});
 
-	context.subscriptions.push(provider, treeView, canvas);
+	context.subscriptions.push(provider, treeView, canvas, statusBar);
 	context.subscriptions.push(treeView.onDidChangeSelection(event => {
 		const resource = event.selection.find(item => item.type === 'resource');
 		const graph = provider.getGraph();
@@ -913,6 +951,10 @@ export function activate(context: ExtensionContext): void {
 			return;
 		}
 		canvas.openExport(toCanvasSnapshot(graph, currentArchitectureName));
+	}));
+	context.subscriptions.push(commands.registerCommand('cloudforge.openTemplateLibrary', () => {
+		const graph = provider.getGraph();
+		canvas.openTemplates(graph ? toCanvasSnapshot(graph, currentArchitectureName) : undefined);
 	}));
 	context.subscriptions.push(commands.registerCommand('cloudforge.importProviderSchema', async () => {
 		const inspected = await callService<unknown>('inspectCatalogueSchemaFile', {});
@@ -1010,15 +1052,17 @@ export function activate(context: ExtensionContext): void {
 	context.subscriptions.push(commands.registerCommand('cloudforge.openWorkspace', () => {
 		return opening ??= openWorkspace(provider, treeView, (loaded, architectureName) => {
 			currentArchitectureName = architectureName;
+			updateStatusBar(loaded);
 			canvas.show(toCanvasSnapshot(loaded, architectureName), true);
 		}).finally(() => { opening = undefined; });
 	}));
 
 	// Stage 2: projects with repositories. Architectures chosen in the Projects view, including
 	// those that live in imported repositories, show in both the native graph tree and the canvas.
-	activateProjects(context, {
+	projectControllerRef.current = activateProjects(context, {
 		async show(workspaceId, architectureId, architectureName) {
 			provider.setGraph(undefined);
+			updateStatusBar(undefined);
 			const selected = await callService<unknown>('selectArchitecture', { workspaceId, architectureId });
 			if (!selected.ok) {
 				showServiceError(selected.error);
@@ -1027,6 +1071,7 @@ export function activate(context: ExtensionContext): void {
 			const loaded = await showGraph(provider, treeView, workspaceId, architectureId);
 			if (loaded) {
 				currentArchitectureName = architectureName || l10n.t('Architecture');
+				updateStatusBar(loaded);
 				canvas.show(toCanvasSnapshot(loaded, currentArchitectureName), true);
 			}
 			await commands.executeCommand('cloudforge.resources.focus');

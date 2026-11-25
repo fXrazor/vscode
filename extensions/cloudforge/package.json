@@ -116,6 +116,12 @@
 				"title": "%command.importProviderSchema%",
 				"category": "%displayName%",
 				"icon": "$(cloud-upload)"
+			},
+			{
+				"command": "cloudforge.openTemplateLibrary",
+				"title": "%command.openTemplateLibrary%",
+				"category": "%displayName%",
+				"icon": "$(library)"
 			}
 		],
 		"views": {
@@ -180,14 +186,19 @@
 					"group": "navigation@0"
 				},
 				{
-					"command": "cloudforge.cloneRepository",
+					"command": "cloudforge.openTemplateLibrary",
 					"when": "view == cloudforge.projects",
 					"group": "navigation@1"
 				},
 				{
-					"command": "cloudforge.refreshProject",
+					"command": "cloudforge.cloneRepository",
 					"when": "view == cloudforge.projects",
 					"group": "navigation@2"
+				},
+				{
+					"command": "cloudforge.refreshProject",
+					"when": "view == cloudforge.projects",
+					"group": "navigation@3"
 				},
 				{
 					"command": "cloudforge.forgetProjectAccess",

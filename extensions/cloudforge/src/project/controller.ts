@@ -438,6 +438,58 @@ export class ProjectController implements Disposable {
 		}
 	}
 
+	/** Creates a new local architecture under architectures/<name>/ initialized from a curated offline template. */
+	async createArchitectureFromTemplate(defaultName: string, starterMainTf: string): Promise<void> {
+		const project = this.project;
+		const folder = project ? this.projectFolder() : undefined;
+		if (!project || !folder) {
+			void window.showInformationMessage(l10n.t('Open a CloudForge project before creating an architecture from a template.'));
+			return;
+		}
+		const existingNames = new Set(project.architectures.map(a => a.displayName.toLowerCase()));
+		const safeBase = isPathComponent(defaultName) ? defaultName : 'template';
+		let suggested = safeBase;
+		let suffix = 2;
+		while (existingNames.has(suggested.toLowerCase())) {
+			suggested = `${safeBase}-${suffix++}`;
+		}
+		const rawName = await window.showInputBox({
+			title: l10n.t('New Architecture from Template'),
+			prompt: l10n.t('Architecture name (created under architectures/<name>/)'),
+			value: suggested,
+			validateInput: value => {
+				const trimmed = value.trim();
+				if (!isPathComponent(trimmed)) {
+					return l10n.t('Use a valid Windows folder name.');
+				}
+				if (existingNames.has(trimmed.toLowerCase())) {
+					return l10n.t('An architecture with that name already exists.');
+				}
+				return undefined;
+			}
+		});
+		if (rawName === undefined) {
+			return;
+		}
+		const name = rawName.trim();
+		const archDir = Uri.joinPath(folder, ARCHITECTURES_FOLDER, name);
+		if (await exists(archDir)) {
+			void window.showErrorMessage(l10n.t('A folder named architectures/{0} already exists.', name));
+			return;
+		}
+
+		await workspace.fs.createDirectory(archDir);
+		const markerBytes = new TextEncoder().encode(JSON.stringify({ formatVersion: 1, name }, null, 2) + '\n');
+		await workspace.fs.writeFile(Uri.joinPath(archDir, ARCHITECTURE_MARKER), markerBytes);
+		await workspace.fs.writeFile(Uri.joinPath(archDir, 'main.tf'), new TextEncoder().encode(starterMainTf));
+
+		await this.refresh();
+		const created = this.project?.architectures.find(a => a.displayName.toLowerCase() === name.toLowerCase());
+		if (created) {
+			await this.openArchitecture(created.architectureId);
+		}
+	}
+
 	private async readProjectRootTerraformFiles(folder: Uri): Promise<string[]> {
 		try {
 			const entries = await workspace.fs.readDirectory(folder);

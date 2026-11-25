@@ -89,6 +89,7 @@ export interface CanvasPanelHost {
 		content: string,
 		encoding: 'utf8' | 'base64'
 	): Promise<{ readonly ok: boolean; readonly message: string }>;
+	onUseTemplateAsArchitecture?(templateId: string): Promise<void>;
 }
 
 /**
@@ -102,6 +103,8 @@ export class CloudForgeCanvasPanel implements Disposable {
 	private graph: CanvasGraphSnapshot | undefined;
 	private notice: CanvasNotice | null = null;
 	private pendingValidation: { readonly scope: 'architecture' | 'resource'; readonly nodeId?: string } | undefined;
+	private pendingOpenExport = false;
+	private pendingOpenTemplates = false;
 	private readonly disposables: Disposable[] = [];
 
 	constructor(
@@ -177,6 +180,22 @@ export class CloudForgeCanvasPanel implements Disposable {
 		}
 		if (this.ready) {
 			this.post({ type: 'openExport' });
+		} else {
+			this.pendingOpenExport = true;
+		}
+	}
+
+	/** Opens the Offline Multi-Cloud Template Library Gallery inside the Architecture Canvas. */
+	openTemplates(graph: CanvasGraphSnapshot | undefined): void {
+		if (!this.panel) {
+			this.show(graph, false);
+		} else {
+			this.panel.reveal(this.panel.viewColumn ?? ViewColumn.One, false);
+		}
+		if (this.ready) {
+			this.post({ type: 'openTemplates' });
+		} else {
+			this.pendingOpenTemplates = true;
 		}
 	}
 
@@ -220,6 +239,8 @@ export class CloudForgeCanvasPanel implements Disposable {
 				this.panel = undefined;
 				this.ready = false;
 				this.pendingValidation = undefined;
+				this.pendingOpenExport = false;
+				this.pendingOpenTemplates = false;
 				void this.host.onCancelValidation?.();
 			}
 		});
@@ -262,6 +283,14 @@ export class CloudForgeCanvasPanel implements Disposable {
 					const pending = this.pendingValidation;
 					this.pendingValidation = undefined;
 					this.post({ type: 'runValidation', scope: pending.scope, ...(pending.nodeId ? { nodeId: pending.nodeId } : {}) });
+				}
+				if (this.pendingOpenExport) {
+					this.pendingOpenExport = false;
+					this.post({ type: 'openExport' });
+				}
+				if (this.pendingOpenTemplates) {
+					this.pendingOpenTemplates = false;
+					this.post({ type: 'openTemplates' });
 				}
 				return;
 			case 'selectNode':
@@ -449,6 +478,10 @@ export class CloudForgeCanvasPanel implements Disposable {
 				if (this.panel && this.ready) {
 					this.post({ type: 'exportResult', ok: result.ok, message: result.message });
 				}
+				return;
+			}
+			case 'useTemplateAsArchitecture': {
+				await this.host.onUseTemplateAsArchitecture?.(message.templateId);
 				return;
 			}
 			case 'openSource': {

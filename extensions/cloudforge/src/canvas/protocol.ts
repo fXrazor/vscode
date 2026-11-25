@@ -16,7 +16,7 @@ export type CanvasGridMode = 'lines' | 'dots' | 'none';
 export type ArchitectureLayer = 'infrastructure' | 'platforms' | 'applications' | 'security' | 'operations';
 export type CanvasFrameColor = 'blue' | 'emerald' | 'amber' | 'violet' | 'slate';
 export type CanvasAnnotationColor = 'amber' | 'blue' | 'emerald' | 'rose';
-export type ExportFormat = 'svg' | 'png' | 'markdown';
+export type ExportFormat = 'svg' | 'png' | 'markdown' | 'bicep' | 'arm' | 'cloudformation' | 'k8s';
 
 export const ARCHITECTURE_LAYERS: readonly ArchitectureLayer[] = [
 	'infrastructure',
@@ -396,6 +396,9 @@ export type ExtensionToWebviewMessage =
 		readonly type: 'openExport';
 	}
 	| {
+		readonly type: 'openTemplates';
+	}
+	| {
 		readonly type: 'exportResult';
 		readonly ok: boolean;
 		readonly message: string;
@@ -419,7 +422,8 @@ export type WebviewToExtensionMessage =
 		readonly toKey: { readonly address: string; readonly version: string; readonly formatVersion: string; readonly sha256: string };
 	}
 	| { readonly type: 'requestEngineValidate'; readonly engine?: 'openTofu' | 'terraform' }
-	| { readonly type: 'exportArtifact'; readonly format: ExportFormat; readonly suggestedFileName: string; readonly content: string; readonly encoding: 'utf8' | 'base64' };
+	| { readonly type: 'exportArtifact'; readonly format: ExportFormat; readonly suggestedFileName: string; readonly content: string; readonly encoding: 'utf8' | 'base64' }
+	| { readonly type: 'useTemplateAsArchitecture'; readonly templateId: string };
 
 const MAX_COLLAPSED_GROUPS = 256;
 const MAX_DRAFT_SAVE_CHARS = 512 * 1024;
@@ -448,13 +452,16 @@ export function isValidExportFileName(value: unknown, format: ExportFormat): val
 		return false;
 	}
 	const lower = value.toLowerCase();
-	if (format === 'svg') {
-		return lower.endsWith('.svg');
+	switch (format) {
+		case 'svg': return lower.endsWith('.svg');
+		case 'png': return lower.endsWith('.png');
+		case 'markdown': return lower.endsWith('.md');
+		case 'bicep': return lower.endsWith('.bicep');
+		case 'arm': return lower.endsWith('.json');
+		case 'cloudformation':
+		case 'k8s':
+			return lower.endsWith('.yaml') || lower.endsWith('.yml');
 	}
-	if (format === 'png') {
-		return lower.endsWith('.png');
-	}
-	return lower.endsWith('.md');
 }
 
 function isTypeName(value: unknown): value is string {
@@ -877,7 +884,15 @@ export function parseWebviewMessage(value: unknown): WebviewToExtensionMessage |
 			return value.engine ? { type: 'requestEngineValidate', engine: value.engine } : { type: 'requestEngineValidate' };
 		}
 		case 'exportArtifact': {
-			if (value.format !== 'svg' && value.format !== 'png' && value.format !== 'markdown') {
+			if (
+				value.format !== 'svg'
+				&& value.format !== 'png'
+				&& value.format !== 'markdown'
+				&& value.format !== 'bicep'
+				&& value.format !== 'arm'
+				&& value.format !== 'cloudformation'
+				&& value.format !== 'k8s'
+			) {
 				return undefined;
 			}
 			if (!isValidExportFileName(value.suggestedFileName, value.format)) {
@@ -900,6 +915,8 @@ export function parseWebviewMessage(value: unknown): WebviewToExtensionMessage |
 				encoding: value.encoding,
 			};
 		}
+		case 'useTemplateAsArchitecture':
+			return isOpaqueId(value.templateId) ? { type: 'useTemplateAsArchitecture', templateId: value.templateId } : undefined;
 		default:
 			return undefined;
 	}

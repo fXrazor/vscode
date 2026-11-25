@@ -64,6 +64,17 @@ import {
 	type WorkflowRecipeMeta
 } from '../src/canvas/advisorRecipes';
 import {
+	filterTemplates,
+	findTemplateById,
+	TEMPLATE_LIBRARY,
+	type ArchitectureTemplate,
+	type TemplateProvider
+} from '../src/canvas/templateLibrary';
+import {
+	generateTargetIac,
+	type GeneratorTarget
+} from '../src/canvas/generators';
+import {
 	buildReferenceCandidates,
 	createInitialDraft,
 	lookupBundledSchema,
@@ -220,6 +231,8 @@ let noteDrag: {
 	moved: boolean;
 } | undefined;
 let exportModalOpen = false;
+let exportModalTab: 'diagram' | 'iac' = 'diagram';
+let generatorTarget: GeneratorTarget = 'bicep';
 let lastFocusBeforeExport: HTMLElement | null = null;
 let exportFormat: ExportFormat = 'svg';
 let exportScope: ExportScope = 'architecture';
@@ -230,6 +243,12 @@ let exportIncludeAnnotations = true;
 let exportIncludeProvenance = true;
 let exportBusy = false;
 let exportStatusMessage: { readonly ok: boolean; readonly text: string } | undefined;
+let templatesModalOpen = false;
+let lastFocusBeforeTemplates: HTMLElement | null = null;
+let templateSearchQuery = '';
+let templateProviderFilter: TemplateProvider | 'all' = 'all';
+let templateSortBy: 'name' | 'resources' = 'name';
+let selectedTemplateId: string = TEMPLATE_LIBRARY[0]?.id ?? '';
 let nextPresentationSeq = 1;
 const expandedPaginatedGroups = new Set<string>();
 let drilledModuleId: string | null = null;
@@ -1128,6 +1147,28 @@ function closeExportModal(): void {
 	}
 }
 
+function openTemplatesModal(): void {
+	lastFocusBeforeTemplates = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+	templatesModalOpen = true;
+	if (!findTemplateById(selectedTemplateId) && TEMPLATE_LIBRARY.length > 0) {
+		selectedTemplateId = TEMPLATE_LIBRARY[0].id;
+	}
+	render();
+	root.querySelector<HTMLInputElement>('.cf-template-search')?.focus();
+}
+
+function closeTemplatesModal(): void {
+	if (!templatesModalOpen) {
+		return;
+	}
+	templatesModalOpen = false;
+	render();
+	applyViewportTransform();
+	if (lastFocusBeforeTemplates?.isConnected) {
+		lastFocusBeforeTemplates.focus();
+	}
+}
+
 function buildExportOptions(): DiagramExportOptions {
 	return {
 		scope: exportScope,
@@ -1198,6 +1239,17 @@ async function triggerExportSave(): Promise<void> {
 	const opts = buildExportOptions();
 	const base = `${sanitizeExportBaseName(current.architectureName)}-${current.sourceRevision.slice(0, 8)}`;
 	try {
+		if (exportModalTab === 'iac') {
+			const artifact = generateTargetIac(current, draftDoc?.present.drafts ?? {}, generatorTarget);
+			post({
+				type: 'exportArtifact',
+				format: artifact.target,
+				suggestedFileName: `${base}${artifact.fileExtension}`,
+				content: artifact.code,
+				encoding: 'utf8',
+			});
+			return;
+		}
 		if (exportFormat === 'markdown') {
 			const md = renderArchitectureMarkdownReport(current, projection, opts);
 			post({
@@ -1752,6 +1804,14 @@ function renderHeader(): HTMLElement {
 		}
 	}
 
+	const templatesMenuBtn = el('button', 'cf-btn', 'Template Library\u2026');
+	templatesMenuBtn.type = 'button';
+	templatesMenuBtn.title = 'Browse offline multi-cloud starter templates (Ctrl+Shift+T)';
+	templatesMenuBtn.addEventListener('click', () => {
+		viewDetails.open = false;
+		openTemplatesModal();
+	});
+
 	const timelineMenuBtn = el('button', 'cf-btn', timelineOpen ? 'Hide Timeline' : 'Show Timeline');
 	timelineMenuBtn.type = 'button';
 	timelineMenuBtn.addEventListener('click', () => {
@@ -1776,7 +1836,7 @@ function renderHeader(): HTMLElement {
 		post({ type: 'refresh' });
 	});
 
-	menuActions.append(timelineMenuBtn, fitMenuBtn, refreshMenuBtn);
+	menuActions.append(templatesMenuBtn, timelineMenuBtn, fitMenuBtn, refreshMenuBtn);
 	viewMenu.append(themeLabel, gridLabel, snapRow, el('div', 'cf-popover-divider'), layersSection, menuDivider, menuActions);
 	if (catalogueSnapshots.length > 0) {
 		viewMenu.append(el('div', 'cf-field-help', `${catalogueSnapshots.length} verified provider catalogue${catalogueSnapshots.length === 1 ? '' : 's'} active`));
@@ -2768,6 +2828,51 @@ function renderDepListSection(title: string, items: { node: CanvasNodeSummary; k
 	return section;
 }
 
+function matchDiagnosticTargetNode(
+	diag: { readonly code: string; readonly message: string },
+	current: CanvasGraphSnapshot
+): CanvasNodeSummary | undefined {
+	const haystack = `${diag.code} ${diag.message}`.toLowerCase();
+	// Check exact resource label first (e.g. azurerm_subnet.snet_apps), then resource name (len >= 3), then type
+	const byLabel = [...current.nodes].sort((a, b) => b.label.length - a.label.length);
+	for (const node of byLabel) {
+		if (node.label.length >= 3 && haystack.includes(node.label.toLowerCase())) {
+			return node;
+		}
+	}
+	const byName = [...current.nodes].sort((a, b) => b.name.length - a.name.length);
+	for (const node of byName) {
+		if (node.name.length >= 3 && haystack.includes(node.name.toLowerCase())) {
+			return node;
+		}
+	}
+	for (const node of current.nodes) {
+		if (node.resourceType && haystack.includes(node.resourceType.toLowerCase())) {
+			return node;
+		}
+	}
+	return undefined;
+}
+
+function revealNodeOnCanvas(nodeId: string): void {
+	const isVisible = projection?.nodes.some(n => n.node.id === nodeId) ?? false;
+	if (!isVisible) {
+		let stateChanged = false;
+		if (searchQuery) {
+			searchQuery = '';
+			stateChanged = true;
+		}
+		if (state.hiddenLayers.length > 0 || state.collapsedGroups.length > 0) {
+			state = { ...state, hiddenLayers: [], collapsedGroups: [] };
+			stateChanged = true;
+		}
+		if (stateChanged) {
+			rebuildProjection();
+		}
+	}
+	selectNode(nodeId, { focusInCanvas: true });
+}
+
 function renderDiagnosticsSection(current: CanvasGraphSnapshot): HTMLElement {
 	const section = el('div', 'cf-inspector-section');
 	section.append(el('h3', 'cf-section-title', `Diagnostics (${current.diagnostics.length})`));
@@ -2777,6 +2882,13 @@ function renderDiagnosticsSection(current: CanvasGraphSnapshot): HTMLElement {
 			el('div', 'cf-diag-head cf-mono', `${diag.code} · ${diag.severity}`),
 			el('div', 'cf-diag-msg', diag.message)
 		);
+		const target = matchDiagnosticTargetNode(diag, current);
+		if (target) {
+			const revealBtn = el('button', 'cf-btn cf-diag-reveal-btn', `Reveal ${target.name} on Canvas`);
+			revealBtn.type = 'button';
+			revealBtn.addEventListener('click', () => revealNodeOnCanvas(target.id));
+			item.append(revealBtn);
+		}
 		section.append(item);
 	}
 	return section;
@@ -3657,8 +3769,9 @@ function renderExportModal(): HTMLElement | null {
 		return null;
 	}
 	const opts = buildExportOptions();
-	const svgPreview = exportFormat !== 'markdown' ? renderArchitectureSvg(current, projection, opts) : undefined;
-	const mdPreview = exportFormat === 'markdown' ? renderArchitectureMarkdownReport(current, projection, opts) : undefined;
+	const svgPreview = exportModalTab === 'diagram' && exportFormat !== 'markdown' ? renderArchitectureSvg(current, projection, opts) : undefined;
+	const mdPreview = exportModalTab === 'diagram' && exportFormat === 'markdown' ? renderArchitectureMarkdownReport(current, projection, opts) : undefined;
+	const iacArtifact = exportModalTab === 'iac' ? generateTargetIac(current, draftDoc?.present.drafts ?? {}, generatorTarget) : undefined;
 
 	const backdrop = el('div', 'cf-modal-backdrop');
 	backdrop.addEventListener('click', event => {
@@ -3670,7 +3783,7 @@ function renderExportModal(): HTMLElement | null {
 	const dialog = el('section', 'cf-modal cf-export-modal');
 	dialog.setAttribute('role', 'dialog');
 	dialog.setAttribute('aria-modal', 'true');
-	dialog.setAttribute('aria-label', 'Export Architecture Diagram or Report');
+	dialog.setAttribute('aria-label', 'Export Architecture Diagram, Report, or IaC');
 
 	const head = el('header', 'cf-modal-header');
 	const titleGroup = el('div', 'cf-header-group');
@@ -3680,6 +3793,8 @@ function renderExportModal(): HTMLElement | null {
 	);
 	if (svgPreview) {
 		titleGroup.append(el('span', 'cf-pill', `${svgPreview.width}\u00d7${svgPreview.height}px \u00b7 ${svgPreview.nodeCount} resource(s)`));
+	} else if (iacArtifact) {
+		titleGroup.append(el('span', 'cf-pill', `${iacArtifact.mappedCount} / ${current.nodes.length} mapped`));
 	}
 	const closeBtn = el('button', 'cf-btn cf-export-close', 'Close');
 	closeBtn.type = 'button';
@@ -3690,96 +3805,153 @@ function renderExportModal(): HTMLElement | null {
 
 	const body = el('div', 'cf-modal-body');
 
-	const controls = el('div', 'cf-export-controls');
-
-	const fmtField = el('label', 'cf-export-field');
-	fmtField.append(el('span', undefined, 'Format'));
-	const fmtSelect = el('select', 'cf-select');
-	fmtSelect.setAttribute('aria-label', 'Export format');
-	for (const [val, label] of [['svg', 'SVG Diagram (Vector)'], ['png', 'PNG Image (2\u00d7 Retina)'], ['markdown', 'Markdown Architecture Report']] as const) {
-		const opt = el('option', undefined, label);
-		opt.value = val;
-		opt.selected = exportFormat === val;
-		fmtSelect.append(opt);
-	}
-	fmtSelect.addEventListener('change', () => {
-		exportFormat = fmtSelect.value as ExportFormat;
-		exportStatusMessage = undefined;
-		render();
-	});
-	fmtField.append(fmtSelect);
-
-	const scopeField = el('label', 'cf-export-field');
-	scopeField.append(el('span', undefined, 'Scope'));
-	const scopeSelect = el('select', 'cf-select');
-	scopeSelect.setAttribute('aria-label', 'Export scope');
-	const fullOpt = el('option', undefined, 'Full Architecture');
-	fullOpt.value = 'architecture';
-	fullOpt.selected = exportScope === 'architecture';
-	scopeSelect.append(fullOpt);
-	if (selectedIds.size > 0) {
-		const selOpt = el('option', undefined, `Selection (${selectedIds.size})`);
-		selOpt.value = 'selection';
-		selOpt.selected = exportScope === 'selection';
-		scopeSelect.append(selOpt);
-	}
-	for (const frame of state.frames) {
-		const fOpt = el('option', undefined, `Frame: ${frame.title}`);
-		fOpt.value = `frame:${frame.id}`;
-		fOpt.selected = exportScope === 'frame' && exportFrameId === frame.id;
-		scopeSelect.append(fOpt);
-	}
-	scopeSelect.addEventListener('change', () => {
-		if (scopeSelect.value.startsWith('frame:')) {
-			exportScope = 'frame';
-			exportFrameId = scopeSelect.value.slice('frame:'.length);
-		} else {
-			exportScope = scopeSelect.value as ExportScope;
-			exportFrameId = undefined;
-		}
-		render();
-	});
-	scopeField.append(scopeSelect);
-
-	const themeField = el('label', 'cf-export-field');
-	themeField.append(el('span', undefined, 'Theme'));
-	const themeSel = el('select', 'cf-select');
-	themeSel.setAttribute('aria-label', 'Export theme');
-	for (const [val, label] of [['dark', 'Dark'], ['light', 'Light']] as const) {
-		const opt = el('option', undefined, label);
-		opt.value = val;
-		opt.selected = exportTheme === val;
-		themeSel.append(opt);
-	}
-	themeSel.disabled = exportFormat === 'markdown';
-	themeSel.addEventListener('change', () => {
-		exportTheme = themeSel.value as 'light' | 'dark';
-		render();
-	});
-	themeField.append(themeSel);
-
-	controls.append(fmtField, scopeField, themeField);
-	body.append(controls);
-
-	const toggles = el('div', 'cf-export-toggles');
-	const makeCheck = (labelText: string, checked: boolean, onChange: (val: boolean) => void) => {
-		const lbl = el('label', 'cf-export-check');
-		const cb = el('input');
-		cb.type = 'checkbox';
-		cb.checked = checked;
-		cb.addEventListener('change', () => {
-			onChange(cb.checked);
+	const modeTabs = el('div', 'cf-segmented');
+	for (const [id, label] of [['diagram', 'Diagram & Report'], ['iac', 'Generate IaC']] as const) {
+		const tabBtn = el('button', 'cf-seg-btn', label);
+		tabBtn.type = 'button';
+		tabBtn.setAttribute('aria-pressed', String(exportModalTab === id));
+		tabBtn.addEventListener('click', () => {
+			exportModalTab = id;
+			exportStatusMessage = undefined;
 			render();
 		});
-		lbl.append(cb, el('span', undefined, labelText));
-		return lbl;
-	};
-	toggles.append(
-		makeCheck('Include validation status', exportIncludeValidation, v => { exportIncludeValidation = v; }),
-		makeCheck('Include annotations', exportIncludeAnnotations, v => { exportIncludeAnnotations = v; }),
-		makeCheck('Include revision provenance footer', exportIncludeProvenance, v => { exportIncludeProvenance = v; })
-	);
-	body.append(toggles);
+		modeTabs.append(tabBtn);
+	}
+	body.append(modeTabs);
+
+	if (exportModalTab === 'diagram') {
+		const controls = el('div', 'cf-export-controls');
+
+		const fmtField = el('label', 'cf-export-field');
+		fmtField.append(el('span', undefined, 'Format'));
+		const fmtSelect = el('select', 'cf-select');
+		fmtSelect.setAttribute('aria-label', 'Export format');
+		for (const [val, label] of [['svg', 'SVG Diagram (Vector)'], ['png', 'PNG Image (2\u00d7 Retina)'], ['markdown', 'Markdown Architecture Report']] as const) {
+			const opt = el('option', undefined, label);
+			opt.value = val;
+			opt.selected = exportFormat === val;
+			fmtSelect.append(opt);
+		}
+		fmtSelect.addEventListener('change', () => {
+			exportFormat = fmtSelect.value as ExportFormat;
+			exportStatusMessage = undefined;
+			render();
+		});
+		fmtField.append(fmtSelect);
+
+		const scopeField = el('label', 'cf-export-field');
+		scopeField.append(el('span', undefined, 'Scope'));
+		const scopeSelect = el('select', 'cf-select');
+		scopeSelect.setAttribute('aria-label', 'Export scope');
+		const fullOpt = el('option', undefined, 'Full Architecture');
+		fullOpt.value = 'architecture';
+		fullOpt.selected = exportScope === 'architecture';
+		scopeSelect.append(fullOpt);
+		if (selectedIds.size > 0) {
+			const selOpt = el('option', undefined, `Selection (${selectedIds.size})`);
+			selOpt.value = 'selection';
+			selOpt.selected = exportScope === 'selection';
+			scopeSelect.append(selOpt);
+		}
+		for (const frame of state.frames) {
+			const fOpt = el('option', undefined, `Frame: ${frame.title}`);
+			fOpt.value = `frame:${frame.id}`;
+			fOpt.selected = exportScope === 'frame' && exportFrameId === frame.id;
+			scopeSelect.append(fOpt);
+		}
+		scopeSelect.addEventListener('change', () => {
+			if (scopeSelect.value.startsWith('frame:')) {
+				exportScope = 'frame';
+				exportFrameId = scopeSelect.value.slice('frame:'.length);
+			} else {
+				exportScope = scopeSelect.value as ExportScope;
+				exportFrameId = undefined;
+			}
+			render();
+		});
+		scopeField.append(scopeSelect);
+
+		const themeField = el('label', 'cf-export-field');
+		themeField.append(el('span', undefined, 'Theme'));
+		const themeSel = el('select', 'cf-select');
+		themeSel.setAttribute('aria-label', 'Export theme');
+		for (const [val, label] of [['dark', 'Dark'], ['light', 'Light']] as const) {
+			const opt = el('option', undefined, label);
+			opt.value = val;
+			opt.selected = exportTheme === val;
+			themeSel.append(opt);
+		}
+		themeSel.disabled = exportFormat === 'markdown';
+		themeSel.addEventListener('change', () => {
+			exportTheme = themeSel.value as 'light' | 'dark';
+			render();
+		});
+		themeField.append(themeSel);
+
+		controls.append(fmtField, scopeField, themeField);
+		body.append(controls);
+
+		const toggles = el('div', 'cf-export-toggles');
+		const makeCheck = (labelText: string, checked: boolean, onChange: (val: boolean) => void) => {
+			const lbl = el('label', 'cf-export-check');
+			const cb = el('input');
+			cb.type = 'checkbox';
+			cb.checked = checked;
+			cb.addEventListener('change', () => {
+				onChange(cb.checked);
+				render();
+			});
+			lbl.append(cb, el('span', undefined, labelText));
+			return lbl;
+		};
+		toggles.append(
+			makeCheck('Include validation status', exportIncludeValidation, v => { exportIncludeValidation = v; }),
+			makeCheck('Include annotations', exportIncludeAnnotations, v => { exportIncludeAnnotations = v; }),
+			makeCheck('Include revision provenance footer', exportIncludeProvenance, v => { exportIncludeProvenance = v; })
+		);
+		body.append(toggles);
+	} else if (iacArtifact) {
+		const targetRow = el('div', 'cf-save-bar');
+		const targetField = el('label', 'cf-save-field');
+		targetField.append(el('span', undefined, 'Target format'));
+		const targetSel = el('select', 'cf-select');
+		targetSel.setAttribute('aria-label', 'Target IaC format');
+		for (const [val, label] of [
+			['bicep', 'Azure Bicep (.bicep)'],
+			['arm', 'Azure ARM JSON (.json)'],
+			['cloudformation', 'AWS CloudFormation YAML (.yaml)'],
+			['k8s', 'Kubernetes YAML (.yaml)'],
+		] as const) {
+			const opt = el('option', undefined, label);
+			opt.value = val;
+			opt.selected = generatorTarget === val;
+			targetSel.append(opt);
+		}
+		targetSel.addEventListener('change', () => {
+			generatorTarget = targetSel.value as GeneratorTarget;
+			exportStatusMessage = undefined;
+			render();
+		});
+		targetField.append(targetSel);
+		targetRow.append(targetField);
+		body.append(targetRow);
+
+		const covCard = el('div', iacArtifact.unmappedCount > 0 ? 'cf-save-warnings' : 'cf-save-preview-card');
+		const covHead = el('div', 'cf-header-group');
+		covHead.append(
+			el('strong', undefined, `${iacArtifact.label}: ${iacArtifact.mappedCount} mapped, ${iacArtifact.unmappedCount} unmapped`),
+			el('span', 'cf-pill', iacArtifact.fileExtension)
+		);
+		covCard.append(covHead, el('span', 'cf-muted', iacArtifact.provenance));
+		if (iacArtifact.lossNotes.length > 0) {
+			const ul = el('ul', 'cf-loss-list');
+			for (const note of iacArtifact.lossNotes) {
+				ul.append(el('li', undefined, note));
+			}
+			covCard.append(ul);
+		}
+		body.append(covCard);
+	}
 
 	if (exportStatusMessage) {
 		const msgBox = el('div', exportStatusMessage.ok ? 'cf-save-preview-card' : 'cf-save-error');
@@ -3804,10 +3976,14 @@ function renderExportModal(): HTMLElement | null {
 		body.append(previewBox);
 	} else if (mdPreview !== undefined) {
 		body.append(el('pre', 'cf-hcl-preview cf-mono', mdPreview));
+	} else if (iacArtifact) {
+		body.append(el('pre', 'cf-hcl-preview cf-mono', iacArtifact.code));
 	}
 
 	const footer = el('div', 'cf-modal-header');
-	footer.append(el('span', 'cf-muted', 'Exports are rendered offline from the captured source revision with no external network requests.'));
+	footer.append(el('span', 'cf-muted', exportModalTab === 'iac'
+		? 'Generated statically offline from the active architecture model; review unmapped declarations before deploying.'
+		: 'Exports are rendered offline from the captured source revision with no external network requests.'));
 	const saveExportBtn = el('button', 'cf-btn cf-btn-primary cf-export-save-btn', exportBusy ? 'Exporting\u2026' : 'Save Export\u2026');
 	saveExportBtn.type = 'button';
 	saveExportBtn.disabled = exportBusy;
@@ -3815,6 +3991,221 @@ function renderExportModal(): HTMLElement | null {
 	footer.append(saveExportBtn);
 
 	dialog.append(body, footer);
+	backdrop.append(dialog);
+	return backdrop;
+}
+
+function createTemplateThumbnailSvg(tpl: ArchitectureTemplate): SVGSVGElement {
+	const svg = svgEl('svg', {
+		class: 'cf-template-thumb',
+		viewBox: '0 0 220 72',
+		'aria-hidden': 'true',
+	});
+	const positions = tpl.thumbnailNodes.map(n => ({
+		label: n.label,
+		x: 16 + n.col * 68,
+		y: 10 + n.row * 32,
+	}));
+	for (let i = 1; i < positions.length; i++) {
+		svg.append(svgEl('line', {
+			x1: positions[0].x + 26,
+			y1: positions[0].y + 11,
+			x2: positions[i].x + 26,
+			y2: positions[i].y + 11,
+			class: 'cf-template-thumb-edge',
+		}));
+	}
+	for (const pos of positions) {
+		svg.append(svgEl('rect', {
+			x: pos.x,
+			y: pos.y,
+			width: 52,
+			height: 22,
+			rx: 4,
+			class: 'cf-template-thumb-rect',
+		}));
+		const txt = svgEl('text', {
+			x: pos.x + 26,
+			y: pos.y + 11,
+			class: 'cf-template-thumb-label',
+		});
+		txt.textContent = pos.label;
+		svg.append(txt);
+	}
+	return svg;
+}
+
+function renderTemplatesModal(): HTMLElement | null {
+	if (!templatesModalOpen) {
+		return null;
+	}
+	const filtered = filterTemplates(TEMPLATE_LIBRARY, templateSearchQuery, templateProviderFilter, templateSortBy);
+	const selectedTpl = filtered.find(t => t.id === selectedTemplateId) ?? filtered[0];
+	if (selectedTpl && selectedTpl.id !== selectedTemplateId) {
+		selectedTemplateId = selectedTpl.id;
+	}
+	const current = activeGraph();
+
+	const backdrop = el('div', 'cf-modal-backdrop');
+	backdrop.addEventListener('click', event => {
+		if (event.target === backdrop) {
+			closeTemplatesModal();
+		}
+	});
+
+	const dialog = el('section', 'cf-modal cf-templates-modal');
+	dialog.setAttribute('role', 'dialog');
+	dialog.setAttribute('aria-modal', 'true');
+	dialog.setAttribute('aria-label', 'Offline Multi-Cloud Template Library');
+
+	const head = el('header', 'cf-modal-header');
+	const titleGroup = el('div', 'cf-header-group');
+	titleGroup.append(
+		el('strong', undefined, 'Template Library'),
+		el('span', 'cf-pill', `${filtered.length} of ${TEMPLATE_LIBRARY.length} offline templates`)
+	);
+	const closeBtn = el('button', 'cf-btn cf-templates-close', 'Close');
+	closeBtn.type = 'button';
+	closeBtn.addEventListener('click', () => closeTemplatesModal());
+	head.append(titleGroup, closeBtn);
+	dialog.append(head);
+
+	const body = el('div', 'cf-modal-body');
+
+	const controls = el('div', 'cf-export-controls');
+	const searchField = el('label', 'cf-export-field');
+	searchField.append(el('span', undefined, 'Search'));
+	const searchInput = el('input', 'cf-input cf-template-search');
+	searchInput.type = 'search';
+	searchInput.placeholder = 'Search Azure, AWS, GCP, Kubernetes, VPC…';
+	searchInput.value = templateSearchQuery;
+	searchInput.setAttribute('aria-label', 'Search templates');
+	searchInput.addEventListener('input', () => {
+		templateSearchQuery = searchInput.value;
+		render();
+		const restored = root.querySelector<HTMLInputElement>('.cf-template-search');
+		if (restored) {
+			restored.focus();
+			restored.setSelectionRange(templateSearchQuery.length, templateSearchQuery.length);
+		}
+	});
+	searchField.append(searchInput);
+
+	const provField = el('label', 'cf-export-field');
+	provField.append(el('span', undefined, 'Provider'));
+	const provSel = el('select', 'cf-select');
+	provSel.setAttribute('aria-label', 'Filter templates by provider');
+	for (const [val, label] of [
+		['all', 'All Providers'],
+		['azure', 'Azure'],
+		['aws', 'AWS'],
+		['gcp', 'Google Cloud'],
+		['kubernetes', 'Kubernetes'],
+	] as const) {
+		const opt = el('option', undefined, label);
+		opt.value = val;
+		opt.selected = templateProviderFilter === val;
+		provSel.append(opt);
+	}
+	provSel.addEventListener('change', () => {
+		templateProviderFilter = provSel.value as TemplateProvider | 'all';
+		render();
+	});
+	provField.append(provSel);
+
+	const sortField = el('label', 'cf-export-field');
+	sortField.append(el('span', undefined, 'Sort by'));
+	const sortSel = el('select', 'cf-select');
+	sortSel.setAttribute('aria-label', 'Sort templates');
+	for (const [val, label] of [['name', 'Name (A-Z)'], ['resources', 'Resource Count']] as const) {
+		const opt = el('option', undefined, label);
+		opt.value = val;
+		opt.selected = templateSortBy === val;
+		sortSel.append(opt);
+	}
+	sortSel.addEventListener('change', () => {
+		templateSortBy = sortSel.value as 'name' | 'resources';
+		render();
+	});
+	sortField.append(sortSel);
+
+	controls.append(searchField, provField, sortField);
+	body.append(controls);
+
+	const layout = el('div', 'cf-templates-layout');
+
+	const grid = el('div', 'cf-template-grid');
+	if (filtered.length === 0) {
+		grid.append(el('p', 'cf-muted', 'No templates match your current filter.'));
+	} else {
+		for (const tpl of filtered) {
+			const card = el('button', `cf-template-card${selectedTpl?.id === tpl.id ? ' selected' : ''}`);
+			card.type = 'button';
+			card.dataset.templateId = tpl.id;
+			card.setAttribute('aria-pressed', String(selectedTpl?.id === tpl.id));
+			card.append(createTemplateThumbnailSvg(tpl));
+			const metaRow = el('div', 'cf-block-header');
+			metaRow.append(
+				el('span', 'cf-pill', tpl.provider.toUpperCase()),
+				el('span', 'cf-muted', `${tpl.resourceCount} resources`)
+			);
+			card.append(
+				metaRow,
+				el('strong', undefined, tpl.name),
+				el('span', 'cf-muted', `${tpl.category} · v${tpl.version}`)
+			);
+			card.addEventListener('click', () => {
+				selectedTemplateId = tpl.id;
+				render();
+			});
+			grid.append(card);
+		}
+	}
+	layout.append(grid);
+
+	const detail = el('aside', 'cf-template-detail');
+	if (selectedTpl) {
+		const detailTop = el('div', 'cf-header-group');
+		detailTop.append(
+			el('strong', undefined, selectedTpl.name),
+			el('span', 'cf-pill', selectedTpl.provider.toUpperCase()),
+			el('span', 'cf-pill', `v${selectedTpl.version}`)
+		);
+		detail.append(
+			detailTop,
+			el('p', 'cf-muted', selectedTpl.summary),
+			el('div', 'cf-muted', `Author: ${selectedTpl.author} · Category: ${selectedTpl.category} · Tags: ${selectedTpl.tags.join(', ')}`)
+		);
+
+		const actions = el('div', 'cf-action-row');
+		const createBtn = el('button', 'cf-btn cf-btn-primary cf-template-create-btn', 'Create New Architecture\u2026');
+		createBtn.type = 'button';
+		createBtn.addEventListener('click', () => {
+			post({ type: 'useTemplateAsArchitecture', templateId: selectedTpl.id });
+			closeTemplatesModal();
+		});
+		actions.append(createBtn);
+
+		if (selectedTpl.canvasPatternId && current) {
+			const patternId = selectedTpl.canvasPatternId;
+			const insertBtn = el('button', 'cf-btn cf-template-insert-btn', 'Insert into Current Draft');
+			insertBtn.type = 'button';
+			insertBtn.title = 'Inserts this starter pattern as an atomic undoable draft edit on the active canvas';
+			insertBtn.addEventListener('click', () => {
+				insertStarterPatternById(patternId);
+				closeTemplatesModal();
+			});
+			actions.append(insertBtn);
+		}
+		detail.append(actions);
+		detail.append(el('pre', 'cf-hcl-preview cf-mono cf-template-code', selectedTpl.starterMainTf));
+	} else {
+		detail.append(el('p', 'cf-muted', 'Select a template to inspect its Terraform source and create a new architecture.'));
+	}
+	layout.append(detail);
+
+	body.append(layout);
+	dialog.append(body);
 	backdrop.append(dialog);
 	return backdrop;
 }
@@ -5020,7 +5411,15 @@ function render(): void {
 	if (!current) {
 		const empty = el('div', 'cf-empty-state');
 		empty.append(el('p', undefined, emptyMessage));
+		const browseBtn = el('button', 'cf-btn cf-btn-primary', 'Browse Template Library\u2026');
+		browseBtn.type = 'button';
+		browseBtn.addEventListener('click', () => openTemplatesModal());
+		empty.append(browseBtn);
 		root.append(empty);
+		const tplModal = renderTemplatesModal();
+		if (tplModal) {
+			root.append(tplModal);
+		}
 		return;
 	}
 
@@ -5098,15 +5497,24 @@ function render(): void {
 	if (explainModal) {
 		root.append(explainModal);
 	}
+	const templatesModal = renderTemplatesModal();
+	if (templatesModal) {
+		root.append(templatesModal);
+	}
 }
 
 // Keyboard shortcuts: Ctrl/Cmd+Z (undo), Ctrl/Cmd+Shift+Z / Ctrl+Y (redo), Ctrl/Cmd+Shift+E (export),
-// Ctrl/Cmd+Shift+H (history/experiments), Ctrl/Cmd+Shift+R (plan/policy/recipes), / (search),
-// ArrowUp/ArrowDown (cycle resources), Enter (open resource/module), O (open source), F (fit), Escape (close overlay).
+// Ctrl/Cmd+Shift+T (template library), Ctrl/Cmd+Shift+H (history/experiments), Ctrl/Cmd+Shift+R (plan/policy/recipes),
+// / (search), ArrowUp/ArrowDown (cycle resources), Enter (open resource/module), O (open source), F (fit), Escape (close overlay).
 window.addEventListener('keydown', event => {
 	const target = event.target;
 	const inInput = target instanceof HTMLElement && target.matches('input, textarea, select');
 	if (event.key === 'Escape') {
+		if (templatesModalOpen) {
+			event.preventDefault();
+			closeTemplatesModal();
+			return;
+		}
 		if (explainNodeId) {
 			event.preventDefault();
 			closeExplainModal();
@@ -5148,11 +5556,16 @@ window.addEventListener('keydown', event => {
 		}
 		return;
 	}
+	const mod = event.ctrlKey || event.metaKey;
+	if (!inInput && mod && event.shiftKey && !event.altKey && event.key.toLowerCase() === 't') {
+		event.preventDefault();
+		openTemplatesModal();
+		return;
+	}
 	const current = activeGraph();
 	if (inInput || !current) {
 		return;
 	}
-	const mod = event.ctrlKey || event.metaKey;
 	if (mod && event.shiftKey && !event.altKey && event.key.toLowerCase() === 'e') {
 		event.preventDefault();
 		openExportModal();
@@ -5235,6 +5648,7 @@ window.addEventListener('message', event => {
 			engineValidateBusy = false;
 			hclReviewOpen = false;
 			exportModalOpen = false;
+			templatesModalOpen = false;
 			extractModuleModalOpen = false;
 			historyModalOpen = false;
 			reviewModalOpen = false;
@@ -5404,6 +5818,9 @@ window.addEventListener('message', event => {
 		}
 		case 'openExport':
 			openExportModal();
+			break;
+		case 'openTemplates':
+			openTemplatesModal();
 			break;
 		case 'exportResult':
 			exportBusy = false;
