@@ -39,6 +39,8 @@
 	"config.editor.codeLens": "Show inline CloudForge Canvas and resource actions above Terraform blocks.",
 	"command.importProviderSchema": "Import Provider Schema Snapshot…",
 	"command.extractMirrorSchema": "Extract Provider Schema from Local Mirror…",
+	"command.importMirrorPackage": "Import Provider Archive (.zip) into Local Mirror…",
+	"command.evictMirrorPackage": "Remove Package from Local Provider Mirror…",
 	"command.initArchitectureOffline": "Initialize Architecture Offline from Mirror",
 	"command.openTemplateLibrary": "Browse Template Library…",
 	"view.projects": "CloudForge Project",

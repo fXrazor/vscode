@@ -2043,6 +2043,146 @@ export function activate(context: ExtensionContext): void {
 			l10n.t('Extracted {0} {1} into the CloudForge provider catalogue from the local offline mirror.', picked.pkg.key.address, picked.pkg.key.version)
 		);
 	}));
+	context.subscriptions.push(commands.registerCommand('cloudforge.importMirrorPackage', async () => {
+		const graph = provider.getGraph();
+		let suggestedAddress = 'registry.terraform.io/hashicorp/azurerm';
+		let suggestedVersion = '';
+		let suggestedPlatform = 'windows_amd64';
+		if (graph) {
+			const readiness = await checkArchitectureOfflineMirrorReadiness(graph.workspaceId, graph.architectureId, graph.sourceRevision);
+			const firstMissing = readiness?.missing[0];
+			if (firstMissing) {
+				suggestedAddress = firstMissing.address;
+				suggestedVersion = firstMissing.version;
+				suggestedPlatform = firstMissing.platform;
+			}
+		}
+		const address = await window.showInputBox({
+			title: l10n.t('Provider Address (hostname/namespace/type)'),
+			value: suggestedAddress,
+			placeHolder: 'registry.terraform.io/hashicorp/azurerm',
+			validateInput: text => {
+				const parts = text.trim().split('/');
+				return parts.length === 3 && parts.every(p => /^[A-Za-z0-9._+-]+$/.test(p) && p !== '.' && p !== '..')
+					? undefined
+					: l10n.t('Enter a full 3-segment provider address such as registry.terraform.io/hashicorp/azurerm.');
+			},
+		});
+		if (!address) {
+			return;
+		}
+		const version = await window.showInputBox({
+			title: l10n.t('Provider Version for {0}', address.trim()),
+			value: suggestedVersion,
+			placeHolder: '5.14.0',
+			validateInput: text => /^[A-Za-z0-9._+-]+$/.test(text.trim()) ? undefined : l10n.t('Enter a provider release version such as 5.14.0.'),
+		});
+		if (!version) {
+			return;
+		}
+		const platformPick = await window.showQuickPick(
+			[
+				{ label: 'windows_amd64', description: l10n.t('Required for local Windows offline init & schema extraction') },
+				{ label: 'linux_amd64', description: l10n.t('CI / Linux offline mirror target') },
+			],
+			{
+				title: l10n.t('Target Platform for {0} {1}', address.trim(), version.trim()),
+				placeHolder: suggestedPlatform,
+			}
+		);
+		if (!platformPick) {
+			return;
+		}
+		const expectedSha256 = await window.showInputBox({
+			title: l10n.t('Expected SHA-256 Digest (64 hex characters)'),
+			placeHolder: '0123456789abcdef...',
+			validateInput: text => /^[0-9a-fA-F]{64}$/.test(text.trim())
+				? undefined
+				: l10n.t('Enter the verified 64-character SHA-256 hex digest for the provider .zip archive.'),
+		});
+		if (!expectedSha256) {
+			return;
+		}
+		const imported = await window.withProgress(
+			{
+				location: ProgressLocation.Notification,
+				title: l10n.t('Verifying and importing {0} {1} ({2}) into local mirror…', address.trim(), version.trim(), platformPick.label),
+				cancellable: false,
+			},
+			() => callService<unknown>('importMirrorPackage', {
+				address: address.trim(),
+				version: version.trim(),
+				platform: platformPick.label,
+				expectedSha256: expectedSha256.trim().toLowerCase(),
+			})
+		);
+		if (!imported.ok) {
+			if (imported.error.code !== 'CANCELLED') {
+				showServiceError(imported.error);
+			}
+			return;
+		}
+		const currentGraph = provider.getGraph();
+		if (currentGraph) {
+			canvas.updateIfOpen(toCanvasSnapshot(currentGraph, currentArchitectureName));
+		}
+		void window.showInformationMessage(
+			l10n.t('Verified and imported {0} {1} ({2}) into the local offline provider mirror.', address.trim(), version.trim(), platformPick.label)
+		);
+	}));
+	context.subscriptions.push(commands.registerCommand('cloudforge.evictMirrorPackage', async () => {
+		const listed = await callService<unknown>('listMirrorPackages', {});
+		if (!listed.ok) {
+			showServiceError(listed.error);
+			return;
+		}
+		const packages = parseMirrorPackages(listed.value);
+		if (packages.length === 0) {
+			void window.showInformationMessage(l10n.t('The local CloudForge provider mirror is currently empty.'));
+			return;
+		}
+		const picked = await window.showQuickPick(
+			packages.map(pkg => ({
+				label: `${pkg.key.address} ${pkg.key.version} (${pkg.key.platform})`,
+				description: `${pkg.sizeBytes} bytes · ${pkg.sha256.slice(0, 8)}`,
+				detail: pkg.publisher ? l10n.t('{0} · recorded {1}', pkg.publisher, pkg.recordedAt) : l10n.t('Recorded {0}', pkg.recordedAt),
+				pkg,
+			})),
+			{
+				title: l10n.t('Remove Package from Local Offline Mirror'),
+				placeHolder: l10n.t('Select a mirrored provider archive to remove'),
+			}
+		);
+		if (!picked) {
+			return;
+		}
+		const confirmAction = l10n.t('Remove Package');
+		const confirm = await window.showWarningMessage(
+			l10n.t('Remove {0} {1} ({2}) from the local offline provider mirror?', picked.pkg.key.address, picked.pkg.key.version, picked.pkg.key.platform),
+			{ modal: true },
+			confirmAction
+		);
+		if (confirm !== confirmAction) {
+			return;
+		}
+		const evicted = await callService<unknown>('evictMirrorPackage', {
+			address: picked.pkg.key.address,
+			version: picked.pkg.key.version,
+			platform: picked.pkg.key.platform,
+		});
+		if (!evicted.ok) {
+			showServiceError(evicted.error);
+			return;
+		}
+		const bytesReclaimed = isRecord(evicted.value) && typeof evicted.value.bytesReclaimed === 'number' ? evicted.value.bytesReclaimed : picked.pkg.sizeBytes;
+		const currentGraph = provider.getGraph();
+		if (currentGraph) {
+			canvas.updateIfOpen(toCanvasSnapshot(currentGraph, currentArchitectureName));
+		}
+		void window.showInformationMessage(
+			l10n.t('Removed {0} {1} ({2}) from the local mirror ({3} bytes reclaimed).', picked.pkg.key.address, picked.pkg.key.version, picked.pkg.key.platform, bytesReclaimed)
+		);
+	}));
 	let opening: Promise<void> | undefined;
 	context.subscriptions.push(commands.registerCommand('cloudforge.openWorkspace', () => {
 		return opening ??= openWorkspace(provider, treeView, (loaded, architectureName) => {

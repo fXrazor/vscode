@@ -260,6 +260,18 @@
 				"icon": "$(package)"
 			},
 			{
+				"command": "cloudforge.importMirrorPackage",
+				"title": "%command.importMirrorPackage%",
+				"category": "%displayName%",
+				"icon": "$(archive)"
+			},
+			{
+				"command": "cloudforge.evictMirrorPackage",
+				"title": "%command.evictMirrorPackage%",
+				"category": "%displayName%",
+				"icon": "$(trash)"
+			},
+			{
 				"command": "cloudforge.initArchitectureOffline",
 				"title": "%command.initArchitectureOffline%",
 				"category": "%displayName%",

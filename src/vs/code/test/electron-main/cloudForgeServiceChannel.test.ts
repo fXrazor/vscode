@@ -572,5 +572,81 @@ suite('CloudForgeServiceChannel', () => {
 			address: 'registry.terraform.io/hashicorp/azurerm',
 			version: '../5.14.0'
 		}), undefined);
+
+		const sha = 'a'.repeat(64);
+		assert.deepStrictEqual(validateCloudForgeServiceParams('importMirrorPackage', {
+			address: 'registry.terraform.io/hashicorp/azurerm',
+			version: '5.14.0',
+			platform: 'windows_amd64',
+			expectedSha256: sha.toUpperCase(),
+			publisher: ' HashiCorp '
+		}), {
+			address: 'registry.terraform.io/hashicorp/azurerm',
+			version: '5.14.0',
+			platform: 'windows_amd64',
+			expectedSha256: sha,
+			publisher: 'HashiCorp'
+		});
+		// Extension host may never supply `archivePath`.
+		assert.strictEqual(validateCloudForgeServiceParams('importMirrorPackage', {
+			archivePath: 'C:\\evil.zip',
+			address: 'registry.terraform.io/hashicorp/azurerm',
+			version: '5.14.0',
+			platform: 'windows_amd64',
+			expectedSha256: sha
+		}), undefined);
+
+		assert.deepStrictEqual(validateCloudForgeServiceParams('evictMirrorPackage', {
+			address: 'registry.terraform.io/hashicorp/azurerm',
+			version: '5.14.0',
+			platform: 'windows_amd64'
+		}), {
+			address: 'registry.terraform.io/hashicorp/azurerm',
+			version: '5.14.0',
+			platform: 'windows_amd64'
+		});
+		assert.strictEqual(validateCloudForgeServiceParams('evictMirrorPackage', {
+			address: 'hashicorp/azurerm',
+			version: '5.14.0',
+			platform: 'windows_amd64'
+		}), undefined);
+	});
+
+	test('picks a local .zip archive in Electron main for importMirrorPackage and blocks UNC paths', async () => {
+		const sha = 'a'.repeat(64);
+		const params = {
+			address: 'registry.terraform.io/hashicorp/azurerm',
+			version: '5.14.0',
+			platform: 'windows_amd64',
+			expectedSha256: sha,
+			publisher: 'HashiCorp'
+		};
+
+		const cancelled = createBroker([contosoWindow]);
+		assert.deepStrictEqual(await cancelled.call(1, 'importMirrorPackage', params), {
+			ok: false,
+			error: { code: 'CANCELLED', message: 'The CloudForge request was cancelled.' }
+		});
+		assert.deepStrictEqual(cancelled.dialogs.map(dialog => dialog.properties), [['openFile']]);
+		assert.deepStrictEqual(cancelled.callsByWindow(), { 1: [] });
+
+		const unc = createBroker([contosoWindow], { picked: ['\\\\server\\share\\provider.zip'] });
+		assert.deepStrictEqual(await unc.call(1, 'importMirrorPackage', params), {
+			ok: false,
+			error: { code: 'SCOPE_DENIED', message: 'The requested CloudForge workspace is not active in this window.' }
+		});
+		assert.deepStrictEqual(unc.callsByWindow(), { 1: [] });
+
+		const local = createBroker([contosoWindow], {
+			picked: ['D:\\Mirrors\\terraform-provider-azurerm_5.14.0_windows_amd64.zip'],
+			reply: () => ({ created: true, package: { key: { address: params.address, version: params.version, platform: params.platform }, sizeBytes: 1024, sha256: sha, recordedAt: '2026-11-25T00:00:00Z' } })
+		});
+		const imported = await local.call(1, 'importMirrorPackage', params);
+		assert.strictEqual(imported.ok, true);
+		assert.deepStrictEqual(local.callsByWindow(), {
+			1: [{ method: 'importMirrorPackage', params: { ...params, archivePath: 'D:\\Mirrors\\terraform-provider-azurerm_5.14.0_windows_amd64.zip' } }]
+		});
+
+		await Promise.all([cancelled, unc, local].map(item => item.broker.stop()));
 	});
 });
