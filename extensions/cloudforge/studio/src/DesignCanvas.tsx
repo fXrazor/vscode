@@ -380,7 +380,7 @@ export const DesignCanvas = memo(function DesignCanvas({
 			>
 				<CanvasBackground grid={grid} />
 				<AlignmentGuides lines={guideLines}/>
-				{!hand && !creatingConnection && selectedIds.length > 1 && !canvasElements(architecture).some(item => selectedIds.includes(item.id) && item.canvasLocked) && resizable(architecture, selectedIds, mode) > 0 && <SelectionResizeHandle ids={selectedIds} onScale={scale => run(('size-' + scale) as SelectionAction)}/>}
+				{!hand && !creatingConnection && selectedIds.length > 1 && !canvasElements(architecture).some(item => selectedIds.includes(item.id) && item.canvasLocked) && resizable(architecture, selectedIds, mode) > 0 && <SelectionResizeHandle ids={selectedIds} onScale={(scale, anchor) => dispatch({ type: 'canvas', command: { kind: 'resize', ids: selectedIds, mode, scale, anchor } })}/>}
 				{minimap && <MiniMap<CanvasNode> pannable zoomable nodeColor={node => node.type === 'board' && node.data.item.kind === 'frame' ? 'transparent' : '#8e79d9'} />}
 				{!creatingConnection && (selectedConnection && showConnections ? <SelectionAnchor ids={[selectedConnection.source,selectedConnection.target]} canvas={bounds}><ConnectionTools connection={selectedConnection} dispatch={dispatch} onClose={() => { setSelectedConnectionId(''); bounds.current?.focus(); }}/></SelectionAnchor> : selectedIds.some(id=>canvasElements(architecture).some(item=>item.id===id)) && <SelectionAnchor ids={selectedIds.filter(id=>canvasElements(architecture).some(item=>item.id===id))} canvas={bounds}><SelectionControls architecture={architecture} ids={selectedIds} dispatch={dispatch} run={run} hasClipboard={hasClipboard} mode={mode} onInspect={onOpen} container={bounds.current}/></SelectionAnchor>)}
 			</ReactFlow>

@@ -96,6 +96,48 @@ try {
 			assert.deepEqual(errors, [], 'no browser errors');
 			console.log(`PASS pen ${viewport.width}×${viewport.height} ${theme} (0 browser errors)`);
 			checks++;
+
+			await page.reload();
+			await page.getByLabel('Close resource library', { exact: true }).click();
+			if (theme === 'dark') { await page.getByLabel('Toggle light or dark theme').click(); }
+			await page.getByLabel('Canvas zoom', { exact: true }).selectOption({ label: '70%' });
+			await page.locator('main.canvas').focus();
+			await page.keyboard.press('n');
+			const firstId = await page.locator('.react-flow__node.selected').getAttribute('data-id');
+			for (let index = 0; index < 26; index++) { await page.keyboard.press('Shift+ArrowLeft'); }
+			for (let index = 0; index < 16; index++) { await page.keyboard.press('Shift+ArrowUp'); }
+			await page.keyboard.press('n');
+			const secondId = await page.locator('.react-flow__node.selected').getAttribute('data-id');
+			await page.locator(`.react-flow__node[data-id="${firstId}"]`).click({ modifiers: ['Control'] });
+			const selected = page.locator('.react-flow__node.selected');
+			assert.equal(await selected.count(), 2);
+			const original = await selected.evaluateAll(nodes => nodes.map(node => ({ id: node.dataset.id, width: node.style.width, height: node.style.height, transform: node.style.transform })));
+			const frame = page.locator('.selection-resize');
+			const fixedPoint = (box, corner) => ({ x: box.x + (corner.endsWith('left') ? box.width : 0), y: box.y + (corner.startsWith('top') ? box.height : 0) });
+			for (const corner of ['top-left', 'top-right', 'bottom-left', 'bottom-right']) {
+				assert.equal(await page.locator('.selection-resize-handle').count(), 4);
+				const before = await frame.boundingBox();
+				const handle = await page.locator(`.selection-resize-handle[data-corner="${corner}"]`).boundingBox();
+				const x = handle.x + handle.width / 2; const y = handle.y + handle.height / 2;
+				const dx = before.width * (corner.endsWith('left') ? -0.15 : 0.15); const dy = before.height * (corner.startsWith('top') ? -0.15 : 0.15);
+				await page.mouse.move(x, y); await page.mouse.down();
+				await page.mouse.move(x + dx, y + dy, { steps: 6 });
+				assert.equal(await frame.getAttribute('data-active'), 'true', 'group handle receives the gesture');
+				if (corner === 'top-left') { await page.screenshot({ path: path.join(output, `corners-${viewport.width}-${theme}.png`) }); }
+				await page.mouse.up();
+				await page.waitForTimeout(100);
+				const after = await frame.boundingBox();
+				const a = fixedPoint(before, corner); const b = fixedPoint(after, corner);
+				assert.ok(Math.abs(a.x - b.x) < 1 && Math.abs(a.y - b.y) < 1, `${corner}: opposite corner stays fixed`);
+				assert.ok(after.width > before.width && after.height > before.height, `${corner}: selection grew`);
+				await page.locator('main.canvas').focus(); await page.keyboard.press('Control+z');
+				const restored = await selected.evaluateAll(nodes => nodes.map(node => ({ id: node.dataset.id, width: node.style.width, height: node.style.height, transform: node.style.transform })));
+				assert.deepEqual(restored, original, `${corner}: one Undo restores every dimension and position`);
+			}
+			assert.ok(firstId !== secondId);
+			assert.deepEqual(errors, [], 'no browser errors');
+			console.log(`PASS four corners ${viewport.width}×${viewport.height} ${theme} (0 browser errors)`);
+			checks++;
 			await page.close();
 		}
 	}
