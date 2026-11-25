@@ -134,6 +134,47 @@
 				"title": "%command.openProjectGallery%",
 				"category": "%displayName%",
 				"icon": "$(layout)"
+			},
+			{
+				"command": "cloudforge.openProjectStatus",
+				"title": "%command.openProjectStatus%",
+				"category": "%displayName%",
+				"icon": "$(dashboard)"
+			},
+			{
+				"command": "cloudforge.refreshSidePanel",
+				"title": "%command.refreshSidePanel%",
+				"category": "%displayName%",
+				"icon": "$(refresh)"
+			},
+			{
+				"command": "cloudforge.linkCloudConnection",
+				"title": "%command.linkCloudConnection%",
+				"category": "%displayName%",
+				"icon": "$(plug)"
+			},
+			{
+				"command": "cloudforge.storeCloudKey",
+				"title": "%command.storeCloudKey%",
+				"category": "%displayName%",
+				"icon": "$(key)"
+			},
+			{
+				"command": "cloudforge.deleteCloudKey",
+				"title": "%command.deleteCloudKey%",
+				"category": "%displayName%",
+				"icon": "$(trash)"
+			},
+			{
+				"command": "cloudforge.removeCloudConnection",
+				"title": "%command.removeCloudConnection%",
+				"category": "%displayName%",
+				"icon": "$(debug-disconnect)"
+			},
+			{
+				"command": "cloudforge.revealStateResource",
+				"title": "%command.revealStateResource%",
+				"category": "%displayName%"
 			}
 		],
 		"keybindings": [
@@ -144,7 +185,12 @@
 			}
 		],
 		"views": {
-			"explorer": [
+			"cloudforge": [
+				{
+					"id": "cloudforge.status",
+					"name": "%view.status%",
+					"icon": "$(dashboard)"
+				},
 				{
 					"id": "cloudforge.projects",
 					"name": "%view.projects%"
@@ -152,6 +198,15 @@
 				{
 					"id": "cloudforge.resources",
 					"name": "%view.resources%"
+				},
+				{
+					"id": "cloudforge.state",
+					"name": "%view.state%",
+					"visibility": "collapsed"
+				},
+				{
+					"id": "cloudforge.connections",
+					"name": "%view.connections%"
 				}
 			]
 		},
@@ -200,6 +255,14 @@
 				{
 					"command": "cloudforge.forgetProjectAccess",
 					"when": "cloudforge.projectOpen"
+				},
+				{
+					"command": "cloudforge.revealStateResource",
+					"when": "false"
+				},
+				{
+					"command": "cloudforge.deleteCloudKey",
+					"when": "false"
 				}
 			],
 			"view/title": [
@@ -242,6 +305,21 @@
 					"command": "cloudforge.validateArchitecture",
 					"when": "view == cloudforge.resources",
 					"group": "navigation@2"
+				},
+				{
+					"command": "cloudforge.openProjectStatus",
+					"when": "view == cloudforge.status",
+					"group": "navigation@1"
+				},
+				{
+					"command": "cloudforge.refreshSidePanel",
+					"when": "view == cloudforge.status || view == cloudforge.state || view == cloudforge.connections",
+					"group": "navigation@9"
+				},
+				{
+					"command": "cloudforge.linkCloudConnection",
+					"when": "view == cloudforge.connections",
+					"group": "navigation@1"
 				}
 			],
 			"view/item/context": [
@@ -259,6 +337,35 @@
 					"command": "cloudforge.importRepository",
 					"when": "view == cloudforge.projects && viewItem == cloudforge.unimportedFolder",
 					"group": "inline@1"
+				},
+				{
+					"command": "cloudforge.linkCloudConnection",
+					"when": "view == cloudforge.connections && viewItem =~ /^cloudforge\\.connection\\./",
+					"group": "inline@1"
+				},
+				{
+					"command": "cloudforge.storeCloudKey",
+					"when": "view == cloudforge.connections && viewItem =~ /^cloudforge\\.connection\\.(azure|aws)\\.linked/",
+					"group": "inline@2"
+				},
+				{
+					"command": "cloudforge.removeCloudConnection",
+					"when": "view == cloudforge.connections && viewItem =~ /^cloudforge\\.connection\\.[a-z]+\\.linked/",
+					"group": "inline@3"
+				},
+				{
+					"command": "cloudforge.deleteCloudKey",
+					"when": "view == cloudforge.connections && viewItem =~ /\\.key$/",
+					"group": "key@1"
+				}
+			]
+		},
+		"viewsContainers": {
+			"activitybar": [
+				{
+					"id": "cloudforge",
+					"title": "%viewContainer.cloudforge%",
+					"icon": "resources/cloudforge-activity.svg"
 				}
 			]
 		}

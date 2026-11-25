@@ -433,6 +433,16 @@ suite('CloudForgeServiceChannel', () => {
 		assert.strictEqual(validateCloudForgeServiceParams('applyFocusedSaveBatch', { ...batchBase, previewToken: 'save-0123456789abcdef0123456789abcdef', fileName: 'main.tf' }), undefined);
 
 		assert.ok(validateCloudForgeServiceParams('readResourceValues', { workspaceId, architectureId: `${workspaceId}-architecture-1`, expectedSourceRevision: sha256 }));
+		assert.ok(validateCloudForgeServiceParams('summarizeState', { workspaceId, architectureId: `${workspaceId}-architecture-1` }));
+		assert.strictEqual(validateCloudForgeServiceParams('summarizeState', { workspaceId, architectureId: `${workspaceId}-architecture-1`, path: 'C:\\x' }), undefined);
+		assert.deepStrictEqual(validateCloudForgeServiceParams('listCloudConnections', { workspaceId }), { workspaceId });
+		assert.deepStrictEqual(validateCloudForgeServiceParams('setCloudConnection', { workspaceId, provider: 'aws', binding: { profile: 'dev' } }), { workspaceId, provider: 'aws', binding: { profile: 'dev' } });
+		assert.strictEqual(validateCloudForgeServiceParams('setCloudConnection', { workspaceId, provider: 'oracle', binding: {} }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('setCloudConnection', { workspaceId, provider: 'aws', binding: { profile: { nested: true } } }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('setCloudConnection', { workspaceId, provider: 'aws', key: { a: 'b' } }), undefined);
+		assert.ok(validateCloudForgeServiceParams('storeCloudKey', { workspaceId, provider: 'azure', key: { clientSecret: 'abcdefgh' } }));
+		assert.deepStrictEqual(validateCloudForgeServiceParams('removeCloudConnection', { workspaceId, provider: 'google', keyOnly: true }), { workspaceId, provider: 'google', keyOnly: true });
+		assert.strictEqual(validateCloudForgeServiceParams('removeCloudConnection', { workspaceId, provider: 'google', binding: {} }), undefined);
 		assert.strictEqual(validateCloudForgeServiceParams('readResourceValues', { workspaceId, architectureId: `${workspaceId}-architecture-1`, rootPath: 'C:\\Windows' }), undefined);
 		assert.ok(validateCloudForgeServiceParams('inspectDependencies', { workspaceId, architectureId: `${workspaceId}-architecture-1`, expectedSourceRevision: sha256, engine: 'opentofu' }));
 		assert.strictEqual(validateCloudForgeServiceParams('inspectDependencies', { workspaceId, architectureId: `${workspaceId}-architecture-1`, engine: 'pulumi' }), undefined);

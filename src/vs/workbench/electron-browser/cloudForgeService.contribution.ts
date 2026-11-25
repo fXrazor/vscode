@@ -32,6 +32,7 @@ type CloudForgeServiceMethod =
 	| 'startValidationRun' | 'pollValidationRun' | 'cancelValidationRun'
 	| 'previewDraftSave' | 'applyDraftSave' | 'previewFocusedSave' | 'applyFocusedSave' | 'readResourceValues'
 	| 'previewFocusedSaveBatch' | 'applyFocusedSaveBatch'
+	| 'summarizeState' | 'listCloudConnections' | 'setCloudConnection' | 'storeCloudKey' | 'removeCloudConnection'
 	| 'inspectDependencies' | 'readModule' | 'auditExportReadiness' | 'runEngineValidate';
 type CloudForgeCatalogueMethod = 'inspectCatalogueSchemaFile' | 'importCatalogueSnapshot' | 'listCatalogueSnapshots' | 'listCatalogueTypes' | 'getResourceFormSchema' | 'getCatalogueCoverage' | 'renderResourceDraft' | 'listCloudRegions' | 'diffCatalogueSnapshots' | 'detectEngines';
 type CloudForgeProjectMethod = 'createProject' | 'openProject' | 'grantProject' | 'forgetProjectAccess' | 'createWorkspaceFile' | 'inspectRepository' | 'importRepository' | 'removeRepository' | 'createArchitecture' | 'summarizeArchitectures' | 'installGit';
@@ -286,6 +287,7 @@ CommandsRegistry.registerCommand('_cloudforge.callService', async (accessor, met
 		method !== 'startValidationRun' && method !== 'pollValidationRun' && method !== 'cancelValidationRun' &&
 		method !== 'previewDraftSave' && method !== 'applyDraftSave' && method !== 'previewFocusedSave' && method !== 'applyFocusedSave' &&
 		method !== 'previewFocusedSaveBatch' && method !== 'applyFocusedSaveBatch' &&
+		method !== 'summarizeState' && method !== 'listCloudConnections' && method !== 'setCloudConnection' && method !== 'storeCloudKey' && method !== 'removeCloudConnection' &&
 		method !== 'inspectDependencies' && method !== 'readResourceValues' &&
 		method !== 'readModule' && method !== 'auditExportReadiness' && method !== 'runEngineValidate'
 	) {
@@ -310,6 +312,7 @@ CommandsRegistry.registerCommand('_cloudforge.callService', async (accessor, met
 		case 'startValidationRun':
 		case 'inspectDependencies':
 		case 'readResourceValues':
+		case 'summarizeState':
 		case 'readModule':
 		case 'auditExportReadiness':
 		case 'runEngineValidate':
@@ -326,6 +329,12 @@ CommandsRegistry.registerCommand('_cloudforge.callService', async (accessor, met
 			if (!isOpaqueId(params.architectureId) || params.architectureId !== activeArchitectureId || typeof params.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(params.expectedSourceRevision)) {
 				return failure('SCOPE_DENIED', 'The requested architecture is not active in this window.');
 			}
+			break;
+		case 'listCloudConnections':
+		case 'setCloudConnection':
+		case 'storeCloudKey':
+		case 'removeCloudConnection':
+			// Workspace-scoped (checked above); Electron main validates the provider and fields.
 			break;
 		case 'pollValidationRun':
 		case 'cancelValidationRun':

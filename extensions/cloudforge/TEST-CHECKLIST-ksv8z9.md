@@ -4,11 +4,11 @@ Covers everything built in both repos on 25 November 2026 (updated for three-way
 
 ## 0. Build and automated checks (Windows)
 
-- [ ] Rust: in a checkout of the branch, from `service/`, with a **fresh** `CARGO_TARGET_DIR` (a stale one gives bogus `hcl-edit` E0599 errors), run `cargo test`. Expect everything to pass, including the `focused_save` (14) and `resource_values` (1) unit tests and, in `tests/draft_save.rs`, `focused_save_rewrites_only_changed_values_and_keeps_comments`, `read_resource_values_returns_file_values_without_secrets` and `focused_batch_saves_several_files_under_one_token`. `fixtures.rs` expects 22 Stage 2 fixtures, including `create-architecture-adopt-root-files`. `tests/stdio.rs` now expects the 2 MiB request limit.
+- [ ] Rust: in a checkout of the branch, from `service/`, with a **fresh** `CARGO_TARGET_DIR` (a stale one gives bogus `hcl-edit` E0599 errors), run `cargo test`. Expect everything to pass, including the `focused_save` (14) and `resource_values` (1) unit tests and, in `tests/draft_save.rs`, `focused_save_rewrites_only_changed_values_and_keeps_comments`, `read_resource_values_returns_file_values_without_secrets` and `focused_batch_saves_several_files_under_one_token`. `tests/stage11_state_connections.rs` (it writes and then deletes one generic credential in your Credential Manager). `fixtures.rs` expects 22 Stage 2 fixtures, including `create-architecture-adopt-root-files`. `tests/stdio.rs` now expects the 2 MiB request limit.
 - [ ] Rust: `node docs/protocol/fixtures/check-fixtures.mjs` reports the fixtures consistent.
 - [ ] Code OSS: build with the new service binary staged, then run the electron-main test `src/vs/code/test/electron-main/cloudForgeServiceChannel.test.ts`.
 - [ ] Code OSS: full type-check (`npm run compile` or the usual watch build). This covers `cloudForgeService.contribution.ts`, which couldn't be checked in the cloud.
-- [ ] Studio: `pnpm check` and tests (110 expected) in `extensions/cloudforge/studio`; extension tests (71 expected).
+- [ ] Studio: `pnpm check` and tests (110 expected) in `extensions/cloudforge/studio`; extension tests (74 expected).
 
 Use a test project with at least two architectures and one `.tf` file that has comments, a `tags = local.tags` line, a `lifecycle` block and a `dynamic` block.
 
@@ -92,6 +92,24 @@ Use a test project with at least two architectures and one `.tf` file that has c
 - [ ] After saving, the top bar no longer shows unsaved changes once the refresh arrives, including for fields written as expressions.
 - [ ] Undo after a refresh: your canvas steps undo, and the file change stays.
 - [ ] Change a `.tf` file outside Code OSS (for example `git checkout` of another version, or edit it in Notepad). The canvas refreshes on its own within a second.
+
+## 9. CloudForge side panel
+
+- [ ] A CloudForge icon appears in the activity bar. Its panel holds Project Status, Projects, CloudForge Graph, Terraform State and Cloud Connections. Projects and CloudForge Graph are no longer in Explorer.
+- [ ] Project Status lists the project, architecture and revision, resources, checks (click opens Problems) and the state line. If the architecture uses Azure resources and Azure isn't linked, an Azure row shows a warning.
+- [ ] "Open Project Status" opens a tab. Refresh, Open canvas, Run checks, Link and Store key all work from it.
+- [ ] Terraform State, with no backend block and no state file: "Backend local (default)" and "No local state file".
+- [ ] Copy a real `terraform.tfstate` into an architecture folder. Serial, Terraform version, resources (clicking one with a matching block opens its source), outputs (sensitive ones show a lock) and "Differences from configuration" appear. No attribute or output value shows anywhere.
+- [ ] Add `terraform { backend "azurerm" { … } }`. The backend shows `azurerm` and its setting names only. After `terraform init` with a different backend, "Initialized backend differs" appears.
+
+## 10. Cloud connections
+
+- [ ] Run `az login`, then Link Cloud Account → Azure. Enter the tenant and subscription from `az account show`. The row shows "subscription …abcd" (masked).
+- [ ] Link AWS with a profile name and region, and Google with a project ID.
+- [ ] Store Key for AWS (access key ID plus secret). The secret box is masked. Afterwards the row says "key stored", and Windows Credential Manager → Generic Credentials has `CloudForge/<numbers>/aws`.
+- [ ] `%LOCALAPPDATA%\CloudForge\service\cloud-connections.json` holds the bindings and no key. Nothing new appears in the project folder or its git status.
+- [ ] Delete Stored Key removes the credential; Unlink removes the binding and any key.
+- [ ] Close and reopen the project, including after renaming or moving its folder: the links are still there.
 
 ## 8. Known gaps (not bugs)
 

@@ -40,6 +40,7 @@ const cloudForgeMethods: ReadonlySet<string> = new Set<CloudForgeServiceMethod>(
 	'previewDraftSave', 'applyDraftSave', 'previewFocusedSave', 'applyFocusedSave',
 	'previewFocusedSaveBatch', 'applyFocusedSaveBatch',
 	'inspectDependencies', 'readResourceValues', 'listCloudRegions', 'readModule',
+	'summarizeState', 'listCloudConnections', 'setCloudConnection', 'storeCloudKey', 'removeCloudConnection',
 	'diffCatalogueSnapshots', 'auditExportReadiness',
 	'detectEngines', 'runEngineValidate'
 ]);
@@ -49,6 +50,7 @@ const installGitTimeoutMs = 11 * 60 * 1000;
 const maxPathLength = 32767;
 const maxNameLength = 255;
 const maxRemoteBytes = 2048;
+const cloudProviders: ReadonlySet<string> = new Set(['azure', 'aws', 'google']);
 /** A batch save must fit in one service request (2 MiB) with room for the envelope. */
 const maxBatchBytes = 1_900_000;
 const maxSelections = 32;
@@ -594,6 +596,31 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 				expectedSourceRevision: value.expectedSourceRevision,
 				previewToken: value.previewToken
 			};
+		}
+		case 'summarizeState':
+			return validateCloudForgeServiceParams('readResourceValues', value);
+		case 'listCloudConnections':
+			return hasOnlyKeys(value, ['workspaceId']) && isOpaqueId(value.workspaceId) ? { workspaceId: value.workspaceId } : undefined;
+		case 'setCloudConnection':
+		case 'storeCloudKey':
+		case 'removeCloudConnection': {
+			const field = method === 'setCloudConnection' ? 'binding' : method === 'storeCloudKey' ? 'key' : undefined;
+			const keys = ['workspaceId', 'provider', ...(field ? [field] : ['keyOnly'])];
+			if (!hasOnlyKeys(value, keys) || !isOpaqueId(value.workspaceId) || !cloudProviders.has(value.provider as string)) {
+				return undefined;
+			}
+			if (field) {
+				// Shape only: the service checks every field. A key is passed through once and never logged.
+				const body = value[field];
+				if (!isRecord(body) || Object.keys(body).length > 8 || !Object.values(body).every(item => item === null || (typeof item === 'string' && item.length <= 512))) {
+					return undefined;
+				}
+				return { workspaceId: value.workspaceId, provider: value.provider, [field]: { ...body } };
+			}
+			if (value.keyOnly !== undefined && typeof value.keyOnly !== 'boolean') {
+				return undefined;
+			}
+			return { workspaceId: value.workspaceId, provider: value.provider, ...(value.keyOnly === true ? { keyOnly: true } : {}) };
 		}
 		case 'readResourceValues': {
 			if (!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'expectedSourceRevision']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId)) {

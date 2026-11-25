@@ -30,6 +30,7 @@ import { orientServiceEdgesForCanvas } from './canvas/layout';
 import { isValidTfFileName, type CanvasCatalogueSnapshot, type CanvasCatalogueTypes, type CanvasCloudRegionsPayload, type CanvasEngineValidateReport, type CanvasGraphSnapshot } from './canvas/protocol';
 import { lookupBundledSchema, type FormSchema } from './canvas/schemaForm';
 import { findTemplateById } from './canvas/templateLibrary';
+import { activateSidePanel } from './sidePanel/sidePanel';
 import {
 	draftSaveErrorMessage,
 	mapRustFormSchemaToCanvasFormSchema,
@@ -1394,5 +1395,19 @@ export function activate(context: ExtensionContext): void {
 			}
 			await commands.executeCommand('cloudforge.resources.focus');
 		}
+	});
+
+	// Stage 11: the CloudForge side panel (Project Status, Terraform State, Cloud Connections).
+	const projectChanged = new EventEmitter<void>();
+	context.subscriptions.push(projectChanged, projectControllerRef.current.onDidChange(() => projectChanged.fire()));
+	activateSidePanel(context, {
+		callService,
+		getGraph: () => provider.getGraph(),
+		onDidChangeGraph: provider.onDidChangeTreeData,
+		architectureName: () => provider.getGraph() ? currentArchitectureName : undefined,
+		projectName: () => projectControllerRef.current?.current?.displayName,
+		projectWorkspaceId: () => projectControllerRef.current?.current?.workspaceId,
+		onDidChangeProject: projectChanged.event,
+		openNodeSource: (graph, nodeId) => openNodeSource(graph.workspaceId, graph.architectureId, graph.sourceRevision, nodeId),
 	});
 }
