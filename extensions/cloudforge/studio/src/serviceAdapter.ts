@@ -35,6 +35,7 @@ import type {
 } from './webviewBridge.ts';
 
 export interface ProjectGraphOptions {
+	/** Only supply the previous model for a refresh of the same architecture (enforced by App). */
 	readonly previousArchitecture?: Architecture;
 	readonly viewState?: Partial<HostViewState>;
 }
@@ -475,7 +476,9 @@ export function projectGraphSnapshotToArchitecture(
 	// Assign the most specific compatible container first (e.g. Subnet > VNet > Resource Group),
 	// verifying cycle safety via `resourcePlacement`.
 	const baseArch: Architecture = {
-		name: snapshot.architectureName || 'CloudForge Architecture',
+		// Like edge appearance, a locally edited title survives service refreshes. A different
+		// architecture is projected without previousArchitecture and takes its service title.
+		name: options.previousArchitecture?.name ?? (snapshot.architectureName || 'CloudForge Architecture'),
 		variables: options.previousArchitecture?.variables ? structuredClone(options.previousArchitecture.variables) : [],
 		resources,
 		items: options.previousArchitecture?.items ? structuredClone(options.previousArchitecture.items) : [],

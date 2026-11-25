@@ -102,3 +102,36 @@ test('a refresh keeps user drawing links, edge styling, groups and layer order',
 	assert.equal(h.present.groups, undefined, 'a group left with one member is dropped');
 	assert.deepEqual(h.present.layerOrder, ['note-1', 'rg-2']);
 });
+
+test('a local architecture rename survives repeated refreshes and stays undoable alongside external additions', () => {
+	let h = createHistory(projectGraphSnapshotToArchitecture(snapshot([rg], 'a')).architecture);
+	h = historyReducer(h, { type: 'renameArchitecture', name: 'Platform network' });
+	h = refresh(h, snapshot([rg, vnet], 'b'));
+	assert.equal(h.present.name, 'Platform network');
+	assert.equal(h.past.length, 1);
+	h = refresh(h, snapshot([rg, vnet], 'c'));
+	assert.equal(h.present.name, 'Platform network');
+	assert.equal(h.past.length, 1, 'refresh does not create a second rename gesture');
+	h = historyReducer(h, { type: 'undo' });
+	assert.equal(h.present.name, 'Live');
+	assert.ok(h.present.resources.some(resource => resource.id === vnet.id), 'external resource survives rename Undo');
+	h = historyReducer(h, { type: 'redo' });
+	assert.equal(h.present.name, 'Platform network');
+});
+
+test('an undone rename remains in redo after refresh; a different architecture takes its own name', () => {
+	let h = createHistory(projectGraphSnapshotToArchitecture(snapshot([rg], 'a')).architecture);
+	h = historyReducer(h, { type: 'renameArchitecture', name: 'Platform network' });
+	h = historyReducer(h, { type: 'undo' });
+	h = refresh(h, snapshot([rg, vnet], 'b'));
+	assert.equal(h.present.name, 'Live');
+	assert.equal(h.future.length, 1);
+	h = historyReducer(h, { type: 'redo' });
+	assert.equal(h.present.name, 'Platform network');
+	// App passes previousArchitecture only for a refresh of the same architecture identity.
+	const other = projectGraphSnapshotToArchitecture({ ...snapshot([rg2], 'c'), architectureId: 'arch-2', architectureName: 'Second environment' }).architecture;
+	h = historyReducer(h, { type: 'replace', architecture: other });
+	assert.equal(h.present.name, 'Second environment');
+	assert.equal(h.past.length, 0);
+	assert.equal(h.future.length, 0);
+});

@@ -2,6 +2,12 @@
 
 ## Studio continuation — read first — 25 November 2026
 
+Latest continuation: `codex/studio-whiteboard-2`, in `C:/Users/dalep/.codex/worktrees/infrastructure-studio/CloudForge-Code`, based on Claude's PR #1 head `3875328c5ce4bc2d9528069a15404f671db204ad`. Integration owner: Codex. Completed five bounded passes: safe Appearance-based sizing for rotated drawings, contextual pen colour/weight presets, all four anchored selection resize corners, shared resize eligibility/bounds, and preservation of local architecture names through refresh/Undo/Redo. One architecture/history and Rust authorization boundaries remain intact. Scope: Studio plus this handoff; no main/Claude-branch push, PR merge, Rust/protocol or dependency-version changes.
+
+Start with [STUDIO-CONTINUATION-2026-11-25-WHITEBOARD-2.md](extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25-WHITEBOARD-2.md). It records the five commits, source ownership, fresh checks, screenshots, limitations and exact next actions. Fresh final verification: Studio TypeScript/build, **111/111** Node tests, **20/20** browser scenarios at 1360×860 and 1024×768 in both themes, and hosted refresh **20/20** on Windows Edge; zero console/page errors. This does not claim an installed Workbench/service or installer smoke. The earlier continuation/backlog is preserved unchanged. True point endpoints have a short plan in the new handoff and require Dale's separate go-ahead before implementation, as the resume request specifies.
+
+## Claude continuation — historical — 25 November 2026
+
 **15:00 update:** branch `claude/project-thread-dnlp5o` (PR #1) now also has equal-spacing guides, a drag handle to resize a multi-selection, and a freehand pen (`ink` drawings). **15:40:** rotation for drawings and a quick-create menu when a connector is dropped on empty canvas (99/99 tests). Details and file list: "Whiteboard pass" and "Rotation and connector-drop pass" in [STUDIO-CONTINUATION-2026-11-25.md](extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md). 91/91 tests.
 
 Resuming Codex: **do not continue on `codex/infrastructure-studio-preview`**. Its last commit, `f82e0c12`, is merged into `main`, and `main` has 52 later Studio/desktop commits. On 25 November the Codex worktree `C:/Users/dalep/.codex/worktrees/infrastructure-studio/CloudForge-Code` had no unpushed Studio changes. Every step in the "Exact resume action" list of [CONFIGURATOR-REFINEMENT-2026-11-25.md](extensions/cloudforge/studio/CONFIGURATOR-REFINEMENT-2026-11-25.md) was completed on `main`.

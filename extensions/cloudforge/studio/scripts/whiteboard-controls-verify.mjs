@@ -176,6 +176,38 @@ try {
 			console.log(`PASS resize eligibility ${viewport.width}×${viewport.height} ${theme} (0 browser errors)`);
 			checks++;
 			await page.close();
+
+			const hosted = await browser.newPage({ viewport });
+			hosted.setDefaultTimeout(10_000);
+			hosted.on('pageerror', error => errors.push(error.message));
+			hosted.on('console', message => { if (message.type() === 'error') { errors.push(message.text()); } });
+			await hosted.addInitScript(() => {
+				window.acquireVsCodeApi = () => ({ postMessage: () => {}, getState: () => undefined, setState: () => {} });
+			});
+			await hosted.goto(url);
+			const graph = (architectureId, architectureName, revision) => ({ workspaceId: 'whiteboard-check', architectureId, architectureName, sourceRevision: revision.repeat(64), status: 'complete', nodes: [{ id: 'group', kind: 'resource', resourceType: 'azurerm_resource_group', name: 'rg_main', label: 'rg_main', hasSource: true }], edges: [], diagnostics: [] });
+			const sendGraph = async snapshot => {
+				await hosted.evaluate(({ snapshot, theme }) => window.postMessage({ type: 'graph', graph: snapshot, viewState: { theme, inspectorOpen: false } }, '*'), { snapshot, theme });
+				await hosted.waitForTimeout(200);
+			};
+			await sendGraph(graph('architecture-a', 'Hosted platform', 'a'));
+			const name = hosted.getByLabel('Architecture name', { exact: true });
+			assert.equal(await name.inputValue(), 'Hosted platform');
+			await name.fill('Locally renamed platform');
+			await sendGraph(graph('architecture-a', 'Hosted platform', 'b'));
+			assert.equal(await name.inputValue(), 'Locally renamed platform', 'refresh preserves local name');
+			await hosted.screenshot({ path: path.join(output, `rename-${viewport.width}-${theme}.png`) });
+			await hosted.getByLabel('Undo', { exact: true }).click();
+			assert.equal(await name.inputValue(), 'Hosted platform');
+			await hosted.getByLabel('Redo', { exact: true }).click();
+			assert.equal(await name.inputValue(), 'Locally renamed platform');
+			await sendGraph(graph('architecture-b', 'Other architecture', 'c'));
+			assert.equal(await name.inputValue(), 'Other architecture', 'architecture switch takes the service name');
+			assert.equal(await hosted.getByLabel('Undo', { exact: true }).isEnabled(), false);
+			assert.deepEqual(errors, [], 'no browser errors');
+			console.log(`PASS hosted rename ${viewport.width}×${viewport.height} ${theme} (0 browser errors)`);
+			checks++;
+			await hosted.close();
 		}
 	}
 } finally {
