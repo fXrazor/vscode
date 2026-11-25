@@ -10,8 +10,8 @@
  *
  * Guarantees:
  * - Preserves opaque Rust node IDs 1:1 so selection, Open Source, and validation findings match.
- * - Infers valid infrastructure containment (`parentId`) from graph edges + `cloudlab-core` rules.
- * - Derives explicit typed `resourceRefs` from non-containment reference edges when supported.
+ * - Suggests visual grouping from graph edges without claiming provider ownership.
+ * - Preserves field bindings created in Studio; summary graph edges do not identify field paths.
  * - Preserves user-positioned node coordinates across live `sourceRevision` refreshes.
  * - Never copies architecture data into a second store or fabricates unverified validation claims.
  */
@@ -21,8 +21,7 @@ import type { Architecture, DesignConnection, Position, Provider, Resource, Reso
 import { elementEndpoint, endpointExists, endpointKey } from './connectionEndpoints.ts';
 import type { Diagnostic } from './diagnostics.ts';
 import { providerRegions, resourceDefinition, resourceTypes } from './fixture.ts';
-import { bindingKey, type ResourceRefBinding } from './fieldBindings.ts';
-import { fitResourceContainers, isResourceContainer, resourceAddress, resourcePlacement, visualResourcePlacement } from './resourceHierarchy.ts';
+import { fitResourceContainers, isResourceContainer, resourceAddress, resourcePlacement, visualParentId, visualResourcePlacement } from './resourceHierarchy.ts';
 import { projectResourceFiles, resourceSourceFile, terraformCode } from './terraformProjection.ts';
 import type {
 	HostCloudRegionsPayload,
@@ -217,94 +216,12 @@ function canDirectlyContain(parent: Resource, child: Resource): boolean {
 	return childDef.parents.includes(parentType);
 }
 
-function tryWireExplicitReference(consumer: Resource, provider: Resource): boolean {
-	if (consumer.id === provider.id || consumer.provider !== provider.provider || consumer.kind === 'module' || provider.kind === 'module') {
-		return false;
-	}
-	const consumerType = resourceDefinition(consumer).type;
-	const providerType = resourceDefinition(provider).type;
-	const consumerDef = getDef(consumerType);
-	if (!consumerDef) {
-		return false;
-	}
-	const providerDef = getDef(providerType);
-	const exported = providerDef?.exported ?? ['id'];
-
-	// 1. Check top-level attributes with matching refTypes (e.g., VM.network_interface_ids -> azurerm_network_interface.id).
-	for (const attr of consumerDef.attributes) {
-		if (attr.type === 'block' || !attr.refTypes?.includes(providerType)) {
-			continue;
-		}
-		const targetAttr = attr.refAttr ?? 'id';
-		if (!exported.includes(targetAttr)) {
-			continue;
-		}
-		const key = bindingKey({ kind: 'setting', name: attr.name });
-		const existing = consumer.resourceRefs?.[key]?.refs ?? [];
-		if (existing.some(entry => entry.resourceId === provider.id && entry.attribute === targetAttr)) {
-			return true;
-		}
-		const nextRefs = attr.type === 'list'
-			? [...existing, { resourceId: provider.id, attribute: targetAttr }]
-			: [{ resourceId: provider.id, attribute: targetAttr }];
-		consumer.resourceRefs = { ...(consumer.resourceRefs ?? {}), [key]: { refs: nextRefs } as ResourceRefBinding };
-		consumer.settings[attr.name] ??= attr.type === 'list' ? '[]' : '';
-		return true;
-	}
-
-	// 2. Check one-level nested block attributes (e.g., NIC.ip_configuration.subnet_id -> azurerm_subnet.id).
-	for (const blockAttr of consumerDef.attributes) {
-		if (blockAttr.type !== 'block' || !blockAttr.children?.length) {
-			continue;
-		}
-		const matchingChild = blockAttr.children.find(child => child.type !== 'block' && child.refTypes?.includes(providerType));
-		if (!matchingChild) {
-			continue;
-		}
-		const targetAttr = matchingChild.refAttr ?? 'id';
-		if (!exported.includes(targetAttr)) {
-			continue;
-		}
-		// Skip if this exact block field is already inherited from an ancestor container.
-		if (consumerDef.inherit.some(rule => rule.attr === `${blockAttr.name}.${matchingChild.name}` && rule.fromType === providerType)) {
-			// If provider is NOT already an ancestor, still bind explicitly.
-			if (consumer.parentId === provider.id) {
-				return false;
-			}
-		}
-		let block: ResourceBlock | undefined = consumer.blocks.find(item => item.type === blockAttr.name);
-		if (!block) {
-			const defaults: Record<string, string> = {};
-			for (const child of blockAttr.children) {
-				if (child.type !== 'block' && child.default !== undefined) {
-					defaults[child.name] = typeof child.default === 'string' ? child.default : JSON.stringify(child.default);
-				}
-			}
-			block = { id: `${consumer.id}:${blockAttr.name}:0`, type: blockAttr.name, values: defaults, blocks: [] };
-			consumer.blocks.push(block);
-		}
-		const key = bindingKey({ kind: 'block', blockId: block.id, name: matchingChild.name });
-		const existing = consumer.resourceRefs?.[key]?.refs ?? [];
-		if (existing.some(entry => entry.resourceId === provider.id && entry.attribute === targetAttr)) {
-			return true;
-		}
-		const nextRefs = matchingChild.type === 'list'
-			? [...existing, { resourceId: provider.id, attribute: targetAttr }]
-			: [{ resourceId: provider.id, attribute: targetAttr }];
-		consumer.resourceRefs = { ...(consumer.resourceRefs ?? {}), [key]: { refs: nextRefs } as ResourceRefBinding };
-		block.values[matchingChild.name] ??= '';
-		return true;
-	}
-
-	return false;
-}
-
 function layoutNewResources(resources: Resource[], preservedIds: ReadonlySet<string>): void {
 	const childrenByParent = new Map<string | undefined, Resource[]>();
 	for (const resource of resources) {
-		const list = childrenByParent.get(resource.parentId) ?? [];
+		const list = childrenByParent.get(visualParentId(resource)) ?? [];
 		list.push(resource);
-		childrenByParent.set(resource.parentId, list);
+		childrenByParent.set(visualParentId(resource), list);
 	}
 
 	const LEAF_W = 256;
@@ -464,6 +381,7 @@ export function projectGraphSnapshotToArchitecture(
 	};
 
 	for (const edge of snapshot.edges) {
+		if (edge.kind !== 'reference') { continue; }
 		const a = byId.get(edge.fromId);
 		const b = byId.get(edge.toId);
 		if (!a || !b || a.id === b.id) {
@@ -497,17 +415,19 @@ export function projectGraphSnapshotToArchitecture(
 			resource.parentId = previousParent;
 			continue;
 		}
+		// A summary edge carries no source field. It may suggest diagram nesting, but cannot
+		// establish inherited Terraform fields or ownership (e.g. a location-only RG reference).
+		if (resource.visualParentId !== undefined) { continue; }
 		const candidates = (candidateParents.get(resource.id) ?? []).slice().sort((a, b) => containerSpecificity(b) - containerSpecificity(a));
 		for (const candidate of candidates) {
-			const placement = resourcePlacement(baseArch, resource, candidate.id);
-			if (placement.ok && placement.parentId === candidate.id) {
-				resource.parentId = candidate.id;
+			if (visualResourcePlacement(baseArch, resource, candidate.id).ok) {
+				resource.visualParentId = candidate.id;
 				break;
 			}
 		}
 	}
 
-	// Derive explicit typed `resourceRefs` for non-containment edges, and preserve remaining edges as design connections.
+	// Preserve typed local field bindings and retain source-summary edges with their original kind.
 	for (const resource of resources) {
 		if (resource.visualParentId && (!byId.has(resource.visualParentId) || !visualResourcePlacement(baseArch, resource, resource.visualParentId).ok)) { delete resource.visualParentId; }
 	}
@@ -519,16 +439,8 @@ export function projectGraphSnapshotToArchitecture(
 		if (!from || !to || from.id === to.id) {
 			continue;
 		}
-		// Skip edges that are already represented as direct containment (child -> parent or parent -> child).
-		if (from.parentId === to.id || to.parentId === from.id) {
-			continue;
-		}
-		// Try wiring an explicit typed resource reference (e.g., VM -> NIC).
-		const wiredFromTo = tryWireExplicitReference(from, to);
-		const wiredToFrom = !wiredFromTo && tryWireExplicitReference(to, from);
-		if (wiredFromTo || wiredToFrom) {
-			continue;
-		}
+		// Keep opaque reference/depends_on edges intact. Without a source field path, a
+		// compatible resource pair is insufficient evidence for a typed attachment binding.
 		const edgeId = `${from.id}->${to.id}`;
 		if (!seenConnections.has(edgeId)) {
 			seenConnections.add(edgeId);
@@ -538,6 +450,7 @@ export function projectGraphSnapshotToArchitecture(
 				...(edge.kind && edge.kind !== 'reference' ? { label: edge.kind } : {}),
 				...(styled ? structuredClone(styled) : {}),
 				id: edgeId,
+				origin: { kind: 'service', edgeKind: edge.kind },
 				source: elementEndpoint(from.id),
 				target: elementEndpoint(to.id),
 			});

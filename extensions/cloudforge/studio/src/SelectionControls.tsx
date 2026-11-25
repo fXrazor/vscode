@@ -43,9 +43,9 @@ export function resizable(architecture: Architecture, ids: string[], mode: Desig
 	return items.length + icons.length;
 }
 
-export function CanvasActionMenu({ children, architecture, ids, hasClipboard, run, container }: { children: ReactNode; architecture: Architecture; ids: string[]; hasClipboard: boolean; run: (action: SelectionAction) => void; container: HTMLElement | null }) {
+export function CanvasActionMenu({ children, architecture, ids, hasClipboard, run, container, readOnly = false }: { children: ReactNode; architecture: Architecture; ids: string[]; hasClipboard: boolean; run: (action: SelectionAction) => void; container: HTMLElement | null; readOnly?: boolean }) {
 	return <ContextMenu.Root><ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger><ContextMenu.Portal container={container}><ContextMenu.Content className="canvas-context-menu" aria-label="Canvas actions" collisionPadding={8} onCloseAutoFocus={event => { event.preventDefault(); container?.focus(); }}>
-		{selectionActions(architecture, ids, hasClipboard).map(action => <ContextMenu.Item key={action.id} disabled={!action.enabled} className="canvas-context-item" onSelect={() => run(action.id)}>{action.label}<span>{action.shortcut}</span></ContextMenu.Item>)}
+		{selectionActions(architecture, ids, hasClipboard).filter(action => !readOnly || ['edit', 'fit', 'selectAll'].includes(action.id)).map(action => <ContextMenu.Item key={action.id} disabled={!action.enabled} className="canvas-context-item" onSelect={() => run(action.id)}>{readOnly && action.id === 'edit' ? 'Inspect resource' : action.label}<span>{action.shortcut}</span></ContextMenu.Item>)}
 	</ContextMenu.Content></ContextMenu.Portal></ContextMenu.Root>;
 }
 

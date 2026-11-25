@@ -71,6 +71,8 @@ export interface Architecture {
 
 export interface DesignConnection {
 	id: string; source: DesignEndpoint; target: DesignEndpoint;
+	/** Preserve source graph provenance separately from editable labels and appearance. */
+	origin?: { kind: 'service'; edgeKind: string };
 	label?: string;
 	labelFontSize?: number;
 	labelColor?: string;
@@ -231,14 +233,14 @@ function editArchitecture(architecture: Architecture, action: Edit): Architectur
 		}
 		case 'reverseConnection': {
 			const connection = architecture.connections.find(item => item.id === action.id);
-			if (!connection || !canConnectEndpoints(architecture, connection.target, connection.source, connection.id)) { return architecture; }
+			if (!connection || connection.origin || connection.id.includes('->') || !canConnectEndpoints(architecture, connection.target, connection.source, connection.id)) { return architecture; }
 			return { ...architecture, connections: architecture.connections.map(item => item.id === action.id ? { ...item, source: item.target, target: item.source } : item) };
 		}
 		case 'updateConnection': {
 			const connection = architecture.connections.find(connection => connection.id === action.id);
 			if (!connection) { return architecture; }
 			const patch = action.patch;
-			if ('source' in patch || 'target' in patch || 'id' in patch) { return architecture; }
+			if ('source' in patch || 'target' in patch || 'id' in patch || 'origin' in patch) { return architecture; }
 			if (patch.width !== undefined && (!Number.isFinite(patch.width) || patch.width < 1 || patch.width > 8)
 				|| patch.stroke !== undefined && !/^#[0-9a-f]{6}$/i.test(patch.stroke)
 				|| patch.routing !== undefined && !['straight', 'elbow', 'curve'].includes(patch.routing)
@@ -251,7 +253,7 @@ function editArchitecture(architecture: Architecture, action: Edit): Architectur
 			return { ...architecture, connections: architecture.connections.map(item => item.id === action.id ? { ...item, ...patch } : item) };
 		}
 		case 'deleteConnection':
-			return architecture.connections.some(connection => connection.id === action.id) ? { ...architecture, connections: architecture.connections.filter(connection => connection.id !== action.id) } : architecture;
+			return architecture.connections.some(connection => connection.id === action.id && !connection.origin && !connection.id.includes('->')) ? { ...architecture, connections: architecture.connections.filter(connection => connection.id !== action.id) } : architecture;
 		case 'connectEndpoints': {
 			if (!action.id || action.id.includes('->') || architecture.connections.some(link => link.id === action.id) || !canConnectEndpoints(architecture, action.source, action.target)) { return architecture; }
 			return { ...architecture, connections: [...architecture.connections, { id: action.id, source: action.source, target: action.target }] };

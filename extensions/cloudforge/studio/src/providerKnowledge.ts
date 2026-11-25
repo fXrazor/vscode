@@ -20,7 +20,7 @@ const rule = (field: string, targets: string, category: RelationshipCategory, me
 function profile(resourceType: string, layer: InfrastructureLayer, parents: string, cost: string, blast: string, rules: RelationshipRule[], troubleshooting: string[], runtime = '', security = '', monitoring = ''): ResourceIntelligence {
 	const platform = resourceType.startsWith('azurerm_') ? 'azure' : resourceType.startsWith('aws_') ? 'aws' : resourceType.startsWith('google_') ? 'gcp' : 'kubernetes';
 	return { resourceType, platform, reviewStatus: 'documented', fieldSyntax: platform === 'kubernetes' ? 'kubernetes-manifest' : 'terraform', sourceKey: platform + ':' + resourceType.replace(/^(azurerm|aws|google)_/, ''), layer,
-		parentTypes: parents ? parents.split(' ') : [], childTypes: [], attachmentTypes: [...new Set(rules.filter(rule => rule.category === 'attachment').flatMap(rule => rule.targets))],
+		parentTypes: [...new Set([...(parents ? parents.split(' ') : []), ...rules.filter(rule => rule.category === 'ownership').flatMap(rule => rule.targets).filter(type => type !== '*')])], childTypes: [], attachmentTypes: [...new Set(rules.filter(rule => rule.category === 'attachment').flatMap(rule => rule.targets))],
 		commonDependencies: [...new Set(rules.flatMap(rule => rule.targets))], commonRuntimeLinks: runtime ? [runtime] : [], securityRelationships: security ? [security] : [], monitoringRelationships: monitoring ? [monitoring] : [],
 		costCategory: cost, blastRadiusCategory: blast, rules, troubleshooting };
 }

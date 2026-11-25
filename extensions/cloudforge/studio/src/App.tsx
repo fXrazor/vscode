@@ -50,6 +50,7 @@ export function Studio() {
 	const hostBridge = useMemo(() => createHostBridge(), []);
 	const [history, dispatch] = useReducer(historyReducer, undefined, () => createHistory(sampleArchitecture()));
 	const [mode, setMode] = useState<DesignMode>('visual');
+	const modeRef = useRef(mode); modeRef.current = mode;
 	const [theme, setTheme] = useState<'light' | 'dark'>(() => detectInitialTheme(hostBridge.isHosted));
 	const [selectedIds, setSelectedIds] = useState<string[]>([]);
 	const selectedId = selectedIds.length === 1 ? selectedIds[0] : '';
@@ -464,6 +465,7 @@ export function Studio() {
 		function handleKey(event: KeyboardEvent) {
 			if (event.defaultPrevented) { return; }
 			const target = event.target;
+			if (target instanceof HTMLElement && target.closest('main.canvas[data-read-only="true"]')) { return; }
 			if (target instanceof HTMLElement && (target.matches('input, textarea, select') || target.isContentEditable)) { return; }
 			if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
 				event.preventDefault();
@@ -479,11 +481,12 @@ export function Studio() {
 		// The renderer records its viewport on move end. A departing renderer's instance
 		// may still be mounted here, so never copy it into the next renderer's slot.
 		setMode(next);
-		setMessage(next === 'visual' ? 'Visual Design · shared draft preserved' : 'Technical Design · shared draft preserved');
+		setMessage(next === 'visual' ? 'Architecture view · shared draft preserved' : 'Configuration view · shared draft preserved');
 	}
 
 	const resourceCount = architecture.resources.length;
 	const addResource = useCallback((kind: ResourceKind, provider: Provider, position?: Position, parentId?:string) => {
+		if (modeRef.current !== 'visual') { setMessage('Switch to Architecture to add resources.'); return; }
 		const id = crypto.randomUUID();
 		const definition = resourceDefinition({ kind, provider });
 		const placed = position ?? {
@@ -505,6 +508,7 @@ export function Studio() {
 	}, [resourceCount,architecture]);
 
  const addCatalogueResource = useCallback((entry: CatalogueEntry, provider: Provider, position?: Position, parentId?:string) => {
+  if (modeRef.current !== 'visual') { setMessage('Switch to Architecture to add resources.'); return; }
   const id = crypto.randomUUID();
   const bounds = document.querySelector('.canvas')?.getBoundingClientRect();
   const placed = position ?? (flow && bounds ? flow.screenToFlowPosition({ x: bounds.x+bounds.width/2, y:bounds.y+bounds.height/2 }) : { x:100,y:100 });
@@ -515,6 +519,7 @@ export function Studio() {
  },[flow,architecture]);
 
  function addTemplate(kind:'network'|'platform'|'workflow') {
+  if (modeRef.current !== 'visual') { setMessage('Switch to Architecture to add a template.'); return; }
   if(kind==='workflow'){
    const rect=document.querySelector('.canvas')?.getBoundingClientRect();
    const centre=flow&&rect?flow.screenToFlowPosition({x:rect.x+rect.width/2,y:rect.y+rect.height/2}):{x:200,y:200};
@@ -533,6 +538,7 @@ export function Studio() {
  }
 
 	const addItem = useCallback((kind: BoardItem['kind'], position: Position, caption?:string, shape?: ShapeId) => {
+		if (modeRef.current !== 'visual') { setMessage('Switch to Architecture to add a drawing.'); return; }
 		const id = crypto.randomUUID();
 		const text = { frame: 'New section', note: 'Add an architecture note', text: 'Architecture annotation', shape: 'Label', ink: '' }[kind];
 		dispatch({ type: 'addItem', item: {

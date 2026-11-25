@@ -70,6 +70,8 @@ export function selectionFragment(architecture: Architecture, ids: string[], con
 	for (const frame of architecture.items.filter(item => item.kind === 'frame' && selected.has(item.id))) { frame.members.forEach(id => selected.add(id)); }
 	for (const resource of architecture.resources.filter(item=>selected.has(item.id))) { visualDescendants(architecture,resource.id).forEach(item=>selected.add(item.id)); }
 	const connections = architecture.connections.flatMap(link => {
+		// Copy source-derived relationships only through copied field bindings, never as invented service evidence.
+		if (link.origin?.kind === 'service' || link.id.includes('->')) { return []; }
 		const endpoints = connectionElementIds(link);
 		if (endpoints.length && endpoints.every(id => selected.has(id))) { return [link]; }
 		if (!connectionIds.includes(link.id)) { return []; }
