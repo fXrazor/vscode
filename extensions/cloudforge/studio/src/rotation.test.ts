@@ -4,7 +4,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { dragRotation, pointerAngle, rotatedCorners, snapRotation } from './rotation.ts';
+import { dragRotation, drawingResizeVisible, pointerAngle, rotatedCorners, snapRotation } from './rotation.ts';
 import { applyCanvasCommand, normaliseRotation } from './canvasOperations.ts';
 import { createHistory, historyReducer, type Architecture, type BoardItem } from './model.ts';
 import { presentationSvg } from './exportPresentation.ts';
@@ -50,4 +50,26 @@ test('a rotation is one undo step and exports with a centred rotate transform', 
 test('rotated corners keep the centre', () => {
 	const corners = rotatedCorners(0, 0, 100, 50, 90);
 	assert.deepEqual(corners.map(point => ({ x: Math.round(point.x), y: Math.round(point.y) })), [{ x: 75, y: -25 }, { x: 75, y: 75 }, { x: 25, y: 75 }, { x: 25, y: -25 }]);
+});
+
+test('canvas resize controls disappear during rotation and return only for an unlocked upright selection', () => {
+	for (const kind of ['note', 'text', 'shape', 'ink'] as const) {
+		const drawing = item(kind, kind);
+		assert.equal(drawingResizeVisible(drawing, true), true);
+		assert.equal(drawingResizeVisible(drawing, true, 360), true);
+		for (const angle of [15, 90, 180, 345, NaN]) { assert.equal(drawingResizeVisible(drawing, true, angle), false); }
+		assert.equal(drawingResizeVisible({ ...drawing, rotation: 45 }, true), false);
+		assert.equal(drawingResizeVisible({ ...drawing, canvasLocked: true }, true), false);
+		assert.equal(drawingResizeVisible(drawing, false), false);
+	}
+});
+
+test('Appearance dimensions resize rotated ink without changing its path, turn or shared position and undo once', () => {
+	const drawing = item('ink', 'ink', { width: 160, height: 80, rotation: 45, path: 'M0 0L100 100' });
+	let h = createHistory(board([drawing]));
+	h = historyReducer(h, { type: 'updateItem', id: 'ink', patch: { width: 240 } });
+	assert.equal(h.past.length, 1);
+	assert.deepEqual(h.present.items[0], { ...drawing, width: 240 });
+	h = historyReducer(h, { type: 'undo' });
+	assert.deepEqual(h.present.items[0], drawing);
 });

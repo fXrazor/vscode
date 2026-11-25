@@ -12,13 +12,24 @@ import { inkDefaults } from './ink.ts';
 export function ElementAppearance({ item, ids, dispatch }: { item: BoardItem; ids: string[]; dispatch: Dispatch<Action> }) {
 	const style = (patch: Partial<TextAppearance>) => dispatch({ type:'canvas',command:{kind:'style',ids,patch} });
 	const single = ids.length === 1;
+	const dimensions = single && (['width', 'height'] as const).map(dimension => {
+		const minimum = item.kind === 'ink' ? 16 : dimension === 'width' ? 140 : 80;
+		return <label key={dimension}>{dimension === 'width' ? 'Width' : 'Height'}<input aria-label={'Element ' + dimension} type="number" min={minimum} max={4000} value={Math.round(item[dimension])} onChange={event => {
+			const value = Number(event.target.value);
+			if (Number.isFinite(value) && value >= minimum && value <= 4000) { dispatch({ type: 'updateItem', id: item.id, patch: { [dimension]: value } }); }
+		}}/></label>;
+	});
+	const rotation = item.kind !== 'frame' && <label>Rotation<input aria-label="Element rotation in degrees" type="number" min={-360} max={360} step={15} value={Math.round(item.rotation ?? 0)} onChange={event => {
+		const value = Number(event.target.value);
+		if (Number.isFinite(value)) { dispatch({ type: 'canvas', command: { kind: 'rotate', ids, angle: value } }); }
+	}}/></label>;
+	const resizeHelp = single && !!item.rotation && <p className="appearance-wide field-help">Use Width and Height to resize this rotated drawing, or set Rotation to 0° to use canvas handles.</p>;
 	if (item.kind === 'ink') {
 		return <div className="element-appearance-grid">
 			<label>Pen colour<input aria-label="Pen colour" type="color" value={item.strokeColor ?? inkDefaults.strokeColor} onChange={event=>style({strokeColor:event.target.value})}/></label>
 			<label>Pen weight<select aria-label="Pen weight" value={item.strokeWidth ?? inkDefaults.strokeWidth} onChange={event=>style({strokeWidth:Number(event.target.value)})}>{[1,2,3,4,6,8].map(width=><option key={width}>{width}</option>)}</select></label>
 			<label>Line style<select aria-label="Pen line style" value={item.strokeStyle??'solid'} onChange={event=>style({strokeStyle:event.target.value as BoardItem['strokeStyle']})}><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select></label>
-			<label>Rotation<input aria-label="Element rotation in degrees" type="number" min={-360} max={360} step={15} value={Math.round(item.rotation ?? 0)} onChange={event=>{const value=Number(event.target.value);if(Number.isFinite(value)){dispatch({type:'canvas',command:{kind:'rotate',ids,angle:value}});}}}/></label>
-			<label>Rotation<input aria-label="Element rotation in degrees" type="number" min={-360} max={360} step={15} value={Math.round(item.rotation ?? 0)} onChange={event=>{const value=Number(event.target.value);if(Number.isFinite(value)){dispatch({type:'canvas',command:{kind:'rotate',ids,angle:value}});}}}/></label>
+			{rotation}{dimensions}{resizeHelp}
 		<label>Opacity<select aria-label="Element opacity" value={item.opacity??1} onChange={event=>style({opacity:Number(event.target.value)})}>{[1,.75,.5,.25].map(value=><option key={value} value={value}>{value*100}%</option>)}</select></label>
 			{!single && <p className="appearance-wide field-help">Applies to all selected drawings. Controls show the first drawing’s values.</p>}
 		</div>;
@@ -36,7 +47,7 @@ export function ElementAppearance({ item, ids, dispatch }: { item: BoardItem; id
 		<label>Fill<input aria-label="Element fill colour" type="color" value={item.fill&&item.fill!=='transparent'?item.fill:item.kind==='note'?'#fff0b5':'#eef2ff'} onChange={event=>style({fill:event.target.value})}/></label>
 		<button aria-label="Transparent element fill" aria-pressed={item.fill==='transparent'} onClick={()=>style({fill:item.fill==='transparent'?'#eef2ff':'transparent'})}>No fill</button>
 		{item.kind!=='text' && <><label>Border colour<input aria-label="Shape border colour" type="color" value={item.strokeColor??'#7565bd'} onChange={event=>style({strokeColor:event.target.value})}/></label><label>Border weight<select aria-label="Shape border weight" value={item.strokeWidth??1.5} onChange={event=>style({strokeWidth:Number(event.target.value)})}>{[1,1.5,2,3,4,6].map(width=><option key={width}>{width}</option>)}</select></label><label>Border style<select aria-label="Shape border style" value={item.strokeStyle??'solid'} onChange={event=>style({strokeStyle:event.target.value as BoardItem['strokeStyle']})}><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select></label></>}
-		{single && (['width','height'] as const).map(dimension=><label key={dimension}>{dimension==='width'?'Width':'Height'}<input aria-label={'Element '+dimension} type="number" min={dimension==='width'?140:80} max={4000} value={Math.round(item[dimension])} onChange={event=>{const value=Number(event.target.value);if(value>=(dimension==='width'?140:80)&&value<=4000){dispatch({type:'updateItem',id:item.id,patch:{[dimension]:value}});}}}/></label>)}
+		{rotation}{dimensions}{resizeHelp}
 		{!single && <p className="appearance-wide field-help">Applies to all selected drawings. Controls show the first drawing’s values.</p>}
 	</div>;
 }
