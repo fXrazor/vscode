@@ -2,27 +2,28 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
+
 import { execFile } from 'node:child_process';
 import { access } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { run } from '../esbuild-webview-common.mts';
 
 const execFileAsync = promisify(execFile);
 const extDir = import.meta.dirname;
-const srcDir = path.join(extDir, 'canvas-src');
-const outDir = path.join(extDir, 'media');
 const studioDir = path.join(extDir, 'studio');
 
-async function stageStudioMedia(resolvedMediaOutDir: string): Promise<void> {
+const outputRootIndex = process.argv.indexOf('--outputRoot');
+const outputRoot = outputRootIndex >= 0 ? process.argv[outputRootIndex + 1] : undefined;
+const mediaOutDir = outputRoot ? path.join(outputRoot, 'media') : path.join(extDir, 'media');
+const studioTargetDir = path.join(mediaOutDir, 'studio');
+
+async function buildStudioMedia(): Promise<void> {
 	const studioNodeModules = path.join(studioDir, 'node_modules');
 	try {
 		await access(studioNodeModules);
 	} catch {
-		console.log('[cloudforge] Skipping Studio Webview media staging (extensions/cloudforge/studio/node_modules not installed).');
-		return;
+		throw new Error('CloudForge Studio dependencies are missing. Run `corepack pnpm install --frozen-lockfile` in extensions/cloudforge/studio.');
 	}
-	const studioTargetDir = path.join(resolvedMediaOutDir, 'studio');
 	await execFileAsync(
 		process.execPath,
 		[path.join(studioDir, 'build.ts'), '--stage-media', '--outdir', studioTargetDir],
@@ -30,11 +31,7 @@ async function stageStudioMedia(resolvedMediaOutDir: string): Promise<void> {
 	);
 }
 
-run({
-	entryPoints: {
-		'canvas': path.join(srcDir, 'index.ts'),
-		'canvas-style': path.join(srcDir, 'canvas.css'),
-	},
-	srcDir,
-	outdir: outDir,
-}, process.argv, stageStudioMedia);
+buildStudioMedia().catch(error => {
+	console.error(error);
+	process.exitCode = 1;
+});

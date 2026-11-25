@@ -58,6 +58,7 @@ export function Studio() {
 	const [overview, setOverview] = useState(true);
 	const [moduleImportOpen, setModuleImportOpen] = useState(false);
 	const [libraryOpen, setLibraryOpen] = useState(true);
+	const [libraryTab, setLibraryTab] = useState<'resources' | 'templates'>('resources');
  const [shapesOpen, setShapesOpen] = useState(false);
  function openShapes() { setDetailTab('form'); setOverview(true); setLibraryOpen(true); setShapesOpen(true); }
 	const [inspectorOpen, setInspectorOpen] = useState(false);
@@ -231,6 +232,31 @@ export function Studio() {
 					} else {
 						setSaveError(incoming.result.error);
 					}
+					break;
+				case 'runValidation':
+					setInspectorOpen(true);
+					setDetailTab('issues');
+					if (!incoming.localOnly && hostArchitectureIdRef.current) {
+						setValidating(true);
+						hostBridge.post({ type: 'requestValidation', scope: incoming.scope, ...(incoming.nodeId ? { nodeId: incoming.nodeId } : {}) });
+					}
+					break;
+				case 'cancelValidation':
+					setValidating(false);
+					setMessage('Validation cancelled');
+					break;
+				case 'openExport': {
+					const exportMenu = document.querySelector<HTMLDetailsElement>('.shell-export');
+					if (exportMenu) {
+						exportMenu.open = true;
+						exportMenu.querySelector('summary')?.focus();
+					}
+					break;
+				}
+				case 'openTemplates':
+					setShapesOpen(false);
+					setLibraryOpen(true);
+					setLibraryTab('templates');
 					break;
 				case 'exportResult':
 					setMessage(incoming.message);
@@ -542,6 +568,7 @@ export function Studio() {
 			<div className="studio-body">
 				<ResourceCatalogue architecture={architecture} onAdd={addResource} onAddCatalogue={addCatalogueResource} onTemplate={addTemplate} search={search} onSearch={setSearch} onImportModule={() => setModuleImportOpen(true)}
 					shapesOpen={shapesOpen} onShapesOpen={openShapes} onShapesBack={() => setShapesOpen(false)}
+					tab={libraryTab} onTabChange={setLibraryTab}
      visible={libraryOpen} onClose={() => setLibraryOpen(false)}
 					onDesignAdd={(kind,caption,shape) => {
 						const position = flow?.screenToFlowPosition({ x: innerWidth / 2, y: innerHeight / 2 });

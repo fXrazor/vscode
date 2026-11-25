@@ -19,24 +19,6 @@
 		"virtualWorkspaces": true
 	},
 	"contributes": {
-		"configuration": {
-			"title": "%displayName%",
-			"properties": {
-				"cloudforge.canvasEngine": {
-					"type": "string",
-					"enum": [
-						"classic",
-						"studio"
-					],
-					"enumDescriptions": [
-						"%config.canvasEngine.classic%",
-						"%config.canvasEngine.studio%"
-					],
-					"default": "classic",
-					"markdownDescription": "%config.canvasEngine%"
-				}
-			}
-		},
 		"commands": [
 			{
 				"command": "cloudforge.showProofStatus",
@@ -110,12 +92,6 @@
 				"title": "%command.openCanvas%",
 				"category": "%displayName%",
 				"icon": "$(type-hierarchy)"
-			},
-			{
-				"command": "cloudforge.openStudioCanvas",
-				"title": "%command.openStudioCanvas%",
-				"category": "%displayName%",
-				"icon": "$(layout)"
 			},
 			{
 				"command": "cloudforge.validateArchitecture",
@@ -238,11 +214,6 @@
 					"command": "cloudforge.validateArchitecture",
 					"when": "view == cloudforge.resources",
 					"group": "navigation@2"
-				},
-				{
-					"command": "cloudforge.openStudioCanvas",
-					"when": "view == cloudforge.resources",
-					"group": "secondary@1"
 				}
 			],
 			"view/item/context": [

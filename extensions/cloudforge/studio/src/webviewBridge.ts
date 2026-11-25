@@ -276,6 +276,10 @@ export type HostInboundMessage =
 	| { readonly type: 'moduleInspection'; readonly modulePath: readonly string[]; readonly inspection: HostModuleInspection | null; readonly error?: string }
 	| { readonly type: 'detectedEngines'; readonly engines: readonly HostDetectedEngine[] }
 	| { readonly type: 'engineValidateReport'; readonly report: HostEngineValidateReport | null; readonly error?: string }
+	| { readonly type: 'runValidation'; readonly scope: 'architecture' | 'resource'; readonly nodeId?: string; readonly localOnly?: boolean }
+	| { readonly type: 'cancelValidation' }
+	| { readonly type: 'openExport' }
+	| { readonly type: 'openTemplates' }
 	| { readonly type: 'exportResult'; readonly ok: boolean; readonly message: string };
 
 export type HostOutboundMessage =

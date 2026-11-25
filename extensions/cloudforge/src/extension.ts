@@ -1001,10 +1001,6 @@ export function activate(context: ExtensionContext): void {
 		const graph = provider.getGraph();
 		canvas.show(graph ? toCanvasSnapshot(graph, currentArchitectureName) : undefined, false);
 	}));
-	context.subscriptions.push(commands.registerCommand('cloudforge.openStudioCanvas', () => {
-		const graph = provider.getGraph();
-		canvas.show(graph ? toCanvasSnapshot(graph, currentArchitectureName) : undefined, false, 'studio');
-	}));
 	context.subscriptions.push(commands.registerCommand('cloudforge.validateArchitecture', () => {
 		const graph = provider.getGraph();
 		if (!graph) {
