@@ -80,9 +80,7 @@ export function rebaseSnapshot(snapshot: Architecture, base: Architecture, incom
 	const merged: Architecture = {
 		...snapshot,
 		name: mergeValue(snapshot.name, base.name, incoming.name),
-		resources: resources.map(resource => resource.parentId && !resourceIds.has(resource.parentId)
-			? { ...resource, parentId: undefined }
-			: resource),
+		resources: resources.map(resource => (resource.parentId && !resourceIds.has(resource.parentId) || resource.visualParentId && !resourceIds.has(resource.visualParentId)) ? { ...resource, parentId: resource.parentId && resourceIds.has(resource.parentId) ? resource.parentId : undefined, visualParentId: resource.visualParentId && !resourceIds.has(resource.visualParentId) ? undefined : resource.visualParentId } : resource),
 		items,
 		connections: mergeKeyed(snapshot.connections, base.connections, incoming.connections)
 			.filter(connection => endpointExists(connection.source, endpointIds) && endpointExists(connection.target, endpointIds)),

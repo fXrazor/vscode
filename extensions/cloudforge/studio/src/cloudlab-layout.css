@@ -118,6 +118,7 @@
 .studio .lab-category:not([open]) > summary > svg:last-child { transform: rotate(-90deg); }
 .studio .resource-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(66px, 1fr)); gap: 6px; padding: 0 0 12px; }
 .studio .resource-tile { position: relative; min-width: 0; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--panel); }
+.studio .resource-tile:hover, .studio .resource-tile:focus-within, .studio .resource-tile:has([aria-pressed="true"]) { border-color: color-mix(in srgb, var(--accent) 45%, var(--panel-solid)); }
 .studio .tile-pick { width: 100%; height: 78px; padding: 9px 4px 7px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: transparent; border: 0; border-radius: inherit; cursor: grab; }
 .studio .tile-pick:hover { background: var(--accent-soft); }
 .studio .tile-pick img { width: 29px; height: 29px; flex: none; }

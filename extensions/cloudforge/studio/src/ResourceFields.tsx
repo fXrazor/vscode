@@ -4,15 +4,16 @@
  *--------------------------------------------------------------------------------------------*/
 import type { Dispatch } from 'react';
 import type { Action, Architecture, Resource, ResourceBlock } from './model.ts';
-import { providerRegions, resourceTypes, resourceDefinition } from './fixture.ts';
-import type { ResourceKind } from './model.ts';
+import { resourceDefinition } from './fixture.ts';
+import { ResourceIconPicker } from './ResourceIconPicker.tsx';
 import { additionalBlocks, editableFields, fieldIssue, type BlockDefinition } from './formDefinition.ts';
 import { SchemaField } from './SchemaField.tsx';
 import { bindingKey, canBindField, eligibleReferenceTargets, fieldDefinition, fieldTargetPath, regionAttribute, resourceRefBindingIssue, variableBindingIssue, type FieldTarget } from './fieldBindings.ts';
-import { inheritedReference, inheritedReferences, isResourceContainer, resourcePlacement } from './resourceHierarchy.ts';
+import { inheritedReference, inheritedReferences, isResourceContainer, resourcePlacement, visualParentId, visualResourcePlacement } from './resourceHierarchy.ts';
 import type { LiveSchemaMap } from './liveSchema.ts';
 import type { HostCloudRegionsPayload, HostModuleInspection } from './webviewBridge.ts';
 import { resolveProviderRegions } from './serviceAdapter.ts';
+import { fieldImpact } from './fieldImpact.ts';
 
 export interface ResourceModuleInspectionProps {
 	readonly loading: boolean;
@@ -27,7 +28,7 @@ function fieldState(resource:Resource,architecture:Architecture|undefined,target
 	const definition = fieldDefinition(resource, target, liveSchemas);
 	const key = bindingKey(target);
 	const canBind = !!architecture && canBindField(resource, target);
-	return {path:path.join('.'),...(canBind?{variables:architecture.variables??[],onManageVariables,binding:resource.fieldBindings?.[key],onBind:(variableId?:string)=>dispatch({type:'bindVariable',id:resource.id,target,variableId}),resourceReference:definition?.refTypes?.length?{binding:resource.resourceRefs?.[key],candidates:eligibleReferenceTargets(architecture,resource,definition,liveSchemas),architecture,resource,onSelect:(refs?:{resourceId:string;attribute:string}[])=>dispatch({type:'bindResourceRef',id:resource.id,target,refs}),onReveal:onRevealResource}:undefined}:{}),
+	return {path:path.join('.'),impact:fieldImpact(resource,path,liveSchemas?.[resourceDefinition(resource).type]),...(canBind?{variables:architecture.variables??[],onManageVariables,binding:resource.fieldBindings?.[key],onBind:(variableId?:string)=>dispatch({type:'bindVariable',id:resource.id,target,variableId}),resourceReference:definition?.refTypes?.length?{binding:resource.resourceRefs?.[key],candidates:eligibleReferenceTargets(architecture,resource,definition,liveSchemas),architecture,resource,onSelect:(refs?:{resourceId:string;attribute:string}[])=>dispatch({type:'bindResourceRef',id:resource.id,target,refs}),onReveal:onRevealResource}:undefined}:{}),
 		inheritance:available?{available,reference:architecture&&inheritedReference(architecture,resource,path),onInherit:(enabled:boolean)=>dispatch({type:'useInheritance',id:resource.id,target,enabled}),onReveal:onRevealResource}:undefined};
 }
 
@@ -42,6 +43,9 @@ export function ResourceFields({ resource, dispatch, architecture, compactMetada
 
  function field(name:string,value:string) {
   const definition=fieldDefinition(resource,{kind:'setting',name},liveSchemas);
+  const path = fieldTargetPath(resource,{kind:'setting',name}).join('.');
+  const computed = liveSchema?.attributes.find(attribute => attribute.path === path || attribute.name === path)?.access === 'computedOnly';
+  if (computed) { return <div className="schema-field" key={name}><label>{name.replaceAll('_',' ')}<input aria-label={name+' provider output'} readOnly value={value}/></label><p className="field-help">Provider output · read only</p></div>; }
   const update=(value:string)=>dispatch({type:'update',id:resource.id,patch:{settings:{...resource.settings,[name]:value}}});
   let display = value;
   if (!resource.catalogue && definition?.type === 'list') { try { JSON.parse(value); } catch { display = JSON.stringify([value]); } }
@@ -59,9 +63,7 @@ export function ResourceFields({ resource, dispatch, architecture, compactMetada
 			<details className="form-section">
 				<summary>Graphics</summary>
 				<div className="form-section-body">
-					<label>Icon<select value={resource.iconKind ?? resource.kind} onChange={event => dispatch({ type: 'update', id: resource.id, patch: { iconKind: event.target.value as ResourceKind } })}>
-						{Object.keys(resourceTypes).map(kind => <option key={kind} value={kind}>{resourceDefinition({ kind: kind as ResourceKind, provider: resource.provider }).label}</option>)}
-					</select></label>
+					<ResourceIconPicker resource={resource} dispatch={dispatch}/>
 					<label>Resource label<input value={resource.label ?? ''} placeholder={resource.name} onChange={event => dispatch({ type: 'update', id: resource.id, patch: { label: event.target.value } })} /></label>
 					{!isResourceContainer(resource)&&<label>Icon size<input aria-label="Resource icon size" type="number" min={24} max={160} step={4} disabled={resource.canvasLocked} value={resource.iconSize ?? 48} onChange={event => { const iconSize = Number(event.target.value); if (iconSize >= 24 && iconSize <= 160) { dispatch({ type: 'resizeResource', id: resource.id, position: resource.positions.visual, iconSize }); } }}/></label>}
 				</div>
@@ -77,7 +79,9 @@ export function ResourceFields({ resource, dispatch, architecture, compactMetada
 							{hasSource && onOpenSource && <button type="button" className="quiet-button source-file-open" title={'Open ' + (resource.sourceFile ?? 'main.tf') + ' in Code OSS editor'} onClick={onOpenSource}>Open</button>}
 						</div>
 					</label>
-					{architecture&&<label>Parent container<select aria-label="Parent infrastructure container" value={resource.parentId??''} onChange={event=>dispatch({type:'placeResource',id:resource.id,parentId:event.target.value||undefined,mode:'visual'})}><option value="">Canvas · no inheritance</option>{architecture.resources.filter(item=>item.id!==resource.id&&isResourceContainer(item)).map(parent=>{const placement=resourcePlacement(architecture,resource,parent.id);return <option key={parent.id} value={parent.id} disabled={!placement.ok||placement.parentId!==parent.id}>{parent.name} · {resourceDefinition(parent).label}{!placement.ok?' — incompatible':''}</option>;})}</select></label>}
+					{architecture&&<><label>Inheritance container<select aria-label="Parent infrastructure container" value={resource.parentId??''} onChange={event=>dispatch({type:'placeResource',id:resource.id,parentId:event.target.value||undefined,mode:'visual'})}><option value="">Canvas · no inheritance</option>{architecture.resources.filter(item=>item.id!==resource.id&&isResourceContainer(item)).map(parent=>{const placement=resourcePlacement(architecture,resource,parent.id);return <option key={parent.id} value={parent.id} disabled={!placement.ok||placement.parentId!==parent.id}>{parent.name} · {resourceDefinition(parent).label}{!placement.ok?' — incompatible':''}</option>;})}</select></label>
+					<label>Visual container<select aria-label="Visual resource container" value={visualParentId(resource)??''} onChange={event=>dispatch({type:'placeResource',id:resource.id,visualParentId:event.target.value||null,mode:'visual'})}><option value="">Canvas</option>{architecture.resources.filter(item=>item.id!==resource.id&&isResourceContainer(item)).map(parent=><option key={parent.id} value={parent.id} disabled={!visualResourcePlacement(architecture,resource,parent.id).ok}>{parent.name} · {resourceDefinition(parent).label}</option>)}</select></label><p className="field-help">Visual grouping can differ from inheritance. Resource references determine network attachments.</p></>}
+					<details className="field-change-guide"><summary>Before changing existing infrastructure</summary><p>Provider rules and the current state determine whether a change updates, restarts or replaces a resource. Review a Terraform plan before applying. The diagram does not evaluate replacement impact.</p><a href="https://developer.hashicorp.com/terraform/cli/commands/plan" target="_blank" rel="noreferrer">Understand Terraform plans</a></details>
 				</div>
 			</details>
 			<details className="form-section" open>

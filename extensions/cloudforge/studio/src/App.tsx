@@ -28,7 +28,7 @@ import { ArrowLeft, Scan, PanelsTopLeft, PanelRightClose, Code2, ListTree, Boxes
 import { PaneResizeHandle } from './PaneResizeHandle.tsx';
 import { architectureDiagnostics, type Diagnostic } from './diagnostics.ts';
 import { IssuesPanel, focusResourceField } from './IssuesPanel.tsx';
-import { resourcePlacement } from './resourceHierarchy.ts';
+import { visualResourcePlacement } from './resourceHierarchy.ts';
 import { workflowTemplate } from './workflowTemplate.ts';
 import { createHostBridge, type HostCloudRegionsPayload, type HostDependencyReport, type HostDetectedEngine, type HostDraftSaveError, type HostDraftSavePreview, type HostEngineValidateReport, type HostExportAuditReport, type HostGraphSnapshot, type HostModuleInspection, type HostNotice, type HostValidationRun } from './webviewBridge.ts';
 import type { LiveSchemaMap } from './liveSchema.ts';
@@ -497,7 +497,7 @@ export function Studio() {
 			blocks: [],
 			positions: { visual: placed, technical: placed }
 		};
-		const placement=resourcePlacement(architecture,resource,parentId); if(!placement.ok){setMessage(placement.reason);return;} resource.parentId=placement.parentId;
+		const placement=visualResourcePlacement(architecture,resource,parentId); if(!placement.ok){setMessage(placement.reason);return;} resource.parentId=placement.parentId; if(parentId&&parentId!==placement.parentId){resource.visualParentId=parentId;}
 		dispatch({type:'add',resource});
 		setSelectedId(id);
 		setOverview(false); setInspectorOpen(true); setInspectorCategory('resources'); setDetailTab('form');
@@ -510,7 +510,7 @@ export function Studio() {
   const placed = position ?? (flow && bounds ? flow.screenToFlowPosition({ x: bounds.x+bounds.width/2, y:bounds.y+bounds.height/2 }) : { x:100,y:100 });
   const settings = Object.fromEntries(entry.fields.filter(field=>field.required && !['name','location','region'].includes(field.name)).map(field=>[field.name, field.default === undefined ? '' : String(field.default)]));
   const resource:Resource={ id, kind:'generic', catalogue:entry, provider, name:entry.type.replace(/^(azurerm|aws|google)_/,'')+'_'+id.slice(0,4), ...(hostSnapshot ? { sourceFile: defaultTargetTfFile(architecture, selectedId || undefined) } : {}), region:providerRegions[provider][0], settings, blocks:[], positions:{visual:placed,technical:placed} };
-  const placement=resourcePlacement(architecture,resource,parentId);if(!placement.ok){setMessage(placement.reason);return;}resource.parentId=placement.parentId;dispatch({type:'add',resource});
+  const placement=visualResourcePlacement(architecture,resource,parentId);if(!placement.ok){setMessage(placement.reason);return;}resource.parentId=placement.parentId;if(parentId&&parentId!==placement.parentId){resource.visualParentId=parentId;}dispatch({type:'add',resource});
   setSelectedId(id); setOverview(false); setInspectorOpen(true); setInspectorCategory('resources'); setDetailTab('form');
  },[flow,architecture]);
 
@@ -593,7 +593,7 @@ export function Studio() {
 					onExportArtifact: exportHostArtifact,
 				} : undefined} />
 			<div className="studio-body">
-				<ResourceCatalogue architecture={architecture} onAdd={addResource} onAddCatalogue={addCatalogueResource} onTemplate={addTemplate} search={search} onSearch={setSearch} onImportModule={() => setModuleImportOpen(true)}
+				<ResourceCatalogue architecture={architecture} liveSchemas={liveSchemas} onAdd={addResource} onAddCatalogue={addCatalogueResource} onTemplate={addTemplate} search={search} onSearch={setSearch} onImportModule={() => setModuleImportOpen(true)}
 					shapesOpen={shapesOpen} onShapesOpen={openShapes} onShapesBack={() => setShapesOpen(false)}
 					tab={libraryTab} onTabChange={setLibraryTab}
      visible={libraryOpen} onClose={() => setLibraryOpen(false)}

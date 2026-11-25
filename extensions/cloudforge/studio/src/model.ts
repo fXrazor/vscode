@@ -8,7 +8,7 @@ import { elementEndpoint, endpointKey, normaliseArchitectureConnections, type Ar
 export type { DesignEndpoint } from './connectionEndpoints.ts';
 import { applyCanvasCommand, canvasElements, type CanvasCommand } from './canvasOperations.ts';
 import { bindingKey, acceptsResourceRefs, acceptsVariable, canBindField, fieldDefinition, fieldTargetPath, findResourceBlock, pruneBlockBindings, pruneBlockResourceRefs, type FieldTarget, type ResourceRefBinding, type ResourceRefEntry, type VariableBinding } from './fieldBindings.ts';
-import { fitResourceContainers, isResourceContainer, reparentResource, resourcePlacement, terraformIdentifier } from './resourceHierarchy.ts';
+import { fitResourceContainers, isResourceContainer, reparentResource, resourcePlacement, visualResourcePlacement, terraformIdentifier } from './resourceHierarchy.ts';
 import type { ShapeId } from './shapes.ts';
 import { rebaseHistory } from './historyRebase.ts';
 export type DesignMode = 'visual' | 'technical';
@@ -22,10 +22,13 @@ export interface CatalogueField {
 }
 export interface CatalogueEntry {
  type: string; label: string; service: string; category: string; icon: string; fields: CatalogueField[]; curated?: boolean; iconMatch?: string;
+ providerVersion?: string; providerSource?: string;
 }
 
 export interface Resource {
 	parentId?: string;
+	/** Visual containment override. Undefined follows inheritance; null explicitly means canvas. */
+	visualParentId?: string | null;
 	containerSize?: { width: number; height: number };
 	inheritanceOverrides?: string[];
 	canvasLocked?: boolean;
@@ -42,6 +45,7 @@ export interface Resource {
 	sourceLine?: number;
 	label?: string;
 	iconKind?: ResourceKind;
+	iconOverride?: { provider: Provider; icon: string; label: string };
 	region: string;
 	settings: Record<string, string>;
 	blocks: ResourceBlock[];
@@ -115,7 +119,7 @@ export interface History {
 }
 
 export type Edit =
-	| { type: 'placeResource'; id: string; parentId?: string; mode: DesignMode; positions?: Record<string,Position> }
+	| { type: 'placeResource'; id: string; parentId?: string; visualParentId?: string | null; mode: DesignMode; positions?: Record<string,Position> }
 	| { type: 'resizeContainer'; id: string; position: Position; width: number; height: number }
 	| { type: 'useInheritance'; id: string; target: FieldTarget; enabled: boolean }
 	| { type: 'canvas'; command: CanvasCommand }
@@ -127,7 +131,7 @@ export type Edit =
 	| { type: 'deleteConnection'; id: string }
 	| { type: 'connectEndpoints'; id: string; source: DesignEndpoint; target: DesignEndpoint }
 	| { type: 'reconnectConnection'; id: string; side: 'source' | 'target'; endpoint: DesignEndpoint }
-	| { type: 'update'; id: string; patch: Partial<Pick<Resource, 'name' | 'terraformName' | 'label' | 'iconKind' | 'region' | 'settings' | 'blocks'>> }
+	| { type: 'update'; id: string; patch: Partial<Pick<Resource, 'name' | 'terraformName' | 'label' | 'iconKind' | 'iconOverride' | 'region' | 'settings' | 'blocks'>> }
 	| { type: 'move'; id: string; mode: DesignMode; position: Position }
 	| { type: 'applyResourceCode'; resources: Resource[] }
 	| { type: 'add'; resource: Resource }
@@ -159,9 +163,11 @@ function editArchitecture(architecture: Architecture, action: Edit): Architectur
 	switch (action.type) {
 		case 'placeResource': {
 			const resource = architecture.resources.find(item=>item.id===action.id);
-			if (!resource || resource.canvasLocked || !resourcePlacement(architecture,resource,action.parentId).ok) { return architecture; }
+			if (!resource || resource.canvasLocked) { return architecture; }
+			const placement = action.visualParentId !== undefined ? visualResourcePlacement(architecture,resource,action.visualParentId??undefined) : resourcePlacement(architecture,resource,action.parentId);
+			if (!placement.ok) { return architecture; }
 			const moved = action.positions ? applyCanvasCommand(architecture,{kind:'move',mode:action.mode,positions:action.positions,fit:false}) : architecture;
-			return fitResourceContainers(reparentResource(moved,action.id,action.parentId));
+			return fitResourceContainers(reparentResource(moved,action.id,placement.parentId,action.visualParentId !== undefined ? action.visualParentId : undefined));
 		}
 		case 'resizeContainer': {
 			const resource = architecture.resources.find(item=>item.id===action.id);

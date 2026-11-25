@@ -21,7 +21,7 @@ import { elementEndpoint, endpointElementId, needsConnectionOverlay, pointEndpoi
 import { connectionPathBounds } from './connectionGeometry.ts';
 import { resizeBounds } from './resizeGeometry.ts';
 import { resourceIconSize } from './resourceGeometry.ts';
-import { inheritedDependencies, isResourceContainer, resourceAncestors, resourceDescendants, resourceDimensions, resourcePlacement } from './resourceHierarchy.ts';
+import { inheritedDependencies, isResourceContainer, visualAncestors, visualDescendants, resourceDimensions, visualResourcePlacement, visualParentId } from './resourceHierarchy.ts';
 import { architectureDiagnostics } from './diagnostics.ts';
 import { SelectionAnchor } from './SelectionAnchor.tsx';
 import { alignmentGuides, type GuideLine } from './alignmentGuides.ts';
@@ -121,14 +121,14 @@ export const DesignCanvas = memo(function DesignCanvas({
 	const dependencies = useMemo(() => inheritedDependencies(architecture), [architecture]);
 
 	const resourceNodes = useMemo<CanvasNode[]>(() => architecture.resources.map(resource => {
-		const parent = architecture.resources.find(item=>item.id===resource.parentId) ?? architecture.items.find(item => item.kind === 'frame' && item.members.includes(resource.id));
+		const parent = architecture.resources.find(item=>item.id===visualParentId(resource)) ?? architecture.items.find(item => item.kind === 'frame' && item.members.includes(resource.id));
 		const parentPosition = parent?.positions[mode] ?? { x: 0, y: 0 };
 		const container = isResourceContainer(resource);
 		return {
 			id: resource.id, type: 'resource', parentId: parent?.id,
 			style: container ? resourceDimensions(architecture,resource,mode) : mode === 'visual' ? {width:resourceIconSize(resource),height:resourceIconSize(resource)} : undefined,
 			position: { x: resource.positions[mode].x - parentPosition.x, y: resource.positions[mode].y - parentPosition.y },
-			data: { resource, mode, dispatch, architecture, onReview:onOpen, origin: parentPosition, variables: architecture.variables, childCount:architecture.resources.filter(item=>item.parentId===resource.id).length, dependencies: dependencies.filter(edge => edge.target === resource.id).map(edge => architecture.resources.find(candidate => candidate.id === edge.source)?.name ?? edge.source), findings: diagnostics.filter(finding => finding.resourceId === resource.id) }, ariaLabel: resource.name + ', ' + resourceDefinition(resource).label
+			data: { resource, mode, dispatch, architecture, onReview:onOpen, origin: parentPosition, variables: architecture.variables, childCount:architecture.resources.filter(item=>visualParentId(item)===resource.id).length, dependencies: dependencies.filter(edge => edge.target === resource.id).map(edge => architecture.resources.find(candidate => candidate.id === edge.source)?.name ?? edge.source), findings: diagnostics.filter(finding => finding.resourceId === resource.id) }, ariaLabel: resource.name + ', ' + resourceDefinition(resource).label
 		};
 	}), [architecture, mode, dispatch, dependencies, diagnostics, onOpen]);
 
@@ -144,8 +144,8 @@ export const DesignCanvas = memo(function DesignCanvas({
 	})), [architecture.items, mode, dispatch, editRequest]);
 
 	const displayNodes = useMemo(() => [...boardNodes, ...resourceNodes].map(node => ({
-		...node, selected: selectedIds.includes(node.id), draggable: !(node.type === 'board' ? node.data.item.canvasLocked : node.data.resource.canvasLocked||isResourceContainer(node.data.resource)&&resourceDescendants(architecture,node.id).some(child=>child.canvasLocked)),
-		zIndex: node.type === 'board' && node.data.item.kind === 'frame' ? -100 : node.type==='resource' && isResourceContainer(node.data.resource) ? -80+resourceAncestors(architecture,node.data.resource).length : order.indexOf(node.id) + 1
+		...node, selected: selectedIds.includes(node.id), draggable: !(node.type === 'board' ? node.data.item.canvasLocked : node.data.resource.canvasLocked||isResourceContainer(node.data.resource)&&visualDescendants(architecture,node.id).some(child=>child.canvasLocked)),
+		zIndex: node.type === 'board' && node.data.item.kind === 'frame' ? -100 : node.type==='resource' && isResourceContainer(node.data.resource) ? -80+visualAncestors(architecture,node.data.resource).length : order.indexOf(node.id) + 1
 	})), [boardNodes, resourceNodes, selectedIds, order, architecture]);
 
 	// Synchronise committed edits while React Flow owns transient drag positions.
@@ -244,20 +244,20 @@ export const DesignCanvas = memo(function DesignCanvas({
 		return {x,y};
 	}
 	function containerAt(point:Position, movingId?:string) {
-		const excluded=new Set(movingId?[movingId,...resourceDescendants(architecture,movingId).map(item=>item.id)]:[]);
-		return architecture.resources.filter(item=>isResourceContainer(item)&&!excluded.has(item.id)).filter(item=>{const pos=item.positions[mode];const size=resourceDimensions(architecture,item,mode);return point.x>=pos.x&&point.y>=pos.y&&point.x<=pos.x+size.width&&point.y<=pos.y+size.height;}).sort((a,b)=>resourceAncestors(architecture,b).length-resourceAncestors(architecture,a).length||resourceDimensions(architecture,a,mode).width*resourceDimensions(architecture,a,mode).height-resourceDimensions(architecture,b,mode).width*resourceDimensions(architecture,b,mode).height)[0];
+		const excluded=new Set(movingId?[movingId,...visualDescendants(architecture,movingId).map(item=>item.id)]:[]);
+		return architecture.resources.filter(item=>isResourceContainer(item)&&!excluded.has(item.id)).filter(item=>{const pos=item.positions[mode];const size=resourceDimensions(architecture,item,mode);return point.x>=pos.x&&point.y>=pos.y&&point.x<=pos.x+size.width&&point.y<=pos.y+size.height;}).sort((a,b)=>visualAncestors(architecture,b).length-visualAncestors(architecture,a).length||resourceDimensions(architecture,a,mode).width*resourceDimensions(architecture,a,mode).height-resourceDimensions(architecture,b,mode).width*resourceDimensions(architecture,b,mode).height)[0];
 	}
 	function placementAt(node:CanvasNode,client:{clientX:number;clientY:number}) {
 		if(node.type!=='resource'||!flow){return undefined;}
-		const excluded=new Set([node.id,...resourceDescendants(architecture,node.id).map(item=>item.id)]);
+		const excluded=new Set([node.id,...visualDescendants(architecture,node.id).map(item=>item.id)]);
 		// Hit-test current rendered bounds: opening a panel or a viewport move can change
 		// screen geometry during a drag. The domain model still validates the candidate.
 		const target=architecture.resources.filter(item=>isResourceContainer(item)&&!excluded.has(item.id)).filter(item=>{
 			const element=bounds.current?.querySelector<HTMLElement>('.react-flow__node[data-id="'+CSS.escape(item.id)+'"]');const rectangle=element?.getBoundingClientRect();
 			return rectangle&&client.clientX>=rectangle.left&&client.clientX<=rectangle.right&&client.clientY>=rectangle.top&&client.clientY<=rectangle.bottom;
-		}).sort((a,b)=>resourceAncestors(architecture,b).length-resourceAncestors(architecture,a).length)[0];
-		const placement=resourcePlacement(architecture,node.data.resource,target?.id);
-		return {...placement,target:placement.ok?placement.parentId:target?.id};
+		}).sort((a,b)=>visualAncestors(architecture,b).length-visualAncestors(architecture,a).length)[0];
+		const placement=visualResourcePlacement(architecture,node.data.resource,target?.id);
+		return {...placement,target:target?.id,visualParentId:target?.id??null};
 	}
 	function commitDrag(moved: CanvasNode[], event?:{clientX:number;clientY:number}) {
 		const current = new Map((flow?.getNodes() ?? nodes).map(node => [node.id, node]));
@@ -268,7 +268,7 @@ export const DesignCanvas = memo(function DesignCanvas({
 		const placement=moved.length===1&&event?placementAt(moved[0],event):undefined;
 		setDropFeedback(undefined);
 		if(placement&&!placement.ok){setNodes(displayNodes);setDropFeedback({ok:false,reason:placement.reason});return;}
-		if(placement){dispatch({type:'placeResource',id:moved[0].id,parentId:placement.parentId,mode,positions});}
+		if(placement){dispatch({type:'placeResource',id:moved[0].id,parentId:placement.parentId,visualParentId:placement.visualParentId,mode,positions});}
 		else{dispatch({ type: 'canvas', command: { kind: 'move', mode, positions } });}
 	}
 

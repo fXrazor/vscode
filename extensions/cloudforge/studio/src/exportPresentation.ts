@@ -1,3 +1,4 @@
+import { resourceGraphic } from './resourceGraphic.ts';
 import { shapeDefinition, shapeTextColor, shapeStrokeDash } from './shapes.ts';
 import { inkDefaults } from './ink.ts';
 import { rotatedCorners } from './rotation.ts';
@@ -58,7 +59,7 @@ export async function presentationSvg(architecture: Architecture): Promise<strin
  const width = Math.max(400, ...points.map(point => point.x + point.width)) - x + 40;
  const height = Math.max(300, ...points.map(point => point.y + point.height)) - y + 40;
  const icons = await Promise.all(architecture.resources.map(async resource => {
-  const graphic = resource.iconKind ? resourceDefinition({ kind: resource.iconKind, provider: resource.provider }) : resourceDefinition(resource);
+  const graphic = resourceGraphic(resource);
   const response = await fetch('./assets/' + graphic.icon);
   if (!response.ok) { throw new Error('Unable to load export icon'); }
   const blob = await response.blob();

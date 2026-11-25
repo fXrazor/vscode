@@ -4,12 +4,14 @@ import { memo, useEffect, useMemo, useState, useRef, type ReactNode } from 'reac
 import * as Tabs from '@radix-ui/react-tabs';
 import type { Architecture, Provider, ResourceKind, BoardItem, CatalogueEntry } from './model.ts';
 import { resourceDefinition } from './fixture.ts';
+import { ProviderMark } from './ProviderMark.tsx';
+import type { LiveSchemaMap } from './liveSchema.ts';
 import { loadCatalogue, groupServices, technologySections, type CatalogueSnapshot } from './catalogue.ts';
 import { Box, Cpu, Network, Database, HardDrive, Activity, PanelLeftClose, Square, Type, Shapes, Package, ChevronDown, ChevronLeft, Search, History, Star, Shield, Zap, Wrench, Brain, BarChart3, Layers, StickyNote, KeyRound, MapPin } from 'lucide-react';
 
 const icons: Record<string, typeof Box> = { Compute: Cpu, Network, Storage:HardDrive, Database, Monitoring:Activity, 'Security & Identity':Shield, Integration:Zap, Management:Wrench, 'AI & ML':Brain, Analytics:BarChart3, Other:Box };
 
-export const ResourceCatalogue = memo(function ResourceCatalogue({ architecture, onAdd, search, onSearch, onImportModule, visible, onClose, onDesignAdd, resizeHandle, onAddCatalogue, onTemplate, shapesOpen, onShapesOpen, onShapesBack, tab: controlledTab, onTabChange }: {
+export const ResourceCatalogue = memo(function ResourceCatalogue({ architecture, onAdd, search, onSearch, onImportModule, visible, onClose, onDesignAdd, resizeHandle, onAddCatalogue, onTemplate, shapesOpen, onShapesOpen, onShapesBack, tab: controlledTab, onTabChange, liveSchemas }: {
  shapesOpen: boolean; onShapesOpen: () => void; onShapesBack: () => void;
  architecture: Architecture; onAdd: (kind: ResourceKind, provider: Provider) => void;
  search: string; onSearch: (value: string) => void; onImportModule: () => void; visible: boolean; onClose: () => void;
@@ -17,6 +19,7 @@ export const ResourceCatalogue = memo(function ResourceCatalogue({ architecture,
  onAddCatalogue: (entry: CatalogueEntry, provider: Provider) => void;
  onTemplate: (kind: 'network' | 'platform' | 'workflow') => void;
  tab?: 'resources' | 'templates'; onTabChange?: (tab: 'resources' | 'templates') => void;
+ liveSchemas?: LiveSchemaMap;
 }) {
  const shapesButton = useRef<HTMLButtonElement>(null);
  const [provider, setProvider] = useState<Provider>('azure');
@@ -44,6 +47,8 @@ export const ResourceCatalogue = memo(function ResourceCatalogue({ architecture,
  const results = entries.filter(entry => (entry.type+' '+entry.label+' '+entry.service).toLowerCase().includes(needle));
  const current = services.find(service => service.key === serviceKey);
  const prefix = provider+':';
+ const activeSchemas = Object.values(liveSchemas ?? {}).filter(schema => schema.providerSource.replace('registry.terraform.io/', '') === snapshot?.source);
+ const activeVersions = [...new Set(activeSchemas.map(schema => schema.providerVersion))];
  function add(entry: CatalogueEntry) { setRecent(values => [prefix+entry.type,...values.filter(value => value !== prefix+entry.type)].slice(0,12)); onAddCatalogue(entry,provider); }
  function favourite(entry: CatalogueEntry) { const key=prefix+entry.type; setFavourites(values => values.includes(key) ? values.filter(value => value !== key) : [...values,key]); }
  function section(id:string,title:ReactNode,children:ReactNode,count?:number) {
@@ -70,7 +75,7 @@ export const ResourceCatalogue = memo(function ResourceCatalogue({ architecture,
   {resizeHandle}
   <Tabs.List className="lab-tabs library-title" aria-label="Resource sidebar"><Tabs.Trigger value="resources">Resources</Tabs.Trigger><Tabs.Trigger value="templates">Templates</Tabs.Trigger><span className="spacer"/><span className="lib-count">{entries.length.toLocaleString()} types</span><button aria-label="Close resource library" onClick={onClose}><PanelLeftClose size={15}/></button></Tabs.List>
   <div className="cat-head">
-   <div className="lib-provider"><select aria-label="Cloud provider" value={provider} onChange={event=>{setProvider(event.target.value as Provider);onSearch('');}}><option value="azure">Azure</option><option value="aws">AWS</option><option value="gcp">Google Cloud</option></select><span className="lib-version" title="Imported provider catalogue version">{snapshot?.version ?? '…'}</span></div>
+   <div className="lib-provider"><ProviderMark provider={provider}/><select aria-label="Cloud provider" value={provider} onChange={event=>{setProvider(event.target.value as Provider);onSearch('');}}><option value="azure">Microsoft Azure</option><option value="aws">Amazon Web Services</option><option value="gcp">Google Cloud</option></select><details className="provider-schema"><summary aria-label="Provider version and schema">{snapshot ? 'v'+snapshot.version : '…'}<ChevronDown size={12}/></summary><div><strong>Catalogue snapshot</strong><p>{snapshot ? snapshot.source+' '+snapshot.version : 'Loading…'}</p><strong>Workspace form schemas</strong><p>{activeSchemas.length ? activeSchemas.length+' types · '+activeVersions.join(', ') : 'No live schema loaded for this provider.'}</p><p>Forms use workspace schemas when available. Changing the catalogue provider does not change your Terraform provider version.</p></div></details></div>
    <label className="lab-search"><Search size={14}/><input aria-label="Search resource library" placeholder="Search TF resources" value={search} onChange={event=>{onSearch(event.target.value);setServiceKey('');setLimit(80);}}/></label>
    <span className="lib-docs faint">{snapshot ? snapshot.source+' · catalogue snapshot v'+snapshot.version : 'Loading provider catalogue…'}</span>
   </div>

@@ -2,6 +2,7 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
+import { resourceGraphic } from './resourceGraphic.ts';
 import { shapeDefinition, shapeStrokeDash } from './shapes.ts';
 import { inkDefaults } from './ink.ts';
 import { DrawingText } from './DrawingText.tsx';
@@ -25,7 +26,7 @@ export type CanvasNode = ResourceNodeType | BoardNodeType;
 
 export const ResourceNode = memo(function ResourceNode({ data, selected }: NodeProps<ResourceNodeType>) {
 	const metadata = resourceDefinition(data.resource);
-	const graphic = data.resource.iconKind ? resourceDefinition({ kind: data.resource.iconKind, provider: data.resource.provider }) : metadata;
+	const graphic = resourceGraphic(data.resource);
 	const technical = data.mode === 'technical';
 	const boundName = fieldExpression(data.resource,{kind:'name'},data.variables,data.architecture);
 	const boundRegion = fieldExpression(data.resource,{kind:'region'},data.variables,data.architecture);

@@ -738,6 +738,48 @@ dialog::backdrop { background: #12152488; backdrop-filter: blur(3px); }
 .variable-picker-list small { margin-left: auto; font-size: 10px; color: var(--muted); }
 .variable-picker-list > button > span:last-child { color: var(--muted); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
 .variable-picker-empty { padding-top: 12px; }
+.variable-picker { display: flex; flex-direction: column; overflow: hidden; gap: 10px; }
+.variable-picker .variable-picker-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 0; }
+.variable-picker .variable-picker-heading h2 { margin: 0; font-size: 14px; }
+.variable-picker .variable-picker-heading button { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; }
+.variable-picker > p, .variable-picker .variable-picker-search { margin: 0; }
+.variable-picker-search { flex: none; padding: 0 9px; border: 1px solid var(--border); border-radius: 5px; }
+.variable-picker-search:focus-within { border-color: var(--accent-ink); }
+.variable-picker-search input { border: 0; padding: 9px 0; min-width: 0; box-shadow: none; outline: none; }
+.variable-picker .variable-picker-list { min-height: 0; max-height: none; flex: 1 1 auto; overflow-y: auto; }
+.variable-picker-list > button { flex: none; border-radius: 4px; }
+.variable-picker-list > button[aria-pressed="true"] { background: var(--selection); color: var(--accent-ink); }
+.variable-picker-list > button > span { min-width: 0; }
+.variable-picker-list > button > span > svg { flex: none; }
+.variable-picker-list .variable-picker-description { color: var(--muted); font-size: 11px; line-height: 1.5; }
+.variable-picker-current, .variable-picker > footer { flex: none; display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); }
+.variable-picker > footer { justify-content: space-between; padding-top: 10px; border-top: 1px solid var(--border); }
+.variable-picker > footer button { font-size: 11px; }
+.configurator-delete { display: grid; place-items: center; flex: none; width: 32px; height: 32px; color: var(--danger); }
+.provider-mark { width: 23px; height: 23px; object-fit: contain; padding: 2px; background: #fff; border-radius: 4px; flex: none; }
+.provider-schema { position: relative; flex: none; font-size: 11px; }
+.provider-schema > summary { display: flex; align-items: center; gap: 6px; cursor: pointer; padding: 8px; border: 1px solid var(--border); border-radius: 5px; list-style: none; }
+.provider-schema > div { position: absolute; z-index: 60; right: 0; top: calc(100% + 6px); width: 270px; padding: 14px; border-radius: 6px; background: var(--panel-solid); box-shadow: 0 6px 24px #00000030; }
+.provider-schema p { margin: 5px 0 14px; color: var(--muted); line-height: 1.5; overflow-wrap: anywhere; }
+.provider-schema p:last-child { margin-bottom: 0; }
+.graphic-picker-trigger { width: 22px; height: 22px; object-fit: contain; }
+.resource-icon-control > button { display: flex; align-items: center; gap: 8px; padding: 6px 10px; min-height: 34px; font: inherit; font-size: 12px; color: var(--text); border: 1px solid var(--border); border-radius: 5px; background: var(--input); }
+.resource-icon-control > button:hover { border-color: var(--accent-ink); background: var(--selection); }
+.graphic-catalogue { display: grid; gap: 12px; }
+.graphic-provider { display: flex; gap: 8px; align-items: center; }
+.graphic-provider select { min-width: 0; flex: 1; }
+.graphic-icon-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; max-height: 220px; overflow-y: auto; }
+.graphic-icon-grid button { display: grid; place-items: center; min-height: 44px; padding: 6px; background: var(--input); }
+.graphic-icon-grid button[aria-pressed="true"] { border-color: var(--accent-ink); background: var(--selection); }
+.graphic-icon-grid img { width: 28px; height: 28px; object-fit: contain; }
+.field-impact { display: flex; align-items: flex-start; gap: 8px; padding: 10px; background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 5px; font-size: 11px; line-height: 1.5; }
+.field-impact > svg { flex: none; color: var(--warning, var(--warn)); margin-top: 1px; }
+.field-impact strong { font-size: 11px; font-weight: 600; }
+.field-impact p { margin: 4px 0; }
+.field-impact a { color: var(--accent-ink); text-underline-offset: 3px; }
+.field-impact small { color: var(--muted); }
+.field-change-guide { font-size: 11px; color: var(--muted); line-height: 1.5; }
+.field-change-guide p { margin: 8px 0; }
 .resource-workspace { width: min(1500px,96vw); height: min(900px,92dvh); }
 .resource-workspace .workspace-header { gap: 20px; }
 .workspace-header > button, .workspace-layout-actions > button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 32px; padding: 5px 8px; border: 1px solid var(--border); background: var(--panel-solid); color: var(--text); font-size: 12px; }

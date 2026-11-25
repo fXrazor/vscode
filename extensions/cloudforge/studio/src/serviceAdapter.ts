@@ -22,7 +22,7 @@ import { elementEndpoint, endpointExists, endpointKey } from './connectionEndpoi
 import type { Diagnostic } from './diagnostics.ts';
 import { providerRegions, resourceDefinition, resourceTypes } from './fixture.ts';
 import { bindingKey, type ResourceRefBinding } from './fieldBindings.ts';
-import { fitResourceContainers, isResourceContainer, resourceAddress, resourcePlacement } from './resourceHierarchy.ts';
+import { fitResourceContainers, isResourceContainer, resourceAddress, resourcePlacement, visualResourcePlacement } from './resourceHierarchy.ts';
 import { projectResourceFiles, resourceSourceFile, terraformCode } from './terraformProjection.ts';
 import type {
 	HostCloudRegionsPayload,
@@ -179,6 +179,9 @@ function createResourceFromNode(node: HostNodeSummary, fallbackPosition: Positio
 		...(preserved?.inheritanceOverrides ? { inheritanceOverrides: [...preserved.inheritanceOverrides] } : {}),
 		...(preserved?.containerSize ? { containerSize: { ...preserved.containerSize } } : {}),
 		...(preserved?.iconSize ? { iconSize: preserved.iconSize } : {}),
+		...(preserved?.iconKind ? { iconKind: preserved.iconKind } : {}),
+		...(preserved?.iconOverride ? { iconOverride: { ...preserved.iconOverride } } : {}),
+		...(preserved?.visualParentId !== undefined ? { visualParentId: preserved.visualParentId } : {}),
 		...(preserved?.canvasLocked ? { canvasLocked: true } : {}),
 		positions,
 	};
@@ -505,6 +508,9 @@ export function projectGraphSnapshotToArchitecture(
 	}
 
 	// Derive explicit typed `resourceRefs` for non-containment edges, and preserve remaining edges as design connections.
+	for (const resource of resources) {
+		if (resource.visualParentId && (!byId.has(resource.visualParentId) || !visualResourcePlacement(baseArch, resource, resource.visualParentId).ok)) { delete resource.visualParentId; }
+	}
 	const connections: DesignConnection[] = [];
 	const seenConnections = new Set<string>();
 	for (const edge of snapshot.edges) {

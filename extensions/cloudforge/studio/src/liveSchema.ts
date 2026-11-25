@@ -94,6 +94,7 @@ function toAttrDef(attribute: HostFormAttribute, curated?: AttrDef): AttrDef {
 /** Convert editable (non-computedOnly) live Rust `FormSchema` attributes to `AttrDef[]`. */
 export function liveSchemaAttributes(schema: HostFormSchema, curatedAttributes: readonly AttrDef[] = []): AttrDef[] {
 	const curatedByName = new Map(curatedAttributes.filter(attr => attr.type !== 'block').map(attr => [attr.name, attr]));
+	const computedOnly = new Set(schema.attributes.filter(attr => attr.access === 'computedOnly').map(attr => attr.name));
 	const merged = new Map<string, AttrDef>();
 	for (const attr of schema.attributes) {
 		if (attr.access === 'computedOnly') {
@@ -102,7 +103,7 @@ export function liveSchemaAttributes(schema: HostFormSchema, curatedAttributes: 
 		merged.set(attr.name, toAttrDef(attr, curatedByName.get(attr.name)));
 	}
 	for (const curated of curatedAttributes) {
-		if (curated.type !== 'block' && !merged.has(curated.name)) {
+		if (curated.type !== 'block' && !computedOnly.has(curated.name) && !merged.has(curated.name)) {
 			merged.set(curated.name, curated);
 		}
 	}
