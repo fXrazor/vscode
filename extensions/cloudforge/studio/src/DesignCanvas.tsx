@@ -252,7 +252,10 @@ export const DesignCanvas = memo(function DesignCanvas({
 		const dependency = dependencies.find(item=>item.id===edgeId);
 		if(dependency){if(key==='enter'||key===' '){event.preventDefault();onOpen(dependency.target);}else if(key==='delete'||key==='backspace'){event.preventDefault();}return;}
 		if (edgeId && (key === 'enter' || key === ' ')) {
-			event.preventDefault(); event.stopPropagation(); setCreatingConnection(false); onSelectionChange([]); setSelectedConnectionId(edgeId); return;
+			event.preventDefault(); event.stopPropagation(); setCreatingConnection(false); onSelectionChange([]); setSelectedConnectionId(edgeId);
+			// Opened from the keyboard: move focus into the connection tools so Tab continues there.
+			requestAnimationFrame(() => requestAnimationFrame(() => bounds.current?.querySelector<HTMLElement>('.connection-tools input, .connection-tools select, .connection-tools button')?.focus()));
+			return;
 		}
 		if ((edgeId || selectedConnectionId) && (key === 'delete' || key === 'backspace')) {
 			event.preventDefault(); event.stopPropagation(); dispatch({ type: 'deleteConnection', id: edgeId ?? selectedConnectionId }); setSelectedConnectionId(''); return;
@@ -367,7 +370,7 @@ export const DesignCanvas = memo(function DesignCanvas({
 				<label><input type="checkbox" checked={allDependencies} onChange={event=>setAllDependencies(event.target.checked)}/>All inherited dependencies</label>
 				<label><input type="checkbox" checked={showLabels} onChange={event => setShowLabels(event.target.checked)} />Always show connection labels</label>
 				<button aria-pressed={minimap} onClick={() => setMinimap(value => !value)}>Minimap</button>
-				<details className="canvas-shortcuts"><summary>Keyboard shortcuts</summary><p>Ctrl / Cmd + click: extend selection<br/>Shift + drag: select an area<br/>Arrows: move 1 px; Shift + arrows: 10 px<br/>Enter: edit; Escape: clear selection<br/>V: select; H: pan; T: text; N: note<br/>F: focus selection; Space + drag: pan<br/>Copy, duplicate, group and layer actions are in the selection menu.</p></details>
+				<details className="canvas-shortcuts"><summary>Keyboard shortcuts</summary><p>Ctrl / Cmd + click: extend selection<br/>Shift + drag: select an area<br/>Arrows: move 1 px; Shift + arrows: 10 px<br/>Enter: edit; Escape: clear selection<br/>V: select; H: pan; T: text; N: note<br/>F: focus selection; Space + drag: pan<br/>Alt + F10: move to the selection toolbar; Escape: back to the canvas<br/>Copy, duplicate, group and layer actions are in the selection menu.</p></details>
 			</div></details>
 			{dropFeedback&&<div className={'container-drop-status '+(dropFeedback.ok?'valid':'invalid')} role="status">{dropFeedback.reason}</div>}
 			<div className="canvas-navigation" role="group" aria-label="Zoom and navigation">
