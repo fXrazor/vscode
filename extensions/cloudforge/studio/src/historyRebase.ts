@@ -41,7 +41,7 @@ function same(a: unknown, b: unknown): boolean {
 	return keys.length === otherKeys.length && keys.every(key => same(left[key], right[key]));
 }
 
-function mergeKeyed<T extends { id: string }>(snapshot: readonly T[] | undefined, base: readonly T[] | undefined, incoming: readonly T[] | undefined): T[] {
+function mergeKeyed<T extends { id: string }>(snapshot: readonly T[] | undefined, base: readonly T[] | undefined, incoming: readonly T[] | undefined, mergeEntry?: (snapshot: T, base: T, incoming: T) => T): T[] {
 	const baseById = new Map((base ?? []).map(entry => [entry.id, entry]));
 	const incomingById = new Map((incoming ?? []).map(entry => [entry.id, entry]));
 	const refreshChanged = (id: string) => !same(baseById.get(id), incomingById.get(id));
@@ -53,7 +53,10 @@ function mergeKeyed<T extends { id: string }>(snapshot: readonly T[] | undefined
 			result.push(entry);
 		} else {
 			const replacement = incomingById.get(entry.id);
-			if (replacement) {
+			const before = baseById.get(entry.id);
+			if (replacement && before && mergeEntry) {
+				result.push(mergeEntry(entry, before, replacement));
+			} else if (replacement) {
 				result.push(structuredClone(replacement));
 			}
 		}
@@ -70,9 +73,42 @@ function mergeValue<T>(snapshot: T, base: T, incoming: T): T {
 	return same(base, incoming) ? snapshot : structuredClone(incoming);
 }
 
+/**
+ * Field-level merge of one resource changed by both the refresh and the user: each property the
+ * refresh left alone keeps the user's value, and `settings` merge key by key. So a value edited
+ * in the `.tf` file reaches the canvas without discarding an unsaved canvas edit to another field
+ * of the same resource. Where both changed the same field, the file wins.
+ */
+function mergeRecord<T extends object>(snapshot: T, base: T, incoming: T, nested: ReadonlySet<string> = new Set()): T {
+	const left = snapshot as Record<string, unknown>;
+	const before = base as Record<string, unknown>;
+	const after = incoming as Record<string, unknown>;
+	const merged: Record<string, unknown> = {};
+	for (const key of new Set([...Object.keys(left), ...Object.keys(before), ...Object.keys(after)])) {
+		let value: unknown;
+		if (same(before[key], after[key])) {
+			value = left[key];
+		} else if (nested.has(key) && isPlainRecord(left[key]) && isPlainRecord(before[key]) && isPlainRecord(after[key])) {
+			value = mergeRecord(left[key] as object, before[key] as object, after[key] as object);
+		} else {
+			value = structuredClone(after[key]);
+		}
+		if (value !== undefined) {
+			merged[key] = value;
+		}
+	}
+	return merged as T;
+}
+
+function isPlainRecord(value: unknown): boolean {
+	return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+const RESOURCE_NESTED = new Set(['settings', 'fieldBindings']);
+
 /** Three-way merge of one history snapshot. Exported for tests. */
 export function rebaseSnapshot(snapshot: Architecture, base: Architecture, incoming: Architecture): Architecture {
-	const resources = mergeKeyed(snapshot.resources, base.resources, incoming.resources);
+	const resources = mergeKeyed(snapshot.resources, base.resources, incoming.resources, (mine, before, after) => mergeRecord(mine, before, after, RESOURCE_NESTED));
 	const resourceIds = new Set(resources.map(resource => resource.id));
 	const items = mergeKeyed(snapshot.items, base.items, incoming.items);
 	const endpointIds = new Set([...resourceIds, ...items.map(item => item.id)]);
@@ -105,22 +141,31 @@ export function rebaseSnapshot(snapshot: Architecture, base: Architecture, incom
 }
 
 /**
- * Replace `history.present` with `incoming` (a refresh of the same architecture) while keeping
- * the user's undo and redo steps. Steps that become no-ops after rebasing are dropped.
+ * Rebase the history onto `incoming`, a refresh of the same architecture.
+ *
+ * Without `base`, `incoming` was projected from the present (the old behaviour): it becomes the
+ * present and only past and future steps are rebased. With `base` (the state the files said
+ * before this refresh), the present is rebased too, so unsaved canvas edits survive a refresh
+ * and file changes are applied on top of them. Steps that become no-ops are dropped.
  */
-export function rebaseHistory<H extends SnapshotHistory>(history: H, incoming: Architecture): H {
-	const base = history.present;
-	if (same(base, incoming)) {
-		// Typically the echo of the user's own save: nothing to rebase, but adopt the loaded object
-		// so callers can compare the present against the service baseline by identity.
-		return { ...history, present: incoming };
+export function rebaseHistory<H extends SnapshotHistory>(history: H, incoming: Architecture, base?: Architecture): H {
+	const from = base ?? history.present;
+	if (same(from, incoming)) {
+		if (!base || history.present === base) {
+			// Typically the echo of the user's own save: nothing to rebase, but adopt the loaded object
+			// so callers can compare the present against the service baseline by identity.
+			return { ...history, present: incoming };
+		}
+		return history;
 	}
-	const past = history.past.map(snapshot => rebaseSnapshot(snapshot, base, incoming));
-	const future = history.future.map(snapshot => rebaseSnapshot(snapshot, base, incoming));
+	const rebasedPresent = base && history.present !== base ? rebaseSnapshot(history.present, from, incoming) : incoming;
+	const present = same(rebasedPresent, incoming) ? incoming : rebasedPresent;
+	const past = history.past.map(snapshot => rebaseSnapshot(snapshot, from, incoming));
+	const future = history.future.map(snapshot => rebaseSnapshot(snapshot, from, incoming));
 
 	// Walk outward from the new present so each kept step differs from its neighbour.
 	const keptPast: Architecture[] = [];
-	let neighbour = incoming;
+	let neighbour = present;
 	for (let index = past.length - 1; index >= 0; index--) {
 		if (!same(past[index], neighbour)) {
 			keptPast.unshift(past[index]);
@@ -128,12 +173,12 @@ export function rebaseHistory<H extends SnapshotHistory>(history: H, incoming: A
 		}
 	}
 	const keptFuture: Architecture[] = [];
-	neighbour = incoming;
+	neighbour = present;
 	for (const snapshot of future) {
 		if (!same(snapshot, neighbour)) {
 			keptFuture.push(snapshot);
 			neighbour = snapshot;
 		}
 	}
-	return { ...history, past: keptPast.slice(-MAX_PAST), present: incoming, future: keptFuture };
+	return { ...history, past: keptPast.slice(-MAX_PAST), present, future: keptFuture };
 }

@@ -33,7 +33,7 @@ import { createHostBridge, type HostCloudRegionsPayload, type HostDependencyRepo
 import type { LiveSchemaMap } from './liveSchema.ts';
 import { parseSchemaPreview, type SchemaPreview } from './resourceDraft.ts';
 import { hydrateResourceValues, parseResourceValues } from './resourceValues.ts';
-import { buildDraftSavePayload, buildHostViewState, changedFilePayloads, defaultTargetTfFile, projectGraphSnapshotToArchitecture, projectHostDiagnostics, sanitizeDraftTfFileName } from './serviceAdapter.ts';
+import { buildDraftSavePayload, buildHostViewState, changedFilePayloads, refreshPrevious, adoptSavedFiles, defaultTargetTfFile, projectGraphSnapshotToArchitecture, projectHostDiagnostics, sanitizeDraftTfFileName } from './serviceAdapter.ts';
 import { projectResourceFiles } from './terraformProjection.ts';
 import { DraftSaveDialog } from './DraftSaveDialog.tsx';
 import { SaveAllDialog } from './SaveAllDialog.tsx';
@@ -78,6 +78,8 @@ export function Studio() {
 	/** The architecture last loaded from the service; the draft is modified when the present differs from it. */
 	const [hostBaseline, setHostBaseline] = useState<Architecture | null>(null);
 	const hostBaselineRef = useRef<Architecture | null>(null);
+	/** The canvas state and file names of the last successful save, adopted into the next baseline. */
+	const savedFilesRef = useRef<{ readonly state: Architecture; readonly files: ReadonlySet<string> } | null>(null);
 	const hostGraphRef = useRef<HostGraphSnapshot | null>(null);
 	const [hasSourceById, setHasSourceById] = useState<Readonly<Record<string, boolean>>>({});
 	const [hostNotice, setHostNotice] = useState<HostNotice | null>(null);
@@ -138,8 +140,15 @@ export function Studio() {
 				case 'graph': {
 					const sameArch = hostArchitectureIdRef.current === incoming.graph.architectureId;
 					hostArchitectureIdRef.current = incoming.graph.architectureId;
+					// Project from what the files said last time, not from the canvas: unsaved canvas edits
+					// are then rebased onto the refresh instead of being folded into the new baseline.
+					const saved = savedFilesRef.current;
+					savedFilesRef.current = null;
+					const previousBaseline = sameArch && hostBaselineRef.current
+						? (saved ? adoptSavedFiles(hostBaselineRef.current, saved.state, saved.files) : hostBaselineRef.current)
+						: null;
 					const projected = projectGraphSnapshotToArchitecture(incoming.graph, {
-						previousArchitecture: sameArch ? architectureRef.current : undefined,
+						previousArchitecture: sameArch ? refreshPrevious(previousBaseline, architectureRef.current) : undefined,
 						viewState: incoming.viewState,
 					});
 					setHostSnapshot(incoming.graph);
@@ -161,7 +170,7 @@ export function Studio() {
 					if (incoming.viewState?.viewports) {
 						viewport.current = { ...viewport.current, ...incoming.viewState.viewports };
 					}
-					dispatch({ type: sameArch ? 'rebase' : 'replace', architecture: projected.architecture });
+					dispatch(sameArch ? { type: 'rebase', architecture: projected.architecture, ...(previousBaseline ? { base: previousBaseline } : {}) } : { type: 'replace', architecture: projected.architecture });
 					setHostBaseline(projected.architecture);
 					hostBaselineRef.current = projected.architecture;
 					if (incoming.viewState?.selectedId && projected.architecture.resources.some(r => r.id === incoming.viewState?.selectedId)) {
@@ -192,16 +201,17 @@ export function Studio() {
 					registerServiceTypes(incoming.types);
 					break;
 				case 'resourceValues': {
-					// Show what the files say. Only before the user edits, so no canvas edit is replaced.
+					// Show what the files say: the values go into the baseline, and the canvas is rebased
+					// onto it, so file values appear without replacing any unsaved canvas edit.
 					const graph = hostGraphRef.current;
 					const parsed = parseResourceValues(incoming.values);
-					const current = architectureRef.current;
-					if (!graph || !parsed || parsed.sourceRevision !== graph.sourceRevision || incoming.sourceRevision !== graph.sourceRevision || current !== hostBaselineRef.current) {
+					const base = hostBaselineRef.current;
+					if (!graph || !base || !parsed || parsed.sourceRevision !== graph.sourceRevision || incoming.sourceRevision !== graph.sourceRevision) {
 						break;
 					}
-					const hydrated = hydrateResourceValues(current, graph, parsed.resources, parsed.variables);
-					if (hydrated !== current) {
-						dispatch({ type: 'rebase', architecture: hydrated });
+					const hydrated = hydrateResourceValues(base, graph, parsed.resources, parsed.variables);
+					if (hydrated !== base) {
+						dispatch({ type: 'rebase', architecture: hydrated, base });
 						setHostBaseline(hydrated);
 						hostBaselineRef.current = hydrated;
 					}
@@ -267,6 +277,7 @@ export function Studio() {
 						setSaveDialogOpen(false);
 						setSavePreview(null);
 						setSaveError(null);
+						savedFilesRef.current = { state: architectureRef.current, files: new Set([incoming.result.applied.fileName]) };
 						setMessage('Saved ' + incoming.result.applied.fileName + ' · rev ' + incoming.result.applied.newSourceRevision.slice(0, 8));
 						hostBridge.post({ type: 'refresh' });
 					} else {
@@ -289,6 +300,7 @@ export function Studio() {
 						setSaveAllOpen(false);
 						setSaveAllPreview(null);
 						setSaveAllError(null);
+						savedFilesRef.current = { state: architectureRef.current, files: new Set(incoming.result.applied.files.map(file => file.fileName)) };
 						setMessage('Saved ' + incoming.result.applied.files.map(file => file.fileName).join(', ') + ' · rev ' + incoming.result.applied.newSourceRevision.slice(0, 8));
 						hostBridge.post({ type: 'refresh' });
 					} else {

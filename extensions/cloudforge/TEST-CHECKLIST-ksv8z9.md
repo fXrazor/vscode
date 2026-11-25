@@ -8,7 +8,7 @@ Covers everything built in both repos on 25 November 2026 (updated for three-way
 - [ ] Rust: `node docs/protocol/fixtures/check-fixtures.mjs` reports the fixtures consistent.
 - [ ] Code OSS: build with the new service binary staged, then run the electron-main test `src/vs/code/test/electron-main/cloudForgeServiceChannel.test.ts`.
 - [ ] Code OSS: full type-check (`npm run compile` or the usual watch build). This covers `cloudForgeService.contribution.ts`, which couldn't be checked in the cloud.
-- [ ] Studio: `pnpm check` and tests (107 expected) in `extensions/cloudforge/studio`; extension tests (71 expected).
+- [ ] Studio: `pnpm check` and tests (110 expected) in `extensions/cloudforge/studio`; extension tests (71 expected).
 
 Use a test project with at least two architectures and one `.tf` file that has comments, a `tags = local.tags` line, a `lifecycle` block and a `dynamic` block.
 
@@ -78,8 +78,15 @@ Use a test project with at least two architectures and one `.tf` file that has c
 - [ ] Move a resource to another file (change its source file on the canvas, if your build offers it) and save all: it is removed from the old file and added to the new one, which is created if needed.
 - [ ] A large architecture (several hundred resources) still previews and saves (requests up to 2 MiB).
 
+## 7c. Canvas and files stay in step
+
+- [ ] Edit a field on the canvas and don't save. In the code editor, change a different value of the same resource in the `.tf` file and save the file. The canvas shows the new file value and still has your canvas edit.
+- [ ] Press Save: your canvas edit is written (it was not lost by the refresh).
+- [ ] Change the same field in both places: the file value wins on the canvas.
+- [ ] After saving, the top bar no longer shows unsaved changes once the refresh arrives, including for fields written as expressions.
+- [ ] Undo after a refresh: your canvas steps undo, and the file change stays.
+
 ## 8. Known gaps (not bugs)
 
-- If the graph refreshes while you have unsaved canvas edits, those edits count as already saved for the next three-way save. Save before refreshing.
 - Moving a resource between files works only through Save all (both files in one save); the single-file save still keeps the old block.
 - The schema check appears in the inspector's Code tab, not in the focused workspace's code pane.

@@ -145,7 +145,7 @@ export type Edit =
 
 export type Action = Edit | { type: 'undo' } | { type: 'redo' } | { type: 'replace'; architecture: Architecture }
 	/** A live refresh of the same architecture: keeps undo/redo, rebased onto the refreshed state. */
-	| { type: 'rebase'; architecture: Architecture };
+	| { type: 'rebase'; architecture: Architecture; base?: Architecture };
 
 export function createHistory(architecture: Architecture): History {
 	return { past: [], present: architecture, future: [] };
@@ -327,7 +327,7 @@ export function historyReducer(history: History, action: Action): History {
 		return createHistory(action.architecture);
 	}
 	if (action.type === 'rebase') {
-		return rebaseHistory(history, action.architecture);
+		return rebaseHistory(history, action.architecture, action.base);
 	}
 	if (action.type === 'undo') {
 		const previous = history.past.at(-1);

@@ -8,7 +8,7 @@ import { createHistory, historyReducer } from './model.ts';
 import { liveSchemaAttributes, liveSchemaBlocks, liveSchemaOutputs, type HostFormSchema } from './liveSchema.ts';
 import { additionalBlocks, editableFields } from './formDefinition.ts';
 import { architectureDiagnostics, isStaleDiagnostic } from './diagnostics.ts';
-import { sourceChanges, buildDraftSavePayload, changedFilePayloads, buildHostViewState, defaultTargetTfFile, projectGraphSnapshotToArchitecture, projectHostDiagnostics, resolveProviderRegions } from './serviceAdapter.ts';
+import { sourceChanges, buildDraftSavePayload, changedFilePayloads, refreshPrevious, adoptSavedFiles, buildHostViewState, defaultTargetTfFile, projectGraphSnapshotToArchitecture, projectHostDiagnostics, resolveProviderRegions } from './serviceAdapter.ts';
 import { projectResourceFiles } from './terraformProjection.ts';
 import { describeMerge } from './draftSaveMerge.ts';
 import { buildResourceDraft, parseSchemaPreview } from './resourceDraft.ts';
@@ -475,4 +475,26 @@ test('variables declared in the files become canvas variables and var. fields be
 	const hydrated = hydrateResourceValues(architecture, snapshot, parsed.resources, parsed.variables);
 	assert.deepEqual(hydrated.variables?.map(item => [item.name, item.type, item.sensitive, item.defaultValue]), [['space', 'list(string)', false, ['10.0.0.0/16']], ['key', 'string', true, undefined]]);
 	assert.match(codeFor(hydrated, 'network'), /address_space\s*=\s*var\.space/);
+});
+
+test('a refresh is projected from the file baseline plus resources that exist only on the canvas', () => {
+	const baseline = schemaSample();
+	const added = { ...baseline.resources[0], id: 'canvas-only', name: 'canvas-only' };
+	const edited = { ...baseline, resources: [...baseline.resources.map(resource => ({ ...resource, name: resource.name + '-edited' })), added] };
+	const previous = refreshPrevious(baseline, edited);
+	assert.equal(previous.resources.length, baseline.resources.length + 1);
+	assert.equal(previous.resources[0].name, baseline.resources[0].name, 'file baseline wins for known resources');
+	assert.equal(previous.resources.at(-1)?.id, 'canvas-only');
+	assert.equal(refreshPrevious(null, edited), edited);
+});
+
+test('after a save the saved files take the canvas version in the next baseline', () => {
+	const baseline = schemaSample();
+	const target = baseline.resources[0];
+	const saved = { ...baseline, resources: baseline.resources.map(resource => resource.id === target.id ? { ...resource, name: 'saved-name' } : resource) };
+	const file = projectResourceFiles(baseline)[0];
+	assert.equal(adoptSavedFiles(baseline, saved, new Set([file])).resources.find(resource => resource.id === target.id)?.name, 'saved-name');
+	assert.equal(adoptSavedFiles(baseline, saved, new Set(['other.tf'])).resources.find(resource => resource.id === target.id)?.name, target.name);
+	const deleted = { ...baseline, resources: baseline.resources.filter(resource => resource.id !== target.id) };
+	assert.equal(adoptSavedFiles(baseline, deleted, new Set([file])).resources.some(resource => resource.id === target.id), false);
 });

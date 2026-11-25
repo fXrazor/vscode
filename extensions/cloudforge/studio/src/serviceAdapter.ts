@@ -760,6 +760,49 @@ export function buildDraftSavePayload(
 	};
 }
 
+/**
+ * What a refresh of the same architecture is projected from: the last state the files said
+ * (`baseline`), not the canvas with its unsaved edits, so the new baseline stays a faithful copy
+ * of the files and the next three-way save still sees those edits. Resources and connections
+ * that exist only on the canvas (added and not yet reloaded) come from `present`, so a resource
+ * the user just saved keeps its canvas configuration when it first appears in the graph.
+ */
+export function refreshPrevious(baseline: Architecture | null | undefined, present: Architecture): Architecture {
+	if (!baseline || baseline === present) {
+		return present;
+	}
+	const resourceIds = new Set(baseline.resources.map(resource => resource.id));
+	const connectionIds = new Set(baseline.connections.map(connection => connection.id));
+	return {
+		...baseline,
+		resources: [...baseline.resources, ...present.resources.filter(resource => !resourceIds.has(resource.id))],
+		connections: [...baseline.connections, ...present.connections.filter(connection => !connectionIds.has(connection.id))],
+	};
+}
+
+/**
+ * After a save, the saved files say what the canvas said: resources of those files take the
+ * saved canvas version (and ones deleted on the canvas leave), so the next baseline treats them
+ * as saved even where `readResourceValues` cannot hydrate a value (expressions, bindings).
+ */
+export function adoptSavedFiles(baseline: Architecture, saved: Architecture, files: ReadonlySet<string>): Architecture {
+	const savedById = new Map(saved.resources.map(resource => [resource.id, resource]));
+	const inSavedFile = (resource: Architecture['resources'][number]) => files.has(resourceSourceFile(resource));
+	const resources = baseline.resources
+		.filter(resource => !inSavedFile(resource) || savedById.has(resource.id))
+		.map(resource => {
+			const mine = savedById.get(resource.id);
+			return mine && (inSavedFile(resource) || inSavedFile(mine)) ? mine : resource;
+		});
+	const known = new Set(resources.map(resource => resource.id));
+	for (const resource of saved.resources) {
+		if (!known.has(resource.id) && inSavedFile(resource)) {
+			resources.push(resource);
+		}
+	}
+	return { ...baseline, resources };
+}
+
 export type DraftSavePayload = ReturnType<typeof buildDraftSavePayload>;
 
 /**
