@@ -142,10 +142,6 @@ try {
 			await page.reload();
 			await page.getByLabel('Close resource library', { exact: true }).click();
 			if (theme === 'dark') { await page.getByLabel('Toggle light or dark theme').click(); }
-			// Isolate resize eligibility from overlapping edge hit areas in the sample diagram.
-			await page.locator('.canvas-options > summary').click();
-			await page.getByLabel('Show connections', { exact: true }).uncheck();
-			await page.locator('.canvas-options > summary').click();
 			await page.locator('main.canvas').focus(); await page.keyboard.press('Control+a');
 			const checkFrame = async technical => {
 				await page.waitForTimeout(200);

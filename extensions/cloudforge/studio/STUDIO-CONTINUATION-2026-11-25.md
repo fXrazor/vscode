@@ -11,7 +11,7 @@ Dale approved continuing the proposed point-endpoint pass in this chat. No furth
 ### Current work queue
 
 1. **Done:** shared clamped resize geometry between command and live preview; see the continuation pass below.
-2. Fix wide edge hit areas intercepting node-centre clicks while retaining accessible, selectable connections.
+2. **Done:** explicit canvas layering prevents nested edge hit areas intercepting node centres; see below.
 3. Implement the approved design endpoint union, loose-end drop choice, endpoint movement/reconnection, refresh/clipboard/delete/export behavior and semantic Undo/Redo.
 4. Run targeted tests, Studio check/build, both themes at 1360×860 and 1024×768 and hosted refresh regression on Windows Edge. Record results here and update the root HANDOFF index; commit bounded passes and push this feature branch.
 
@@ -24,6 +24,12 @@ Live installed Workbench/service save-refresh-Undo verification remains separate
 Extracted `resizeGeometry.ts`: the semantic resize command and selection preview now share per-element size limits, pixel rounding and fixed-corner correction. `resizeSelectionBoxes` supplies the same eligible dimensions/limits to both. This resolves the scale-clamp preview limitation from the previous iteration; proportional logical bounds for rotated drawings remain a separate limitation.
 
 Files: `resizeGeometry.ts`, `resizeGeometry.test.ts` (listed in package.json), `canvasOperations.ts`, `SelectionResizeHandle.tsx`, `DesignCanvas.tsx`, browser verification script. Fresh TypeScript/build passed; **114/114** Node tests, **20/20** Edge browser scenarios and hosted refresh **20/20**. The matrix includes dragging a maximum-size icon: the live box matches release instead of growing beyond the icon limit, in both requested sizes/themes. Zero console/page errors.
+
+### Continuation pass — node clicks take priority over edges
+
+React Flow's automatic sub-flow edge elevation caused the interception. Its installed v13 source (`EdgeWrapper` and `getElevatedEdgeZIndex`) and current Context7 docs confirmed the behavior. Studio now uses supported `zIndexMode="manual"` with its existing explicit frame/container/node layers. Edge hit areas remain available outside node bodies; keyboard edge focus remains supported.
+
+Fresh TypeScript/build and **114/114** Node tests passed. The real size/theme matrix passed **20/20** with connections visible throughout (the earlier workaround that hid connections was removed), including node-centre clicks and group resize. Hosted refresh passed **20/20**, with zero console/page errors. Files: `DesignCanvas.tsx`, `scripts/whiteboard-controls-verify.mjs`. No dependency or semantic model change in this pass.
 
 ## Historical Codex whiteboard continuation
 
