@@ -955,7 +955,10 @@ function optionalMerge(value: unknown): { merge?: DraftSaveMergeSummary } {
 	if (!updated || !added || !removed || !skipped) {
 		return {};
 	}
-	return { merge: { updated, added, removed, unchanged: value.unchanged, preserved: value.preserved, skipped } };
+	const renamed = Array.isArray(value.renamed)
+		? value.renamed.slice(0, 256).filter((item): item is { from: string; to: string } => isRecord(item) && isNonEmptyString(item.from, 512) && isNonEmptyString(item.to, 512)).map(({ from, to }) => ({ from, to }))
+		: [];
+	return { merge: { updated, added, removed, unchanged: value.unchanged, preserved: value.preserved, skipped, renamed } };
 }
 
 export function parseDraftSaveApply(value: unknown): DraftSaveApplyResult | undefined {

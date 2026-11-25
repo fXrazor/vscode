@@ -236,7 +236,7 @@ test('Stage 5 guarded save parsers and Webview protocol validation enforce stric
 		...focusedBase,
 		merge: { updated: ['aws_vpc.main'], added: [], removed: [], unchanged: 1, preserved: 2, skipped: [''] },
 	});
-	assert.deepEqual(focused?.merge, { updated: ['aws_vpc.main'], added: [], removed: [], unchanged: 1, preserved: 2, skipped: [] });
+	assert.deepEqual(focused?.merge, { updated: ['aws_vpc.main'], added: [], removed: [], unchanged: 1, preserved: 2, skipped: [], renamed: [] });
 	assert.equal(parseDraftSavePreview({ ...focusedBase, merge: { updated: 'x' } })?.merge, undefined);
 	assert.equal(parseDraftSavePreview({ ...focusedBase, focused: false, merge: { updated: [], added: [], removed: [], unchanged: 0, preserved: 0, skipped: [] } })?.merge, undefined);
 
@@ -470,4 +470,6 @@ test('draft save previews carry bounded canvas deletions', () => {
 	assert.deepEqual(parseWebviewMessage({ type: 'requestDraftSavePreview', fileName: 'main.tf', contents: '', removeAddresses: [] }), { type: 'requestDraftSavePreview', fileName: 'main.tf', contents: '' });
 	assert.equal(parseWebviewMessage({ type: 'requestDraftSavePreview', fileName: 'main.tf', contents: '', removeAddresses: [''] }), undefined);
 	assert.equal(parseWebviewMessage({ type: 'requestDraftSavePreview', fileName: 'main.tf', contents: '', removeAddresses: 'aws_vpc.old' }), undefined);
+	assert.deepEqual(parseWebviewMessage({ type: 'requestDraftSavePreview', fileName: 'main.tf', contents: '', renames: [{ from: 'a.b', to: 'a.c' }] }), { type: 'requestDraftSavePreview', fileName: 'main.tf', contents: '', renames: [{ from: 'a.b', to: 'a.c' }] });
+	assert.equal(parseWebviewMessage({ type: 'requestDraftSavePreview', fileName: 'main.tf', contents: '', renames: [{ from: 'a.b', to: 'a.c', extra: 1 }] }), undefined);
 });

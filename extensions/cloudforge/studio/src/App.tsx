@@ -382,7 +382,7 @@ export function Studio() {
 		setSaveError(null);
 		setSaveDialogOpen(true);
 		setSaving(true);
-		hostBridge.post({ type: 'requestDraftSavePreview', fileName: payload.fileName, contents: payload.contents, removeAddresses: payload.removeAddresses });
+		hostBridge.post({ type: 'requestDraftSavePreview', fileName: payload.fileName, contents: payload.contents, removeAddresses: payload.removeAddresses, renames: payload.renames });
 	}, [hostBridge, architecture, selectedId, hostSnapshot]);
 
 	const selectDraftSaveProjectFile = useCallback((nextFileName: string) => {
@@ -395,7 +395,7 @@ export function Studio() {
 		setSavePreview(null);
 		setSaveError(null);
 		setSaving(true);
-		hostBridge.post({ type: 'requestDraftSavePreview', fileName: payload.fileName, contents: payload.contents, removeAddresses: payload.removeAddresses });
+		hostBridge.post({ type: 'requestDraftSavePreview', fileName: payload.fileName, contents: payload.contents, removeAddresses: payload.removeAddresses, renames: payload.renames });
 	}, [hostBridge, architecture, selectedId, hostSnapshot]);
 
 	const refreshDraftSavePreview = useCallback(() => {
@@ -407,7 +407,7 @@ export function Studio() {
 		setSavePreview(null);
 		setSaveError(null);
 		setSaving(true);
-		hostBridge.post({ type: 'requestDraftSavePreview', fileName: payload.fileName, contents: payload.contents, removeAddresses: payload.removeAddresses });
+		hostBridge.post({ type: 'requestDraftSavePreview', fileName: payload.fileName, contents: payload.contents, removeAddresses: payload.removeAddresses, renames: payload.renames });
 	}, [hostBridge, architecture, saveFileName, selectedId, hostSnapshot]);
 
 	const applyHostDraftSave = useCallback(() => {

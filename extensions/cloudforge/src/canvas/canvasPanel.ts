@@ -54,7 +54,8 @@ export interface CanvasPanelHost {
 		expectedSourceRevision: string,
 		fileName: string,
 		contents: string,
-		removeAddresses?: readonly string[]
+		removeAddresses?: readonly string[],
+		renames?: readonly { readonly from: string; readonly to: string }[]
 	): Promise<{ readonly ok: true; readonly preview: DraftSavePreviewResult } | { readonly ok: false; readonly error: DraftSaveError }>;
 	onApplyDraftSave?(
 		workspaceId: string,
@@ -433,7 +434,8 @@ export class CloudForgeCanvasPanel implements Disposable {
 					graph.sourceRevision,
 					message.fileName,
 					message.contents,
-					message.removeAddresses
+					message.removeAddresses,
+					message.renames
 				);
 				if (!result.ok && result.error.code === 'STALE_SOURCE') {
 					this.setNotice({

@@ -15,10 +15,13 @@ export function describeMerge(merge: HostDraftSaveMerge): string[] {
 	if (merge.added.length) {
 		lines.push(`Adds ${merge.added.slice(0, 3).join(', ')}${merge.added.length > 3 ? ` and ${merge.added.length - 3} more` : ''}`);
 	}
+	for (const rename of (merge.renamed ?? []).slice(0, 3)) {
+		lines.push(`Renames ${rename.from} to ${rename.to} and adds a moved block`);
+	}
 	if (merge.removed.length) {
 		lines.push(`Removes ${merge.removed.join(', ')}`);
 	}
-	if (!merge.updated.length && !merge.added.length && !merge.removed.length) {
+	if (!merge.updated.length && !merge.added.length && !merge.removed.length && !merge.renamed?.length) {
 		lines.push('No changes to write');
 	}
 	const kept = merge.unchanged + merge.preserved;

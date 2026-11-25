@@ -8,7 +8,7 @@ import { createHistory, historyReducer } from './model.ts';
 import { liveSchemaAttributes, liveSchemaBlocks, liveSchemaOutputs, type HostFormSchema } from './liveSchema.ts';
 import { additionalBlocks, editableFields } from './formDefinition.ts';
 import { architectureDiagnostics, isStaleDiagnostic } from './diagnostics.ts';
-import { removedSourceAddresses, buildDraftSavePayload, buildHostViewState, defaultTargetTfFile, projectGraphSnapshotToArchitecture, projectHostDiagnostics, resolveProviderRegions } from './serviceAdapter.ts';
+import { sourceChanges, buildDraftSavePayload, buildHostViewState, defaultTargetTfFile, projectGraphSnapshotToArchitecture, projectHostDiagnostics, resolveProviderRegions } from './serviceAdapter.ts';
 import { projectResourceFiles } from './terraformProjection.ts';
 import { describeMerge } from './draftSaveMerge.ts';
 import { buildResourceDraft, parseSchemaPreview } from './resourceDraft.ts';
@@ -354,6 +354,7 @@ test('focused save summary says what changes and what is kept', () => {
 		'Keeps 3 other blocks exactly as written',
 		'Comments and fields the canvas does not show are kept',
 	]);
+	assert.ok(describeMerge({ updated: [], added: [], removed: [], unchanged: 0, preserved: 0, skipped: [], renamed: [{ from: 'a.b', to: 'a.c' }] }).includes('Renames a.b to a.c and adds a moved block'));
 	assert.deepEqual(describeMerge({ updated: [], added: [], removed: [], unchanged: 1, preserved: 0, skipped: ['a.b'] }), [
 		'No changes to write',
 		'Keeps 1 other block exactly as written',
@@ -392,8 +393,8 @@ test('focused saves remove only blocks deleted or renamed on the canvas', () => 
 			node('other-file', 'resource', 'azurerm_subnet', 'x', 'other.tf'),
 		],
 	};
-	assert.deepEqual(removedSourceAddresses(architecture, snapshot, 'main.tf'), ['azurerm_subnet.old', 'data.azurerm_client_config.current', 'module.net']);
+	assert.deepEqual(sourceChanges(architecture, snapshot, 'main.tf'), { removeAddresses: ['azurerm_subnet.old', 'data.azurerm_client_config.current', 'module.net'], renames: [] });
 	const renamed = { ...architecture, resources: architecture.resources.map(resource => resource.id === 'network' ? { ...resource, terraformName: 'hub' } : resource) };
-	assert.ok(removedSourceAddresses(renamed, snapshot, 'main.tf').includes('azurerm_virtual_network.' + (keep.terraformName ?? keep.name)));
-	assert.deepEqual(removedSourceAddresses(architecture, null, 'main.tf'), []);
+	assert.deepEqual(sourceChanges(renamed, snapshot, 'main.tf').renames, [{ from: 'azurerm_virtual_network.' + (keep.terraformName ?? keep.name), to: 'azurerm_virtual_network.hub' }]);
+	assert.deepEqual(sourceChanges(architecture, null, 'main.tf'), { removeAddresses: [], renames: [] });
 });

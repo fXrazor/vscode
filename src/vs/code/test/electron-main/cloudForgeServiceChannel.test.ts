@@ -408,6 +408,8 @@ suite('CloudForgeServiceChannel', () => {
 		assert.deepStrictEqual(validateCloudForgeServiceParams('previewFocusedSave', { ...draftBase, removeAddresses: ['aws_vpc.main'] }), { ...draftBase, removeAddresses: ['aws_vpc.main'] });
 		assert.strictEqual(validateCloudForgeServiceParams('previewFocusedSave', { ...draftBase, removeAddresses: [''] }), undefined);
 		assert.strictEqual(validateCloudForgeServiceParams('previewFocusedSave', { ...draftBase, removeAddresses: 'aws_vpc.main' }), undefined);
+		assert.deepStrictEqual(validateCloudForgeServiceParams('previewFocusedSave', { ...draftBase, renames: [{ from: 'a.b', to: 'a.c' }] }), { ...draftBase, renames: [{ from: 'a.b', to: 'a.c' }] });
+		assert.strictEqual(validateCloudForgeServiceParams('previewFocusedSave', { ...draftBase, renames: [{ from: 'a.b' }] }), undefined);
 		const { contents: _contents, ...focusedApply } = { ...draftBase, previewToken: 'save-0123456789abcdef0123456789abcdef' };
 		assert.ok(validateCloudForgeServiceParams('applyFocusedSave', focusedApply));
 		assert.strictEqual(validateCloudForgeServiceParams('applyFocusedSave', { ...focusedApply, contents: 'x' }), undefined);

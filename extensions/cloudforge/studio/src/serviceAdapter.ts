@@ -682,34 +682,54 @@ export function defaultTargetTfFile(architecture: Architecture, selectedResource
 }
 
 /** Generate a guarded `.tf` draft payload scoped to the corresponding project `.tf` file. */
+/** Terraform identifier the projection writes for a canvas name (mirrors terraformProjection). */
+function terraformIdentifier(resource: Pick<Resource, 'name' | 'terraformName'>): string {
+	if (resource.terraformName) {
+		return resource.terraformName;
+	}
+	const cleaned = resource.name.replace(/[^A-Za-z0-9_-]/g, '_');
+	return /^[A-Za-z_]/.test(resource.name) ? cleaned : '_' + cleaned;
+}
+
+export interface SourceChanges {
+	/** Blocks in the file on disk that were deleted on the canvas. */
+	readonly removeAddresses: readonly string[];
+	/** Blocks renamed on the canvas; the service renames them in place and writes `moved`. */
+	readonly renames: readonly { readonly from: string; readonly to: string }[];
+}
+
 /**
- * Terraform addresses in `fileName` on disk that the canvas no longer has: resources deleted on
- * the canvas, and the old address of resources renamed on it. A focused save removes these
- * blocks; everything else the canvas does not generate is kept as written.
+ * What the canvas changed in `fileName` compared with the host graph: deleted blocks and renamed
+ * blocks. A focused save applies these; everything else the canvas does not generate is kept.
  */
-export function removedSourceAddresses(architecture: Architecture, snapshot: HostGraphSnapshot | null | undefined, fileName: string): string[] {
+export function sourceChanges(architecture: Architecture, snapshot: HostGraphSnapshot | null | undefined, fileName: string): SourceChanges {
+	const removeAddresses: string[] = [];
+	const renames: { from: string; to: string }[] = [];
 	if (!snapshot) {
-		return [];
+		return { removeAddresses, renames };
 	}
 	const current = new Map(architecture.resources.map(resource => [resource.id, resource]));
-	const removed: string[] = [];
+	const address = (kind: string, type: string | null, name: string) =>
+		kind === 'resource' && type ? `${type}.${name}` : kind === 'data' && type ? `data.${type}.${name}` : kind === 'module' ? `module.${name}` : undefined;
 	for (const node of snapshot.nodes) {
 		if (!node.hasSource || node.sourceFile !== fileName) {
 			continue;
 		}
-		const address = node.kind === 'resource' && node.resourceType ? `${node.resourceType}.${node.name}`
-			: node.kind === 'data' && node.resourceType ? `data.${node.resourceType}.${node.name}`
-				: node.kind === 'module' ? `module.${node.name}` : undefined;
-		if (!address) {
+		const from = address(node.kind, node.resourceType, node.name);
+		if (!from) {
 			continue;
 		}
 		const resource = current.get(node.id);
-		const renamed = resource && node.kind !== 'data' && (resource.terraformName ?? resource.name) !== node.name;
-		if (!resource || renamed) {
-			removed.push(address);
+		if (!resource) {
+			removeAddresses.push(from);
+			continue;
+		}
+		const name = terraformIdentifier(resource);
+		if (node.kind !== 'data' && name !== node.name) {
+			renames.push({ from, to: address(node.kind, node.resourceType, name)! });
 		}
 	}
-	return removed.slice(0, 256);
+	return { removeAddresses: removeAddresses.slice(0, 256), renames: renames.slice(0, 256) };
 }
 
 export function buildDraftSavePayload(
@@ -717,7 +737,7 @@ export function buildDraftSavePayload(
 	fileName?: string,
 	selectedResourceId?: string,
 	snapshot?: HostGraphSnapshot | null
-): { readonly fileName: string; readonly contents: string; readonly removeAddresses: readonly string[] } {
+): { readonly fileName: string; readonly contents: string } & SourceChanges {
 	const safeName = fileName && /^[A-Za-z0-9._-]+\.tf$/i.test(fileName) && !fileName.startsWith('.')
 		? fileName
 		: defaultTargetTfFile(architecture, selectedResourceId);
@@ -728,7 +748,7 @@ export function buildDraftSavePayload(
 	return {
 		fileName: safeName,
 		contents,
-		removeAddresses: removedSourceAddresses(architecture, snapshot, safeName),
+		...sourceChanges(architecture, snapshot, safeName),
 	};
 }
 

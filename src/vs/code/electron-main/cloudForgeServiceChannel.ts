@@ -478,15 +478,20 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 		}
 		case 'previewFocusedSave': {
 			const removeAddresses = value.removeAddresses;
+			const renames = value.renames;
 			if (
-				!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'expectedSourceRevision', 'fileName', 'contents', 'removeAddresses']) ||
+				!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'expectedSourceRevision', 'fileName', 'contents', 'removeAddresses', 'renames']) ||
 				!isOpaqueId(value.workspaceId) ||
 				!isOpaqueId(value.architectureId) ||
 				typeof value.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(value.expectedSourceRevision) ||
 				!isPathComponent(value.fileName) || value.fileName.startsWith('.') || !value.fileName.toLowerCase().endsWith('.tf') || value.fileName.length <= 3 ||
 				typeof value.contents !== 'string' || Buffer.byteLength(value.contents, 'utf8') > maxDraftBytes ||
 				(removeAddresses !== undefined && (!Array.isArray(removeAddresses) || removeAddresses.length > 256 ||
-					!removeAddresses.every(address => typeof address === 'string' && address.length > 0 && address.length <= 512)))
+					!removeAddresses.every(address => typeof address === 'string' && address.length > 0 && address.length <= 512))) ||
+				(renames !== undefined && (!Array.isArray(renames) || renames.length > 256 ||
+					!renames.every(rename => isRecord(rename) && hasOnlyKeys(rename, ['from', 'to']) &&
+						typeof rename.from === 'string' && rename.from.length > 0 && rename.from.length <= 512 &&
+						typeof rename.to === 'string' && rename.to.length > 0 && rename.to.length <= 512)))
 			) {
 				return undefined;
 			}
@@ -496,7 +501,8 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 				expectedSourceRevision: value.expectedSourceRevision,
 				fileName: value.fileName,
 				contents: value.contents,
-				...(removeAddresses === undefined ? {} : { removeAddresses: [...removeAddresses as string[]] })
+				...(removeAddresses === undefined ? {} : { removeAddresses: [...removeAddresses as string[]] }),
+				...(renames === undefined ? {} : { renames: (renames as { from: string; to: string }[]).map(({ from, to }) => ({ from, to })) })
 			};
 		}
 		case 'applyFocusedSave': {

@@ -124,6 +124,7 @@ export interface DraftSaveMergeSummary {
 	readonly unchanged: number;
 	readonly preserved: number;
 	readonly skipped: readonly string[];
+	readonly renamed: readonly { readonly from: string; readonly to: string }[];
 }
 
 export interface DraftSaveApplyResult {
@@ -458,7 +459,7 @@ export type WebviewToExtensionMessage =
 	| { readonly type: 'viewState'; readonly state: CanvasViewState }
 	| { readonly type: 'requestValidation'; readonly scope: 'architecture' | 'resource'; readonly nodeId?: string }
 	| { readonly type: 'cancelValidation' }
-	| { readonly type: 'requestDraftSavePreview'; readonly fileName: string; readonly contents: string; readonly removeAddresses?: readonly string[] }
+	| { readonly type: 'requestDraftSavePreview'; readonly fileName: string; readonly contents: string; readonly removeAddresses?: readonly string[]; readonly renames?: readonly { readonly from: string; readonly to: string }[] }
 	| { readonly type: 'applyDraftSave'; readonly fileName: string; readonly contents: string; readonly previewToken: string }
 	| { readonly type: 'requestSchema'; readonly kind: 'resource' | 'dataSource'; readonly typeName: string }
 	| { readonly type: 'requestModule'; readonly modulePath: readonly string[] }
@@ -911,12 +912,19 @@ export function parseWebviewMessage(value: unknown): WebviewToExtensionMessage |
 			}
 			{
 				const remove = value.removeAddresses;
-				if (remove !== undefined && (!Array.isArray(remove) || remove.length > 256 || !remove.every(item => typeof item === 'string' && item.length > 0 && item.length <= 512))) {
+				const renames = value.renames;
+				const isAddress = (item: unknown) => typeof item === 'string' && item.length > 0 && item.length <= 512;
+				if (remove !== undefined && (!Array.isArray(remove) || remove.length > 256 || !remove.every(isAddress))) {
+					return undefined;
+				}
+				if (renames !== undefined && (!Array.isArray(renames) || renames.length > 256 || !renames.every(item =>
+					typeof item === 'object' && item !== null && Object.keys(item).length === 2 && isAddress((item as { from?: unknown }).from) && isAddress((item as { to?: unknown }).to)))) {
 					return undefined;
 				}
 				return {
 					type: 'requestDraftSavePreview', fileName: value.fileName, contents: value.contents,
 					...(Array.isArray(remove) && remove.length ? { removeAddresses: [...remove as string[]] } : {}),
+					...(Array.isArray(renames) && renames.length ? { renames: (renames as { from: string; to: string }[]).map(({ from, to }) => ({ from, to })) } : {}),
 				};
 			}
 		case 'applyDraftSave':
