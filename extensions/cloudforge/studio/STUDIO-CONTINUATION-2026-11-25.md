@@ -8,6 +8,12 @@ Worktree: `C:/Users/dalep/.codex/worktrees/infrastructure-studio/CloudForge-Code
 
 Dale approved continuing the proposed point-endpoint pass in this chat. No further approval is needed for that plan. Work remains within Studio and handoff documentation; one architecture and one semantic undo history, independent theme/viewport/tool preferences, drawings excluded from Terraform and Rust-owned guarded I/O remain binding.
 
+### Provider intelligence research — complete before Technical View implementation
+
+Starting revision `64d86b5d17d`. The new request is to resolve overlapping technical cards using real provider semantics. [Research and design decision](research/provider-intelligence.md) covers Terraform Core, Azure/AWS/Google Cloud/Kubernetes, relationship taxonomy, dependency/attachment pitfalls, conditional architecture patterns and the size-aware presentation layout decision. Source manifest: 88 pinned primary documents and SHA-256 hashes. Registry: 4,092 records covering all 4,078 catalogue entries; 87 documented profiles, 4,005 explicitly unreviewed. AWS research revision is not a workspace 6.73.1 compatibility claim. Kubernetes paths are manifest-only; no provider support is added.
+
+Fresh research verification: all 88 local capture hashes match; four registry coverage/provenance/semantics tests pass; Studio TypeScript passes. No Technical View rendering or architecture behavior was changed in this research commit. Next: implement measured, compound automatic spacing as presentation state; shared-delta movement/Undo; field-evidenced categorized relationships and configured-impact context. Then reproduce the 19-resource overlap case and run targeted browser/regression verification. Preserve the existing backlog below.
+
 ### Current work queue
 
 1. **Done:** shared clamped resize geometry between command and live preview; see the continuation pass below.
