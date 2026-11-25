@@ -37,6 +37,7 @@
 	"command.explainResource": "Explain Resource…",
 	"command.revealNodeInCanvas": "Reveal Resource in Canvas",
 	"config.editor.codeLens": "Show inline CloudForge Canvas and resource actions above Terraform blocks.",
+	"config.plan.useLinkedCloudAccounts": "Run Plan with the project's linked cloud accounts (after checking each one's sign-in) when the architecture uses that cloud. Turn off to always plan credential-free.",
 	"command.importProviderSchema": "Import Provider Schema Snapshot…",
 	"command.openProjectGallery": "Browse Project Architectures",
 	"command.extractMirrorSchema": "Extract Provider Schema from Local Mirror…",

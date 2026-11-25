@@ -51,6 +51,11 @@
 					"type": "boolean",
 					"default": true,
 					"description": "%config.editor.codeLens%"
+				},
+				"cloudforge.plan.useLinkedCloudAccounts": {
+					"type": "boolean",
+					"default": true,
+					"description": "%config.plan.useLinkedCloudAccounts%"
 				}
 			}
 		},

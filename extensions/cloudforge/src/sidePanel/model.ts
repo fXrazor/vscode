@@ -511,3 +511,24 @@ document.addEventListener('click', event => {
 </body>
 </html>`;
 }
+
+/**
+ * Providers a plan should run signed in for: those the graph's resources use that also have a
+ * linked connection in this project. Order follows CLOUD_PROVIDERS so the request is stable.
+ */
+export function planCloudProviders(resourceTypes: readonly (string | null | undefined)[], connections: readonly CloudConnection[]): CloudProvider[] {
+	const used = new Set<CloudProvider>();
+	for (const type of resourceTypes) {
+		if (!type) {
+			continue;
+		}
+		if (type.startsWith('azurerm_') || type.startsWith('azapi_')) {
+			used.add('azure');
+		} else if (type.startsWith('aws_')) {
+			used.add('aws');
+		} else if (type.startsWith('google_')) {
+			used.add('google');
+		}
+	}
+	return CLOUD_PROVIDERS.filter(provider => used.has(provider) && connections.some(connection => connection.provider === provider && connection.linked));
+}

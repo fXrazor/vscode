@@ -22,6 +22,7 @@ import type {
 	CanvasEnginePlanActionKind,
 	CanvasEnginePlanOutputChange,
 	CanvasEnginePlanReport,
+	CanvasPlanCloudTarget,
 	CanvasEnginePlanResourceChange,
 	CanvasEnginePlanSummary,
 	CanvasEngineValidateDiagnostic,
@@ -1048,13 +1049,23 @@ export function parseSaveAllApply(value: unknown): SaveAllApplyResult | undefine
 	return { files, newSourceRevision: value.newSourceRevision };
 }
 
-export function draftSaveErrorMessage(code: string): DraftSaveError {
+/**
+ * `linkedRepository` is set only when the open project lists the architecture as one imported
+ * from a repository. Every other SCOPE_DENIED means the canvas holds ids the service no longer
+ * grants: CloudForge reconnected to the project, or another architecture became active.
+ */
+export function draftSaveErrorMessage(code: string, options: { readonly linkedRepository?: boolean } = {}): DraftSaveError {
 	switch (code) {
 		case 'SCOPE_DENIED':
-			return {
-				code,
-				message: 'Imported repositories are read-only in CloudForge. Save changes in a local project architecture or edit the repository in source control.',
-			};
+			return options.linkedRepository
+				? {
+					code,
+					message: 'This architecture is linked to an imported repository, and CloudForge does not write into linked repositories yet. Edit the files in the repository, or import a copy into the project to edit it on the canvas.',
+				}
+				: {
+					code,
+					message: 'This canvas lost its link to the open project, usually because CloudForge reconnected to the project folder. Reopen the architecture from the CloudForge panel, then save again.',
+				};
 		case 'STALE_SOURCE':
 			return {
 				code,
@@ -1727,8 +1738,19 @@ export function parseEnginePlanReport(value: unknown): CanvasEnginePlanReport | 
 
 	const diagnostics = parseValidateDiagnostics(value.diagnostics, MAX_PLAN_DIAGNOSTICS);
 	const formatVersion = isNonEmptyString(value.formatVersion, 32) ? value.formatVersion : undefined;
+	const cloudTargets: CanvasPlanCloudTarget[] = [];
+	for (const item of Array.isArray(value.cloudTargets) ? value.cloudTargets.slice(0, 16) : []) {
+		if (cloudTargets.length < 3 && isRecord(item) && (item.provider === 'azure' || item.provider === 'aws' || item.provider === 'google') && !cloudTargets.some(target => target.provider === item.provider)) {
+			cloudTargets.push({
+				provider: item.provider,
+				...(isNonEmptyString(item.signedInAs, 128) ? { signedInAs: item.signedInAs } : {}),
+				...(isNonEmptyString(item.targetName, 128) ? { targetName: item.targetName } : {}),
+			});
+		}
+	}
 
 	return {
+		...(cloudTargets.length > 0 ? { cloudTargets } : {}),
 		sourceRevision: value.sourceRevision,
 		engine: value.engine,
 		engineVersion: value.engineVersion,
@@ -1751,8 +1773,12 @@ export function formatEnginePlanReportText(report: CanvasEnginePlanReport, archi
 	const lines: string[] = [
 		`CloudForge Local Plan (${architectureName})`,
 		`Engine: ${engineLabel} ${report.engineVersion}${report.engineInferred ? ' (inferred)' : ''} · rev ${report.sourceRevision.slice(0, 8)} · ${report.durationMs} ms`,
-		`Status: ${report.status === 'planned' ? (report.errored ? 'planned (errored)' : 'planned') : 'failed'} (credential-free, -refresh=false -lock=false, zero workspace files written)`,
+		`Status: ${report.status === 'planned' ? (report.errored ? 'planned (errored)' : 'planned') : 'failed'} (${report.cloudTargets?.length ? 'with linked cloud accounts, read-only' : 'credential-free'}, -refresh=false -lock=false, zero workspace files written)`,
 	];
+	for (const target of report.cloudTargets ?? []) {
+		const provider = target.provider === 'azure' ? 'Azure' : target.provider === 'aws' ? 'AWS' : 'Google Cloud';
+		lines.push(`Cloud: ${provider}${target.targetName ? ` · ${target.targetName}` : ''}${target.signedInAs ? ` · signed in as ${target.signedInAs}` : ''}`);
+	}
 	if (report.status === 'planned') {
 		const s = report.summary;
 		lines.push(`Summary: +${s.create} create · ~${s.update} update · +/-${s.replace} replace · -${s.delete} delete · ${s.read} read · ${s.noOp} no-op (${s.total} total)`);

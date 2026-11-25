@@ -8,7 +8,7 @@ Covers everything built in both repos on 25 November 2026 (updated for three-way
 - [ ] Rust: `node docs/protocol/fixtures/check-fixtures.mjs` reports the fixtures consistent.
 - [ ] Code OSS: build with the new service binary staged, then run the electron-main test `src/vs/code/test/electron-main/cloudForgeServiceChannel.test.ts`.
 - [ ] Code OSS: full type-check (`npm run compile` or the usual watch build). This covers `cloudForgeService.contribution.ts`, which couldn't be checked in the cloud.
-- [ ] Studio: `pnpm check` and tests (142 expected) in `extensions/cloudforge/studio`; extension tests (102 expected).
+- [ ] Studio: `pnpm check` and tests (142 expected) in `extensions/cloudforge/studio`; extension tests (104 expected).
 
 Use a test project with at least two architectures and one `.tf` file that has comments, a `tags = local.tags` line, a `lifecycle` block and a `dynamic` block.
 
@@ -157,7 +157,23 @@ Use a test project with at least two architectures and one `.tf` file that has c
 - [ ] **Terraform State → Resources in state** rows show the same service icons.
 - [ ] Do the same with an AWS and a Google architecture.
 
+## 10f. Plan with linked cloud accounts (Stage 11E)
+
+- [ ] Link Azure to the project (side panel) and sign in with `az login` to the linked subscription. Open an Azure architecture and run **Run Local Plan**. The progress says "Running local plan", and the **CloudForge Plan** output says "with linked cloud accounts, read-only" and a line "Cloud: Azure · <subscription> · signed in as <you>". A provider block with no credentials of its own now gets past provider configuration.
+- [ ] Sign in to a different subscription than the link (`az account set`), then run the plan again. It stops before running, with **Check Sign-In** and **Plan Without Cloud**. Check Sign-In opens the side panel's check for Azure; Plan Without Cloud runs the old credential-free plan.
+- [ ] Turn off **Settings → CloudForge → Plan: Use Linked Cloud Accounts**. The plan runs credential-free again, and the output says "credential-free".
+- [ ] An architecture with only AWS resources and only Azure linked runs credential-free (only providers the graph uses and that are linked are passed).
+- [ ] Nothing in the Plan output, notifications or logs shows a key, token or secret.
+
+## 10g. Saving after CloudForge reconnects
+
+- [ ] Open an architecture on the canvas and make a change without saving. Reconnect the project (close and reopen the folder in the same window, or run **CloudForge: Open Project** again) while the canvas stays open. Save from the canvas. The preview and save work without reopening, and the canvas shows the new revision.
+- [ ] If the save still can't find the architecture (for example it was renamed), the message says "This canvas lost its link to the open project… Reopen the architecture", not "Imported repositories are read-only".
+- [ ] On an architecture imported with **Import Terraform from Folder…** (a linked repository), saving says it is linked to an imported repository and suggests importing a copy.
+
 ## 8. Known gaps (not bugs)
 
 - Moving a resource between files works only through Save all (both files in one save); the single-file save still keeps the old block.
 - The schema check appears in the inspector's Code tab, not in the focused workspace's code pane.
+- Linked repository architectures (Import Terraform from Folder…) are still read-only. The product spec now proposes allowing guarded saves into them and adding import-as-copy; that waits for Dale's decision.
+- Validate, plan and other canvas actions don't yet reconnect a stale canvas the way saves do; reopen the architecture if they report it isn't active.

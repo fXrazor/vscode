@@ -58,6 +58,7 @@ import { isValidTfFileName, type CanvasCatalogueSnapshot, type CanvasCatalogueTy
 import { lookupBundledSchema, type FormSchema } from './canvas/schemaForm';
 import { findTemplateById } from './canvas/templateLibrary';
 import { activateSidePanel } from './sidePanel/sidePanel';
+import { parseCloudConnections, planCloudProviders, type CloudProvider } from './sidePanel/model';
 import {
 	draftSaveErrorMessage,
 	formatEnginePlanReportText,
@@ -600,6 +601,52 @@ export function activate(context: ExtensionContext): void {
 	const projectControllerRef: { current?: ReturnType<typeof activateProjects> } = {};
 	const terraformProvidersRef: { current?: ReturnType<typeof registerTerraformEditorProviders> } = {};
 
+	interface WritableTarget { readonly workspaceId: string; readonly architectureId: string }
+	type WritableCall = (target: WritableTarget) => Promise<ServiceResult<unknown>>;
+
+	/**
+	 * The service mints new workspace and architecture ids each time CloudForge connects to a
+	 * project, so a canvas opened before a reconnect holds ids it no longer grants and every save
+	 * fails with SCOPE_DENIED. Map the canvas to the same local architecture in the open project,
+	 * select it, and let the caller retry. Linked repository architectures are reported instead.
+	 */
+	async function recoverWritableTarget(stale: WritableTarget): Promise<WritableTarget | 'linkedRepository' | undefined> {
+		const project = projectControllerRef.current?.current;
+		if (!project) {
+			return undefined;
+		}
+		const sameWorkspace = project.workspaceId === stale.workspaceId;
+		const matches = sameWorkspace
+			? project.architectures.filter(item => item.architectureId === stale.architectureId)
+			: project.architectures.filter(item => item.displayName === currentArchitectureName);
+		if (matches.length !== 1) {
+			return undefined;
+		}
+		const architecture = matches[0];
+		if (architecture.source === 'repository') {
+			return 'linkedRepository';
+		}
+		const target = { workspaceId: project.workspaceId, architectureId: architecture.architectureId };
+		const selected = await callService<unknown>('selectArchitecture', { ...target });
+		return selected.ok ? target : undefined;
+	}
+
+	/** Runs a save call, retrying once against the recovered target after a SCOPE_DENIED. */
+	async function callWritable(target: WritableTarget, call: WritableCall): Promise<{ readonly result: ServiceResult<unknown>; readonly target: WritableTarget; readonly linkedRepository: boolean }> {
+		const result = await call(target);
+		if (result.ok || result.error.code !== 'SCOPE_DENIED') {
+			return { result, target, linkedRepository: false };
+		}
+		const recovered = await recoverWritableTarget(target);
+		if (recovered === 'linkedRepository') {
+			return { result, target, linkedRepository: true };
+		}
+		if (!recovered) {
+			return { result, target, linkedRepository: false };
+		}
+		return { result: await call(recovered), target: recovered, linkedRepository: false };
+	}
+
 	function toVsSeverity(raw: string): DiagnosticSeverity {
 		const lower = raw.toLowerCase();
 		if (lower === 'error') {
@@ -847,15 +894,25 @@ export function activate(context: ExtensionContext): void {
 		workspaceId: string,
 		architectureId: string,
 		sourceRevision: string,
-		engine?: 'openTofu' | 'terraform'
+		engine?: 'openTofu' | 'terraform',
+		cloud: 'linked' | 'off' = 'linked'
 	) {
+		const cloudProviders = cloud === 'linked' ? await linkedPlanProviders(workspaceId) : [];
 		const result = await callService<unknown>('runEnginePlan', {
 			workspaceId,
 			architectureId,
 			expectedSourceRevision: sourceRevision,
 			...(engine ? { engine } : {}),
+			...(cloudProviders.length ? { cloudProviders } : {}),
 		});
 		if (!result.ok) {
+			if (result.error.code === 'INVALID_STATE' && cloudProviders.length) {
+				return {
+					ok: false as const,
+					cloudProviders,
+					message: l10n.t('A linked cloud account is not signed in as its link expects, so the plan did not run. Check the sign-in, or plan without cloud access.'),
+				};
+			}
 			const message = result.error.code === 'STALE_SOURCE'
 				? l10n.t('The Terraform source changed on disk. Refresh the graph before running a local plan.')
 				: result.error.code === 'WORKSPACE_UNAVAILABLE'
@@ -871,6 +928,24 @@ export function activate(context: ExtensionContext): void {
 		}
 		syncProblems(provider.getGraph(), report);
 		return { ok: true as const, report };
+	}
+
+	/**
+	 * Cloud providers to plan with: those the open graph uses that are linked to this project,
+	 * unless the user turned linked accounts off for plans. The service checks each sign-in
+	 * against its link before any CLI sees credentials.
+	 */
+	async function linkedPlanProviders(workspaceId: string): Promise<CloudProvider[]> {
+		if (!workspace.getConfiguration('cloudforge').get<boolean>('plan.useLinkedCloudAccounts', true)) {
+			return [];
+		}
+		const resourceTypes = provider.getGraph()?.nodes.map(node => node.resourceType) ?? [];
+		if (!resourceTypes.some(type => type)) {
+			return [];
+		}
+		const listed = await callService<unknown>('listCloudConnections', { workspaceId });
+		const connections = listed.ok ? parseCloudConnections(listed.value) : undefined;
+		return connections ? planCloudProviders(resourceTypes, connections) : [];
 	}
 
 	async function checkArchitectureOfflineMirrorReadiness(
@@ -933,16 +1008,29 @@ export function activate(context: ExtensionContext): void {
 		}
 	}
 
-	async function runAndPresentLocalPlan(graph: ArchitectureGraph): Promise<void> {
+	async function runAndPresentLocalPlan(graph: ArchitectureGraph, cloud: 'linked' | 'off' = 'linked'): Promise<void> {
 		const outcome = await window.withProgress(
 			{
 				location: ProgressLocation.Notification,
-				title: l10n.t('CloudForge: Running credential-free local plan for {0}…', currentArchitectureName),
+				title: cloud === 'linked'
+					? l10n.t('CloudForge: Running local plan for {0}…', currentArchitectureName)
+					: l10n.t('CloudForge: Running credential-free local plan for {0}…', currentArchitectureName),
 				cancellable: false,
 			},
-			() => runArchitectureEnginePlan(graph.workspaceId, graph.architectureId, graph.sourceRevision)
+			() => runArchitectureEnginePlan(graph.workspaceId, graph.architectureId, graph.sourceRevision, undefined, cloud)
 		);
 		if (!outcome.ok) {
+			if ('cloudProviders' in outcome && outcome.cloudProviders?.length) {
+				const check = l10n.t('Check Sign-In');
+				const withoutCloud = l10n.t('Plan Without Cloud');
+				const picked = await window.showErrorMessage(outcome.message, check, withoutCloud);
+				if (picked === check) {
+					await commands.executeCommand('cloudforge.checkCloudSignIn', outcome.cloudProviders[0]);
+				} else if (picked === withoutCloud) {
+					await runAndPresentLocalPlan(graph, 'off');
+				}
+				return;
+			}
 			void window.showErrorMessage(outcome.message);
 			return;
 		}
@@ -1272,18 +1360,18 @@ export function activate(context: ExtensionContext): void {
 			// Focused save first: the service folds the canvas draft into the file on disk and keeps
 			// comments and fields the canvas does not show. If the file on disk does not parse, fall
 			// back to the whole-file preview so the user can still save.
-			const params = { workspaceId, architectureId, expectedSourceRevision, fileName, contents };
-			let result = await callService<unknown>('previewFocusedSave', {
-				...params,
+			const focused = await callWritable({ workspaceId, architectureId }, target => callService<unknown>('previewFocusedSave', {
+				...target, expectedSourceRevision, fileName, contents,
 				...(removeAddresses?.length ? { removeAddresses: [...removeAddresses] } : {}),
 				...(renames?.length ? { renames: renames.map(({ from, to }) => ({ from, to })) } : {}),
 				...(baseContents !== undefined ? { baseContents } : {}),
-			});
+			}));
+			let result = focused.result;
 			if (!result.ok && (result.error.code === 'UNSUPPORTED_FORMAT' || result.error.code === 'INVALID_PARAMS')) {
-				result = await callService<unknown>('previewDraftSave', params);
+				result = await callService<unknown>('previewDraftSave', { ...focused.target, expectedSourceRevision, fileName, contents });
 			}
 			if (!result.ok) {
-				return { ok: false, error: draftSaveErrorMessage(result.error.code) };
+				return { ok: false, error: draftSaveErrorMessage(result.error.code, { linkedRepository: focused.linkedRepository }) };
 			}
 			const preview = parseDraftSavePreview(result.value);
 			if (!preview) {
@@ -1296,11 +1384,12 @@ export function activate(context: ExtensionContext): void {
 			// A focused preview holds the merged text in the service; only the token goes back.
 			const focused = focusedSaveToken !== undefined && focusedSaveToken === previewToken;
 			focusedSaveToken = undefined;
-			const result = focused
-				? await callService<unknown>('applyFocusedSave', { workspaceId, architectureId, expectedSourceRevision, fileName, previewToken })
-				: await callService<unknown>('applyDraftSave', { workspaceId, architectureId, expectedSourceRevision, fileName, contents, previewToken });
+			const call = await callWritable({ workspaceId, architectureId }, target => focused
+				? callService<unknown>('applyFocusedSave', { ...target, expectedSourceRevision, fileName, previewToken })
+				: callService<unknown>('applyDraftSave', { ...target, expectedSourceRevision, fileName, contents, previewToken }));
+			const result = call.result;
 			if (!result.ok) {
-				return { ok: false, error: draftSaveErrorMessage(result.error.code) };
+				return { ok: false, error: draftSaveErrorMessage(result.error.code, { linkedRepository: call.linkedRepository }) };
 			}
 			const applied = parseDraftSaveApply(result.value);
 			if (!applied) {
@@ -1308,7 +1397,7 @@ export function activate(context: ExtensionContext): void {
 			}
 			// Re-read the architecture so both the native CloudForge Graph tree and Canvas reflect
 			// the newly saved file and updated sourceRevision.
-			const refreshed = await showGraph(provider, treeView, workspaceId, architectureId);
+			const refreshed = await showGraph(provider, treeView, call.target.workspaceId, call.target.architectureId);
 			if (refreshed) {
 				updateStatusBar(refreshed);
 				syncProblems(refreshed);
@@ -1321,8 +1410,8 @@ export function activate(context: ExtensionContext): void {
 			return { ok: true, applied };
 		},
 		async onPreviewSaveAll(workspaceId, architectureId, expectedSourceRevision, files) {
-			const result = await callService<unknown>('previewFocusedSaveBatch', {
-				workspaceId, architectureId, expectedSourceRevision,
+			const call = await callWritable({ workspaceId, architectureId }, target => callService<unknown>('previewFocusedSaveBatch', {
+				...target, expectedSourceRevision,
 				files: files.map(file => ({
 					fileName: file.fileName,
 					contents: file.contents,
@@ -1330,24 +1419,26 @@ export function activate(context: ExtensionContext): void {
 					...(file.renames?.length ? { renames: file.renames.map(({ from, to }) => ({ from, to })) } : {}),
 					...(file.baseContents !== undefined ? { baseContents: file.baseContents } : {}),
 				})),
-			});
+			}));
+			const result = call.result;
 			if (!result.ok) {
-				return { ok: false, error: draftSaveErrorMessage(result.error.code) };
+				return { ok: false, error: draftSaveErrorMessage(result.error.code, { linkedRepository: call.linkedRepository }) };
 			}
 			const preview = parseSaveAllPreview(result.value);
 			return preview ? { ok: true, preview } : { ok: false, error: draftSaveErrorMessage('SERVICE_ERROR') };
 		},
 		async onApplySaveAll(workspaceId, architectureId, expectedSourceRevision, previewToken) {
 			// The merged text of every file stays in the service; only the token goes back.
-			const result = await callService<unknown>('applyFocusedSaveBatch', { workspaceId, architectureId, expectedSourceRevision, previewToken });
+			const call = await callWritable({ workspaceId, architectureId }, target => callService<unknown>('applyFocusedSaveBatch', { ...target, expectedSourceRevision, previewToken }));
+			const result = call.result;
 			if (!result.ok) {
-				return { ok: false, error: draftSaveErrorMessage(result.error.code) };
+				return { ok: false, error: draftSaveErrorMessage(result.error.code, { linkedRepository: call.linkedRepository }) };
 			}
 			const applied = parseSaveAllApply(result.value);
 			if (!applied) {
 				return { ok: false, error: draftSaveErrorMessage('SERVICE_ERROR') };
 			}
-			const refreshed = await showGraph(provider, treeView, workspaceId, architectureId);
+			const refreshed = await showGraph(provider, treeView, call.target.workspaceId, call.target.architectureId);
 			if (refreshed) {
 				updateStatusBar(refreshed);
 				syncProblems(refreshed);

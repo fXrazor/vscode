@@ -355,7 +355,7 @@ suite('CloudForgeServiceChannel', () => {
 				{ method: 'createWorkspaceFile', params: { workspaceId } },
 				{ method: 'removeRepository', params: { workspaceId, repositoryId: `${workspaceId}-repository-1` } },
 				{ method: 'installGit', params: {}, timeoutMs: 11 * 60 * 1000 },
-				{ method: 'runEnginePlan', params: { workspaceId, architectureId: `${workspaceId}-architecture-1`, engine: 'openTofu' }, timeoutMs: 2 * 60 * 1000 },
+				{ method: 'runEnginePlan', params: { workspaceId, architectureId: `${workspaceId}-architecture-1`, engine: 'openTofu' }, timeoutMs: 3 * 60 * 1000 },
 			]
 		});
 		await broker.stop();
@@ -577,6 +577,19 @@ suite('CloudForgeServiceChannel', () => {
 			architectureId: 'workspace-1-architecture-1',
 			engine: 'cmd'
 		}), undefined);
+		assert.deepStrictEqual(validateCloudForgeServiceParams('runEnginePlan', {
+			workspaceId: 'workspace-1',
+			architectureId: 'workspace-1-architecture-1',
+			cloudProviders: ['azure']
+		}), {
+			workspaceId: 'workspace-1',
+			architectureId: 'workspace-1-architecture-1',
+			cloudProviders: ['azure']
+		});
+		for (const cloudProviders of [['oracle'], ['azure', 'azure'], 'azure', ['azure', 'aws', 'google', 'azure']]) {
+			assert.strictEqual(validateCloudForgeServiceParams('runEnginePlan', { workspaceId: 'workspace-1', architectureId: 'workspace-1-architecture-1', cloudProviders }), undefined);
+		}
+		assert.strictEqual(validateCloudForgeServiceParams('runEngineValidate', { workspaceId: 'workspace-1', architectureId: 'workspace-1-architecture-1', cloudProviders: ['azure'] }), undefined);
 		assert.strictEqual(validateCloudForgeServiceParams('runEnginePlan', {
 			workspaceId: 'workspace-1',
 			architectureId: 'workspace-1-architecture-1',

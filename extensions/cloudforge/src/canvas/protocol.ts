@@ -347,6 +347,14 @@ export interface CanvasEnginePlanReport {
 	readonly outputChanges: readonly CanvasEnginePlanOutputChange[];
 	readonly diagnostics: readonly CanvasEngineValidateDiagnostic[];
 	readonly truncated: boolean;
+	/** Linked cloud accounts the plan ran with, confirmed by a sign-in check (masked); empty when credential-free. */
+	readonly cloudTargets?: readonly CanvasPlanCloudTarget[];
+}
+
+export interface CanvasPlanCloudTarget {
+	readonly provider: 'azure' | 'aws' | 'google';
+	readonly signedInAs?: string;
+	readonly targetName?: string;
 }
 
 export interface CanvasMirrorPackageKey {

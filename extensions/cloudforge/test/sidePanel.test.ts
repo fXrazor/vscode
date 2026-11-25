@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-	cloudAccountPickItems, parseCloudAccountList, buildStatusHtml, describeConnection, describeSignInCheck, describeState, escapeHtml, parseCloudConnections, parseSignInCheck, parseStateSummary, parseStatusPageMessage, providersInUse, signInLabel, stateDrift,
+	cloudAccountPickItems, parseCloudAccountList, buildStatusHtml, describeConnection, describeSignInCheck, describeState, escapeHtml, parseCloudConnections, parseSignInCheck, parseStateSummary, parseStatusPageMessage, planCloudProviders, providersInUse, signInLabel, stateDrift,
 } from '../src/sidePanel/model.ts';
 
 const summary = {
@@ -122,4 +122,18 @@ test('the link picker keeps only accounts that make a valid link, default and cu
 	assert.equal(parseCloudAccountList({ provider: 'azure', status: 'notSignedIn', accounts: [] })?.accounts.length, 0);
 	assert.equal(parseCloudAccountList({ provider: 'oracle', status: 'ok', accounts: [] }), undefined);
 	assert.equal(parseCloudAccountList({ provider: 'azure', status: 'hacked', accounts: [] }), undefined);
+});
+
+test('plans use linked cloud accounts only for providers the graph uses', () => {
+	const connections = parseCloudConnections({
+		connections: [
+			{ provider: 'azure', signIn: 'az', cliFound: true, linked: true, keyStored: false },
+			{ provider: 'aws', signIn: 'aws', cliFound: true, linked: false, keyStored: false },
+			{ provider: 'google', signIn: 'gcloud', cliFound: true, linked: true, keyStored: false },
+		],
+	}) ?? [];
+	assert.deepStrictEqual(planCloudProviders(['azurerm_resource_group', 'aws_vpc', null, 'random_id'], connections), ['azure']);
+	assert.deepStrictEqual(planCloudProviders(['google_compute_network', 'azapi_resource'], connections), ['azure', 'google']);
+	assert.deepStrictEqual(planCloudProviders(['aws_vpc'], connections), []);
+	assert.deepStrictEqual(planCloudProviders([], connections), []);
 });
