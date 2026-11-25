@@ -794,7 +794,9 @@ export function defaultTargetTfFile(architecture: Architecture, selectedResource
 	if (explicitFiles.length > 0) {
 		return explicitFiles[0];
 	}
-	return sanitizeDraftTfFileName(architecture.name);
+	// Every new architecture starts with a `main.tf` (the service's starter or a template), so the
+	// first resources go there rather than into a second file named after the architecture.
+	return 'main.tf';
 }
 
 /** Generate a guarded `.tf` draft payload scoped to the corresponding project `.tf` file. */

@@ -168,7 +168,7 @@ test('projectGraphSnapshotToArchitecture infers container nesting, derives VM->N
 
 	// Guarded draft save payload produces valid `.tf` filename + generated HCL.
 	const payload = buildDraftSavePayload(refreshed.architecture);
-	assert.equal(payload.fileName, 'azure-landing-zone.tf');
+	assert.equal(payload.fileName, 'main.tf');
 	assert.match(payload.contents, /resource "azurerm_linux_virtual_machine" "vm_app"/);
 });
 
@@ -583,4 +583,8 @@ test('node ids that shift after a save do not swap one resource for another', ()
 		nodes: [{ id: 'node-1', kind: 'resource', resourceType: 'azurerm_virtual_network', name: 'core_renamed', label: 'core_renamed', hasSource: true }],
 	}, { previousArchitecture: previous });
 	assert.deepEqual(renamed.architecture.resources[0]?.positions.visual, { x: 10, y: 10 });
+});
+
+test('the first resources of a new architecture go into main.tf, not a file named after it', () => {
+	assert.equal(defaultTargetTfFile({ name: 'projectone', resources: [], items: [], connections: [] }), 'main.tf');
 });
