@@ -508,4 +508,69 @@ suite('CloudForgeServiceChannel', () => {
 			workingDir: 'C:\\evil'
 		}), undefined);
 	});
+
+	test('validates Stage 10 mirror, offline init, and schema extraction parameters and rejects paths', () => {
+		const rev = 'b'.repeat(64);
+		assert.deepStrictEqual(validateCloudForgeServiceParams('listMirrorPackages', {}), {});
+		assert.strictEqual(validateCloudForgeServiceParams('listMirrorPackages', { mirrorPath: 'C:\\mirror' }), undefined);
+
+		assert.deepStrictEqual(validateCloudForgeServiceParams('checkOfflineMirrorReadiness', {
+			workspaceId: 'workspace-1',
+			architectureId: 'workspace-1-architecture-1',
+			expectedSourceRevision: rev,
+			engine: 'openTofu',
+			platforms: ['windows_amd64', 'linux_amd64']
+		}), {
+			workspaceId: 'workspace-1',
+			architectureId: 'workspace-1-architecture-1',
+			expectedSourceRevision: rev,
+			engine: 'openTofu',
+			platforms: ['windows_amd64', 'linux_amd64']
+		});
+		assert.strictEqual(validateCloudForgeServiceParams('checkOfflineMirrorReadiness', {
+			workspaceId: 'workspace-1',
+			architectureId: 'workspace-1-architecture-1',
+			platforms: []
+		}), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('checkOfflineMirrorReadiness', {
+			workspaceId: 'workspace-1',
+			architectureId: 'workspace-1-architecture-1',
+			platforms: ['../escape']
+		}), undefined);
+
+		assert.deepStrictEqual(validateCloudForgeServiceParams('runEngineInitOffline', {
+			workspaceId: 'workspace-1',
+			architectureId: 'workspace-1-architecture-1',
+			expectedSourceRevision: rev,
+			engine: 'terraform'
+		}), {
+			workspaceId: 'workspace-1',
+			architectureId: 'workspace-1-architecture-1',
+			expectedSourceRevision: rev,
+			engine: 'terraform'
+		});
+		assert.strictEqual(validateCloudForgeServiceParams('runEngineInitOffline', {
+			workspaceId: 'workspace-1',
+			architectureId: 'workspace-1-architecture-1',
+			cliConfigPath: 'C:\\evil.tofurc'
+		}), undefined);
+
+		assert.deepStrictEqual(validateCloudForgeServiceParams('extractProviderSchemaFromMirror', {
+			address: 'registry.terraform.io/hashicorp/azurerm',
+			version: '5.14.0',
+			engine: 'openTofu'
+		}), {
+			address: 'registry.terraform.io/hashicorp/azurerm',
+			version: '5.14.0',
+			engine: 'openTofu'
+		});
+		assert.strictEqual(validateCloudForgeServiceParams('extractProviderSchemaFromMirror', {
+			address: 'hashicorp/azurerm',
+			version: '5.14.0'
+		}), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('extractProviderSchemaFromMirror', {
+			address: 'registry.terraform.io/hashicorp/azurerm',
+			version: '../5.14.0'
+		}), undefined);
+	});
 });

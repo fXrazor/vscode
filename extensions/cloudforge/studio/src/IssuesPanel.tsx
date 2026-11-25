@@ -2,10 +2,10 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-import { CircleCheck, TriangleAlert, CircleAlert, ChevronRight, ShieldCheck, Terminal, FileDiff } from 'lucide-react';
+import { CircleCheck, TriangleAlert, CircleAlert, ChevronRight, ShieldCheck, Terminal, FileDiff, HardDriveDownload } from 'lucide-react';
 import type { Architecture } from './model.ts';
 import type { Diagnostic } from './diagnostics.ts';
-import type { HostDependencyReport, HostEnginePlanReport, HostEngineValidateReport, HostExportAuditReport, HostValidationRun } from './webviewBridge.ts';
+import type { HostDependencyReport, HostEngineInitOfflineReport, HostEnginePlanReport, HostEngineValidateReport, HostExportAuditReport, HostOfflineMirrorReadiness, HostValidationRun } from './webviewBridge.ts';
 
 export interface IssuesHostContext {
 	readonly isHosted: boolean;
@@ -16,12 +16,16 @@ export interface IssuesHostContext {
 	readonly enginePlanReport?: HostEnginePlanReport | null;
 	readonly dependencyReport?: HostDependencyReport | null;
 	readonly exportAuditReport?: HostExportAuditReport | null;
+	readonly offlineMirrorReadiness?: HostOfflineMirrorReadiness | null;
+	readonly engineInitReport?: HostEngineInitOfflineReport | null;
 	readonly availableEngine?: 'openTofu' | 'terraform';
 	readonly validating?: boolean;
 	readonly planning?: boolean;
+	readonly initializingOffline?: boolean;
 	readonly onRunValidation?: () => void;
 	readonly onRunEngineValidate?: () => void;
 	readonly onRunEnginePlan?: () => void;
+	readonly onRunEngineInitOffline?: () => void;
 }
 
 const sourceBadgeLabel: Record<NonNullable<Diagnostic['source']>, string> = {
@@ -89,9 +93,9 @@ export function IssuesPanel({architecture,findings,onReveal,host}:{architecture:
 				</div>
 			</details>
 		)}
-		{host?.isHosted && (host.dependencyReport || host.exportAuditReport) && (
+		{host?.isHosted && (host.dependencyReport || host.exportAuditReport || host.offlineMirrorReadiness) && (
 			<details className="workspace-readiness-card">
-				<summary>Workspace readiness<span>{host.exportAuditReport ? (host.exportAuditReport.reproducible ? 'Reproducible' : 'Action needed') : host.dependencyReport?.lockState}</span></summary>
+				<summary>Workspace readiness<span>{host.exportAuditReport ? (host.exportAuditReport.reproducible ? 'Reproducible' : 'Action needed') : host.offlineMirrorReadiness ? (host.offlineMirrorReadiness.isReady ? 'Offline ready' : 'Mirror incomplete') : host.dependencyReport?.lockState}</span></summary>
 				<div className="workspace-readiness-body">
 					{host.dependencyReport && (
 						<div className="readiness-group">
@@ -113,6 +117,29 @@ export function IssuesPanel({architecture,findings,onReveal,host}:{architecture:
 							<p className="field-help">Export audit: <strong>{host.exportAuditReport.reproducible ? 'Reproducible' : 'Not yet reproducible'}</strong> · {host.exportAuditReport.lockEntryCount} lock entries · {host.exportAuditReport.moduleCount} modules</p>
 							{host.exportAuditReport.unresolvedReasonKinds.length > 0 && (
 								<p className="field-help">Unresolved: {host.exportAuditReport.unresolvedReasonKinds.join(', ')}</p>
+							)}
+						</div>
+					)}
+					{host.offlineMirrorReadiness && (
+						<div className="readiness-group">
+							<p className="field-help">
+								Offline mirror: <strong>{host.offlineMirrorReadiness.isReady ? 'Offline ready' : `${host.offlineMirrorReadiness.missing.length} missing`}</strong>
+								{' · '}{host.offlineMirrorReadiness.ready.length} ready
+								{host.offlineMirrorReadiness.corrupted.length > 0 ? ` · ${host.offlineMirrorReadiness.corrupted.length} corrupted` : ''}
+								{' · '}lock <code>{host.offlineMirrorReadiness.lockState}</code>
+							</p>
+							{host.availableEngine && host.onRunEngineInitOffline && host.offlineMirrorReadiness.isReady && (
+								<div className="issues-host-actions">
+									<button type="button" className="quiet-button" disabled={host.validating || host.planning || host.initializingOffline || !host.hasWorkspace} title="Run init -backend=false -lockfile=readonly strictly from the local provider mirror" onClick={host.onRunEngineInitOffline}>
+										<HardDriveDownload size={14} />
+										<span>{host.initializingOffline ? 'Initializing offline…' : 'Offline init'}</span>
+									</button>
+								</div>
+							)}
+							{host.engineInitReport && (
+								<p className="field-help">
+									{(host.engineInitReport.engine === 'openTofu' ? 'OpenTofu ' : 'Terraform ') + host.engineInitReport.engineVersion} offline init: <strong>{host.engineInitReport.status}</strong> ({host.engineInitReport.durationMs} ms) — {host.engineInitReport.summary}
+								</p>
 							)}
 						</div>
 					)}

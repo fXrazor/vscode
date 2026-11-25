@@ -12,10 +12,12 @@ import type {
 	CanvasChildModuleRef,
 	CanvasCloudRegion,
 	CanvasCloudRegionsPayload,
+	CanvasCorruptedMirrorPackage,
 	CanvasDependencyReport,
 	CanvasDetectedEngine,
 	CanvasDiagnosticSummary,
 	CanvasEdgeSummary,
+	CanvasEngineInitOfflineReport,
 	CanvasEnginePlanActionKind,
 	CanvasEnginePlanOutputChange,
 	CanvasEnginePlanReport,
@@ -25,10 +27,13 @@ import type {
 	CanvasEngineValidateReport,
 	CanvasExportAuditReport,
 	CanvasGraphSnapshot,
+	CanvasMirrorPackageKey,
+	CanvasMirrorPackageSummary,
 	CanvasModuleInspection,
 	CanvasModuleOutput,
 	CanvasModuleVariable,
 	CanvasNodeSummary,
+	CanvasOfflineMirrorReadiness,
 	CanvasProviderDependency,
 	CanvasSchemaDiffReport,
 	CanvasSchemaImpactedItem,
@@ -1622,4 +1627,117 @@ export function formatEnginePlanReportText(report: CanvasEnginePlanReport, archi
 		lines.push('', 'Note: Plan output exceeded service bounds and was truncated.');
 	}
 	return lines.join('\n') + '\n';
+}
+
+// ============================================================================
+// Stage 10: Offline Provider Mirror, Offline Init, & Mirror Schema Extraction
+// ============================================================================
+
+function parseMirrorPackageKey(value: unknown): CanvasMirrorPackageKey | undefined {
+	if (
+		!isRecord(value) ||
+		!isNonEmptyString(value.address, 256) ||
+		!isNonEmptyString(value.version, 64) ||
+		!isNonEmptyString(value.platform, 64)
+	) {
+		return undefined;
+	}
+	return {
+		address: value.address,
+		version: value.version,
+		platform: value.platform,
+	};
+}
+
+export function parseMirrorPackages(value: unknown): readonly CanvasMirrorPackageSummary[] {
+	if (!isRecord(value) || !Array.isArray(value.packages)) {
+		return [];
+	}
+	const out: CanvasMirrorPackageSummary[] = [];
+	for (const item of value.packages.slice(0, 512)) {
+		if (
+			!isRecord(item) ||
+			!isNonNegativeInt(item.sizeBytes) ||
+			!isSha256(item.sha256) ||
+			!isNonEmptyString(item.recordedAt, 64)
+		) {
+			continue;
+		}
+		const key = parseMirrorPackageKey(item.key);
+		if (!key) {
+			continue;
+		}
+		out.push({
+			key,
+			sizeBytes: item.sizeBytes,
+			sha256: item.sha256,
+			recordedAt: item.recordedAt,
+			...(isNonEmptyString(item.publisher, 128) ? { publisher: item.publisher } : {}),
+		});
+	}
+	return out;
+}
+
+export function parseOfflineMirrorReadiness(value: unknown): CanvasOfflineMirrorReadiness | undefined {
+	if (
+		!isRecord(value) ||
+		!isSha256(value.sourceRevision) ||
+		(value.engine !== 'openTofu' && value.engine !== 'terraform') ||
+		typeof value.engineInferred !== 'boolean' ||
+		(value.lockState !== 'absent' && value.lockState !== 'valid' && value.lockState !== 'invalid' && value.lockState !== 'unreadable') ||
+		typeof value.isReady !== 'boolean' ||
+		!Array.isArray(value.ready) ||
+		!Array.isArray(value.missing) ||
+		!Array.isArray(value.corrupted)
+	) {
+		return undefined;
+	}
+	const ready = value.ready.slice(0, 128).map(parseMirrorPackageKey).filter((k): k is CanvasMirrorPackageKey => k !== undefined);
+	const missing = value.missing.slice(0, 128).map(parseMirrorPackageKey).filter((k): k is CanvasMirrorPackageKey => k !== undefined);
+	const corrupted: CanvasCorruptedMirrorPackage[] = [];
+	for (const item of value.corrupted.slice(0, 128)) {
+		if (!isRecord(item) || !isNonEmptyString(item.reason, 256)) {
+			continue;
+		}
+		const key = parseMirrorPackageKey(item.key);
+		if (key) {
+			corrupted.push({ key, reason: item.reason });
+		}
+	}
+	return {
+		sourceRevision: value.sourceRevision,
+		engine: value.engine,
+		engineInferred: value.engineInferred,
+		lockState: value.lockState,
+		isReady: value.isReady,
+		ready,
+		missing,
+		corrupted,
+	};
+}
+
+export function parseEngineInitOfflineReport(value: unknown): CanvasEngineInitOfflineReport | undefined {
+	if (
+		!isRecord(value) ||
+		!isSha256(value.sourceRevision) ||
+		(value.engine !== 'openTofu' && value.engine !== 'terraform') ||
+		!isNonEmptyString(value.engineVersion, 64) ||
+		typeof value.engineInferred !== 'boolean' ||
+		(value.status !== 'initialized' && value.status !== 'failed') ||
+		typeof value.exitCode !== 'number' || !Number.isSafeInteger(value.exitCode) ||
+		!isNonNegativeInt(value.durationMs) ||
+		!isNonEmptyString(value.summary, 512)
+	) {
+		return undefined;
+	}
+	return {
+		sourceRevision: value.sourceRevision,
+		engine: value.engine,
+		engineVersion: value.engineVersion,
+		engineInferred: value.engineInferred,
+		status: value.status,
+		exitCode: value.exitCode,
+		durationMs: value.durationMs,
+		summary: value.summary,
+	};
 }

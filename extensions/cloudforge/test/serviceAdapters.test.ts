@@ -17,10 +17,13 @@ import {
 	parseDetectedEngines,
 	parseDraftSaveApply,
 	parseDraftSavePreview,
+	parseEngineInitOfflineReport,
 	parseEnginePlanReport,
 	parseEngineValidateReport,
 	parseExportAuditReport,
+	parseMirrorPackages,
 	parseModuleInspection,
+	parseOfflineMirrorReadiness,
 	parseSchemaDiffReport,
 	parseValidationPoll,
 	parseValidationStart,
@@ -505,4 +508,58 @@ test('Stage 9B guarded local engine plan adapters sanitize planned/failed respon
 	assert.equal(failed.status, 'failed');
 	assert.equal(failed.diagnostics.length, 1);
 	assert.equal(parseEnginePlanReport({ status: 'unknown' }), undefined);
+});
+
+test('Stage 10 mirror package, readiness, offline init adapters and webview protocol enforce bounds', () => {
+	const sha = 'c'.repeat(64);
+	const packages = parseMirrorPackages({
+		packages: [
+			{
+				key: { address: 'registry.terraform.io/hashicorp/azurerm', version: '5.14.0', platform: 'windows_amd64' },
+				sizeBytes: 1024,
+				sha256: sha,
+				recordedAt: '2026-11-25T00:00:00Z',
+				publisher: 'HashiCorp',
+			},
+			{ key: { address: '', version: '1.0.0', platform: 'windows_amd64' }, sizeBytes: 10, sha256: sha, recordedAt: '2026-11-25T00:00:00Z' },
+		],
+	});
+	assert.equal(packages.length, 1);
+	assert.equal(packages[0].key.address, 'registry.terraform.io/hashicorp/azurerm');
+	assert.equal(packages[0].publisher, 'HashiCorp');
+
+	const readiness = parseOfflineMirrorReadiness({
+		sourceRevision: sha,
+		engine: 'openTofu',
+		engineInferred: true,
+		lockState: 'valid',
+		isReady: false,
+		ready: [{ address: 'registry.terraform.io/hashicorp/azurerm', version: '5.14.0', platform: 'windows_amd64' }],
+		missing: [{ address: 'registry.terraform.io/hashicorp/azurerm', version: '5.14.0', platform: 'linux_amd64' }],
+		corrupted: [],
+	});
+	assert.ok(readiness);
+	assert.equal(readiness.isReady, false);
+	assert.equal(readiness.ready.length, 1);
+	assert.equal(readiness.missing.length, 1);
+	assert.equal(parseOfflineMirrorReadiness({ isReady: true }), undefined);
+
+	const initReport = parseEngineInitOfflineReport({
+		sourceRevision: sha,
+		engine: 'openTofu',
+		engineVersion: '1.13.9',
+		engineInferred: true,
+		status: 'initialized',
+		exitCode: 0,
+		durationMs: 140,
+		summary: 'Offline mirror initialization succeeded (lock file: valid, 1 provider package(s)).',
+	});
+	assert.ok(initReport);
+	assert.equal(initReport.status, 'initialized');
+	assert.equal(initReport.exitCode, 0);
+	assert.equal(parseEngineInitOfflineReport({ status: 'weird' }), undefined);
+
+	assert.deepEqual(parseWebviewMessage({ type: 'requestEngineInitOffline' }), { type: 'requestEngineInitOffline' });
+	assert.deepEqual(parseWebviewMessage({ type: 'requestEngineInitOffline', engine: 'terraform' }), { type: 'requestEngineInitOffline', engine: 'terraform' });
+	assert.equal(parseWebviewMessage({ type: 'requestEngineInitOffline', engine: 'bash' }), undefined);
 });

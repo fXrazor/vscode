@@ -57,7 +57,8 @@ export type CloudForgeServiceMethod =
 	| 'previewDraftSave' | 'applyDraftSave'
 	| 'inspectDependencies' | 'listCloudRegions' | 'readModule'
 	| 'diffCatalogueSnapshots' | 'auditExportReadiness'
-	| 'detectEngines' | 'runEngineValidate' | 'runEnginePlan';
+	| 'detectEngines' | 'runEngineValidate' | 'runEnginePlan'
+	| 'listMirrorPackages' | 'checkOfflineMirrorReadiness' | 'runEngineInitOffline' | 'extractProviderSchemaFromMirror';
 
 export class CloudForgeServiceError extends Error {
 	constructor(readonly code: string, readonly kind?: string) {

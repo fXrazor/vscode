@@ -40,13 +40,18 @@ const cloudForgeMethods: ReadonlySet<string> = new Set<CloudForgeServiceMethod>(
 	'previewDraftSave', 'applyDraftSave',
 	'inspectDependencies', 'listCloudRegions', 'readModule',
 	'diffCatalogueSnapshots', 'auditExportReadiness',
-	'detectEngines', 'runEngineValidate', 'runEnginePlan'
+	'detectEngines', 'runEngineValidate', 'runEnginePlan',
+	'listMirrorPackages', 'checkOfflineMirrorReadiness', 'runEngineInitOffline', 'extractProviderSchemaFromMirror'
 ]);
 
 /** The service allows `installGit` 10 minutes; the broker waits a little longer for its reply. */
 const installGitTimeoutMs = 11 * 60 * 1000;
 /** Stage 9B `runEnginePlan` allows 60 s for `plan` + 30 s for `show -json`; the broker waits 120 s. */
 const enginePlanTimeoutMs = 2 * 60 * 1000;
+/** Stage 10 `runEngineInitOffline` allows 120 s; the broker waits 125 s. */
+const engineInitOfflineTimeoutMs = 125 * 1000;
+/** Stage 10 `extractProviderSchemaFromMirror` allows 120 s init + 120 s schema; the broker waits 245 s. */
+const extractMirrorSchemaTimeoutMs = 245 * 1000;
 const maxPathLength = 32767;
 const maxNameLength = 255;
 const maxRemoteBytes = 2048;
@@ -509,7 +514,8 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 		}
 		case 'auditExportReadiness':
 		case 'runEngineValidate':
-		case 'runEnginePlan': {
+		case 'runEnginePlan':
+		case 'runEngineInitOffline': {
 			if (!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'expectedSourceRevision', 'engine']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId)) {
 				return undefined;
 			}
@@ -526,7 +532,56 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 				...(value.engine === undefined ? {} : { engine: value.engine })
 			};
 		}
+		case 'checkOfflineMirrorReadiness': {
+			if (!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'expectedSourceRevision', 'engine', 'platforms']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId)) {
+				return undefined;
+			}
+			if (value.expectedSourceRevision !== undefined && (typeof value.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(value.expectedSourceRevision))) {
+				return undefined;
+			}
+			if (value.engine !== undefined && value.engine !== 'openTofu' && value.engine !== 'terraform') {
+				return undefined;
+			}
+			let platforms: string[] | undefined;
+			if (value.platforms !== undefined) {
+				if (!Array.isArray(value.platforms) || value.platforms.length === 0 || value.platforms.length > 8) {
+					return undefined;
+				}
+				platforms = [];
+				for (const item of value.platforms) {
+					if (typeof item !== 'string' || !/^[a-z0-9]{1,32}_[a-z0-9]{1,32}$/.test(item)) {
+						return undefined;
+					}
+					platforms.push(item);
+				}
+			}
+			return {
+				workspaceId: value.workspaceId,
+				architectureId: value.architectureId,
+				...(value.expectedSourceRevision === undefined ? {} : { expectedSourceRevision: value.expectedSourceRevision }),
+				...(value.engine === undefined ? {} : { engine: value.engine }),
+				...(platforms === undefined ? {} : { platforms })
+			};
+		}
+		case 'extractProviderSchemaFromMirror': {
+			if (!hasOnlyKeys(value, ['address', 'version', 'engine']) || typeof value.address !== 'string' || !isSnapshotSegment(value.version)) {
+				return undefined;
+			}
+			const segments = value.address.split('/');
+			if (segments.length !== 3 || !segments.every(isSnapshotSegment)) {
+				return undefined;
+			}
+			if (value.engine !== undefined && value.engine !== 'openTofu' && value.engine !== 'terraform') {
+				return undefined;
+			}
+			return {
+				address: value.address,
+				version: value.version,
+				...(value.engine === undefined ? {} : { engine: value.engine })
+			};
+		}
 		case 'detectEngines':
+		case 'listMirrorPackages':
 			return hasOnlyKeys(value, []) ? {} : undefined;
 		case 'listCloudRegions': {
 			if (!hasOnlyKeys(value, ['provider', 'scope', 'configuredRegions'])) {
@@ -763,7 +818,11 @@ export class CloudForgeServiceBroker implements IServerChannel<string> {
 				? installGitTimeoutMs
 				: method === 'runEnginePlan'
 					? enginePlanTimeoutMs
-					: undefined;
+					: method === 'runEngineInitOffline'
+						? engineInitOfflineTimeoutMs
+						: method === 'extractProviderSchemaFromMirror'
+							? extractMirrorSchemaTimeoutMs
+							: undefined;
 			let value = await service.call(method, request.params, timeoutMs);
 			if (method === 'createProject') {
 				value = completeCreateProject(value, request.params.parentPath);

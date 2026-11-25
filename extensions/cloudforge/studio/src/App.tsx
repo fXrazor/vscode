@@ -29,7 +29,7 @@ import { architectureDiagnostics, type Diagnostic } from './diagnostics.ts';
 import { IssuesPanel, focusResourceField } from './IssuesPanel.tsx';
 import { resourcePlacement } from './resourceHierarchy.ts';
 import { workflowTemplate } from './workflowTemplate.ts';
-import { createHostBridge, type HostCloudRegionsPayload, type HostDependencyReport, type HostDetectedEngine, type HostDraftSaveError, type HostDraftSavePreview, type HostEnginePlanReport, type HostEngineValidateReport, type HostExportAuditReport, type HostGraphSnapshot, type HostModuleInspection, type HostNotice, type HostValidationRun } from './webviewBridge.ts';
+import { createHostBridge, type HostCloudRegionsPayload, type HostDependencyReport, type HostDetectedEngine, type HostDraftSaveError, type HostDraftSavePreview, type HostEngineInitOfflineReport, type HostEnginePlanReport, type HostEngineValidateReport, type HostExportAuditReport, type HostGraphSnapshot, type HostModuleInspection, type HostNotice, type HostOfflineMirrorReadiness, type HostValidationRun } from './webviewBridge.ts';
 import type { LiveSchemaMap } from './liveSchema.ts';
 import { buildDraftSavePayload, buildHostViewState, defaultTargetTfFile, projectGraphSnapshotToArchitecture, projectHostDiagnostics, sanitizeDraftTfFileName } from './serviceAdapter.ts';
 import { projectResourceFiles } from './terraformProjection.ts';
@@ -81,6 +81,8 @@ export function Studio() {
 	const [hostCloudRegions, setHostCloudRegions] = useState<Partial<Record<'azure' | 'aws' | 'google', HostCloudRegionsPayload>>>({});
 	const [dependencyReport, setDependencyReport] = useState<HostDependencyReport | null>(null);
 	const [exportAuditReport, setExportAuditReport] = useState<HostExportAuditReport | null>(null);
+	const [offlineMirrorReadiness, setOfflineMirrorReadiness] = useState<HostOfflineMirrorReadiness | null>(null);
+	const [engineInitReport, setEngineInitReport] = useState<HostEngineInitOfflineReport | null>(null);
 	const [moduleInspections, setModuleInspections] = useState<Record<string, { loading: boolean; inspection: HostModuleInspection | null; error?: string }>>({});
 	const [validationRun, setValidationRun] = useState<HostValidationRun | null>(null);
 	const [detectedEngines, setDetectedEngines] = useState<readonly HostDetectedEngine[]>([]);
@@ -88,6 +90,7 @@ export function Studio() {
 	const [enginePlanReport, setEnginePlanReport] = useState<HostEnginePlanReport | null>(null);
 	const [validating, setValidating] = useState(false);
 	const [planning, setPlanning] = useState(false);
+	const [initializingOffline, setInitializingOffline] = useState(false);
 	const [saveDialogOpen, setSaveDialogOpen] = useState(false);
 	const [saveFileName, setSaveFileName] = useState('cloudforge-studio.tf');
 	const [saveContents, setSaveContents] = useState('');
@@ -136,6 +139,7 @@ export function Studio() {
 					});
 					setHostSnapshot(incoming.graph);
 					setEnginePlanReport(null);
+					setEngineInitReport(null);
 					setHasSourceById(projected.hasSourceById);
 					setHostNotice(incoming.notice ?? null);
 					setSaveFileName(defaultTargetTfFile(projected.architecture, incoming.viewState?.selectedId ?? undefined));
@@ -192,6 +196,19 @@ export function Studio() {
 					break;
 				case 'exportAuditReport':
 					setExportAuditReport(incoming.report);
+					break;
+				case 'offlineMirrorReadiness':
+					setOfflineMirrorReadiness(incoming.report);
+					break;
+				case 'engineInitOfflineReport':
+					setInitializingOffline(false);
+					if (incoming.report) {
+						setEngineInitReport(incoming.report);
+						const label = incoming.report.engine === 'openTofu' ? 'OpenTofu' : 'Terraform';
+						setMessage(`${label} offline init: ${incoming.report.status} (${incoming.report.durationMs} ms)`);
+					} else if (incoming.error) {
+						setMessage(incoming.error);
+					}
 					break;
 				case 'moduleInspection': {
 					const modKey = incoming.modulePath.join('.');
@@ -377,6 +394,14 @@ export function Studio() {
 		}
 		setPlanning(true);
 		hostBridge.post(availableEngine ? { type: 'requestEnginePlan', engine: availableEngine } : { type: 'requestEnginePlan' });
+	}, [hostBridge, availableEngine]);
+
+	const runHostEngineInitOffline = useCallback(() => {
+		if (!hostBridge.isHosted) {
+			return;
+		}
+		setInitializingOffline(true);
+		hostBridge.post(availableEngine ? { type: 'requestEngineInitOffline', engine: availableEngine } : { type: 'requestEngineInitOffline' });
 	}, [hostBridge, availableEngine]);
 
 	const openDraftSave = useCallback((requestedFileName?: string) => {
@@ -653,7 +678,7 @@ export function Studio() {
 						<div className="form-action-row"><span className="form-action-spacer" />{hostBridge.isHosted && hasSourceById[selected.id] && <button aria-label="Open Terraform source" title="Open Terraform source in editor" onClick={() => hostBridge.post({ type: 'openSource', nodeId: selected.id })}><FileCode2 /></button>}<button aria-label="Open focused resource workspace" title="Open focused resource workspace" onClick={() => openDetails(selected.id)}><PanelsTopLeft /></button><button aria-label="Focus selected resource" title="Focus selected resource" onClick={() => { void flow?.fitView({ nodes: [{ id: selected.id }], padding: 0.5, maxZoom: 1.5 }); }}><Scan /></button></div>
      </>}
      <div className={'inspector-content'+(detailTab==='code'&&inspectorCategory==='resources'?' inspector-content-code':'')}>
-     {detailTab === 'issues' ? <IssuesPanel architecture={architecture} findings={findings} onReveal={revealIssue} host={hostBridge.isHosted ? { isHosted: true, hasWorkspace: !!hostSnapshot, sourceRevision: hostSnapshot?.sourceRevision, validationRun, engineReport, enginePlanReport, dependencyReport, exportAuditReport, availableEngine, validating, planning, onRunValidation: runHostValidation, onRunEngineValidate: runHostEngineValidate, onRunEnginePlan: runHostEnginePlan } : undefined}/> : inspectorCategory === 'variables' ? null : <>
+     {detailTab === 'issues' ? <IssuesPanel architecture={architecture} findings={findings} onReveal={revealIssue} host={hostBridge.isHosted ? { isHosted: true, hasWorkspace: !!hostSnapshot, sourceRevision: hostSnapshot?.sourceRevision, validationRun, engineReport, enginePlanReport, dependencyReport, exportAuditReport, offlineMirrorReadiness, engineInitReport, availableEngine, validating, planning, initializingOffline, onRunValidation: runHostValidation, onRunEngineValidate: runHostEngineValidate, onRunEnginePlan: runHostEnginePlan, onRunEngineInitOffline: runHostEngineInitOffline } : undefined}/> : inspectorCategory === 'variables' ? null : <>
 
 					{detailTab === 'code' && !selected ? null : overview ? (
 						<ArchitectureOverview architecture={architecture} onSelect={id => { setSelectedId(id); setOverview(false); setDetailTab('form'); }} />

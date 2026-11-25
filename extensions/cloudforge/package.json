@@ -254,6 +254,18 @@
 				"icon": "$(cloud-upload)"
 			},
 			{
+				"command": "cloudforge.extractMirrorSchema",
+				"title": "%command.extractMirrorSchema%",
+				"category": "%displayName%",
+				"icon": "$(package)"
+			},
+			{
+				"command": "cloudforge.initArchitectureOffline",
+				"title": "%command.initArchitectureOffline%",
+				"category": "%displayName%",
+				"icon": "$(plug)"
+			},
+			{
 				"command": "cloudforge.openTemplateLibrary",
 				"title": "%command.openTemplateLibrary%",
 				"category": "%displayName%",

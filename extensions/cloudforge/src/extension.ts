@@ -64,10 +64,13 @@ import {
 	parseDetectedEngines,
 	parseDraftSaveApply,
 	parseDraftSavePreview,
+	parseEngineInitOfflineReport,
 	parseEnginePlanReport,
 	parseEngineValidateReport,
 	parseExportAuditReport,
+	parseMirrorPackages,
 	parseModuleInspection,
+	parseOfflineMirrorReadiness,
 	parseSchemaDiffReport,
 	parseValidationPoll,
 	parseValidationStart,
@@ -813,6 +816,55 @@ export function activate(context: ExtensionContext): void {
 		return { ok: true as const, report };
 	}
 
+	async function checkArchitectureOfflineMirrorReadiness(
+		workspaceId: string,
+		architectureId: string,
+		sourceRevision: string
+	) {
+		const result = await callService<unknown>('checkOfflineMirrorReadiness', {
+			workspaceId,
+			architectureId,
+			expectedSourceRevision: sourceRevision,
+		});
+		if (!result.ok) {
+			return undefined;
+		}
+		return parseOfflineMirrorReadiness(result.value);
+	}
+
+	async function runArchitectureEngineInitOffline(
+		workspaceId: string,
+		architectureId: string,
+		sourceRevision: string,
+		engine?: 'openTofu' | 'terraform'
+	) {
+		const result = await callService<unknown>('runEngineInitOffline', {
+			workspaceId,
+			architectureId,
+			expectedSourceRevision: sourceRevision,
+			...(engine ? { engine } : {}),
+		});
+		if (!result.ok) {
+			const message = result.error.code === 'STALE_SOURCE'
+				? l10n.t('The Terraform source changed on disk. Refresh the graph before running offline init.')
+				: result.error.code === 'SCOPE_DENIED'
+					? l10n.t('Offline init is only allowed on writable project architectures, not read-only imported repositories.')
+					: result.error.code === 'SCHEMA_UNAVAILABLE'
+						? l10n.t('One or more locked providers are missing or unverified in the local offline mirror.')
+						: result.error.code === 'WORKSPACE_UNAVAILABLE'
+							? l10n.t('No compatible local OpenTofu or Terraform CLI engine was found.')
+							: result.error.code === 'LIMIT_EXCEEDED'
+								? l10n.t('Offline init exceeded its time or output limit.')
+								: l10n.t('Offline mirror initialization could not complete.');
+			return { ok: false as const, message };
+		}
+		const report = parseEngineInitOfflineReport(result.value);
+		if (!report) {
+			return { ok: false as const, message: l10n.t('The CloudForge service returned an invalid offline init report.') };
+		}
+		return { ok: true as const, report };
+	}
+
 	function planActionIcon(kind: CanvasEnginePlanActionKind): string {
 		switch (kind) {
 			case 'create': return '$(diff-added)';
@@ -1185,6 +1237,8 @@ export function activate(context: ExtensionContext): void {
 		onDetectEngines: detectLocalEngines,
 		onRunEngineValidate: runArchitectureEngineValidate,
 		onRunEnginePlan: runArchitectureEnginePlan,
+		onCheckOfflineMirrorReadiness: checkArchitectureOfflineMirrorReadiness,
+		onRunEngineInitOffline: runArchitectureEngineInitOffline,
 		async onExportArtifact(format, suggestedFileName, content, encoding) {
 			const folder = workspace.workspaceFolders?.[0]?.uri;
 			const defaultUri = folder ? Uri.joinPath(folder, suggestedFileName) : Uri.file(suggestedFileName);
@@ -1896,6 +1950,88 @@ export function activate(context: ExtensionContext): void {
 		}
 		void window.showInformationMessage(
 			l10n.t('Imported {0} {1} ({2} resources) into the CloudForge provider catalogue.', chosen.address, version.trim(), chosen.resources)
+		);
+	}));
+	context.subscriptions.push(commands.registerCommand('cloudforge.initArchitectureOffline', async () => {
+		const graph = provider.getGraph();
+		if (!graph) {
+			void window.showInformationMessage(l10n.t('Open an architecture before running offline mirror initialization.'));
+			return;
+		}
+		const outcome = await window.withProgress(
+			{
+				location: ProgressLocation.Notification,
+				title: l10n.t('CloudForge: Initializing {0} offline from local provider mirror…', currentArchitectureName),
+				cancellable: false,
+			},
+			() => runArchitectureEngineInitOffline(graph.workspaceId, graph.architectureId, graph.sourceRevision)
+		);
+		if (!outcome.ok) {
+			void window.showWarningMessage(outcome.message);
+			return;
+		}
+		const engineLabel = outcome.report.engine === 'openTofu' ? 'OpenTofu' : 'Terraform';
+		if (outcome.report.status === 'initialized') {
+			void window.showInformationMessage(
+				l10n.t('{0} {1} offline init succeeded in {2} ms. {3}', engineLabel, outcome.report.engineVersion, outcome.report.durationMs, outcome.report.summary)
+			);
+		} else {
+			void window.showWarningMessage(
+				l10n.t('{0} {1} offline init failed (exit {2}): {3}', engineLabel, outcome.report.engineVersion, outcome.report.exitCode, outcome.report.summary)
+			);
+		}
+	}));
+	context.subscriptions.push(commands.registerCommand('cloudforge.extractMirrorSchema', async () => {
+		const listed = await callService<unknown>('listMirrorPackages', {});
+		if (!listed.ok) {
+			showServiceError(listed.error);
+			return;
+		}
+		const winPackages = parseMirrorPackages(listed.value).filter(pkg => pkg.key.platform === 'windows_amd64');
+		if (winPackages.length === 0) {
+			void window.showInformationMessage(
+				l10n.t('No verified windows_amd64 provider packages were found in the local CloudForge mirror.')
+			);
+			return;
+		}
+		const picked = await window.showQuickPick(
+			winPackages.map(pkg => ({
+				label: `${pkg.key.address} ${pkg.key.version}`,
+				description: pkg.publisher ? `${pkg.publisher} · ${pkg.sha256.slice(0, 8)}` : pkg.sha256.slice(0, 8),
+				detail: l10n.t('windows_amd64 · {0} bytes · recorded {1}', pkg.sizeBytes, pkg.recordedAt),
+				pkg,
+			})),
+			{
+				title: l10n.t('Extract Provider Schema from Local Offline Mirror'),
+				placeHolder: l10n.t('Select a verified mirrored provider package to extract into the catalogue'),
+			}
+		);
+		if (!picked) {
+			return;
+		}
+		const extracted = await window.withProgress(
+			{
+				location: ProgressLocation.Notification,
+				title: l10n.t('Extracting {0} {1} schema offline from local mirror…', picked.pkg.key.address, picked.pkg.key.version),
+				cancellable: false,
+			},
+			() => callService<unknown>('extractProviderSchemaFromMirror', {
+				address: picked.pkg.key.address,
+				version: picked.pkg.key.version,
+			})
+		);
+		if (!extracted.ok) {
+			showServiceError(extracted.error);
+			return;
+		}
+		cachedCatalogueSnapshots = undefined;
+		cachedLiveSchemas.clear();
+		const graph = provider.getGraph();
+		if (graph) {
+			canvas.updateIfOpen(toCanvasSnapshot(graph, currentArchitectureName));
+		}
+		void window.showInformationMessage(
+			l10n.t('Extracted {0} {1} into the CloudForge provider catalogue from the local offline mirror.', picked.pkg.key.address, picked.pkg.key.version)
 		);
 	}));
 	let opening: Promise<void> | undefined;
