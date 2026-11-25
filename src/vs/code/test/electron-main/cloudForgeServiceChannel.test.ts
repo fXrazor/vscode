@@ -644,7 +644,7 @@ suite('CloudForgeServiceChannel', () => {
 		const imported = await local.call(1, 'importMirrorPackage', params);
 		assert.strictEqual(imported.ok, true);
 		assert.deepStrictEqual(local.callsByWindow(), {
-			1: [{ method: 'importMirrorPackage', params: { ...params, archivePath: 'D:\\Mirrors\\terraform-provider-azurerm_5.14.0_windows_amd64.zip' } }]
+			1: [{ method: 'importMirrorPackage', params: { ...params, archivePath: 'D:\\Mirrors\\terraform-provider-azurerm_5.14.0_windows_amd64.zip' }, timeoutMs: 65000 }]
 		});
 
 		await Promise.all([cancelled, unc, local].map(item => item.broker.stop()));
