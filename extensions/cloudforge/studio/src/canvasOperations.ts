@@ -1,0 +1,138 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+import type { Architecture, BoardItem, DesignMode, Position, ResourceBlock } from './model.ts';
+import { bindingKey, bindingTarget } from './fieldBindings.ts';
+import { fitResourceContainers, isResourceContainer, resourceAncestors, resourceDescendants } from './resourceHierarchy.ts';
+
+export type TextAppearance = Pick<BoardItem, 'fontSize' | 'bold' | 'italic' | 'underline' | 'textColor' | 'fontFamily' | 'textAlign' | 'verticalAlign' | 'fill' | 'opacity' | 'strokeColor' | 'strokeWidth' | 'strokeStyle'>;
+export type CanvasCommand =
+	| { kind: 'move'; mode: DesignMode; positions: Record<string, Position>; fit?: boolean }
+	| { kind: 'style'; ids: string[]; patch: Partial<TextAppearance> }
+	| { kind: 'lock'; ids: string[]; locked: boolean }
+	| { kind: 'delete'; ids: string[] }
+	| { kind: 'group'; ids: string[]; id: string }
+	| { kind: 'ungroup'; ids: string[] }
+	| { kind: 'arrange'; ids: string[]; direction: 'front' | 'forward' | 'backward' | 'back' }
+	| { kind: 'duplicate'; fragment: Architecture; idMap: Record<string, string>; offset: number };
+
+export function canvasElements(architecture: Architecture) { return [...architecture.resources, ...architecture.items]; }
+
+export function expandGroups(architecture: Architecture, ids: string[]): string[] {
+	const selected = new Set(ids.filter(id => canvasElements(architecture).some(element => element.id === id)));
+	for (const group of architecture.groups ?? []) { if (group.members.some(id => selected.has(id))) { group.members.forEach(id => selected.add(id)); } }
+	return [...selected];
+}
+
+export function sceneOrder(architecture: Architecture): string[] {
+	const frames = architecture.items.filter(item => item.kind === 'frame').map(item => item.id);
+	const defaultOrder = [...architecture.resources.map(item => item.id), ...architecture.items.filter(item => item.kind !== 'frame').map(item => item.id)];
+	const known = new Set(defaultOrder);
+	const containers = architecture.resources.filter(isResourceContainer).sort((a,b)=>resourceAncestors(architecture,a).length-resourceAncestors(architecture,b).length).map(item=>item.id);
+	return [...frames,...containers,...new Set([...(architecture.layerOrder ?? []).filter(id => known.has(id)&&!containers.includes(id)), ...defaultOrder.filter(id=>!containers.includes(id))])];
+}
+
+export function selectionFragment(architecture: Architecture, ids: string[]): Architecture {
+	const selected = new Set(expandGroups(architecture, ids));
+	for (const frame of architecture.items.filter(item => item.kind === 'frame' && selected.has(item.id))) { frame.members.forEach(id => selected.add(id)); }
+	for (const resource of architecture.resources.filter(item=>selected.has(item.id))) { resourceDescendants(architecture,resource.id).forEach(item=>selected.add(item.id)); }
+	return structuredClone({ name: architecture.name, resources: architecture.resources.filter(item => selected.has(item.id)), items: architecture.items.filter(item => selected.has(item.id)), connections: architecture.connections.filter(link => selected.has(link.source) && selected.has(link.target)), groups: (architecture.groups ?? []).filter(group => group.members.every(id => selected.has(id))), layerOrder: sceneOrder(architecture).filter(id => selected.has(id)) });
+}
+
+export function applyCanvasCommand(architecture: Architecture, command: CanvasCommand): Architecture {
+	const elements = canvasElements(architecture); const byId = new Map(elements.map(element => [element.id, element]));
+	const expanded = 'ids' in command ? expandGroups(architecture, command.ids) : [];
+	const editable = new Set(expanded.filter(id => !byId.get(id)?.canvasLocked));
+	switch (command.kind) {
+		case 'move': {
+			if (Object.values(command.positions).some(position => !Number.isFinite(position.x) || !Number.isFinite(position.y))) { return architecture; }
+			const pinnedContainers=new Set(architecture.resources.filter(resource=>isResourceContainer(resource)&&resourceDescendants(architecture,resource.id).some(child=>child.canvasLocked)).map(resource=>resource.id));
+			const destinations = new Map(Object.entries(command.positions).filter(([id]) => byId.has(id) && !byId.get(id)?.canvasLocked && !pinnedContainers.has(id)));
+			// A moved frame owns the delta for its children, even if a child was also selected.
+			for (const frame of architecture.items.filter(item => item.kind === 'frame' && destinations.has(item.id))) {
+				const next = destinations.get(frame.id)!; const before = frame.positions[command.mode];
+				for (const id of frame.members) { const child = byId.get(id); if (child && !child.canvasLocked) { destinations.set(id, { x: child.positions[command.mode].x + next.x - before.x, y: child.positions[command.mode].y + next.y - before.y }); } }
+			}
+			for (const container of architecture.resources.filter(item=>destinations.has(item.id)&&isResourceContainer(item)).sort((a,b)=>resourceAncestors(architecture,a).length-resourceAncestors(architecture,b).length)) {
+				const next = destinations.get(container.id)!; const before = container.positions[command.mode];
+				for (const child of resourceDescendants(architecture,container.id)) { if (!child.canvasLocked) { destinations.set(child.id,{x:child.positions[command.mode].x+next.x-before.x,y:child.positions[command.mode].y+next.y-before.y}); } }
+			}
+			const changed = [...destinations].some(([id, position]) => { const before = byId.get(id)!.positions[command.mode]; return before.x !== position.x || before.y !== position.y; });
+			if (!changed) { return architecture; }
+			const move = <T extends typeof elements[number]>(element: T): T => destinations.has(element.id) ? { ...element, positions: { visual:destinations.get(element.id)!,technical:destinations.get(element.id)! } } : element;
+			const next = { ...architecture, resources: architecture.resources.map(move), items: architecture.items.map(move) };
+			return command.fit===false?next:fitResourceContainers(next);
+		}
+		case 'style': {
+			const patch = command.patch;
+			if (patch.fontSize !== undefined && (!Number.isFinite(patch.fontSize) || patch.fontSize < 10 || patch.fontSize > 128)
+				|| patch.opacity !== undefined && (!Number.isFinite(patch.opacity) || patch.opacity < 0.1 || patch.opacity > 1)
+				|| patch.strokeWidth !== undefined && (!Number.isFinite(patch.strokeWidth) || patch.strokeWidth < 1 || patch.strokeWidth > 8)
+				|| patch.fontFamily !== undefined && !['sans', 'serif', 'mono'].includes(patch.fontFamily)
+				|| patch.textAlign !== undefined && !['left', 'center', 'right'].includes(patch.textAlign)
+				|| patch.verticalAlign !== undefined && !['top', 'middle', 'bottom'].includes(patch.verticalAlign)
+				|| patch.strokeStyle !== undefined && !['solid', 'dashed', 'dotted'].includes(patch.strokeStyle)
+				|| [patch.textColor, patch.strokeColor].some(value => value !== undefined && !/^#[0-9a-f]{6}$/i.test(value))
+				|| patch.fill !== undefined && patch.fill !== 'transparent' && !/^#[0-9a-f]{6}$/i.test(patch.fill)) { return architecture; }
+			let changed = false;
+			const items = architecture.items.map(item => {
+				if (!editable.has(item.id) || Object.entries(patch).every(([key, value]) => item[key as keyof BoardItem] === value)) { return item; }
+				changed = true; return { ...item, ...patch };
+			});
+			return changed ? { ...architecture, items } : architecture;
+		}
+		case 'lock': {
+			const selected = new Set(expanded);
+			if (!elements.some(item => selected.has(item.id) && !!item.canvasLocked !== command.locked)) { return architecture; }
+			return { ...architecture, resources: architecture.resources.map(item => selected.has(item.id) ? { ...item, canvasLocked: command.locked } : item), items: architecture.items.map(item => selected.has(item.id) ? { ...item, canvasLocked: command.locked } : item) };
+		}
+		case 'delete': {
+			for (const resource of architecture.resources.filter(item=>editable.has(item.id))) {
+				const descendants = resourceDescendants(architecture,resource.id);
+				if (descendants.some(item=>item.canvasLocked)) { editable.delete(resource.id); }
+				else { descendants.forEach(item=>editable.add(item.id)); }
+			}
+			if (!editable.size) { return architecture; }
+			return { ...architecture, resources: architecture.resources.filter(item => !editable.has(item.id)), items: architecture.items.filter(item => !editable.has(item.id)).map(item => ({ ...item, members: item.members.filter(id => !editable.has(id)) })), connections: architecture.connections.filter(link => !editable.has(link.source) && !editable.has(link.target)), groups: (architecture.groups ?? []).map(group => ({ ...group, members: group.members.filter(id => !editable.has(id)) })).filter(group => group.members.length > 1), layerOrder: sceneOrder(architecture).filter(id => !editable.has(id)) };
+		}
+		case 'group': {
+			if (expanded.length < 2 || expanded.some(id => byId.get(id)?.canvasLocked) || !command.id || (architecture.groups ?? []).some(group => group.id === command.id)) { return architecture; }
+			const members = [...new Set(expanded)];
+			return { ...architecture, groups: [...(architecture.groups ?? []).filter(group => !group.members.some(id => members.includes(id))), { id: command.id, label: 'Visual group', members }] };
+		}
+		case 'ungroup': {
+			const groups = (architecture.groups ?? []).filter(group => !group.members.some(id => editable.has(id)));
+			return groups.length !== (architecture.groups ?? []).length ? { ...architecture, groups } : architecture;
+		}
+		case 'arrange': {
+			const order = sceneOrder(architecture); const frames = new Set([...architecture.items.filter(item => item.kind === 'frame').map(item => item.id),...architecture.resources.filter(isResourceContainer).map(item=>item.id)]);
+			const selected = new Set([...editable].filter(id => !frames.has(id))); const before = order.join('|');
+			let next = [...order];
+			if (command.direction === 'front') { next = [...order.filter(id => !selected.has(id)), ...order.filter(id => selected.has(id))]; }
+			else if (command.direction === 'back') { next = [...order.filter(id => frames.has(id)), ...order.filter(id => selected.has(id)), ...order.filter(id => !frames.has(id) && !selected.has(id))]; }
+			else if (command.direction === 'forward') { for (let index = next.length - 2; index >= 0; index--) { if (selected.has(next[index]) && !selected.has(next[index + 1])) { [next[index], next[index + 1]] = [next[index + 1], next[index]]; } } }
+			else { for (let index = 1; index < next.length; index++) { if (selected.has(next[index]) && !selected.has(next[index - 1]) && !frames.has(next[index - 1])) { [next[index], next[index - 1]] = [next[index - 1], next[index]]; } } }
+			return before === next.join('|') ? architecture : { ...architecture, layerOrder: next };
+		}
+		case 'duplicate': {
+			const fragment = command.fragment; const idMap = command.idMap;
+			const source = canvasElements(fragment); const newIds = source.map(item => idMap[item.id]);
+			if (!source.length || newIds.some(id => !id || byId.has(id)) || new Set(newIds).size !== newIds.length || !Number.isFinite(command.offset)) { return architecture; }
+			const names = new Set(architecture.resources.map(resource => resource.name)); const terraformNames = new Set(architecture.resources.map(resource => resource.terraformName ?? resource.name));
+			const offset = (positions: Record<DesignMode, Position>) => Object.fromEntries(Object.entries(positions).map(([mode, position]) => [mode, { x: position.x + command.offset, y: position.y + command.offset }])) as Record<DesignMode, Position>;
+			const resources = structuredClone(fragment.resources).map(resource => {
+				let index = 1; let name = resource.name + '-copy'; while (names.has(name)) { name = resource.name + '-copy-' + ++index; } names.add(name);
+				const base = (resource.terraformName ?? resource.name).replace(/[^A-Za-z0-9_-]/g, '_').replace(/^(?=[0-9-])/, '_');
+				let terraformName = base + '_copy'; index = 1; while (terraformNames.has(terraformName)) { terraformName = base + '_copy_' + ++index; } terraformNames.add(terraformName);
+				const cloneBlocks = (blocks: ResourceBlock[]): ResourceBlock[] => blocks.map(block => ({ ...block, id: idMap[resource.id] + ':' + block.id, blocks: cloneBlocks(block.blocks) }));
+				const fieldBindings = resource.fieldBindings && Object.fromEntries(Object.entries(resource.fieldBindings).map(([key, binding]) => { const target = bindingTarget(key); return [target?.kind === 'block' ? bindingKey({...target,blockId:idMap[resource.id] + ':' + target.blockId}) : key,binding]; }));
+				return { ...resource, id: idMap[resource.id], parentId:resource.parentId?(idMap[resource.parentId]??(architecture.resources.some(item=>item.id===resource.parentId)?resource.parentId:undefined)):undefined, name, terraformName, fieldBindings, blocks: cloneBlocks(resource.blocks), canvasLocked: false, positions: offset(resource.positions) };
+			});
+			const items = structuredClone(fragment.items).map(item => ({ ...item, id: idMap[item.id], canvasLocked: false, positions: offset(item.positions), members: item.members.map(id => idMap[id]).filter(Boolean) }));
+			const groups = (fragment.groups ?? []).map(group => ({ ...group, id: idMap[group.id], members: group.members.map(id => idMap[id]).filter(Boolean) })).filter(group => group.id && group.members.length > 1);
+			const connections = fragment.connections.filter(link => idMap[link.source] && idMap[link.target]).map(link => ({ ...link, id: idMap[link.source] + '-' + idMap[link.target], source: idMap[link.source], target: idMap[link.target] }));
+			return { ...architecture, resources: [...architecture.resources, ...resources], items: [...architecture.items, ...items], groups: [...(architecture.groups ?? []), ...groups], connections: [...architecture.connections, ...connections], layerOrder: [...sceneOrder(architecture), ...sceneOrder(fragment).map(id => idMap[id])] };
+		}
+	}
+}

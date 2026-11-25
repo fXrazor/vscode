@@ -2,7 +2,11 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-import type { Resource } from './model.ts';
+import type { Architecture, Resource, ResourceBlock } from './model.ts';
+import { getDef, type AttrDef } from './cloudlab-core/catalog/index.ts';
+import { resourceDefinition } from './fixture.ts';
+import { bindingKey, bindingTarget, fieldDefinition, fieldTargetPath, variableBindingIssue } from './fieldBindings.ts';
+import { inheritedReference } from './resourceHierarchy.ts';
 
 export interface BlockDefinition {
 	type: string;
@@ -10,10 +14,83 @@ export interface BlockDefinition {
 	max: number;
 	fields: Record<string, string>;
 	children: BlockDefinition[];
+	required?: boolean;
+	description?: string;
+	attributes?: AttrDef[];
+}
+
+export function blockDefinitions(attributes: AttrDef[]): BlockDefinition[] {
+	return attributes.filter(attribute => attribute.type === 'block').map(attribute => ({
+		type: attribute.name, label: attribute.name.replaceAll('_', ' '), max: attribute.repeat ? Infinity : 1,
+		required: attribute.required, description: attribute.description,
+		attributes: attribute.children?.filter(child => child.type !== 'block') ?? [],
+		fields: Object.fromEntries((attribute.children ?? []).filter(child => child.type !== 'block' && child.default !== undefined).map(child => [child.name, typeof child.default === 'string' ? child.default : JSON.stringify(child.default)])),
+		children: blockDefinitions(attribute.children ?? [])
+	}));
+}
+
+/** Merge richer curated metadata with every imported resource's primitive descriptors. */
+export function editableFields(resource: Resource): AttrDef[] {
+	const curated = getDef(resourceDefinition(resource).type)?.attributes.filter(field => field.type !== 'block') ?? [];
+	const fields = new Map(curated.map(field => [field.name, field]));
+	for (const field of resource.catalogue?.fields ?? []) {
+		if (!fields.has(field.name)) { fields.set(field.name, { ...field, description: field.description ?? '' }); }
+	}
+	return [...fields.values()];
+}
+
+/** Local shape checks only. Expressions and provider constraints require Terraform. */
+export function fieldIssue(value: string, attribute?: AttrDef): string | undefined {
+	if (!value.trim()) { return attribute?.required ? 'Required value' : undefined; }
+	if (/^var\.[A-Za-z_][A-Za-z0-9_-]*$/.test(value)) { return undefined; }
+	if (attribute?.type === 'number' && !Number.isFinite(Number(value))) { return 'Enter a finite number'; }
+	if (attribute?.type === 'bool' && !['true', 'false'].includes(value)) { return 'Choose true or false'; }
+	if (attribute?.options?.length && !attribute.options.includes(value)) { return 'Choose a listed value'; }
+	if (attribute?.type === 'list' || attribute?.type === 'map') {
+		try { const parsed: unknown = JSON.parse(value); if (attribute.type === 'list' ? !Array.isArray(parsed) : !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) { return 'Enter a JSON ' + (attribute.type === 'list' ? 'array' : 'object'); } }
+		catch { return 'Enter a JSON ' + (attribute.type === 'list' ? 'array' : 'object'); }
+	}
+	return undefined;
+}
+
+export function resourceFormIssues(resource: Resource, variables?: import('./variables.ts').VariableDefinition[], architecture?: Architecture): string[] {
+	const issues: string[] = [];
+	for (const [key, binding] of Object.entries(resource.fieldBindings ?? {})) { const target = bindingTarget(key); const issue = variableBindingIssue(binding, variables ?? [], target ? fieldDefinition(resource,target) : undefined); if (issue) { issues.push((target?.kind === 'setting' || target?.kind === 'block' ? target.name : target?.kind ?? 'Field') + ': ' + issue); } }
+	if (resource.catalogue) {
+		for (const field of editableFields(resource)) {
+			if (['name', 'location', 'region'].includes(field.name)) { continue; }
+			if(architecture&&inheritedReference(architecture,resource,[field.name])){continue;}
+			const issue = resource.fieldBindings?.[bindingKey({kind:'setting',name:field.name})] ? undefined : fieldIssue(resource.settings[field.name] ?? '', field);
+			if (issue) { issues.push(field.name + ': ' + issue); }
+		}
+	}
+	const visit = (blocks: ResourceBlock[], definitions: BlockDefinition[], path: string) => {
+		for (const definition of definitions) {
+			const matching = blocks.filter(block => block.type === definition.type);
+			if (definition.required && !matching.length) { issues.push(path + definition.type + ': Required block'); }
+			if (matching.length > definition.max) { issues.push(path + definition.type + ': Too many blocks'); }
+			matching.forEach((block, index) => {
+				const prefix = path + definition.type + '[' + (index + 1) + '].';
+				for (const field of definition.attributes ?? []) {
+					if(architecture&&inheritedReference(architecture,resource,fieldTargetPath(resource,{kind:'block',blockId:block.id,name:field.name}))){continue;}
+					const issue = resource.fieldBindings?.[bindingKey({kind:'block',blockId:block.id,name:field.name})] ? undefined : fieldIssue(block.values[field.name] ?? '', field);
+					if (issue) { issues.push(prefix + field.name + ': ' + issue); }
+				}
+				visit(block.blocks, definition.children, prefix);
+			});
+		}
+	};
+	visit(resource.blocks, additionalBlocks(resource), '');
+	return issues;
 }
 
 /** Small explicit preview definitions. Production forms consume Rust FormSchema. */
 export function additionalBlocks(resource: Resource): BlockDefinition[] {
+	const schema = getDef(resourceDefinition(resource).type);
+	if (schema) {
+		// The sample cluster already represents its default pool through shared settings.
+		return blockDefinitions(schema.attributes).filter(block => !(block.type === 'default_node_pool' && Object.hasOwn(resource.settings, 'Node count')));
+	}
 	if (resource.provider !== 'azure') { return []; }
 	switch (resource.kind) {
 		case 'cluster':

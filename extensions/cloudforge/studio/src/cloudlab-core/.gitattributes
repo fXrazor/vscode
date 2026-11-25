@@ -1,0 +1,2 @@
+# Preserve imported bytes so the SHA-256 provenance manifest survives Windows checkout.
+* -text

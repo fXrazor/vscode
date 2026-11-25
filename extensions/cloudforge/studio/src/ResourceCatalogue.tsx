@@ -1,4 +1,6 @@
-import { memo, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { ShapeLibrary } from './ShapeLibrary.tsx';
+import type { ShapeId } from './shapes.ts';
+import { memo, useEffect, useMemo, useState, useRef, type ReactNode } from 'react';
 import * as Tabs from '@radix-ui/react-tabs';
 import type { Architecture, Provider, ResourceKind, BoardItem, CatalogueEntry } from './model.ts';
 import { resourceDefinition } from './fixture.ts';
@@ -7,13 +9,15 @@ import { Box, Cpu, Network, Database, HardDrive, Activity, PanelLeftClose, Squar
 
 const icons: Record<string, typeof Box> = { Compute: Cpu, Network, Storage:HardDrive, Database, Monitoring:Activity, 'Security & Identity':Shield, Integration:Zap, Management:Wrench, 'AI & ML':Brain, Analytics:BarChart3, Other:Box };
 
-export const ResourceCatalogue = memo(function ResourceCatalogue({ architecture, onAdd, search, onSearch, onImportModule, visible, onClose, onDesignAdd, resizeHandle, onAddCatalogue, onTemplate }: {
+export const ResourceCatalogue = memo(function ResourceCatalogue({ architecture, onAdd, search, onSearch, onImportModule, visible, onClose, onDesignAdd, resizeHandle, onAddCatalogue, onTemplate, shapesOpen, onShapesOpen, onShapesBack }: {
+ shapesOpen: boolean; onShapesOpen: () => void; onShapesBack: () => void;
  architecture: Architecture; onAdd: (kind: ResourceKind, provider: Provider) => void;
  search: string; onSearch: (value: string) => void; onImportModule: () => void; visible: boolean; onClose: () => void;
- onDesignAdd: (kind: BoardItem['kind'],caption?:string) => void; resizeHandle: ReactNode;
+ onDesignAdd: (kind: BoardItem['kind'],caption?:string, shape?:ShapeId) => void; resizeHandle: ReactNode;
  onAddCatalogue: (entry: CatalogueEntry, provider: Provider) => void;
- onTemplate: (kind: 'network' | 'platform') => void;
+ onTemplate: (kind: 'network' | 'platform' | 'workflow') => void;
 }) {
+ const shapesButton = useRef<HTMLButtonElement>(null);
  const [provider, setProvider] = useState<Provider>('azure');
  const [tab,setTab] = useState('resources');
  const [snapshot,setSnapshot] = useState<CatalogueSnapshot>();
@@ -54,7 +58,8 @@ export const ResourceCatalogue = memo(function ResourceCatalogue({ architecture,
   </button></div>;
  }
  const moduleCount = architecture.resources.filter(resource => resource.kind === 'module').length;
- return <Tabs.Root asChild value={tab} onValueChange={setTab}><aside className="resource-sidebar" hidden={!visible}>
+ if (shapesOpen) { return <aside id="resource-library" className="resource-sidebar" hidden={!visible}>{resizeHandle}<ShapeLibrary onWorkflow={()=>onTemplate('workflow')} onBack={() => { onShapesBack(); requestAnimationFrame(() => shapesButton.current?.focus()); }} onAdd={(shape,label) => onDesignAdd('shape',label,shape)} /></aside>; }
+ return <Tabs.Root asChild value={tab} onValueChange={setTab}><aside id="resource-library" className="resource-sidebar" hidden={!visible}>
   {resizeHandle}
   <Tabs.List className="lab-tabs library-title" aria-label="Resource sidebar"><Tabs.Trigger value="resources">Resources</Tabs.Trigger><Tabs.Trigger value="templates">Templates</Tabs.Trigger><span className="spacer"/><span className="lib-count">{entries.length.toLocaleString()} types</span><button aria-label="Close resource library" onClick={onClose}><PanelLeftClose size={15}/></button></Tabs.List>
   <div className="cat-head">
@@ -71,7 +76,7 @@ export const ResourceCatalogue = memo(function ResourceCatalogue({ architecture,
      {favourites.some(value=>value.startsWith(prefix)) && section('fav',<><Star size={14}/>Favourites</>,<div className="resource-grid">{entries.filter(entry=>favourites.includes(prefix+entry.type)).map(tile)}</div>)}
      {recent.some(value=>value.startsWith(prefix)) && section('recent',<><History size={14}/>Recently used</>,<div className="resource-grid">{recent.filter(value=>value.startsWith(prefix)).map(value=>entries.find(entry=>value === prefix+entry.type)).filter((entry):entry is CatalogueEntry=>!!entry).map(tile)}</div>)}
      {section('modules',<><Package size={14}/>Modules</>,<div className="lib-modules"><span className="faint">{moduleCount ? moduleCount+' module references in this architecture' : 'Registry, Git or local module references'}</span><button onClick={onImportModule}><Package size={12}/>Import</button></div>)}
-     {section('design',<><Shapes size={14}/>Design</>,<div className="resource-grid">{([{kind:'frame',name:'Group box',Icon:Square},{kind:'text',name:'Text',Icon:Type},{kind:'shape',name:'Shapes',Icon:Shapes},{kind:'note',name:'Sticky note',Icon:StickyNote}] as const).map(({kind,name,Icon})=><div className="resource-tile" key={kind}><button className="tile-pick" onClick={()=>onDesignAdd(kind)}><Icon size={26}/><span className="t-name">{name}</span></button></div>)}</div>)}
+     {section('design',<><Shapes size={14}/>Design</>,<div className="resource-grid">{([{kind:'frame',name:'Group box',Icon:Square},{kind:'text',name:'Text',Icon:Type},{kind:'shape',name:'Shapes',Icon:Shapes},{kind:'note',name:'Sticky note',Icon:StickyNote}] as const).map(({kind,name,Icon})=><div className="resource-tile" key={kind}><button className="tile-pick" ref={kind === 'shape' ? shapesButton : undefined} onClick={()=>kind === 'shape' ? onShapesOpen() : onDesignAdd(kind)}><Icon size={26}/><span className="t-name">{name}</span></button></div>)}</div>)}
      {section('containers',<><Square size={14}/>Containers</>,<div className="res-list">
       <button className="res-pick" onClick={()=>onDesignAdd('frame','Subscription')} title="Visual subscription grouping"><KeyRound size={24}/><span className="res-text"><span className="res-name">Subscription</span><span className="res-type">Visual grouping · provider wiring pending</span></span></button>
       <button className="res-pick" onClick={()=>onDesignAdd('frame','Region')}><MapPin size={24}/><span className="res-text"><span className="res-name">Region</span><span className="res-type">Group regions and resources visually</span></span></button>
