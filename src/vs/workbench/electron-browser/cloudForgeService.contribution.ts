@@ -33,11 +33,11 @@ type CloudForgeServiceMethod =
 	| 'previewDraftSave' | 'applyDraftSave'
 	| 'inspectDependencies' | 'readModule' | 'auditExportReadiness' | 'runEngineValidate' | 'runEnginePlan'
 	| 'checkOfflineMirrorReadiness' | 'runEngineInitOffline';
-type CloudForgeCatalogueMethod = 'inspectCatalogueSchemaFile' | 'importCatalogueSnapshot' | 'listCatalogueSnapshots' | 'listCatalogueTypes' | 'getResourceFormSchema' | 'renderResourceDraft' | 'listCloudRegions' | 'diffCatalogueSnapshots' | 'detectEngines' | 'listMirrorPackages' | 'extractProviderSchemaFromMirror' | 'importMirrorPackage' | 'evictMirrorPackage';
+type CloudForgeCatalogueMethod = 'inspectCatalogueSchemaFile' | 'importCatalogueSnapshot' | 'listCatalogueSnapshots' | 'listCatalogueTypes' | 'getResourceFormSchema' | 'renderResourceDraft' | 'listCloudRegions' | 'diffCatalogueSnapshots' | 'detectEngines' | 'listMirrorPackages' | 'extractProviderSchemaFromMirror' | 'importMirrorPackage' | 'evictMirrorPackage' | 'verifyMirrorIntegrity' | 'planMirrorCleanup';
 type CloudForgeProjectMethod = 'createProject' | 'openProject' | 'grantProject' | 'forgetProjectAccess' | 'createWorkspaceFile' | 'inspectRepository' | 'importRepository' | 'removeRepository' | 'installGit';
 
 const catalogueMethods: ReadonlySet<string> = new Set<CloudForgeCatalogueMethod>([
-	'inspectCatalogueSchemaFile', 'importCatalogueSnapshot', 'listCatalogueSnapshots', 'listCatalogueTypes', 'getResourceFormSchema', 'renderResourceDraft', 'listCloudRegions', 'diffCatalogueSnapshots', 'detectEngines', 'listMirrorPackages', 'extractProviderSchemaFromMirror', 'importMirrorPackage', 'evictMirrorPackage'
+	'inspectCatalogueSchemaFile', 'importCatalogueSnapshot', 'listCatalogueSnapshots', 'listCatalogueTypes', 'getResourceFormSchema', 'renderResourceDraft', 'listCloudRegions', 'diffCatalogueSnapshots', 'detectEngines', 'listMirrorPackages', 'extractProviderSchemaFromMirror', 'importMirrorPackage', 'evictMirrorPackage', 'verifyMirrorIntegrity', 'planMirrorCleanup'
 ]);
 
 /**
@@ -269,7 +269,7 @@ CommandsRegistry.registerCommand('_cloudforge.callService', async (accessor, met
 		if (!isRecord(params)) {
 			return failure('INVALID_PARAMS', 'The CloudForge request is invalid.');
 		}
-		if (method === 'diffCatalogueSnapshots' && (params.workspaceId !== undefined || params.architectureId !== undefined)) {
+		if ((method === 'diffCatalogueSnapshots' || method === 'planMirrorCleanup') && (params.workspaceId !== undefined || params.architectureId !== undefined)) {
 			if (!isOpaqueId(params.workspaceId) || params.workspaceId !== activeWorkspaceId || !isOpaqueId(params.architectureId) || params.architectureId !== activeArchitectureId) {
 				return failure('SCOPE_DENIED', 'The requested architecture is not active in this window.');
 			}

@@ -610,6 +610,26 @@ suite('CloudForgeServiceChannel', () => {
 			version: '5.14.0',
 			platform: 'windows_amd64'
 		}), undefined);
+
+		assert.deepStrictEqual(validateCloudForgeServiceParams('verifyMirrorIntegrity', {}), {});
+		assert.strictEqual(validateCloudForgeServiceParams('verifyMirrorIntegrity', { mirrorPath: 'C:\\mirror' }), undefined);
+
+		assert.deepStrictEqual(validateCloudForgeServiceParams('planMirrorCleanup', {
+			quotaBytes: 536870912,
+			workspaceId: 'workspace-1',
+			architectureId: 'workspace-1-architecture-1',
+			expectedSourceRevision: rev,
+			engine: 'openTofu'
+		}), {
+			quotaBytes: 536870912,
+			workspaceId: 'workspace-1',
+			architectureId: 'workspace-1-architecture-1',
+			expectedSourceRevision: rev,
+			engine: 'openTofu'
+		});
+		assert.deepStrictEqual(validateCloudForgeServiceParams('planMirrorCleanup', { quotaBytes: 0 }), { quotaBytes: 0 });
+		assert.strictEqual(validateCloudForgeServiceParams('planMirrorCleanup', { quotaBytes: -1 }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('planMirrorCleanup', { quotaBytes: 1024, workspaceId: 'workspace-1' }), undefined);
 	});
 
 	test('picks a local .zip archive in Electron main for importMirrorPackage and blocks UNC paths', async () => {

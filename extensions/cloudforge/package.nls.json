@@ -41,6 +41,8 @@
 	"command.extractMirrorSchema": "Extract Provider Schema from Local Mirror…",
 	"command.importMirrorPackage": "Import Provider Archive (.zip) into Local Mirror…",
 	"command.evictMirrorPackage": "Remove Package from Local Provider Mirror…",
+	"command.verifyMirrorIntegrity": "Verify Local Provider Mirror Integrity",
+	"command.planMirrorCleanup": "Plan Local Mirror Quota Cleanup…",
 	"command.initArchitectureOffline": "Initialize Architecture Offline from Mirror",
 	"command.openTemplateLibrary": "Browse Template Library…",
 	"view.projects": "CloudForge Project",

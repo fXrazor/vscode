@@ -272,6 +272,18 @@
 				"icon": "$(trash)"
 			},
 			{
+				"command": "cloudforge.verifyMirrorIntegrity",
+				"title": "%command.verifyMirrorIntegrity%",
+				"category": "%displayName%",
+				"icon": "$(verified)"
+			},
+			{
+				"command": "cloudforge.planMirrorCleanup",
+				"title": "%command.planMirrorCleanup%",
+				"category": "%displayName%",
+				"icon": "$(clear-all)"
+			},
+			{
 				"command": "cloudforge.initArchitectureOffline",
 				"title": "%command.initArchitectureOffline%",
 				"category": "%displayName%",

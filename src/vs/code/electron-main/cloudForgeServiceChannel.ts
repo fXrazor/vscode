@@ -42,7 +42,7 @@ const cloudForgeMethods: ReadonlySet<string> = new Set<CloudForgeServiceMethod>(
 	'diffCatalogueSnapshots', 'auditExportReadiness',
 	'detectEngines', 'runEngineValidate', 'runEnginePlan',
 	'listMirrorPackages', 'checkOfflineMirrorReadiness', 'runEngineInitOffline', 'extractProviderSchemaFromMirror',
-	'importMirrorPackage', 'evictMirrorPackage'
+	'importMirrorPackage', 'evictMirrorPackage', 'verifyMirrorIntegrity', 'planMirrorCleanup'
 ]);
 
 /** The service allows `installGit` 10 minutes; the broker waits a little longer for its reply. */
@@ -628,8 +628,39 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 				platform: value.platform
 			};
 		}
+		case 'planMirrorCleanup': {
+			if (!hasOnlyKeys(value, ['quotaBytes', 'workspaceId', 'architectureId', 'expectedSourceRevision', 'engine'])) {
+				return undefined;
+			}
+			if (typeof value.quotaBytes !== 'number' || !Number.isSafeInteger(value.quotaBytes) || value.quotaBytes < 0) {
+				return undefined;
+			}
+			const hasWs = value.workspaceId !== undefined;
+			const hasArch = value.architectureId !== undefined;
+			if (hasWs !== hasArch) {
+				return undefined;
+			}
+			if (hasWs && (!isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId))) {
+				return undefined;
+			}
+			if (value.expectedSourceRevision !== undefined) {
+				if (!hasWs || typeof value.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(value.expectedSourceRevision)) {
+					return undefined;
+				}
+			}
+			if (value.engine !== undefined && value.engine !== 'openTofu' && value.engine !== 'terraform') {
+				return undefined;
+			}
+			return {
+				quotaBytes: value.quotaBytes,
+				...(hasWs ? { workspaceId: value.workspaceId, architectureId: value.architectureId } : {}),
+				...(value.expectedSourceRevision === undefined ? {} : { expectedSourceRevision: value.expectedSourceRevision }),
+				...(value.engine === undefined ? {} : { engine: value.engine })
+			};
+		}
 		case 'detectEngines':
 		case 'listMirrorPackages':
+		case 'verifyMirrorIntegrity':
 			return hasOnlyKeys(value, []) ? {} : undefined;
 		case 'listCloudRegions': {
 			if (!hasOnlyKeys(value, ['provider', 'scope', 'configuredRegions'])) {
@@ -883,7 +914,7 @@ export class CloudForgeServiceBroker implements IServerChannel<string> {
 						? engineInitOfflineTimeoutMs
 						: method === 'extractProviderSchemaFromMirror'
 							? extractMirrorSchemaTimeoutMs
-							: method === 'importMirrorPackage'
+							: method === 'importMirrorPackage' || method === 'verifyMirrorIntegrity'
 								? importMirrorPackageTimeoutMs
 								: undefined;
 			let value = await service.call(method, request.params, timeoutMs);
