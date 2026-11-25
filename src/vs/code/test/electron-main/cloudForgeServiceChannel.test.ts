@@ -415,6 +415,18 @@ suite('CloudForgeServiceChannel', () => {
 		const { contents: _contents, ...focusedApply } = { ...draftBase, previewToken: 'save-0123456789abcdef0123456789abcdef' };
 		assert.ok(validateCloudForgeServiceParams('applyFocusedSave', focusedApply));
 		assert.strictEqual(validateCloudForgeServiceParams('applyFocusedSave', { ...focusedApply, contents: 'x' }), undefined);
+		const batchBase = { workspaceId, architectureId: `${workspaceId}-architecture-1`, expectedSourceRevision: sha256 };
+		assert.deepStrictEqual(
+			validateCloudForgeServiceParams('previewFocusedSaveBatch', { ...batchBase, files: [{ fileName: 'main.tf', contents: 'a', baseContents: 'b' }, { fileName: 'net.tf', contents: 'c', renames: [{ from: 'a.b', to: 'a.c' }] }] }),
+			{ ...batchBase, files: [{ fileName: 'main.tf', contents: 'a', baseContents: 'b' }, { fileName: 'net.tf', contents: 'c', renames: [{ from: 'a.b', to: 'a.c' }] }] }
+		);
+		assert.strictEqual(validateCloudForgeServiceParams('previewFocusedSaveBatch', { ...batchBase, files: [] }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('previewFocusedSaveBatch', { ...batchBase, files: [{ fileName: 'main.tf', contents: 'a' }, { fileName: 'MAIN.tf', contents: 'b' }] }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('previewFocusedSaveBatch', { ...batchBase, files: [{ fileName: '../x.tf', contents: 'a' }] }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('previewFocusedSaveBatch', { ...batchBase, files: [{ fileName: 'main.tf', contents: 'a', workspaceId }] }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('previewFocusedSaveBatch', { ...batchBase, files: Array.from({ length: 17 }, (_, index) => ({ fileName: `f${index}.tf`, contents: '' })) }), undefined);
+		assert.ok(validateCloudForgeServiceParams('applyFocusedSaveBatch', { ...batchBase, previewToken: 'save-0123456789abcdef0123456789abcdef' }));
+		assert.strictEqual(validateCloudForgeServiceParams('applyFocusedSaveBatch', { ...batchBase, previewToken: 'save-0123456789abcdef0123456789abcdef', fileName: 'main.tf' }), undefined);
 
 		assert.ok(validateCloudForgeServiceParams('readResourceValues', { workspaceId, architectureId: `${workspaceId}-architecture-1`, expectedSourceRevision: sha256 }));
 		assert.strictEqual(validateCloudForgeServiceParams('readResourceValues', { workspaceId, architectureId: `${workspaceId}-architecture-1`, rootPath: 'C:\\Windows' }), undefined);

@@ -40,6 +40,8 @@ import {
 	parseDetectedEngines,
 	parseDraftSaveApply,
 	parseDraftSavePreview,
+	parseSaveAllApply,
+	parseSaveAllPreview,
 	parseEngineValidateReport,
 	parseExportAuditReport,
 	parseModuleInspection,
@@ -1045,6 +1047,45 @@ export function activate(context: ExtensionContext): void {
 				canvas.setNotice({
 					kind: 'info',
 					message: l10n.t('Saved {0} ({1} bytes) and refreshed architecture to revision {2}.', applied.fileName, applied.bytesWritten, applied.newSourceRevision.slice(0, 8)),
+				});
+			}
+			return { ok: true, applied };
+		},
+		async onPreviewSaveAll(workspaceId, architectureId, expectedSourceRevision, files) {
+			const result = await callService<unknown>('previewFocusedSaveBatch', {
+				workspaceId, architectureId, expectedSourceRevision,
+				files: files.map(file => ({
+					fileName: file.fileName,
+					contents: file.contents,
+					...(file.removeAddresses?.length ? { removeAddresses: [...file.removeAddresses] } : {}),
+					...(file.renames?.length ? { renames: file.renames.map(({ from, to }) => ({ from, to })) } : {}),
+					...(file.baseContents !== undefined ? { baseContents: file.baseContents } : {}),
+				})),
+			});
+			if (!result.ok) {
+				return { ok: false, error: draftSaveErrorMessage(result.error.code) };
+			}
+			const preview = parseSaveAllPreview(result.value);
+			return preview ? { ok: true, preview } : { ok: false, error: draftSaveErrorMessage('SERVICE_ERROR') };
+		},
+		async onApplySaveAll(workspaceId, architectureId, expectedSourceRevision, previewToken) {
+			// The merged text of every file stays in the service; only the token goes back.
+			const result = await callService<unknown>('applyFocusedSaveBatch', { workspaceId, architectureId, expectedSourceRevision, previewToken });
+			if (!result.ok) {
+				return { ok: false, error: draftSaveErrorMessage(result.error.code) };
+			}
+			const applied = parseSaveAllApply(result.value);
+			if (!applied) {
+				return { ok: false, error: draftSaveErrorMessage('SERVICE_ERROR') };
+			}
+			const refreshed = await showGraph(provider, treeView, workspaceId, architectureId);
+			if (refreshed) {
+				updateStatusBar(refreshed);
+				syncProblems(refreshed);
+				canvas.updateIfOpen(toCanvasSnapshot(refreshed, currentArchitectureName));
+				canvas.setNotice({
+					kind: 'info',
+					message: l10n.t('Saved {0} files and refreshed architecture to revision {1}.', applied.files.length, applied.newSourceRevision.slice(0, 8)),
 				});
 			}
 			return { ok: true, applied };

@@ -230,6 +230,28 @@ export interface HostDraftSaveApplied {
 	readonly bytesWritten: number;
 }
 
+export interface HostSaveAllPreviewFile {
+	readonly fileName: string;
+	readonly created: boolean;
+	readonly changed: boolean;
+	readonly addedLines: number;
+	readonly removedLines: number;
+	readonly findings: readonly HostDraftSaveFinding[];
+	readonly merge?: HostDraftSaveMerge;
+}
+
+/** Every changed file merged by Rust under one preview token. */
+export interface HostSaveAllPreview {
+	readonly sourceRevision: string;
+	readonly files: readonly HostSaveAllPreviewFile[];
+	readonly previewToken: string;
+}
+
+export interface HostSaveAllApplied {
+	readonly files: readonly { readonly fileName: string; readonly created: boolean; readonly bytesWritten: number }[];
+	readonly newSourceRevision: string;
+}
+
 export interface HostDraftSaveError {
 	readonly code: string;
 	readonly message: string;
@@ -283,6 +305,8 @@ export type HostInboundMessage =
 	| { readonly type: 'validationRunUpdate'; readonly run: HostValidationRun }
 	| { readonly type: 'draftSavePreview'; readonly result: { readonly ok: true; readonly preview: HostDraftSavePreview } | { readonly ok: false; readonly error: HostDraftSaveError } }
 	| { readonly type: 'draftSaveApplied'; readonly result: { readonly ok: true; readonly applied: HostDraftSaveApplied } | { readonly ok: false; readonly error: HostDraftSaveError } }
+	| { readonly type: 'saveAllPreview'; readonly result: { readonly ok: true; readonly preview: HostSaveAllPreview } | { readonly ok: false; readonly error: HostDraftSaveError } }
+	| { readonly type: 'saveAllApplied'; readonly result: { readonly ok: true; readonly applied: HostSaveAllApplied } | { readonly ok: false; readonly error: HostDraftSaveError } }
 	| { readonly type: 'catalogueSnapshots'; readonly snapshots: readonly HostCatalogueSnapshot[] }
 	| { readonly type: 'liveSchema'; readonly typeName: string; readonly schema: HostFormSchema | null }
 	| { readonly type: 'resourceValues'; readonly sourceRevision: string; readonly values: unknown }
@@ -314,6 +338,8 @@ export type HostOutboundMessage =
 	| { readonly type: 'cancelValidation' }
 	| { readonly type: 'requestDraftSavePreview'; readonly fileName: string; readonly contents: string; readonly removeAddresses?: readonly string[]; readonly renames?: readonly { readonly from: string; readonly to: string }[]; readonly baseContents?: string }
 	| { readonly type: 'applyDraftSave'; readonly fileName: string; readonly contents: string; readonly previewToken: string }
+	| { readonly type: 'requestSaveAllPreview'; readonly files: readonly { readonly fileName: string; readonly contents: string; readonly removeAddresses?: readonly string[]; readonly renames?: readonly { readonly from: string; readonly to: string }[]; readonly baseContents?: string }[] }
+	| { readonly type: 'applySaveAll'; readonly previewToken: string }
 	| { readonly type: 'requestSchema'; readonly kind: 'resource' | 'dataSource'; readonly typeName: string }
 	| { readonly type: 'requestModule'; readonly modulePath: readonly string[] }
 	| { readonly type: 'requestEngineValidate'; readonly engine?: 'openTofu' | 'terraform' }

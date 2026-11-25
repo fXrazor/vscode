@@ -13,7 +13,8 @@ import type { ILogService } from '../../platform/log/common/log.js';
 const protocolVersion = 1;
 const requestId = 'startup';
 const maxHeaderBytes = 4 * 1024;
-const maxRequestBytes = 64 * 1024;
+// Matches the service limit: a 512 KiB draft plus its three-way base fit after JSON escaping.
+const maxRequestBytes = 2 * 1024 * 1024;
 const maxResponseBytes = 8 * 1024 * 1024;
 const initializeTimeoutMs = 5000;
 const requestTimeoutMs = 30000;
@@ -55,6 +56,7 @@ export type CloudForgeServiceMethod =
 	| 'listCatalogueSnapshots' | 'listCatalogueTypes' | 'getResourceFormSchema' | 'getCatalogueCoverage' | 'renderResourceDraft'
 	| 'startValidationRun' | 'pollValidationRun' | 'cancelValidationRun'
 	| 'previewDraftSave' | 'applyDraftSave' | 'previewFocusedSave' | 'applyFocusedSave' | 'readResourceValues'
+	| 'previewFocusedSaveBatch' | 'applyFocusedSaveBatch'
 	| 'inspectDependencies' | 'listCloudRegions' | 'readModule'
 	| 'diffCatalogueSnapshots' | 'auditExportReadiness'
 	| 'detectEngines' | 'runEngineValidate';

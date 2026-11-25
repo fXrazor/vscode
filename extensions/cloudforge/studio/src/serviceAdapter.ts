@@ -760,6 +760,40 @@ export function buildDraftSavePayload(
 	};
 }
 
+export type DraftSavePayload = ReturnType<typeof buildDraftSavePayload>;
+
+/**
+ * Every project file the canvas changed since it loaded, ready for one `previewFocusedSaveBatch`.
+ * A file is included when its generated text differs from what the canvas generated at load, or
+ * when blocks in it were deleted or renamed. A file that only exists in the baseline (its last
+ * resource moved or was deleted) is sent with empty contents so the three-way merge removes the
+ * blocks the canvas no longer generates. Without a baseline nothing can be compared and the
+ * result is empty; the single-file save handles that case.
+ */
+export function changedFilePayloads(
+	architecture: Architecture,
+	snapshot?: HostGraphSnapshot | null,
+	baseline?: Architecture | null
+): DraftSavePayload[] {
+	if (!baseline || baseline === architecture) {
+		return [];
+	}
+	const current = projectResourceFiles(architecture);
+	const before = projectResourceFiles(baseline);
+	const names = [...new Set([...current, ...before])].filter(name => /^[A-Za-z0-9._-]+\.tf$/i.test(name) && !name.startsWith('.'));
+	const payloads: DraftSavePayload[] = [];
+	for (const fileName of names) {
+		const contents = current.includes(fileName) ? terraformCode(architecture, undefined, fileName) : '';
+		const baseContents = before.includes(fileName) ? terraformCode(baseline, undefined, fileName) : '';
+		const changes = sourceChanges(architecture, snapshot, fileName);
+		if (contents === baseContents && !changes.removeAddresses.length && !changes.renames.length) {
+			continue;
+		}
+		payloads.push({ fileName, contents, ...changes, baseContents });
+	}
+	return payloads.slice(0, 16);
+}
+
 /**
  * Serialize Studio's presentation state (mode, theme, selection, inspector, viewports, and
  * node positions) into the canonical `CanvasViewState` contract persisted by `CloudForgeCanvasPanel`.

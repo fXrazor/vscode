@@ -134,6 +134,37 @@ export interface DraftSaveApplyResult {
 	readonly bytesWritten: number;
 }
 
+/** One file of a `previewFocusedSaveBatch` call, as the webview sends it. */
+export interface SaveAllFile {
+	readonly fileName: string;
+	readonly contents: string;
+	readonly removeAddresses?: readonly string[];
+	readonly renames?: readonly { readonly from: string; readonly to: string }[];
+	readonly baseContents?: string;
+}
+
+export interface SaveAllPreviewFile {
+	readonly fileName: string;
+	readonly created: boolean;
+	readonly changed: boolean;
+	readonly addedLines: number;
+	readonly removedLines: number;
+	readonly findings: readonly DraftSaveFinding[];
+	readonly merge?: DraftSaveMergeSummary;
+}
+
+/** Several files merged under one preview token; nothing is written until `applySaveAll`. */
+export interface SaveAllPreviewResult {
+	readonly sourceRevision: string;
+	readonly files: readonly SaveAllPreviewFile[];
+	readonly previewToken: string;
+}
+
+export interface SaveAllApplyResult {
+	readonly files: readonly { readonly fileName: string; readonly created: boolean; readonly bytesWritten: number }[];
+	readonly newSourceRevision: string;
+}
+
 export interface DraftSaveError {
 	readonly code: string;
 	readonly message: string;
@@ -382,6 +413,18 @@ export type ExtensionToWebviewMessage =
 		| { readonly ok: false; readonly error: DraftSaveError };
 	}
 	| {
+		readonly type: 'saveAllPreview';
+		readonly result:
+		| { readonly ok: true; readonly preview: SaveAllPreviewResult }
+		| { readonly ok: false; readonly error: DraftSaveError };
+	}
+	| {
+		readonly type: 'saveAllApplied';
+		readonly result:
+		| { readonly ok: true; readonly applied: SaveAllApplyResult }
+		| { readonly ok: false; readonly error: DraftSaveError };
+	}
+	| {
 		readonly type: 'catalogueTypes';
 		readonly types: CanvasCatalogueTypes;
 	}
@@ -467,6 +510,8 @@ export type WebviewToExtensionMessage =
 	| { readonly type: 'cancelValidation' }
 	| { readonly type: 'requestDraftSavePreview'; readonly fileName: string; readonly contents: string; readonly removeAddresses?: readonly string[]; readonly renames?: readonly { readonly from: string; readonly to: string }[]; readonly baseContents?: string }
 	| { readonly type: 'applyDraftSave'; readonly fileName: string; readonly contents: string; readonly previewToken: string }
+	| { readonly type: 'requestSaveAllPreview'; readonly files: readonly SaveAllFile[] }
+	| { readonly type: 'applySaveAll'; readonly previewToken: string }
 	| { readonly type: 'requestSchema'; readonly kind: 'resource' | 'dataSource'; readonly typeName: string }
 	| { readonly type: 'requestModule'; readonly modulePath: readonly string[] }
 	| {
@@ -480,6 +525,9 @@ export type WebviewToExtensionMessage =
 
 const MAX_COLLAPSED_GROUPS = 256;
 const MAX_DRAFT_SAVE_CHARS = 512 * 1024;
+/** Mirrors the broker: 16 files, and the whole batch must fit one 2 MiB service request. */
+const MAX_SAVE_ALL_FILES = 16;
+const MAX_SAVE_ALL_CHARS = 1_800_000;
 const MAX_EXPORT_CHARS = 8 * 1024 * 1024;
 const MAX_FRAMES = 48;
 const MAX_ANNOTATIONS = 64;
@@ -953,6 +1001,38 @@ export function parseWebviewMessage(value: unknown): WebviewToExtensionMessage |
 				contents: value.contents,
 				previewToken: value.previewToken,
 			};
+		case 'requestSaveAllPreview': {
+			if (!Array.isArray(value.files) || value.files.length === 0 || value.files.length > MAX_SAVE_ALL_FILES) {
+				return undefined;
+			}
+			const files: SaveAllFile[] = [];
+			const names = new Set<string>();
+			let total = 0;
+			for (const file of value.files) {
+				if (typeof file !== 'object' || file === null || Array.isArray(file) || 'type' in file) {
+					return undefined;
+				}
+				const parsed = parseWebviewMessage({ ...file, type: 'requestDraftSavePreview' });
+				if (!parsed || parsed.type !== 'requestDraftSavePreview' || names.has(parsed.fileName.toLowerCase())) {
+					return undefined;
+				}
+				names.add(parsed.fileName.toLowerCase());
+				total += parsed.contents.length + (parsed.baseContents?.length ?? 0);
+				files.push({
+					fileName: parsed.fileName,
+					contents: parsed.contents,
+					...(parsed.baseContents !== undefined ? { baseContents: parsed.baseContents } : {}),
+					...(parsed.removeAddresses ? { removeAddresses: parsed.removeAddresses } : {}),
+					...(parsed.renames ? { renames: parsed.renames } : {}),
+				});
+			}
+			if (total > MAX_SAVE_ALL_CHARS) {
+				return undefined;
+			}
+			return { type: 'requestSaveAllPreview', files };
+		}
+		case 'applySaveAll':
+			return isOpaqueId(value.previewToken) ? { type: 'applySaveAll', previewToken: value.previewToken } : undefined;
 		case 'requestSchema':
 			if ((value.kind !== 'resource' && value.kind !== 'dataSource') || !isTypeName(value.typeName)) {
 				return undefined;

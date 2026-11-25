@@ -8,7 +8,7 @@ import { createHistory, historyReducer } from './model.ts';
 import { liveSchemaAttributes, liveSchemaBlocks, liveSchemaOutputs, type HostFormSchema } from './liveSchema.ts';
 import { additionalBlocks, editableFields } from './formDefinition.ts';
 import { architectureDiagnostics, isStaleDiagnostic } from './diagnostics.ts';
-import { sourceChanges, buildDraftSavePayload, buildHostViewState, defaultTargetTfFile, projectGraphSnapshotToArchitecture, projectHostDiagnostics, resolveProviderRegions } from './serviceAdapter.ts';
+import { sourceChanges, buildDraftSavePayload, changedFilePayloads, buildHostViewState, defaultTargetTfFile, projectGraphSnapshotToArchitecture, projectHostDiagnostics, resolveProviderRegions } from './serviceAdapter.ts';
 import { projectResourceFiles } from './terraformProjection.ts';
 import { describeMerge } from './draftSaveMerge.ts';
 import { buildResourceDraft, parseSchemaPreview } from './resourceDraft.ts';
@@ -408,6 +408,24 @@ test('save payloads carry the load-time canvas text so the service applies only 
 	assert.equal(typeof payload.baseContents, 'string');
 	assert.notEqual(payload.baseContents, payload.contents);
 	assert.equal(buildDraftSavePayload(baseline, 'main.tf', 'network', null, baseline).baseContents, undefined);
+});
+
+test('save all sends only the files the canvas changed, including a file emptied by a move', () => {
+	const baseline = schemaSample();
+	const files = projectResourceFiles(baseline);
+	assert.deepEqual(changedFilePayloads(baseline, null, baseline), []);
+	assert.deepEqual(changedFilePayloads(baseline, null, null), []);
+	const renamedVnet = { ...baseline, resources: baseline.resources.map(resource => resource.id === 'network' ? { ...resource, name: resource.name + '-x' } : resource) };
+	const one = changedFilePayloads(renamedVnet, null, baseline);
+	assert.equal(one.length, 1);
+	assert.equal(one[0].fileName, files.length === 1 ? 'main.tf' : one[0].fileName);
+	assert.notEqual(one[0].contents, one[0].baseContents);
+	const moved = { ...baseline, resources: baseline.resources.map(resource => resource.id === 'network' ? { ...resource, sourceFile: 'network.tf' } : resource) };
+	const both = changedFilePayloads(moved, null, baseline);
+	assert.deepEqual(both.map(payload => payload.fileName).sort(), ['main.tf', 'network.tf'].sort());
+	const added = both.find(payload => payload.fileName === 'network.tf')!;
+	assert.equal(added.baseContents, '');
+	assert.match(added.contents, /azurerm_virtual_network/);
 });
 
 test('the canvas takes literal values from the files and keeps its own for expressions and secrets', () => {

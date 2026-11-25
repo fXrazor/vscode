@@ -31,6 +31,7 @@ type CloudForgeServiceMethod =
 	| 'chooseTerraformRoot' | 'selectArchitecture' | 'readArchitecture'
 	| 'startValidationRun' | 'pollValidationRun' | 'cancelValidationRun'
 	| 'previewDraftSave' | 'applyDraftSave' | 'previewFocusedSave' | 'applyFocusedSave' | 'readResourceValues'
+	| 'previewFocusedSaveBatch' | 'applyFocusedSaveBatch'
 	| 'inspectDependencies' | 'readModule' | 'auditExportReadiness' | 'runEngineValidate';
 type CloudForgeCatalogueMethod = 'inspectCatalogueSchemaFile' | 'importCatalogueSnapshot' | 'listCatalogueSnapshots' | 'listCatalogueTypes' | 'getResourceFormSchema' | 'getCatalogueCoverage' | 'renderResourceDraft' | 'listCloudRegions' | 'diffCatalogueSnapshots' | 'detectEngines';
 type CloudForgeProjectMethod = 'createProject' | 'openProject' | 'grantProject' | 'forgetProjectAccess' | 'createWorkspaceFile' | 'inspectRepository' | 'importRepository' | 'removeRepository' | 'createArchitecture' | 'summarizeArchitectures' | 'installGit';
@@ -284,6 +285,7 @@ CommandsRegistry.registerCommand('_cloudforge.callService', async (accessor, met
 		method !== 'chooseTerraformRoot' && method !== 'selectArchitecture' && method !== 'readArchitecture' &&
 		method !== 'startValidationRun' && method !== 'pollValidationRun' && method !== 'cancelValidationRun' &&
 		method !== 'previewDraftSave' && method !== 'applyDraftSave' && method !== 'previewFocusedSave' && method !== 'applyFocusedSave' &&
+		method !== 'previewFocusedSaveBatch' && method !== 'applyFocusedSaveBatch' &&
 		method !== 'inspectDependencies' && method !== 'readResourceValues' &&
 		method !== 'readModule' && method !== 'auditExportReadiness' && method !== 'runEngineValidate'
 	) {
@@ -319,6 +321,8 @@ CommandsRegistry.registerCommand('_cloudforge.callService', async (accessor, met
 		case 'applyDraftSave':
 		case 'previewFocusedSave':
 		case 'applyFocusedSave':
+		case 'previewFocusedSaveBatch':
+		case 'applyFocusedSaveBatch':
 			if (!isOpaqueId(params.architectureId) || params.architectureId !== activeArchitectureId || typeof params.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(params.expectedSourceRevision)) {
 				return failure('SCOPE_DENIED', 'The requested architecture is not active in this window.');
 			}

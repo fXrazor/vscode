@@ -33,7 +33,10 @@ import type {
 	DraftSaveFinding,
 	DraftSaveMergeSummary,
 	CanvasSchemaPreview,
-	DraftSavePreviewResult
+	DraftSavePreviewResult,
+	SaveAllApplyResult,
+	SaveAllPreviewFile,
+	SaveAllPreviewResult
 } from './protocol';
 import type {
 	FieldAccess,
@@ -977,6 +980,62 @@ export function parseDraftSaveApply(value: unknown): DraftSaveApplyResult | unde
 		newSourceRevision: value.newSourceRevision,
 		bytesWritten: value.bytesWritten,
 	};
+}
+
+function parseFindings(value: unknown[]): DraftSaveFinding[] {
+	const findings: DraftSaveFinding[] = [];
+	for (const f of value) {
+		if (!isRecord(f) || !isNonEmptyString(f.code, 128) || !isNonEmptyString(f.file, 255)) {
+			continue;
+		}
+		findings.push({ code: f.code, file: f.file, ...(isNonNegativeInt(f.line) ? { line: f.line } : {}) });
+	}
+	return findings;
+}
+
+/** `previewFocusedSaveBatch` result: every file merged, one token for all of them. */
+export function parseSaveAllPreview(value: unknown): SaveAllPreviewResult | undefined {
+	if (!isRecord(value) || !isSha256(value.sourceRevision) || !isNonEmptyString(value.previewToken, 256) || !Array.isArray(value.files) || value.files.length > 16) {
+		return undefined;
+	}
+	const files: SaveAllPreviewFile[] = [];
+	for (const file of value.files) {
+		if (
+			!isRecord(file) ||
+			!isNonEmptyString(file.fileName, 255) ||
+			typeof file.created !== 'boolean' ||
+			typeof file.changed !== 'boolean' ||
+			!isNonNegativeInt(file.addedLines) ||
+			!isNonNegativeInt(file.removedLines) ||
+			!Array.isArray(file.findings)
+		) {
+			return undefined;
+		}
+		files.push({
+			fileName: file.fileName,
+			created: file.created,
+			changed: file.changed,
+			addedLines: file.addedLines,
+			removedLines: file.removedLines,
+			findings: parseFindings(file.findings),
+			...optionalMerge(file.merge),
+		});
+	}
+	return { sourceRevision: value.sourceRevision, files, previewToken: value.previewToken };
+}
+
+export function parseSaveAllApply(value: unknown): SaveAllApplyResult | undefined {
+	if (!isRecord(value) || !isSha256(value.newSourceRevision) || !Array.isArray(value.files) || value.files.length > 16) {
+		return undefined;
+	}
+	const files: { fileName: string; created: boolean; bytesWritten: number }[] = [];
+	for (const file of value.files) {
+		if (!isRecord(file) || !isNonEmptyString(file.fileName, 255) || typeof file.created !== 'boolean' || !isNonNegativeInt(file.bytesWritten)) {
+			return undefined;
+		}
+		files.push({ fileName: file.fileName, created: file.created, bytesWritten: file.bytesWritten });
+	}
+	return { files, newSourceRevision: value.newSourceRevision };
 }
 
 export function draftSaveErrorMessage(code: string): DraftSaveError {

@@ -38,6 +38,7 @@ const cloudForgeMethods: ReadonlySet<string> = new Set<CloudForgeServiceMethod>(
 	'listCatalogueSnapshots', 'listCatalogueTypes', 'getResourceFormSchema', 'getCatalogueCoverage', 'renderResourceDraft',
 	'startValidationRun', 'pollValidationRun', 'cancelValidationRun',
 	'previewDraftSave', 'applyDraftSave', 'previewFocusedSave', 'applyFocusedSave',
+	'previewFocusedSaveBatch', 'applyFocusedSaveBatch',
 	'inspectDependencies', 'readResourceValues', 'listCloudRegions', 'readModule',
 	'diffCatalogueSnapshots', 'auditExportReadiness',
 	'detectEngines', 'runEngineValidate'
@@ -48,6 +49,8 @@ const installGitTimeoutMs = 11 * 60 * 1000;
 const maxPathLength = 32767;
 const maxNameLength = 255;
 const maxRemoteBytes = 2048;
+/** A batch save must fit in one service request (2 MiB) with room for the envelope. */
+const maxBatchBytes = 1_900_000;
 const maxSelections = 32;
 const maxWorkspaceFolders = 1024;
 const maxPollEvents = 512;
@@ -523,6 +526,66 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 				architectureId: value.architectureId,
 				expectedSourceRevision: value.expectedSourceRevision,
 				fileName: value.fileName,
+				previewToken: value.previewToken
+			};
+		}
+		case 'previewFocusedSaveBatch': {
+			if (
+				!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'expectedSourceRevision', 'files']) ||
+				!isOpaqueId(value.workspaceId) ||
+				!isOpaqueId(value.architectureId) ||
+				typeof value.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(value.expectedSourceRevision) ||
+				!Array.isArray(value.files) || value.files.length === 0 || value.files.length > 16
+			) {
+				return undefined;
+			}
+			const files: Record<string, unknown>[] = [];
+			const names = new Set<string>();
+			let total = 0;
+			for (const file of value.files) {
+				if (!isRecord(file) || 'workspaceId' in file || 'architectureId' in file || 'expectedSourceRevision' in file) {
+					return undefined;
+				}
+				const checked = validateCloudForgeServiceParams('previewFocusedSave', {
+					...file,
+					workspaceId: value.workspaceId,
+					architectureId: value.architectureId,
+					expectedSourceRevision: value.expectedSourceRevision
+				});
+				if (!checked || names.has(String(checked.fileName).toLowerCase())) {
+					return undefined;
+				}
+				names.add(String(checked.fileName).toLowerCase());
+				total += Buffer.byteLength(String(checked.contents), 'utf8') + (typeof checked.baseContents === 'string' ? Buffer.byteLength(checked.baseContents, 'utf8') : 0);
+				delete checked.workspaceId;
+				delete checked.architectureId;
+				delete checked.expectedSourceRevision;
+				files.push(checked);
+			}
+			if (total > maxBatchBytes) {
+				return undefined;
+			}
+			return {
+				workspaceId: value.workspaceId,
+				architectureId: value.architectureId,
+				expectedSourceRevision: value.expectedSourceRevision,
+				files
+			};
+		}
+		case 'applyFocusedSaveBatch': {
+			if (
+				!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'expectedSourceRevision', 'previewToken']) ||
+				!isOpaqueId(value.workspaceId) ||
+				!isOpaqueId(value.architectureId) ||
+				typeof value.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(value.expectedSourceRevision) ||
+				!isOpaqueId(value.previewToken)
+			) {
+				return undefined;
+			}
+			return {
+				workspaceId: value.workspaceId,
+				architectureId: value.architectureId,
+				expectedSourceRevision: value.expectedSourceRevision,
 				previewToken: value.previewToken
 			};
 		}

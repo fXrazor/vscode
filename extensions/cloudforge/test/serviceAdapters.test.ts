@@ -16,6 +16,8 @@ import {
 	parseDetectedEngines,
 	parseDraftSaveApply,
 	parseDraftSavePreview,
+	parseSaveAllApply,
+	parseSaveAllPreview,
 	parseSchemaPreview,
 	parseEngineValidateReport,
 	parseExportAuditReport,
@@ -474,4 +476,32 @@ test('draft save previews carry bounded canvas deletions', () => {
 	assert.equal(parseWebviewMessage({ type: 'requestDraftSavePreview', fileName: 'main.tf', contents: '', renames: [{ from: 'a.b', to: 'a.c', extra: 1 }] }), undefined);
 	assert.deepEqual(parseWebviewMessage({ type: 'requestDraftSavePreview', fileName: 'main.tf', contents: 'a', baseContents: 'b' }), { type: 'requestDraftSavePreview', fileName: 'main.tf', contents: 'a', baseContents: 'b' });
 	assert.equal(parseWebviewMessage({ type: 'requestDraftSavePreview', fileName: 'main.tf', contents: 'a', baseContents: 1 }), undefined);
+});
+
+test('save-all preview and apply results are validated and messages are bounded', () => {
+	const merge = { updated: ['aws_vpc.main'], added: [], removed: [], unchanged: 0, preserved: 1, skipped: [], renamed: [] };
+	const preview = parseSaveAllPreview({
+		workspaceId: 'w', architectureId: 'a', sourceRevision: 'a'.repeat(64), focused: true, previewToken: 'save-' + 'd'.repeat(32),
+		files: [
+			{ fileName: 'main.tf', created: false, changed: true, addedLines: 1, removedLines: 1, findings: [{ code: 'X', file: 'main.tf', line: 2 }], merge },
+			{ fileName: 'new.tf', created: true, changed: false, addedLines: 0, removedLines: 0, findings: [] },
+		],
+	});
+	assert.equal(preview?.files.length, 2);
+	assert.deepEqual(preview?.files[0].merge, merge);
+	assert.equal(preview?.files[1].merge, undefined);
+	assert.equal(parseSaveAllPreview({ sourceRevision: 'a'.repeat(64), previewToken: 't', files: [{ fileName: 'main.tf' }] }), undefined);
+	assert.deepEqual(parseSaveAllApply({ newSourceRevision: 'e'.repeat(64), files: [{ fileName: 'main.tf', created: false, bytesWritten: 9 }] }), {
+		newSourceRevision: 'e'.repeat(64), files: [{ fileName: 'main.tf', created: false, bytesWritten: 9 }],
+	});
+	assert.equal(parseSaveAllApply({ newSourceRevision: 'bad', files: [] }), undefined);
+
+	assert.deepEqual(parseWebviewMessage({ type: 'requestSaveAllPreview', files: [{ fileName: 'main.tf', contents: 'x', baseContents: 'y', renames: [{ from: 'a.b', to: 'a.c' }] }] }), {
+		type: 'requestSaveAllPreview', files: [{ fileName: 'main.tf', contents: 'x', baseContents: 'y', renames: [{ from: 'a.b', to: 'a.c' }] }],
+	});
+	assert.equal(parseWebviewMessage({ type: 'requestSaveAllPreview', files: [] }), undefined);
+	assert.equal(parseWebviewMessage({ type: 'requestSaveAllPreview', files: [{ fileName: 'a.tf', contents: '' }, { fileName: 'A.tf', contents: '' }] }), undefined);
+	assert.equal(parseWebviewMessage({ type: 'requestSaveAllPreview', files: [{ fileName: '../a.tf', contents: '' }] }), undefined);
+	assert.equal(parseWebviewMessage({ type: 'requestSaveAllPreview', files: [{ type: 'applyDraftSave', fileName: 'a.tf', contents: '' }] }), undefined);
+	assert.deepEqual(parseWebviewMessage({ type: 'applySaveAll', previewToken: 'save-' + 'd'.repeat(32) }), { type: 'applySaveAll', previewToken: 'save-' + 'd'.repeat(32) });
 });

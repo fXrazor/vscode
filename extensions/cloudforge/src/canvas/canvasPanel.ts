@@ -26,6 +26,9 @@ import {
 	type DraftSaveApplyResult,
 	type DraftSaveError,
 	type DraftSavePreviewResult,
+	type SaveAllApplyResult,
+	type SaveAllFile,
+	type SaveAllPreviewResult,
 	type ExportFormat,
 	type ExtensionToWebviewMessage
 } from './protocol';
@@ -66,6 +69,19 @@ export interface CanvasPanelHost {
 		contents: string,
 		previewToken: string
 	): Promise<{ readonly ok: true; readonly applied: DraftSaveApplyResult } | { readonly ok: false; readonly error: DraftSaveError }>;
+	/** Merges several canvas files into the files on disk under one token (`previewFocusedSaveBatch`). */
+	onPreviewSaveAll?(
+		workspaceId: string,
+		architectureId: string,
+		expectedSourceRevision: string,
+		files: readonly SaveAllFile[]
+	): Promise<{ readonly ok: true; readonly preview: SaveAllPreviewResult } | { readonly ok: false; readonly error: DraftSaveError }>;
+	onApplySaveAll?(
+		workspaceId: string,
+		architectureId: string,
+		expectedSourceRevision: string,
+		previewToken: string
+	): Promise<{ readonly ok: true; readonly applied: SaveAllApplyResult } | { readonly ok: false; readonly error: DraftSaveError }>;
 	onLoadCatalogueSnapshots?(): Promise<readonly CanvasCatalogueSnapshot[]>;
 	/** Resource types of the newest imported snapshot per palette provider. */
 	onLoadCatalogueTypes?(): Promise<readonly CanvasCatalogueTypes[]>;
@@ -474,6 +490,44 @@ export class CloudForgeCanvasPanel implements Disposable {
 					});
 				}
 				this.post({ type: 'draftSaveApplied', result });
+				return;
+			}
+			case 'requestSaveAllPreview': {
+				const graph = this.graph;
+				if (!graph || !this.host.onPreviewSaveAll) {
+					this.post({
+						type: 'saveAllPreview',
+						result: { ok: false, error: { code: 'SERVICE_UNAVAILABLE', message: l10n.t('Saving several files at once is not available in this window.') } },
+					});
+					return;
+				}
+				const result = await this.host.onPreviewSaveAll(graph.workspaceId, graph.architectureId, graph.sourceRevision, message.files);
+				if (!result.ok && result.error.code === 'STALE_SOURCE') {
+					this.setNotice({
+						kind: 'stale',
+						message: l10n.t('The Terraform source changed on disk. Refresh the graph before previewing or saving.'),
+					});
+				}
+				this.post({ type: 'saveAllPreview', result });
+				return;
+			}
+			case 'applySaveAll': {
+				const graph = this.graph;
+				if (!graph || !this.host.onApplySaveAll) {
+					this.post({
+						type: 'saveAllApplied',
+						result: { ok: false, error: { code: 'SERVICE_UNAVAILABLE', message: l10n.t('Saving several files at once is not available in this window.') } },
+					});
+					return;
+				}
+				const result = await this.host.onApplySaveAll(graph.workspaceId, graph.architectureId, graph.sourceRevision, message.previewToken);
+				if (!result.ok && result.error.code === 'STALE_SOURCE') {
+					this.setNotice({
+						kind: 'stale',
+						message: l10n.t('The Terraform source changed on disk. Refresh the graph before applying changes.'),
+					});
+				}
+				this.post({ type: 'saveAllApplied', result });
 				return;
 			}
 			case 'requestSchema': {

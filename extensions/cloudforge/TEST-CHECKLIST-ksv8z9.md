@@ -1,14 +1,14 @@
 # CloudForge: test checklist for branch `claude/project-thread-ksv8z9`
 
-Covers everything built in both repos on 25 November 2026 (updated 17:30 for three-way saves and file values) (Rust `fXrazor/CloudForge` and Code OSS `fXrazor/vscode`, same branch name). Nothing is merged yet.
+Covers everything built in both repos on 25 November 2026 (updated for three-way saves, file values and saving several files at once) (Rust `fXrazor/CloudForge` and Code OSS `fXrazor/vscode`, same branch name). Nothing is merged yet.
 
 ## 0. Build and automated checks (Windows)
 
-- [ ] Rust: in a checkout of the branch, from `service/`, with a **fresh** `CARGO_TARGET_DIR` (a stale one gives bogus `hcl-edit` E0599 errors), run `cargo test`. Expect everything to pass, including the `focused_save` (14) and `resource_values` (1) unit tests and, in `tests/draft_save.rs`, `focused_save_rewrites_only_changed_values_and_keeps_comments` and `read_resource_values_returns_file_values_without_secrets`.
+- [ ] Rust: in a checkout of the branch, from `service/`, with a **fresh** `CARGO_TARGET_DIR` (a stale one gives bogus `hcl-edit` E0599 errors), run `cargo test`. Expect everything to pass, including the `focused_save` (14) and `resource_values` (1) unit tests and, in `tests/draft_save.rs`, `focused_save_rewrites_only_changed_values_and_keeps_comments`, `read_resource_values_returns_file_values_without_secrets` and `focused_batch_saves_several_files_under_one_token`. `tests/stdio.rs` now expects the 2 MiB request limit.
 - [ ] Rust: `node docs/protocol/fixtures/check-fixtures.mjs` reports the fixtures consistent.
 - [ ] Code OSS: build with the new service binary staged, then run the electron-main test `src/vs/code/test/electron-main/cloudForgeServiceChannel.test.ts`.
 - [ ] Code OSS: full type-check (`npm run compile` or the usual watch build). This covers `cloudForgeService.contribution.ts`, which couldn't be checked in the cloud.
-- [ ] Studio: `pnpm check` and tests (106 expected) in `extensions/cloudforge/studio`; extension tests (70 expected).
+- [ ] Studio: `pnpm check` and tests (107 expected) in `extensions/cloudforge/studio`; extension tests (71 expected).
 
 Use a test project with at least two architectures and one `.tf` file that has comments, a `tags = local.tags` line, a `lifecycle` block and a `dynamic` block.
 
@@ -68,8 +68,18 @@ Use a test project with at least two architectures and one `.tf` file that has c
 - [ ] Delete a nested block (for example an `ip_configuration`) on the canvas and save. That block is removed from the file.
 - [ ] Refresh the graph after a save: the next save starts from the new file contents.
 
+## 7b. Save every changed file at once
+
+- [ ] Change resources in two different `.tf` files, then press Save in the top bar. A "Save canvas changes" dialog lists both files, each with what changes ("Updates …", "keeps … as written").
+- [ ] Press "Save 2 files". Both files change on disk, nothing else does, and the graph refreshes to the new revision.
+- [ ] Change only one file and press Save: the usual single-file dialog opens for that file.
+- [ ] In the save-all dialog, press Review on one file: the single-file dialog opens for it.
+- [ ] Edit one of the files in the code editor after previewing, then press Save in the dialog. It refuses (source changed) and writes nothing.
+- [ ] Move a resource to another file (change its source file on the canvas, if your build offers it) and save all: it is removed from the old file and added to the new one, which is created if needed.
+- [ ] A large architecture (several hundred resources) still previews and saves (requests up to 2 MiB).
+
 ## 8. Known gaps (not bugs)
 
 - If the graph refreshes while you have unsaved canvas edits, those edits count as already saved for the next three-way save. Save before refreshing.
-- Moving a resource from one file to another isn't supported by focused saves.
+- Moving a resource between files works only through Save all (both files in one save); the single-file save still keeps the old block.
 - The schema check appears in the inspector's Code tab, not in the focused workspace's code pane.
