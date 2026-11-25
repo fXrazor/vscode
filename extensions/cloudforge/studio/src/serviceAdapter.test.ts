@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { createHistory, historyReducer } from './model.ts';
 import { liveSchemaAttributes, liveSchemaBlocks, liveSchemaOutputs, type HostFormSchema } from './liveSchema.ts';
 import { additionalBlocks, editableFields } from './formDefinition.ts';
-import { architectureDiagnostics } from './diagnostics.ts';
+import { architectureDiagnostics, isStaleDiagnostic } from './diagnostics.ts';
 import { buildDraftSavePayload, buildHostViewState, defaultTargetTfFile, projectGraphSnapshotToArchitecture, projectHostDiagnostics, resolveProviderRegions } from './serviceAdapter.ts';
 import { projectResourceFiles } from './terraformProjection.ts';
 import { explicitResourceReferences, inheritedDependencies } from './resourceHierarchy.ts';
@@ -221,6 +221,12 @@ test('projectHostDiagnostics unifies graph, Rust validation, and CLI validate -j
 	assert.equal(cli?.resourceId, 'vnet-1');
 	assert.equal(cli?.severity, 'error');
 	assert.match(cli?.message ?? '', /Missing required argument/);
+	assert.deepEqual(cli?.location, { fileName: 'main.tf', line: 12 });
+	assert.ok(diags.every(d => d.sourceRevision === '3'.repeat(64)));
+	assert.equal(diags.some(d => isStaleDiagnostic(d, architecture, '3'.repeat(64))), false);
+	assert.equal(isStaleDiagnostic(cli!, architecture, '9'.repeat(64)), true, 'a newer source revision makes host findings stale');
+	const validation = diags.find(d => d.source === 'validation')!;
+	assert.equal(isStaleDiagnostic({ ...validation, resourceId: 'deleted-node' }, architecture, '3'.repeat(64)), true, 'a deleted target makes the finding stale');
 });
 
 test('historyReducer replace resets undo/redo history cleanly for live workspace loads', () => {

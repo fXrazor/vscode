@@ -289,6 +289,7 @@ export type HostOutboundMessage =
 	| { readonly type: 'ready' }
 	| { readonly type: 'selectNode'; readonly nodeId: string | null }
 	| { readonly type: 'openSource'; readonly nodeId: string }
+	| { readonly type: 'openSourceLocation'; readonly sourceRevision: string; readonly fileName: string; readonly line?: number; readonly column?: number }
 	| { readonly type: 'refresh' }
 	| { readonly type: 'toggleFocusMode'; readonly active?: boolean }
 	| { readonly type: 'viewState'; readonly state: HostViewState }

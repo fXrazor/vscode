@@ -350,18 +350,21 @@ CommandsRegistry.registerCommand('_cloudforge.callService', async (accessor, met
 	return result;
 });
 
-CommandsRegistry.registerCommand('_cloudforge.openSource', async (accessor, workspaceId: unknown, architectureId: unknown, sourceRevision: unknown, nodeId: unknown): Promise<CloudForgeCallResult> => {
-	if (!isOpaqueId(workspaceId) || workspaceId !== activeWorkspaceId || !isOpaqueId(architectureId) || architectureId !== activeArchitectureId || typeof sourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(sourceRevision) || !isOpaqueId(nodeId)) {
+type ArchitectureSource = { readonly graph: Record<string, unknown> & { readonly nodes: unknown[]; readonly sourceRoot: string[] }; readonly root: URI };
+
+/**
+ * Re-reads the active architecture at `sourceRevision` and resolves the folder its sources live in
+ * (the project, or a linked repository's workspace folder). Shared by the source navigation commands.
+ */
+async function resolveArchitectureSource(accessor: ServicesAccessor, workspaceId: unknown, architectureId: unknown, sourceRevision: unknown): Promise<ArchitectureSource | CloudForgeCallFailure> {
+	if (!isOpaqueId(workspaceId) || workspaceId !== activeWorkspaceId || !isOpaqueId(architectureId) || architectureId !== activeArchitectureId || typeof sourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(sourceRevision)) {
 		return failure('SCOPE_DENIED', 'The requested source is not active in this window.');
 	}
 	const projectRoot = activeRoot;
 	if (!projectRoot || projectRoot.scheme !== Schemas.file) {
 		return failure('WORKSPACE_UNAVAILABLE', 'The selected workspace is not available.');
 	}
-	const editorService = accessor.get(IEditorService);
-	const textFileService = accessor.get(ITextFileService);
 	const workspaceContext = accessor.get(IWorkspaceContextService);
-
 	const result = await serviceChannel(accessor).call<CloudForgeCallResult>('readArchitecture', {
 		workspaceId,
 		architectureId,
@@ -377,11 +380,6 @@ CommandsRegistry.registerCommand('_cloudforge.openSource', async (accessor, work
 	if (!isRecord(graph) || graph.workspaceId !== workspaceId || graph.architectureId !== architectureId || graph.sourceRevision !== sourceRevision || !Array.isArray(graph.nodes)) {
 		return failure('SERVICE_ERROR', 'The CloudForge service returned an invalid graph.');
 	}
-	const node = graph.nodes.find(candidate => isRecord(candidate) && candidate.id === nodeId);
-	if (!isRecord(node) || !isRecord(node.source)) {
-		return failure('UNSUPPORTED_FORMAT', 'This resource has no navigable source location.');
-	}
-
 	// A linked architecture's source lives in its repository's workspace folder (Stage 2).
 	let root = projectRoot;
 	if (isRecord(graph.sourceBase) && graph.sourceBase.kind === 'repository') {
@@ -394,9 +392,33 @@ CommandsRegistry.registerCommand('_cloudforge.openSource', async (accessor, work
 	} else if (graph.sourceBase !== undefined && !(isRecord(graph.sourceBase) && graph.sourceBase.kind === 'project')) {
 		return failure('SERVICE_ERROR', 'The CloudForge service returned an invalid source location.');
 	}
+	if (!Array.isArray(graph.sourceRoot) || graph.sourceRoot.length > 8 || !graph.sourceRoot.every(isSourceSegment)) {
+		return failure('SERVICE_ERROR', 'The CloudForge service returned an invalid source location.');
+	}
+	return { graph: graph as ArchitectureSource['graph'], root };
+}
 
+function isFailure(value: ArchitectureSource | CloudForgeCallFailure): value is CloudForgeCallFailure {
+	return 'ok' in value && value.ok === false;
+}
+
+CommandsRegistry.registerCommand('_cloudforge.openSource', async (accessor, workspaceId: unknown, architectureId: unknown, sourceRevision: unknown, nodeId: unknown): Promise<CloudForgeCallResult> => {
+	if (!isOpaqueId(nodeId)) {
+		return failure('SCOPE_DENIED', 'The requested source is not active in this window.');
+	}
+	const editorService = accessor.get(IEditorService);
+	const textFileService = accessor.get(ITextFileService);
+	const resolved = await resolveArchitectureSource(accessor, workspaceId, architectureId, sourceRevision);
+	if (isFailure(resolved)) {
+		return resolved;
+	}
+	const { graph, root } = resolved;
+	const node = graph.nodes.find(candidate => isRecord(candidate) && candidate.id === nodeId);
+	if (!isRecord(node) || !isRecord(node.source)) {
+		return failure('UNSUPPORTED_FORMAT', 'This resource has no navigable source location.');
+	}
 	const source = node.source;
-	if (!isSourceSegment(source.file) || !Array.isArray(graph.sourceRoot) || graph.sourceRoot.length > 8 || !graph.sourceRoot.every(isSourceSegment)) {
+	if (!isSourceSegment(source.file)) {
 		return failure('SERVICE_ERROR', 'The CloudForge service returned an invalid source location.');
 	}
 	if (typeof source.line !== 'number' || !Number.isSafeInteger(source.line) || source.line < 1 || typeof source.column !== 'number' || !Number.isSafeInteger(source.column) || source.column < 1 || typeof source.endLine !== 'number' || !Number.isSafeInteger(source.endLine) || source.endLine < source.line || typeof source.endColumn !== 'number' || !Number.isSafeInteger(source.endColumn) || source.endColumn < 1 || (source.endLine === source.line && source.endColumn < source.column)) {
@@ -413,6 +435,30 @@ CommandsRegistry.registerCommand('_cloudforge.openSource', async (accessor, work
 			selection: new Range(source.line, source.column, source.endLine, source.endColumn),
 			pinned: true
 		}
+	});
+	return { ok: true, value: true };
+});
+
+/**
+ * Opens a diagnostic's reported file and line (for example from `runEngineValidate`) inside the active
+ * architecture's verified root. The file must be a single `.tf` / `.tf.json` name; the revision must still
+ * be current, so a stale diagnostic never opens a line in changed source.
+ */
+CommandsRegistry.registerCommand('_cloudforge.openSourceLocation', async (accessor, workspaceId: unknown, architectureId: unknown, sourceRevision: unknown, fileName: unknown, line: unknown, column: unknown): Promise<CloudForgeCallResult> => {
+	if (!isSourceSegment(fileName) || !/\.tf(\.json)?$/i.test(fileName) || (line !== undefined && (typeof line !== 'number' || !Number.isSafeInteger(line) || line < 1)) || (column !== undefined && (typeof column !== 'number' || !Number.isSafeInteger(column) || column < 1))) {
+		return failure('SCOPE_DENIED', 'The requested source is not active in this window.');
+	}
+	const editorService = accessor.get(IEditorService);
+	const resolved = await resolveArchitectureSource(accessor, workspaceId, architectureId, sourceRevision);
+	if (isFailure(resolved)) {
+		return resolved;
+	}
+	const resource = URI.joinPath(resolved.root, ...resolved.graph.sourceRoot, fileName);
+	const startLine = typeof line === 'number' ? line : 1;
+	const startColumn = typeof column === 'number' ? column : 1;
+	await editorService.openEditor({
+		resource,
+		options: { selection: new Range(startLine, startColumn, startLine, startColumn), pinned: true }
 	});
 	return { ok: true, value: true };
 });

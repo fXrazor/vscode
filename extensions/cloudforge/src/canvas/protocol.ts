@@ -414,6 +414,7 @@ export type WebviewToExtensionMessage =
 	| { readonly type: 'ready' }
 	| { readonly type: 'selectNode'; readonly nodeId: string | null }
 	| { readonly type: 'openSource'; readonly nodeId: string }
+	| { readonly type: 'openSourceLocation'; readonly sourceRevision: string; readonly fileName: string; readonly line?: number; readonly column?: number }
 	| { readonly type: 'refresh' }
 	| { readonly type: 'toggleFocusMode'; readonly active?: boolean }
 	| { readonly type: 'viewState'; readonly state: CanvasViewState }
@@ -818,6 +819,23 @@ export function parseWebviewMessage(value: unknown): WebviewToExtensionMessage |
 			return isOpaqueId(value.nodeId) ? { type: 'selectNode', nodeId: value.nodeId } : undefined;
 		case 'openSource':
 			return isOpaqueId(value.nodeId) ? { type: 'openSource', nodeId: value.nodeId } : undefined;
+		case 'openSourceLocation': {
+			const position = (raw: unknown) => raw === undefined || (typeof raw === 'number' && Number.isSafeInteger(raw) && raw >= 1);
+			if (
+				typeof value.sourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(value.sourceRevision)
+				|| typeof value.fileName !== 'string' || value.fileName.length > 255 || !/^[^<>:"/\\|?*\u0000-\u001f]+\.tf(\.json)?$/i.test(value.fileName) || value.fileName.startsWith('.')
+				|| !position(value.line) || !position(value.column)
+			) {
+				return undefined;
+			}
+			return {
+				type: 'openSourceLocation',
+				sourceRevision: value.sourceRevision,
+				fileName: value.fileName,
+				...(value.line === undefined ? {} : { line: value.line as number }),
+				...(value.column === undefined ? {} : { column: value.column as number }),
+			};
+		}
 		case 'viewState':
 			return isRecord(value.state) ? { type: 'viewState', state: sanitizeViewState(value.state) } : undefined;
 		case 'requestValidation': {

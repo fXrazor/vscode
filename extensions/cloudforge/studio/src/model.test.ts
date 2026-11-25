@@ -673,6 +673,9 @@ test('local diagnostics link nested required fields, CIDR containment, overlaps 
  assert.ok(architectureDiagnostics(architecture).some(item=>item.resourceId==='subnet'&&item.path==='parent'));
  architecture.resources.push({...architecture.resources[0],id:'overlap',name:'vnet-overlap'});
  assert.ok(architectureDiagnostics(architecture).some(item=>item.severity==='warning'&&item.message.includes('overlap')));
+ const overlap=architectureDiagnostics(architecture).find(item=>item.severity==='warning'&&item.message.includes('overlap'));
+ assert.deepEqual(overlap?.targets?.map(target=>target.resourceId).sort(),[architecture.resources[0].id,'overlap'].sort(),'an overlap points at both networks');
+ assert.ok(overlap?.targets?.every(target=>target.path),'each target opens its address range field');
 });
 
 test('flowchart starters share editable geometry, labelled links and atomic insertion/undo', async () => {

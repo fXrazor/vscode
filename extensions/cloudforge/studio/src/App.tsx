@@ -338,7 +338,13 @@ export function Studio() {
 	}, [setSelectedId]);
 	useEffect(()=>{if(pendingField&&selectedId===pendingField.resourceId&&detailTab==='form'){focusResourceField(document.querySelector('#resource-inspector'),pendingField.path);setPendingField(undefined);}},[pendingField,selectedId,detailTab]);
 	function showIssues(){setInspectorOpen(true);setDetailTab('issues');}
-	function revealIssue(finding:Diagnostic){openResource(finding.resourceId);setPendingField(finding);}
+	function revealIssue(finding:Diagnostic){
+		// A multi-resource finding fits every target on the canvas, then opens the first one's field.
+		if(finding.targets&&finding.targets.length>1){void flow?.fitView({nodes:finding.targets.map(target=>({id:target.resourceId})),padding:0.3,maxZoom:1.2});}
+		else if(finding.resourceId){void flow?.fitView({nodes:[{id:finding.resourceId}],padding:0.5,maxZoom:1.2});}
+		openResource(finding.resourceId);setPendingField(finding.targets?.[0]?{...finding,path:finding.targets[0].path}:finding);
+	}
+	function openIssueLocation(finding:Diagnostic){if(finding.location&&finding.sourceRevision){hostBridge.post({type:'openSourceLocation',sourceRevision:finding.sourceRevision,fileName:finding.location.fileName,line:finding.location.line,column:finding.location.column});}}
 
 	const runHostValidation = useCallback(() => {
 		if (!hostBridge.isHosted) {
@@ -630,7 +636,7 @@ export function Studio() {
 						<div className="form-action-row"><span className="form-action-spacer" />{hostBridge.isHosted && hasSourceById[selected.id] && <button aria-label="Open Terraform source" title="Open Terraform source in editor" onClick={() => hostBridge.post({ type: 'openSource', nodeId: selected.id })}><FileCode2 /></button>}<button aria-label="Open focused resource workspace" title="Open focused resource workspace" onClick={() => openDetails(selected.id)}><PanelsTopLeft /></button><button aria-label="Focus selected resource" title="Focus selected resource" onClick={() => { void flow?.fitView({ nodes: [{ id: selected.id }], padding: 0.5, maxZoom: 1.5 }); }}><Scan /></button></div>
      </>}
      <div className={'inspector-content'+(detailTab==='code'&&inspectorCategory==='resources'?' inspector-content-code':'')}>
-     {detailTab === 'issues' ? <IssuesPanel architecture={architecture} findings={findings} onReveal={revealIssue} host={hostBridge.isHosted ? { isHosted: true, hasWorkspace: !!hostSnapshot, sourceRevision: hostSnapshot?.sourceRevision, validationRun, engineReport, dependencyReport, exportAuditReport, availableEngine, validating, onRunValidation: runHostValidation, onRunEngineValidate: runHostEngineValidate } : undefined}/> : inspectorCategory === 'variables' ? null : <>
+     {detailTab === 'issues' ? <IssuesPanel architecture={architecture} findings={findings} onReveal={revealIssue} host={hostBridge.isHosted ? { isHosted: true, hasWorkspace: !!hostSnapshot, sourceRevision: hostSnapshot?.sourceRevision, validationRun, engineReport, dependencyReport, exportAuditReport, availableEngine, validating, onRunValidation: runHostValidation, onRunEngineValidate: runHostEngineValidate, onOpenLocation: openIssueLocation } : undefined}/> : inspectorCategory === 'variables' ? null : <>
 
 					{detailTab === 'code' && !selected ? null : overview ? (
 						<ArchitectureOverview architecture={architecture} onSelect={id => { setSelectedId(id); setOverview(false); setDetailTab('form'); }} />

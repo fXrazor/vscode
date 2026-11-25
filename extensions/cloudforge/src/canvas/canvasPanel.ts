@@ -36,6 +36,8 @@ const MAX_STORED_ARCHITECTURES = 32;
 export interface CanvasPanelHost {
 	onSelectNode(nodeId: string | null): void;
 	onOpenSource(workspaceId: string, architectureId: string, sourceRevision: string, nodeId: string): Promise<string | undefined>;
+	/** Opens a diagnostic's file and line; `sourceRevision` is the revision the check ran against. */
+	onOpenSourceLocation?(workspaceId: string, architectureId: string, sourceRevision: string, fileName: string, line?: number, column?: number): Promise<string | undefined>;
 	onRefresh(workspaceId: string, architectureId: string): Promise<void>;
 	onRequestValidation?(
 		graph: CanvasGraphSnapshot,
@@ -530,6 +532,31 @@ export class CloudForgeCanvasPanel implements Disposable {
 			}
 			case 'useTemplateAsArchitecture': {
 				await this.host.onUseTemplateAsArchitecture?.(message.templateId);
+				return;
+			}
+			case 'openSourceLocation': {
+				const graph = this.graph;
+				if (!graph || !this.host.onOpenSourceLocation) {
+					return;
+				}
+				if (this.host.isFocusModeActive?.() && this.host.onToggleFocusMode) {
+					const active = await this.host.onToggleFocusMode(false);
+					if (this.panel && this.ready) {
+						this.post({ type: 'focusModeChanged', active });
+					}
+				}
+				const errorCode = await this.host.onOpenSourceLocation(graph.workspaceId, graph.architectureId, message.sourceRevision, message.fileName, message.line, message.column);
+				if (errorCode === 'STALE_SOURCE') {
+					this.setNotice({
+						kind: 'stale',
+						message: l10n.t('This check ran on an earlier version of the Terraform source. Run checks again before opening its location.'),
+					});
+				} else if (errorCode === 'WORKSPACE_UNAVAILABLE' || errorCode === 'SCOPE_DENIED') {
+					this.setNotice({
+						kind: 'unavailable',
+						message: l10n.t('This architecture scope is no longer active. Reopen or refresh the project to inspect it.'),
+					});
+				}
 				return;
 			}
 			case 'openSource': {

@@ -611,6 +611,7 @@ export function projectHostDiagnostics(
 				code: diag.code,
 				message: diag.message,
 				source: 'graph',
+				sourceRevision: snapshot.sourceRevision,
 			});
 		});
 	}
@@ -626,6 +627,7 @@ export function projectHostDiagnostics(
 					message: finding.message,
 					remediation: finding.remediation,
 					source: 'validation',
+					sourceRevision: validationRun.capturedRevision,
 				});
 			}
 		}
@@ -641,6 +643,8 @@ export function projectHostDiagnostics(
 				path: diag.address || location,
 				message: diag.detail ? `${diag.summary} — ${diag.detail}` : diag.summary,
 				source: 'cli',
+				sourceRevision: engineValidateReport.sourceRevision,
+				...(diag.filename ? { location: { fileName: diag.filename, ...(diag.line ? { line: diag.line } : {}), ...(diag.column ? { column: diag.column } : {}) } } : {}),
 			});
 		});
 	}

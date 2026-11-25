@@ -122,6 +122,15 @@ test('webview message parser accepts narrow intents and rejects untrusted payloa
 	assert.equal(parseWebviewMessage({ type: 'openFile', path: 'C:\\secret.tf' }), undefined);
 	assert.equal(parseWebviewMessage({ type: 'openSource', nodeId: '' }), undefined);
 	assert.equal(parseWebviewMessage({ type: 'openSource', nodeId: 'bad\ncontrol' }), undefined);
+	const revision = 'b'.repeat(64);
+	assert.deepEqual(parseWebviewMessage({ type: 'openSourceLocation', sourceRevision: revision, fileName: 'main.tf', line: 12, column: 3 }), { type: 'openSourceLocation', sourceRevision: revision, fileName: 'main.tf', line: 12, column: 3 });
+	assert.deepEqual(parseWebviewMessage({ type: 'openSourceLocation', sourceRevision: revision, fileName: 'vars.tf.json' }), { type: 'openSourceLocation', sourceRevision: revision, fileName: 'vars.tf.json' });
+	for (const bad of [
+		{ fileName: '../main.tf' }, { fileName: 'sub/main.tf' }, { fileName: 'C:\\main.tf' }, { fileName: 'notes.txt' }, { fileName: '.hidden.tf' },
+		{ fileName: 'main.tf', line: 0 }, { fileName: 'main.tf', column: 1.5 }, { fileName: 'main.tf', sourceRevision: 'stale' },
+	]) {
+		assert.equal(parseWebviewMessage({ type: 'openSourceLocation', sourceRevision: revision, ...bad }), undefined, JSON.stringify(bad));
+	}
 	assert.equal(parseWebviewMessage({ type: 'selectNode', nodeId: 123 }), undefined);
 });
 

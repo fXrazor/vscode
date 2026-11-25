@@ -613,6 +613,23 @@ export function activate(context: ExtensionContext): void {
 		}
 	}
 
+	async function openSourceLocation(workspaceId: string, architectureId: string, sourceRevision: string, fileName: string, line?: number, column?: number): Promise<string | undefined> {
+		try {
+			const result = await commands.executeCommand<unknown>('_cloudforge.openSourceLocation', workspaceId, architectureId, sourceRevision, fileName, line, column);
+			if (isRecord(result) && result.ok === false) {
+				const code = isRecord(result.error) && typeof result.error.code === 'string' ? result.error.code : 'SERVICE_ERROR';
+				if (code !== 'STALE_SOURCE') {
+					showServiceError({ code });
+				}
+				return code;
+			}
+			return undefined;
+		} catch {
+			void window.showErrorMessage(l10n.t('The source location could not be opened.'));
+			return 'SERVICE_ERROR';
+		}
+	}
+
 	let activeValidation: { readonly workspaceId: string; readonly runId: string; cancelled: boolean } | undefined;
 	let validationAttempt = 0;
 	let lastValidationRunId: string | null = null;
@@ -854,6 +871,7 @@ export function activate(context: ExtensionContext): void {
 			// Selection is preserved inside the canvas state; native tree selection stays non-destructive.
 		},
 		onOpenSource: openNodeSource,
+		onOpenSourceLocation: openSourceLocation,
 		async onRefresh(workspaceId, architectureId) {
 			await cancelServiceValidation();
 			const refreshed = await showGraph(provider, treeView, workspaceId, architectureId);

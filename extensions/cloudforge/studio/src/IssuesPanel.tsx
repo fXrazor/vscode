@@ -2,9 +2,9 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-import { CircleCheck, TriangleAlert, CircleAlert, ChevronRight, ShieldCheck, Terminal } from 'lucide-react';
+import { CircleCheck, TriangleAlert, CircleAlert, ChevronRight, ShieldCheck, Terminal, FileCode2, Crosshair, RotateCw } from 'lucide-react';
 import type { Architecture } from './model.ts';
-import type { Diagnostic } from './diagnostics.ts';
+import { isStaleDiagnostic, type Diagnostic } from './diagnostics.ts';
 import type { HostDependencyReport, HostEngineValidateReport, HostExportAuditReport, HostValidationRun } from './webviewBridge.ts';
 
 export interface IssuesHostContext {
@@ -19,6 +19,8 @@ export interface IssuesHostContext {
 	readonly validating?: boolean;
 	readonly onRunValidation?: () => void;
 	readonly onRunEngineValidate?: () => void;
+	/** Opens a diagnostic's reported Terraform file and line in the editor. */
+	readonly onOpenLocation?: (finding: Diagnostic) => void;
 }
 
 const sourceBadgeLabel: Record<NonNullable<Diagnostic['source']>, string> = {
@@ -71,8 +73,29 @@ export function IssuesPanel({architecture,findings,onReveal,host}:{architecture:
 			</details>
 		)}
 		{!findings.length&&<p className="issues-clear"><CircleCheck size={16}/>{host?.engineReport?.valid ? 'CLI validation and local checks passed.' : 'No issues found by current checks.'}</p>}
-		{(['error','warning'] as const).map(severity=>{const items=findings.filter(item=>item.severity===severity);return items.length?<div key={severity}><h3>{severity==='error'?'Errors':'Warnings'} <span>{items.length}</span></h3>{items.map(item=><button className={'issue-card '+severity} key={item.id} onClick={()=>onReveal(item)}>{severity==='error'?<CircleAlert size={15}/>:<TriangleAlert size={15}/>}<span><strong>{architecture.resources.find(resource=>resource.id===item.resourceId)?.name??'Architecture'}{item.source && item.source !== 'local' && <em className={'issue-source-tag source-' + item.source}>{sourceBadgeLabel[item.source]}</em>}</strong><span>{item.message}</span>{item.remediation && <small>{item.remediation}</small>}{item.path&&<code>{item.path}</code>}</span><ChevronRight size={14}/></button>)}</div>:null;})}
+		{(['error','warning'] as const).map(severity=>{const items=findings.filter(item=>item.severity===severity);return items.length?<div key={severity}><h3>{severity==='error'?'Errors':'Warnings'} <span>{items.length}</span></h3>{items.map(item=><IssueEntry key={item.id} item={item} architecture={architecture} onReveal={onReveal} host={host}/>)}</div>:null;})}
 	</section>;
+}
+
+/**
+ * One diagnostic: the card reveals its (first) target; extra actions jump to each target of a
+ * multi-resource finding, open the reported source line, or re-run the check when it is stale.
+ */
+function IssueEntry({item,architecture,onReveal,host}:{item:Diagnostic;architecture:Architecture;onReveal:(finding:Diagnostic)=>void;host?:IssuesHostContext}) {
+	const name=(id:string)=>architecture.resources.find(resource=>resource.id===id)?.name;
+	const stale=isStaleDiagnostic(item,architecture,host?.sourceRevision);
+	const rerun=item.source==='cli'?host?.onRunEngineValidate:item.source==='validation'?host?.onRunValidation:undefined;
+	const targets=item.targets&&item.targets.length>1?item.targets:[];
+	const title=targets.length?targets.map(target=>name(target.resourceId)??'Missing resource').join(' and '):name(item.resourceId)??'Architecture';
+	const location=item.location?item.location.fileName+(item.location.line?':'+item.location.line:''):undefined;
+	return <div className={'issue-entry'+(stale?' stale':'')}>
+		<button className={'issue-card '+item.severity} onClick={()=>onReveal(item)} aria-describedby={stale?item.id+'-stale':undefined}>{item.severity==='error'?<CircleAlert size={15}/>:<TriangleAlert size={15}/>}<span><strong>{title}{item.source && item.source !== 'local' && <em className={'issue-source-tag source-' + item.source}>{sourceBadgeLabel[item.source]}</em>}{stale&&<em className="issue-source-tag issue-stale-tag" id={item.id+'-stale'}>Stale</em>}</strong><span>{item.message}</span>{item.remediation && <small>{item.remediation}</small>}{item.path&&!targets.length&&<code>{item.path}</code>}</span><ChevronRight size={14}/></button>
+		{(targets.length>0||(location&&host?.onOpenLocation&&!stale)||(stale&&rerun))&&<div className="issue-actions">
+			{targets.map(target=><button type="button" className="quiet-button" key={target.resourceId} disabled={!name(target.resourceId)} onClick={()=>onReveal({...item,resourceId:target.resourceId,path:target.path,targets:undefined})}><Crosshair size={13}/><span>{name(target.resourceId)??'Missing resource'}{target.path?' · '+target.path:''}</span></button>)}
+			{location&&host?.onOpenLocation&&!stale&&<button type="button" className="quiet-button" onClick={()=>host.onOpenLocation?.(item)}><FileCode2 size={13}/><span>Open {location}</span></button>}
+			{stale&&rerun&&<button type="button" className="quiet-button" disabled={host?.validating} onClick={rerun}><RotateCw size={13}/><span>Run checks again</span></button>}
+		</div>}
+	</div>;
 }
 
 export function focusResourceField(root:ParentNode|null,path?:string) {
