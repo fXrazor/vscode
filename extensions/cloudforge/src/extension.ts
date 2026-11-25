@@ -27,9 +27,21 @@ import {
 	type TreeView
 } from 'vscode';
 import { activateProjects } from './project/index';
+import {
+	formatReadinessReportText,
+	formatResourceExplanationMarkdown,
+	formatSchemaDiffReportText,
+	groupUpgradeableSnapshots,
+	sanitizeExportStem
+} from './project/architectureTools';
 import { findWorkspacePreset, isWorkspacePresetId, WORKSPACE_PRESETS, type WorkspacePresetId } from './project/workspacePresets';
+import { explainResource } from './canvas/advisorRecipes';
 import { CloudForgeCanvasPanel } from './canvas/canvasPanel';
-import { orientServiceEdgesForCanvas } from './canvas/layout';
+import { createDraftDocument } from './canvas/draftDocument';
+import { renderArchitectureMarkdownReport } from './canvas/exportDiagram';
+import { generateTargetIac, type GeneratorTarget } from './canvas/generators';
+import { buildCanvasProjection, orientServiceEdgesForCanvas } from './canvas/layout';
+import { estimateArchitectureCost, evaluateArchitecturePolicies } from './canvas/planReview';
 import { isValidTfFileName, type CanvasCatalogueSnapshot, type CanvasCloudRegionsPayload, type CanvasEnginePlanActionKind, type CanvasEnginePlanReport, type CanvasEngineValidateDiagnostic, type CanvasGraphSnapshot } from './canvas/protocol';
 import { lookupBundledSchema, type FormSchema } from './canvas/schemaForm';
 import { findTemplateById } from './canvas/templateLibrary';
@@ -530,6 +542,8 @@ export function activate(context: ExtensionContext): void {
 	const treeView = window.createTreeView('cloudforge.resources', { treeDataProvider: provider });
 	const problems = languages.createDiagnosticCollection('cloudforge');
 	const planOutput = window.createOutputChannel(l10n.t('CloudForge Plan'));
+	const readinessOutput = window.createOutputChannel(l10n.t('CloudForge Readiness'));
+	const schemaDiffOutput = window.createOutputChannel(l10n.t('CloudForge Schema Diff'));
 	const statusBar = window.createStatusBarItem(StatusBarAlignment.Left, 100);
 	statusBar.command = 'cloudforge.openCanvas';
 	statusBar.name = l10n.t('CloudForge Architecture');
@@ -1213,7 +1227,7 @@ export function activate(context: ExtensionContext): void {
 		isFocusModeActive: () => focusModeActive,
 	});
 
-	context.subscriptions.push(provider, treeView, problems, planOutput, canvas, statusBar);
+	context.subscriptions.push(provider, treeView, problems, planOutput, readinessOutput, schemaDiffOutput, canvas, statusBar);
 	context.subscriptions.push(treeView.onDidChangeSelection(event => {
 		const resource = event.selection.find(item => item.type === 'resource');
 		const graph = provider.getGraph();
@@ -1352,6 +1366,339 @@ export function activate(context: ExtensionContext): void {
 			return;
 		}
 		await runAndPresentLocalPlan(graph);
+	}));
+	context.subscriptions.push(commands.registerCommand('cloudforge.exportMultiTarget', async () => {
+		const graph = provider.getGraph();
+		if (!graph) {
+			void window.showInformationMessage(l10n.t('Open an architecture before exporting IaC or reports.'));
+			return;
+		}
+		const snapshot = toCanvasSnapshot(graph, currentArchitectureName);
+		type TargetPick = {
+			readonly label: string;
+			readonly description: string;
+			readonly target: GeneratorTarget | 'markdown';
+			readonly language: string;
+			readonly ext: string;
+			readonly filterName: string;
+		};
+		const picked = await window.showQuickPick<TargetPick>(
+			[
+				{ label: `$(markdown) ${l10n.t('Architecture Markdown Report')}`, description: '.md · Inventory, dependencies & provider lock summary', target: 'markdown', language: 'markdown', ext: '.md', filterName: 'Markdown Report' },
+				{ label: `$(file-code) ${l10n.t('Azure Bicep Preview')}`, description: '.bicep · Offline static mapper with coverage report', target: 'bicep', language: 'bicep', ext: '.bicep', filterName: 'Azure Bicep' },
+				{ label: `$(json) ${l10n.t('Azure ARM Template Preview')}`, description: '.json · ARM 2019-04-01 template schema', target: 'arm', language: 'json', ext: '.json', filterName: 'Azure ARM JSON' },
+				{ label: `$(file-code) ${l10n.t('AWS CloudFormation YAML Preview')}`, description: '.yaml · AWS CloudFormation resource mapping', target: 'cloudformation', language: 'yaml', ext: '.yaml', filterName: 'CloudFormation YAML' },
+				{ label: `$(file-code) ${l10n.t('Kubernetes Manifests YAML Preview')}`, description: '.yaml · Namespaces, deployments, services & policies', target: 'k8s', language: 'yaml', ext: '.yaml', filterName: 'Kubernetes YAML' },
+			],
+			{
+				title: l10n.t('Export CloudForge Architecture ({0})', currentArchitectureName),
+				placeHolder: l10n.t('Choose an export format to preview or save'),
+			}
+		);
+		if (!picked) {
+			return;
+		}
+
+		let content: string;
+		let summaryNote: string;
+		if (picked.target === 'markdown') {
+			const dependencyReport = await inspectArchitectureDependencies(graph.workspaceId, graph.architectureId, graph.sourceRevision);
+			const projection = buildCanvasProjection(snapshot, 'visual', '', new Set());
+			content = renderArchitectureMarkdownReport(snapshot, projection, {
+				scope: 'architecture',
+				theme: 'dark',
+				mode: 'visual',
+				includeValidation: false,
+				includeAnnotations: false,
+				includeProvenance: true,
+				frames: [],
+				annotations: [],
+				hiddenLayers: [],
+				dependencyReport: dependencyReport ?? null,
+			});
+			summaryNote = l10n.t('Generated Markdown report for {0} ({1} resources).', currentArchitectureName, snapshot.nodes.length);
+		} else {
+			const artifact = generateTargetIac(snapshot, {}, picked.target);
+			content = artifact.code;
+			summaryNote = l10n.t(
+				'Generated {0}: {1} mapped, {2} unmapped.',
+				artifact.label,
+				artifact.mappedCount,
+				artifact.unmappedCount
+			);
+		}
+
+		const doc = await workspace.openTextDocument({ content, language: picked.language });
+		await window.showTextDocument(doc, { preview: true });
+		const saveChoice = l10n.t('Save to File…');
+		const choice = await window.showInformationMessage(summaryNote, saveChoice);
+		if (choice === saveChoice) {
+			const folder = workspace.workspaceFolders?.[0]?.uri;
+			const fileName = `${sanitizeExportStem(currentArchitectureName)}${picked.ext}`;
+			const defaultUri = folder ? Uri.joinPath(folder, fileName) : Uri.file(fileName);
+			const targetUri = await window.showSaveDialog({
+				defaultUri,
+				filters: { [picked.filterName]: [picked.ext.slice(1)] },
+				saveLabel: l10n.t('Save Export'),
+				title: l10n.t('Save {0}', picked.filterName),
+			});
+			if (targetUri) {
+				await workspace.fs.writeFile(targetUri, Buffer.from(content, 'utf8'));
+				void window.showInformationMessage(l10n.t('Saved {0}.', targetUri.path.split('/').pop() ?? fileName));
+			}
+		}
+	}));
+	context.subscriptions.push(commands.registerCommand('cloudforge.inspectArchitectureReadiness', async () => {
+		const graph = provider.getGraph();
+		if (!graph) {
+			void window.showInformationMessage(l10n.t('Open an architecture before inspecting readiness, policy, and cost.'));
+			return;
+		}
+		const snapshot = toCanvasSnapshot(graph, currentArchitectureName);
+		const [dependencyReport, exportAudit] = await Promise.all([
+			inspectArchitectureDependencies(graph.workspaceId, graph.architectureId, graph.sourceRevision),
+			auditArchitectureExportReadiness(graph.workspaceId, graph.architectureId, graph.sourceRevision),
+		]);
+		const policyFindings = evaluateArchitecturePolicies(snapshot, {}, dependencyReport ?? null);
+		const costEstimate = estimateArchitectureCost(createDraftDocument(snapshot));
+
+		readinessOutput.clear();
+		readinessOutput.append(formatReadinessReportText({
+			architectureName: currentArchitectureName,
+			sourceRevision: graph.sourceRevision,
+			dependencyReport,
+			exportAudit,
+			policyFindings,
+			costEstimate,
+		}));
+
+		type ReadinessPick =
+			| { readonly label: string; readonly description?: string; readonly detail?: string; readonly pickKind: 'finding'; readonly nodeId: string | null }
+			| { readonly label: string; readonly description?: string; readonly detail?: string; readonly pickKind: 'openOutput' };
+		const picks: ReadinessPick[] = [];
+		if (exportAudit) {
+			picks.push({
+				label: `${exportAudit.reproducible ? '$(shield)' : '$(warning)'} ${l10n.t('Export Readiness: {0}', exportAudit.reproducible ? l10n.t('Reproducible') : l10n.t('Action Required'))}`,
+				description: l10n.t('lock: {0} ({1} entries) · {2} modules', exportAudit.lockState, exportAudit.lockEntryCount, exportAudit.moduleCount),
+				detail: exportAudit.unresolvedReasonKinds.length > 0 ? l10n.t('Unresolved: {0}', exportAudit.unresolvedReasonKinds.join(', ')) : undefined,
+				pickKind: 'openOutput',
+			});
+		}
+		picks.push({
+			label: `$(credit-card) ${l10n.t('Offline Cost Estimate: ${0}/mo USD', costEstimate.baselineTotalUsd.toFixed(2))}`,
+			description: l10n.t('{0} catalogued · {1} unknown', costEstimate.knownCount, costEstimate.unknownCount),
+			detail: costEstimate.pricingCatalog,
+			pickKind: 'openOutput',
+		});
+		for (const finding of policyFindings) {
+			const icon = finding.severity === 'error' ? '$(error)' : finding.severity === 'warning' ? '$(warning)' : '$(info)';
+			picks.push({
+				label: `${icon} ${finding.ruleId}: ${finding.title}`,
+				description: finding.resourceLabel,
+				detail: finding.remediation,
+				pickKind: 'finding',
+				nodeId: finding.nodeId,
+			});
+		}
+		picks.push({
+			label: `$(output) ${l10n.t('Open Full Readiness & Cost Report')}`,
+			description: l10n.t('CloudForge Readiness output channel'),
+			pickKind: 'openOutput',
+		});
+
+		const picked = await window.showQuickPick(picks, {
+			title: l10n.t('CloudForge Readiness, Policy & Cost ({0})', currentArchitectureName),
+			placeHolder: l10n.t('Select a finding to locate its resource or open the full report'),
+			matchOnDescription: true,
+			matchOnDetail: true,
+		});
+		if (!picked) {
+			return;
+		}
+		if (picked.pickKind === 'finding' && picked.nodeId) {
+			canvas.selectNode(picked.nodeId);
+			await openNodeSource(graph.workspaceId, graph.architectureId, graph.sourceRevision, picked.nodeId);
+			return;
+		}
+		readinessOutput.show(true);
+	}));
+	context.subscriptions.push(commands.registerCommand('cloudforge.diffProviderSchema', async () => {
+		const graph = provider.getGraph();
+		if (!graph) {
+			void window.showInformationMessage(l10n.t('Open an architecture before running a provider schema upgrade diff.'));
+			return;
+		}
+		const snapshots = await loadCatalogueSnapshots();
+		const groups = groupUpgradeableSnapshots(snapshots);
+		if (groups.length === 0) {
+			const importAction = l10n.t('Import Provider Schema…');
+			const choice = await window.showInformationMessage(
+				l10n.t('Import at least two versions of the same provider schema to diff upgrade impact.'),
+				importAction
+			);
+			if (choice === importAction) {
+				await commands.executeCommand('cloudforge.importProviderSchema');
+			}
+			return;
+		}
+		let group = groups[0];
+		if (groups.length > 1) {
+			const pickedGroup = await window.showQuickPick(
+				groups.map(item => ({
+					label: item.address,
+					description: l10n.t('{0} snapshots ({1})', item.snapshots.length, item.snapshots.map(s => s.version).join(', ')),
+					group: item,
+				})),
+				{ title: l10n.t('Choose Provider to Diff') }
+			);
+			if (!pickedGroup) {
+				return;
+			}
+			group = pickedGroup.group;
+		}
+		const fromPick = await window.showQuickPick(
+			group.snapshots.map(snap => ({
+				label: snap.version,
+				description: `format ${snap.formatVersion} · ${snap.sha256.slice(0, 8)}`,
+				detail: l10n.t('{0} resources · {1} data sources', snap.resourceCount, snap.dataSourceCount),
+				snap,
+			})),
+			{ title: l10n.t('Baseline (From) Version for {0}', group.address) }
+		);
+		if (!fromPick) {
+			return;
+		}
+		const toCandidates = group.snapshots.filter(s => s.sha256 !== fromPick.snap.sha256 || s.version !== fromPick.snap.version);
+		const toPick = await window.showQuickPick(
+			toCandidates.map(snap => ({
+				label: snap.version,
+				description: `format ${snap.formatVersion} · ${snap.sha256.slice(0, 8)}`,
+				detail: l10n.t('{0} resources · {1} data sources', snap.resourceCount, snap.dataSourceCount),
+				snap,
+			})),
+			{ title: l10n.t('Target (To) Version for {0}', group.address) }
+		);
+		if (!toPick) {
+			return;
+		}
+		const outcome = await window.withProgress(
+			{
+				location: ProgressLocation.Notification,
+				title: l10n.t('Diffing {0} {1} -> {2}…', group.address, fromPick.snap.version, toPick.snap.version),
+			},
+			() => diffArchitectureCatalogueSnapshots(
+				{ address: fromPick.snap.address, version: fromPick.snap.version, formatVersion: fromPick.snap.formatVersion, sha256: fromPick.snap.sha256 },
+				{ address: toPick.snap.address, version: toPick.snap.version, formatVersion: toPick.snap.formatVersion, sha256: toPick.snap.sha256 },
+				graph.workspaceId,
+				graph.architectureId,
+				graph.sourceRevision
+			)
+		);
+		if (!outcome.ok) {
+			void window.showErrorMessage(outcome.message);
+			return;
+		}
+		const report = outcome.report;
+		schemaDiffOutput.clear();
+		schemaDiffOutput.append(formatSchemaDiffReportText(report, currentArchitectureName));
+
+		type DiffPick =
+			| { readonly label: string; readonly description?: string; readonly detail?: string; readonly pickKind: 'impact'; readonly address: string; readonly typeName: string }
+			| { readonly label: string; readonly description?: string; readonly pickKind: 'openOutput' };
+		const picks: DiffPick[] = report.impactedArchitectureItems.map(item => ({
+			label: `${item.breaking ? '$(error)' : '$(info)'} ${item.resourceAddress}`,
+			description: `${item.typeName}.${item.path}${item.breaking ? ' · BREAKING' : ''}`,
+			detail: item.summary,
+			pickKind: 'impact',
+			address: item.resourceAddress,
+			typeName: item.typeName,
+		}));
+		picks.push({
+			label: `$(output) ${l10n.t('Open Full Schema Diff Output')}`,
+			description: l10n.t('+{0} / -{1} types · {2} path changes{3}', report.addedTypeCount, report.removedTypeCount, report.pathChangeCount, report.hasBreakingChanges ? ' · BREAKING' : ''),
+			pickKind: 'openOutput',
+		});
+
+		const selected = await window.showQuickPick(picks, {
+			title: l10n.t('Schema Upgrade Impact: {0} ({1} -> {2})', report.provider, report.fromVersion, report.toVersion),
+			placeHolder: report.impactedArchitectureItems.length > 0
+				? l10n.t('Select an impacted resource to inspect it in Canvas & source')
+				: l10n.t('No resources in {0} are impacted by this upgrade', currentArchitectureName),
+			matchOnDescription: true,
+			matchOnDetail: true,
+		});
+		if (!selected) {
+			return;
+		}
+		if (selected.pickKind === 'impact') {
+			const targetNode = graph.nodes.find(node =>
+				node.name === selected.address ||
+				(node.resourceType === selected.typeName && selected.address.endsWith(`.${node.label}`))
+			);
+			if (targetNode) {
+				canvas.selectNode(targetNode.id);
+				if (targetNode.hasSource) {
+					await openNodeSource(graph.workspaceId, graph.architectureId, graph.sourceRevision, targetNode.id);
+				}
+				return;
+			}
+		}
+		schemaDiffOutput.show(true);
+	}));
+	context.subscriptions.push(commands.registerCommand('cloudforge.explainResource', async (arg?: unknown) => {
+		const graph = provider.getGraph();
+		if (!graph || graph.nodes.length === 0) {
+			void window.showInformationMessage(l10n.t('Open an architecture before explaining a resource.'));
+			return;
+		}
+		let nodeId: string | undefined;
+		if (arg instanceof ResourceTreeItem) {
+			nodeId = arg.node.id;
+		} else if (typeof arg === 'string') {
+			nodeId = arg;
+		}
+		if (!nodeId) {
+			const picked = await window.showQuickPick(
+				graph.nodes.map(node => ({
+					label: node.label,
+					description: `${node.resourceType ?? node.kind}${node.sourceFile ? ` · ${node.sourceFile}${node.sourceLine ? `:${node.sourceLine}` : ''}` : ''}`,
+					nodeId: node.id,
+				})),
+				{
+					title: l10n.t('Explain CloudForge Resource ({0})', currentArchitectureName),
+					placeHolder: l10n.t('Choose a resource to inspect topology, cost, policy, and advisor guidance'),
+					matchOnDescription: true,
+				}
+			);
+			if (!picked) {
+				return;
+			}
+			nodeId = picked.nodeId;
+		}
+		const snapshot = toCanvasSnapshot(graph, currentArchitectureName);
+		const node = snapshot.nodes.find(item => item.id === nodeId);
+		if (!node) {
+			return;
+		}
+		let schema: FormSchema | undefined;
+		if (node.resourceType) {
+			const kind = node.kind === 'data' ? 'dataSource' : 'resource';
+			schema = (await loadResourceSchema(kind, node.resourceType))
+				?? lookupBundledSchema({ kind: node.kind, resourceType: node.resourceType });
+		}
+		const policyFindings = evaluateArchitecturePolicies(snapshot, {});
+		const costEstimate = estimateArchitectureCost(createDraftDocument(snapshot));
+		const explanation = explainResource(snapshot, node.id, {
+			schema,
+			policyFindings,
+			costEstimate,
+		});
+		if (!explanation) {
+			return;
+		}
+		const markdown = formatResourceExplanationMarkdown(explanation, currentArchitectureName);
+		const doc = await workspace.openTextDocument({ content: markdown, language: 'markdown' });
+		await window.showTextDocument(doc, { preview: true });
 	}));
 	context.subscriptions.push(commands.registerCommand('cloudforge.cancelValidation', () => {
 		canvas.cancelValidation();

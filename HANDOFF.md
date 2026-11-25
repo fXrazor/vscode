@@ -1150,6 +1150,28 @@ Implemented on `fxrazor/continue-project-handoff-review` in `E:\Orca\CloudForge-
 1. Once Codex's Studio whiteboard branch merges cleanly into `main`, wire Studio's `IssuesPanel` / topbar to consume the ready `requestEnginePlan` -> `enginePlanReport` Webview protocol (no extension-host or Electron-main changes needed).
 2. When ready to ship one combined Windows x64 installer containing PR #1 Studio whiteboard upgrades + Project Integrations + Stage 9B Local Plan Capture, run `pwsh -NoProfile -ExecutionPolicy Bypass -File build/cloudforge/package-win32-x64.ps1` against `Z:\CFStage\service-6d6c71d\cloudforge-service.exe` (`ServiceCommit`: `6d6c71df064760190df89b874bcb369f71c32d6c`, `ServiceSha256`: `b243f0d00ef93bc0243cb915e3083aa5c826e7aae1bd471174b112b6f9be7c10`).
 
+### Workbench Architecture Tooling Suite: Multi-Target IaC Export, Readiness/Policy/Cost Audit, Provider Upgrade Diff & Explain Resource (2026-11-25)
+
+Implemented on `fxrazor/continue-project-handoff-review` in `E:\Orca\CloudForge-Code\dace` (fast-forward merged to `Z:\CloudForge-Code` `main` and pushed to `origin/main`). **Zero overlap with Claude (`Z:\CloudForge` untouched) or Codex (`extensions/cloudforge/studio/` untouched); no unnecessary Windows installer rebuild triggered.**
+
+- **Pure Report & Upgrade Helpers ([architectureTools.ts](extensions/cloudforge/src/project/architectureTools.ts), [architectureTools.test.ts](extensions/cloudforge/test/architectureTools.test.ts)):**
+  - Added `groupUpgradeableSnapshots` (groups imported snapshots by provider with numeric version sorting for 2+ snapshot providers), `sanitizeExportStem`, `formatReadinessReportText`, `formatSchemaDiffReportText`, and `formatResourceExplanationMarkdown`.
+- **Four Native Workbench Commands ([extension.ts](extensions/cloudforge/src/extension.ts), [package.json](extensions/cloudforge/package.json), [package.nls.json](extensions/cloudforge/package.nls.json)):**
+  - **CloudForge: Export Multi-Target IaC / Markdown Report… (`cloudforge.exportMultiTarget`):** Previews and optionally saves **Architecture Markdown Reports** (`.md`, including live Stage 6 provider lock tables via `renderArchitectureMarkdownReport`), **Azure Bicep** (`.bicep`), **Azure ARM JSON** (`.json`), **AWS CloudFormation YAML** (`.yaml`), and **Kubernetes YAML** (`.yaml`) via `generateTargetIac` with honest `mapped / unmapped` counts.
+  - **CloudForge: Inspect Readiness, Policy & Cost… (`cloudforge.inspectArchitectureReadiness`):** Combines live Rust Stage 6 `inspectDependencies`, Stage 8 `auditExportReadiness`, offline `evaluateArchitecturePolicies`, and transparent offline `estimateArchitectureCost` (explicit known/unknown coverage) into the **`CloudForge Readiness`** Output Channel and an interactive QuickPick that jumps straight to resource findings in Canvas & `.tf` source.
+  - **CloudForge: Diff Provider Schema Upgrade… (`cloudforge.diffProviderSchema`):** Lets users pick any two imported versions of a provider from live Rust `listCatalogueSnapshots`, runs live Stage 8 `diffCatalogueSnapshots` against the active architecture, logs the structured upgrade report to **`CloudForge Schema Diff`**, and lets users click impacted resources to inspect them in Canvas & source.
+  - **CloudForge: Explain Resource… (`cloudforge.explainResource`):** Available from Command Palette and inline on every `CloudForge Graph` resource tree item (`view == cloudforge.resources && viewItem == cloudForgeResource`). Combines `explainResource`, live/bundled provider schema provenance, upstream/downstream/transitive blast-radius counts, policy findings, and offline cost basis into a clean read-only Markdown preview.
+
+| Check (no full desktop/installer rebuild) | Verified result |
+| --- | --- |
+| `node extensions/cloudforge/esbuild.mts`, TS6 (`tsc6`), TS7 (`tsc`), `oxlint` & `hygiene` | Passed (`0` errors, `0` warnings). |
+| `CLOUDFORGE_REPO=Z:\CloudForge node --test extensions/cloudforge/test/*.test.ts` | **74/74 root extension tests passed** (`0` skipped; includes 4 new test suites in [architectureTools.test.ts](extensions/cloudforge/test/architectureTools.test.ts)). |
+
+**Next actions:**
+1. Once Codex's Studio whiteboard branch merges into `main`, wire Studio's `IssuesPanel` / topbar to consume the ready `requestEnginePlan` -> `enginePlanReport` Webview protocol (no extension-host or Electron-main changes needed).
+2. When ready to ship one combined Windows x64 installer containing PR #1 Studio whiteboard upgrades + Project Integrations + Stage 9B Local Plan Capture + Workbench Architecture Tooling Suite, run `pwsh -NoProfile -ExecutionPolicy Bypass -File build/cloudforge/package-win32-x64.ps1` against `Z:\CFStage\service-6d6c71d\cloudforge-service.exe` (`ServiceCommit`: `6d6c71df064760190df89b874bcb369f71c32d6c`, `ServiceSha256`: `b243f0d00ef93bc0243cb915e3083aa5c826e7aae1bd471174b112b6f9be7c10`).
+
+
 
 
 

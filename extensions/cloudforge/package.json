@@ -183,6 +183,30 @@
 				"icon": "$(export)"
 			},
 			{
+				"command": "cloudforge.exportMultiTarget",
+				"title": "%command.exportMultiTarget%",
+				"category": "%displayName%",
+				"icon": "$(file-code)"
+			},
+			{
+				"command": "cloudforge.inspectArchitectureReadiness",
+				"title": "%command.inspectArchitectureReadiness%",
+				"category": "%displayName%",
+				"icon": "$(shield)"
+			},
+			{
+				"command": "cloudforge.diffProviderSchema",
+				"title": "%command.diffProviderSchema%",
+				"category": "%displayName%",
+				"icon": "$(versions)"
+			},
+			{
+				"command": "cloudforge.explainResource",
+				"title": "%command.explainResource%",
+				"category": "%displayName%",
+				"icon": "$(lightbulb)"
+			},
+			{
 				"command": "cloudforge.importProviderSchema",
 				"title": "%command.importProviderSchema%",
 				"category": "%displayName%",
@@ -369,6 +393,21 @@
 					"command": "cloudforge.runEnginePlan",
 					"when": "view == cloudforge.resources",
 					"group": "navigation@4"
+				},
+				{
+					"command": "cloudforge.inspectArchitectureReadiness",
+					"when": "view == cloudforge.resources",
+					"group": "1_tools@1"
+				},
+				{
+					"command": "cloudforge.diffProviderSchema",
+					"when": "view == cloudforge.resources",
+					"group": "1_tools@2"
+				},
+				{
+					"command": "cloudforge.exportMultiTarget",
+					"when": "view == cloudforge.resources",
+					"group": "1_tools@3"
 				}
 			],
 			"view/item/context": [
@@ -425,6 +464,11 @@
 				{
 					"command": "cloudforge.importRepository",
 					"when": "view == cloudforge.projects && viewItem == cloudforge.unimportedFolder",
+					"group": "inline@1"
+				},
+				{
+					"command": "cloudforge.explainResource",
+					"when": "view == cloudforge.resources && viewItem == cloudForgeResource",
 					"group": "inline@1"
 				}
 			]
