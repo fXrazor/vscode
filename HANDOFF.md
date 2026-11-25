@@ -860,5 +860,32 @@ Implemented on `fxrazor/continue-project-handoff-review` in `E:\Orca\CloudForge-
 1. Wire live Stage 9B (`terraform plan -json` / `tofu plan -json` execution) into the Plan Review modal once the Rust sidecar adds guarded plan capture.
 2. When ready for signed releases, pass `-SignCertificateThumbprint <40-hex>` + `-RequireSignedService` to `build/cloudforge/package-win32-x64.ps1`.
 
+### Multi-Cloud Schema Authoring, Canvas Copy/Paste & Batch Delete, Native Problems Integration & Accessibility Polish (2026-11-25)
+
+Implemented on `fxrazor/continue-project-handoff-review` in `E:\Orca\CloudForge-Code\dace` (fast-forward merged to `Z:\CloudForge-Code` `main` and pushed to `origin/main`). **No unnecessary Windows installer build was triggered** per user instruction; `%LOCALAPPDATA%\Programs\CloudForge Proof` remains verified at `407d56014c1` + Rust Stage 9A `ef4be9d`, and this slice will ship automatically in the next milestone build (e.g., alongside Rust Stage 9B). Zero edits to `extensions/cloudforge/studio/**` or `Z:\CloudForge`.
+
+- **Multi-Cloud Bundled Schemas & `+ Add` Palette ([schemaForm.ts](extensions/cloudforge/src/canvas/schemaForm.ts), [canvas-src/index.ts](extensions/cloudforge/canvas-src/index.ts), [canvas-src/canvas.css](extensions/cloudforge/canvas-src/canvas.css)):**
+  - Added bundled offline form schemas, outputs, and HCL previews for **AWS** (`aws_vpc`, `aws_subnet`, `aws_internet_gateway`, `aws_security_group`), **Google Cloud** (`google_compute_network`, `google_compute_subnetwork`, `google_compute_firewall`), and **Kubernetes** (`kubernetes_namespace`, `kubernetes_config_map`, `kubernetes_network_policy`) alongside the 6 Azure schemas, grouped cleanly inside `+ Add` with left-aligned horizontal provider rows.
+- **Atomic Copy/Paste & Batch Delete ([draftDocument.ts](extensions/cloudforge/src/canvas/draftDocument.ts), [canvas-src/index.ts](extensions/cloudforge/canvas-src/index.ts)):**
+  - Added `copySelectionToClipboard`, `pasteClipboardEdit`, and `deleteResources` in `draftDocument.ts` plus `Ctrl+C` / `Ctrl+V` (preserving drafts & internal edges, generating unique names, offsetting pasted positions by `(+36, +36)`), `Delete` / `Backspace`, multi-selection toolbar `Copy`/`Delete` buttons, and updated `?` keyboard shortcuts help.
+- **Native VS Code Problems Panel & Clickable Stage 9A CLI Diagnostics ([extension.ts](extensions/cloudforge/src/extension.ts), [canvas-src/index.ts](extensions/cloudforge/canvas-src/index.ts)):**
+  - Added `languages.createDiagnosticCollection('cloudforge')` synced on architecture open/refresh/save/clear and after live Stage 9A `runEngineValidate` runs (mapping severity, file URI, line number, and address code into native Problems).
+  - Added clickable `Reveal <name> on Canvas` buttons on matched Stage 9A CLI Validate findings in the Runner Timeline.
+- **Responsive Narrow Workspace & High-Contrast Accessibility ([canvas-src/index.ts](extensions/cloudforge/canvas-src/index.ts), [canvas-src/canvas.css](extensions/cloudforge/canvas-src/canvas.css)):**
+  - Added narrow-width (`<= 960px`) `Inputs | Parameters | Results` tab switcher in Focused Resource Workspace and `@media (forced-colors: active)` Windows High Contrast styling.
+
+| Check (no full desktop/installer rebuild) | Verified result |
+| --- | --- |
+| `CLOUDFORGE_REPO=Z:\CloudForge node --test extensions/cloudforge/test/*.test.ts` | **60/60 extension tests passed** (`0` skipped; includes [authoringPolish.test.ts](extensions/cloudforge/test/authoringPolish.test.ts)). |
+| TS 6 (`tsc6.cmd`) & TS 7 (`tsc.cmd`) on `extensions/cloudforge/tsconfig.json` & `canvas-src/tsconfig.json` | Passed (`0` errors). |
+| `node extensions/cloudforge/esbuild.mts` & `node extensions/cloudforge/esbuild.webview.mts` | Passed (`0` errors). |
+| `node build/oxlint.ts` & `node --experimental-strip-types build/hygiene.ts` (all 6 changed/new files) | Passed (`0` errors, `0` warnings). |
+| Live Edge Playwright UI check (`authoring-polish-verify.mjs`) | Passed (`0` console/page errors; multi-cloud `+ Add`, `Ctrl+C`/`Ctrl+V`/`Delete`/`Ctrl+Z`, Stage 9A CLI diagnostic reveal, and narrow 820px workspace tabs verified with 2 screenshots inspected). |
+
+**Next actions:**
+1. Wire live Stage 9B (`terraform plan -json` / `tofu plan -json`) once the Rust sidecar adds guarded plan capture, then package one combined installer covering Stage 9B + this authoring polish slice.
+2. When ready for signed releases, pass `-SignCertificateThumbprint <40-hex>` + `-RequireSignedService` to `build/cloudforge/package-win32-x64.ps1`.
+
+
 
 

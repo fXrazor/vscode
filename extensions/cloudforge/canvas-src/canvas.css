@@ -1167,6 +1167,20 @@ html, body {
 	display: flex;
 	flex-direction: column;
 	gap: 2px;
+	flex-shrink: 0;
+}
+
+.cf-menu-item.cf-menu-item-icon {
+	flex-direction: row;
+	align-items: center;
+	gap: 8px;
+}
+
+.cf-menu-text {
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	min-width: 0;
 }
 
 .cf-menu-item:hover {
@@ -1823,5 +1837,56 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 @media (max-width: 780px) {
 	.cf-templates-layout {
 		grid-template-columns: 1fr;
+	}
+}
+
+.cf-popover-menu {
+	max-height: 68vh;
+	overflow: auto;
+}
+
+.cf-ws-narrow-tabs {
+	display: none;
+	gap: 4px;
+	padding: 6px 12px;
+	border-bottom: 1px solid var(--cf-border);
+	background: var(--cf-surface);
+	flex-shrink: 0;
+}
+
+@media (max-width: 960px) {
+	.cf-ws-narrow-tabs {
+		display: flex;
+	}
+	.cf-workspace-columns[data-active-pane] {
+		grid-template-columns: 1fr;
+	}
+	.cf-workspace-columns[data-active-pane="inputs"] > .cf-ws-pane:not([data-pane="inputs"]),
+	.cf-workspace-columns[data-active-pane="parameters"] > .cf-ws-pane:not([data-pane="parameters"]),
+	.cf-workspace-columns[data-active-pane="results"] > .cf-ws-pane:not([data-pane="results"]) {
+		display: none;
+	}
+}
+
+@media (forced-colors: active) {
+	.cf-node,
+	.cf-group,
+	.cf-modal,
+	.cf-btn,
+	.cf-template-card {
+		border: 1px solid CanvasText;
+		background: Canvas;
+		color: CanvasText;
+	}
+	.cf-node.selected,
+	.cf-template-card.selected {
+		border: 2px solid Highlight;
+		outline: 2px solid Highlight;
+		outline-offset: 1px;
+	}
+	.cf-btn-primary {
+		background: Highlight;
+		color: HighlightText;
+		border-color: Highlight;
 	}
 }

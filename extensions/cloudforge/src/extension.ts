@@ -5,8 +5,13 @@
 
 import {
 	commands,
+	Diagnostic,
+	DiagnosticSeverity,
 	EventEmitter,
 	l10n,
+	languages,
+	Position,
+	Range,
 	StatusBarAlignment,
 	TreeItem,
 	TreeItemCollapsibleState,
@@ -21,7 +26,7 @@ import {
 import { activateProjects } from './project/index';
 import { CloudForgeCanvasPanel } from './canvas/canvasPanel';
 import { orientServiceEdgesForCanvas } from './canvas/layout';
-import type { CanvasCatalogueSnapshot, CanvasCloudRegionsPayload, CanvasGraphSnapshot } from './canvas/protocol';
+import type { CanvasCatalogueSnapshot, CanvasCloudRegionsPayload, CanvasEngineValidateReport, CanvasGraphSnapshot } from './canvas/protocol';
 import { lookupBundledSchema, type FormSchema } from './canvas/schemaForm';
 import { findTemplateById } from './canvas/templateLibrary';
 import {
@@ -495,11 +500,71 @@ function toCanvasSnapshot(graph: ArchitectureGraph, architectureName: string): C
 export function activate(context: ExtensionContext): void {
 	const provider = new CloudForgeGraphProvider();
 	const treeView = window.createTreeView('cloudforge.resources', { treeDataProvider: provider });
+	const problems = languages.createDiagnosticCollection('cloudforge');
 	const statusBar = window.createStatusBarItem(StatusBarAlignment.Left, 100);
 	statusBar.command = 'cloudforge.openCanvas';
 	statusBar.name = l10n.t('CloudForge Architecture');
 	let currentArchitectureName = l10n.t('Architecture');
 	const projectControllerRef: { current?: ReturnType<typeof activateProjects> } = {};
+
+	function toVsSeverity(raw: string): DiagnosticSeverity {
+		const lower = raw.toLowerCase();
+		if (lower === 'error') {
+			return DiagnosticSeverity.Error;
+		}
+		if (lower === 'warning' || lower === 'warn') {
+			return DiagnosticSeverity.Warning;
+		}
+		return DiagnosticSeverity.Information;
+	}
+
+	function syncProblems(graph: ArchitectureGraph | undefined, cliReport?: CanvasEngineValidateReport): void {
+		problems.clear();
+		if (!graph) {
+			return;
+		}
+		const folder = workspace.workspaceFolders?.[0]?.uri;
+		const fallbackUri = folder
+			? Uri.joinPath(folder, 'main.tf')
+			: Uri.parse(`cloudforge:/${encodeURIComponent(currentArchitectureName)}/main.tf`);
+		const byUri = new Map<string, { uri: Uri; list: Diagnostic[] }>();
+		const pushDiag = (uri: Uri, diag: Diagnostic) => {
+			const key = uri.toString();
+			let bucket = byUri.get(key);
+			if (!bucket) {
+				bucket = { uri, list: [] };
+				byUri.set(key, bucket);
+			}
+			bucket.list.push(diag);
+		};
+		const zeroRange = new Range(new Position(0, 0), new Position(0, 0));
+		for (const d of graph.diagnostics) {
+			const diag = new Diagnostic(zeroRange, d.message, toVsSeverity(d.severity));
+			diag.source = 'CloudForge';
+			diag.code = d.code;
+			pushDiag(fallbackUri, diag);
+		}
+		if (cliReport) {
+			for (const d of cliReport.diagnostics) {
+				const lineIdx = typeof d.line === 'number' && d.line > 0 ? d.line - 1 : 0;
+				const range = new Range(new Position(lineIdx, 0), new Position(lineIdx, 0));
+				const safeRel = d.filename && !d.filename.startsWith('/') && !d.filename.includes('..') && !/^[A-Za-z]:/.test(d.filename)
+					? d.filename.replace(/\\/g, '/')
+					: undefined;
+				const uri = folder && safeRel ? Uri.joinPath(folder, ...safeRel.split('/').filter(Boolean)) : fallbackUri;
+				const msg = d.detail ? `${d.summary}: ${d.detail}` : d.summary;
+				const diag = new Diagnostic(range, msg, toVsSeverity(d.severity));
+				diag.source = cliReport.engine === 'openTofu' ? 'CloudForge (OpenTofu)' : 'CloudForge (Terraform)';
+				if (d.address) {
+					diag.code = d.address;
+				}
+				pushDiag(uri, diag);
+			}
+		}
+		for (const { uri, list } of byUri.values()) {
+			problems.set(uri, list);
+		}
+	}
 
 	function updateStatusBar(graph: ArchitectureGraph | undefined): void {
 		if (!graph) {
@@ -658,6 +723,7 @@ export function activate(context: ExtensionContext): void {
 		if (!report) {
 			return { ok: false as const, message: l10n.t('The CloudForge service returned an invalid CLI validation report.') };
 		}
+		syncProblems(provider.getGraph(), report);
 		return { ok: true as const, report };
 	}
 
@@ -728,6 +794,7 @@ export function activate(context: ExtensionContext): void {
 			const refreshed = await showGraph(provider, treeView, workspaceId, architectureId);
 			if (refreshed) {
 				updateStatusBar(refreshed);
+				syncProblems(refreshed);
 				canvas.updateIfOpen(toCanvasSnapshot(refreshed, currentArchitectureName));
 			}
 		},
@@ -849,6 +916,7 @@ export function activate(context: ExtensionContext): void {
 			const refreshed = await showGraph(provider, treeView, workspaceId, architectureId);
 			if (refreshed) {
 				updateStatusBar(refreshed);
+				syncProblems(refreshed);
 				canvas.updateIfOpen(toCanvasSnapshot(refreshed, currentArchitectureName));
 				canvas.setNotice({
 					kind: 'info',
@@ -916,7 +984,7 @@ export function activate(context: ExtensionContext): void {
 		},
 	});
 
-	context.subscriptions.push(provider, treeView, canvas, statusBar);
+	context.subscriptions.push(provider, treeView, problems, canvas, statusBar);
 	context.subscriptions.push(treeView.onDidChangeSelection(event => {
 		const resource = event.selection.find(item => item.type === 'resource');
 		const graph = provider.getGraph();
@@ -1053,6 +1121,7 @@ export function activate(context: ExtensionContext): void {
 		return opening ??= openWorkspace(provider, treeView, (loaded, architectureName) => {
 			currentArchitectureName = architectureName;
 			updateStatusBar(loaded);
+			syncProblems(loaded);
 			canvas.show(toCanvasSnapshot(loaded, architectureName), true);
 		}).finally(() => { opening = undefined; });
 	}));
@@ -1063,6 +1132,7 @@ export function activate(context: ExtensionContext): void {
 		async show(workspaceId, architectureId, architectureName) {
 			provider.setGraph(undefined);
 			updateStatusBar(undefined);
+			syncProblems(undefined);
 			const selected = await callService<unknown>('selectArchitecture', { workspaceId, architectureId });
 			if (!selected.ok) {
 				showServiceError(selected.error);
@@ -1072,6 +1142,7 @@ export function activate(context: ExtensionContext): void {
 			if (loaded) {
 				currentArchitectureName = architectureName || l10n.t('Architecture');
 				updateStatusBar(loaded);
+				syncProblems(loaded);
 				canvas.show(toCanvasSnapshot(loaded, currentArchitectureName), true);
 			}
 			await commands.executeCommand('cloudforge.resources.focus');

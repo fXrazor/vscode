@@ -97,13 +97,16 @@ import {
 import {
 	applyDraftEdit,
 	computeDraftChangeSummary,
+	copySelectionToClipboard,
 	createDraftDocument,
 	generateTerraformPreview,
+	pasteClipboardEdit,
 	projectDraftGraph,
 	redoDraftEdit,
 	revertDraftDocument,
 	undoDraftEdit,
 	uniqueResourceName,
+	type DraftClipboard,
 	type DraftDocument,
 	type DraftEdit
 } from '../src/canvas/draftDocument';
@@ -150,14 +153,52 @@ const vscode = acquireVsCodeApi<CanvasViewState>();
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
-const ADDABLE_RESOURCE_TYPES: readonly { readonly typeName: string; readonly shortLabel: string; readonly defaultName: string }[] = [
-	{ typeName: 'azurerm_resource_group', shortLabel: 'Resource Group', defaultName: 'rg' },
-	{ typeName: 'azurerm_virtual_network', shortLabel: 'Virtual Network', defaultName: 'vnet' },
-	{ typeName: 'azurerm_subnet', shortLabel: 'Subnet', defaultName: 'subnet' },
-	{ typeName: 'azurerm_network_security_group', shortLabel: 'Network Security Group', defaultName: 'nsg' },
-	{ typeName: 'azurerm_public_ip', shortLabel: 'Public IP', defaultName: 'pip' },
-	{ typeName: 'azurerm_route_table', shortLabel: 'Route Table', defaultName: 'rt' },
-];
+const ADDABLE_RESOURCE_GROUPS: readonly {
+	readonly providerLabel: string;
+	readonly providerClass: string;
+	readonly items: readonly { readonly typeName: string; readonly shortLabel: string; readonly defaultName: string }[];
+}[] = [
+		{
+			providerLabel: 'Azure Resources',
+			providerClass: 'cf-provider-azure',
+			items: [
+				{ typeName: 'azurerm_resource_group', shortLabel: 'Resource Group', defaultName: 'rg' },
+				{ typeName: 'azurerm_virtual_network', shortLabel: 'Virtual Network', defaultName: 'vnet' },
+				{ typeName: 'azurerm_subnet', shortLabel: 'Subnet', defaultName: 'subnet' },
+				{ typeName: 'azurerm_network_security_group', shortLabel: 'Network Security Group', defaultName: 'nsg' },
+				{ typeName: 'azurerm_public_ip', shortLabel: 'Public IP', defaultName: 'pip' },
+				{ typeName: 'azurerm_route_table', shortLabel: 'Route Table', defaultName: 'rt' },
+			],
+		},
+		{
+			providerLabel: 'AWS Resources',
+			providerClass: 'cf-provider-aws',
+			items: [
+				{ typeName: 'aws_vpc', shortLabel: 'VPC', defaultName: 'vpc' },
+				{ typeName: 'aws_subnet', shortLabel: 'VPC Subnet', defaultName: 'subnet' },
+				{ typeName: 'aws_internet_gateway', shortLabel: 'Internet Gateway', defaultName: 'igw' },
+				{ typeName: 'aws_security_group', shortLabel: 'Security Group', defaultName: 'sg' },
+			],
+		},
+		{
+			providerLabel: 'Google Cloud Resources',
+			providerClass: 'cf-provider-gcp',
+			items: [
+				{ typeName: 'google_compute_network', shortLabel: 'VPC Network', defaultName: 'vpc' },
+				{ typeName: 'google_compute_subnetwork', shortLabel: 'Subnetwork', defaultName: 'subnet' },
+				{ typeName: 'google_compute_firewall', shortLabel: 'Firewall Rule', defaultName: 'fw' },
+			],
+		},
+		{
+			providerLabel: 'Kubernetes Resources',
+			providerClass: 'cf-provider-kubernetes',
+			items: [
+				{ typeName: 'kubernetes_namespace', shortLabel: 'Namespace', defaultName: 'ns' },
+				{ typeName: 'kubernetes_config_map', shortLabel: 'ConfigMap', defaultName: 'config' },
+				{ typeName: 'kubernetes_network_policy', shortLabel: 'NetworkPolicy', defaultName: 'netpol' },
+			],
+		},
+	];
 
 let draftDoc: DraftDocument | undefined;
 let notice: CanvasNotice | null = null;
@@ -172,6 +213,8 @@ let lastFocusBeforeWorkspace: HTMLElement | null = null;
 let lastFocusBeforeHclReview: HTMLElement | null = null;
 let activeFieldKey: { readonly blockId?: string; readonly attrName: string } | undefined;
 let workspaceResultsTab: 'findings' | 'preview' | 'outputs' = 'preview';
+let workspaceNarrowTab: 'inputs' | 'parameters' | 'results' = 'parameters';
+let draftClipboard: DraftClipboard | undefined;
 let nextDraftBlockId = 1;
 let nextDraftNodeSeq = 1;
 let currentRun: ValidationRun | undefined;
@@ -959,6 +1002,92 @@ function performRevertDraft(): void {
 	fitGraph(false);
 }
 
+function copySelectedResources(): boolean {
+	if (!draftDoc) {
+		return false;
+	}
+	const ids = selectedIds.size > 0
+		? [...selectedIds]
+		: state.selectedId
+			? [state.selectedId]
+			: [];
+	if (ids.length === 0) {
+		return false;
+	}
+	const captured = copySelectionToClipboard(draftDoc, ids);
+	if (!captured) {
+		return false;
+	}
+	draftClipboard = captured;
+	return true;
+}
+
+function pasteCopiedResources(): boolean {
+	if (!draftDoc || !draftClipboard) {
+		return false;
+	}
+	const idPrefix = `draft-paste-${Date.now()}-${nextDraftNodeSeq++}`;
+	const prepared = pasteClipboardEdit(draftDoc, draftClipboard, idPrefix);
+	if (!prepared) {
+		return false;
+	}
+	const priorPositions = new Map((projection?.nodes ?? []).map(n => [n.node.id, { x: n.x, y: n.y }]));
+	const ok = commitDraftEdit(prepared.edit);
+	if (!ok) {
+		return false;
+	}
+	const existing = { ...(state.nodePositions[state.mode] ?? {}) };
+	let movedAny = false;
+	for (const [oldId, newId] of prepared.idMap.entries()) {
+		const prev = priorPositions.get(oldId);
+		if (prev) {
+			existing[newId] = { x: Math.round(prev.x + 36), y: Math.round(prev.y + 36) };
+			movedAny = true;
+		}
+	}
+	selectedIds.clear();
+	for (const node of prepared.edit.nodes) {
+		selectedIds.add(node.id);
+	}
+	const firstPasted = prepared.edit.nodes[0]?.id ?? null;
+	state = {
+		...state,
+		selectedId: firstPasted,
+		inspectorOpen: prepared.edit.nodes.length === 1,
+		...(movedAny ? { nodePositions: { ...state.nodePositions, [state.mode]: existing } } : {}),
+	};
+	rebuildProjection();
+	render();
+	applyViewportTransform();
+	schedulePersistViewState();
+	return true;
+}
+
+function deleteSelectedResources(): boolean {
+	if (!draftDoc) {
+		return false;
+	}
+	const ids = selectedIds.size > 0
+		? [...selectedIds]
+		: state.selectedId
+			? [state.selectedId]
+			: [];
+	if (ids.length === 0) {
+		return false;
+	}
+	const ok = commitDraftEdit({ type: 'deleteResources', nodeIds: ids });
+	if (!ok) {
+		return false;
+	}
+	selectedIds.clear();
+	state = { ...state, selectedId: null, focusedWorkspaceOpen: false, inspectorOpen: false };
+	post({ type: 'selectNode', nodeId: null });
+	render();
+	applyViewportTransform();
+	schedulePersistViewState();
+	return true;
+}
+
 function openHclReviewModal(): void {
 	if (!draftDoc) {
 		return;
@@ -1584,27 +1713,32 @@ function renderHeader(): HTMLElement {
 	if (current) {
 		const addDetails = el('details', 'cf-disclosure');
 		const addSummary = el('summary', 'cf-btn', '+ Add');
-		addSummary.title = 'Add a schema-backed Azure resource to the unsaved draft';
+		addSummary.title = 'Add a schema-backed Azure, AWS, GCP, or Kubernetes resource or starter pattern';
 		addDetails.append(addSummary);
 		const addMenu = el('div', 'cf-popover cf-popover-menu');
-		addMenu.append(el('div', 'cf-menu-section-label', 'Azure Resources'));
-		for (const item of ADDABLE_RESOURCE_TYPES) {
-			const btn = el('button', 'cf-menu-item cf-menu-item-icon');
-			btn.type = 'button';
-			const iconWrap = el('span', 'cf-menu-glyph cf-provider-azure');
-			iconWrap.append(createGlyphSvg(glyphCategoryFor(item.typeName, 'resource')));
-			const textWrap = el('span', 'cf-menu-text');
-			textWrap.append(
-				el('span', 'cf-dep-name', item.shortLabel),
-				el('span', 'cf-dep-meta cf-mono', item.typeName)
-			);
-			btn.append(iconWrap, textWrap);
-			btn.addEventListener('click', () => {
-				addDetails.open = false;
-				addNewResource(item.typeName, item.defaultName);
-			});
-			addMenu.append(btn);
-		}
+		ADDABLE_RESOURCE_GROUPS.forEach((group, groupIndex) => {
+			if (groupIndex > 0) {
+				addMenu.append(el('div', 'cf-popover-divider'));
+			}
+			addMenu.append(el('div', 'cf-menu-section-label', group.providerLabel));
+			for (const item of group.items) {
+				const btn = el('button', 'cf-menu-item cf-menu-item-icon');
+				btn.type = 'button';
+				const iconWrap = el('span', `cf-menu-glyph ${group.providerClass}`);
+				iconWrap.append(createGlyphSvg(glyphCategoryFor(item.typeName, 'resource')));
+				const textWrap = el('span', 'cf-menu-text');
+				textWrap.append(
+					el('span', 'cf-dep-name', item.shortLabel),
+					el('span', 'cf-dep-meta cf-mono', item.typeName)
+				);
+				btn.append(iconWrap, textWrap);
+				btn.addEventListener('click', () => {
+					addDetails.open = false;
+					addNewResource(item.typeName, item.defaultName);
+				});
+				addMenu.append(btn);
+			}
+		});
 		addMenu.append(el('div', 'cf-popover-divider'), el('div', 'cf-menu-section-label', 'Starter Patterns'));
 		for (const pattern of STARTER_PATTERNS) {
 			const btn = el('button', 'cf-menu-item cf-menu-item-icon');
@@ -2091,6 +2225,24 @@ function renderStage(): HTMLElement {
 			});
 			bar.append(extractBtn);
 
+			const copyBtn = el('button', 'cf-icon-btn', 'Copy');
+			copyBtn.type = 'button';
+			copyBtn.title = 'Copy selected resources and internal links (Ctrl+C)';
+			copyBtn.addEventListener('click', event => {
+				event.stopPropagation();
+				copySelectedResources();
+			});
+			bar.append(copyBtn);
+
+			const delSelBtn = el('button', 'cf-icon-btn', 'Delete');
+			delSelBtn.type = 'button';
+			delSelBtn.title = 'Delete selected resources in one undoable step (Delete)';
+			delSelBtn.addEventListener('click', event => {
+				event.stopPropagation();
+				deleteSelectedResources();
+			});
+			bar.append(delSelBtn);
+
 			const clearBtn = el('button', 'cf-icon-btn', 'Clear');
 			clearBtn.type = 'button';
 			clearBtn.addEventListener('click', event => {
@@ -2135,9 +2287,12 @@ function renderStage(): HTMLElement {
 		['Enter', 'Open focused workspace'],
 		['O', 'Open Terraform source'],
 		['Shift+Click', 'Multi-select & align'],
+		['Ctrl+C / V', 'Copy / Paste resources'],
+		['Del', 'Delete selected'],
+		['Ctrl+Shift+T', 'Template Library'],
 		['Ctrl+Shift+R', 'Plan, Policy & Recipes'],
 		['Ctrl+Shift+H', 'History & Experiments'],
-		['Ctrl+Shift+E', 'Export SVG / PNG / MD'],
+		['Ctrl+Shift+E', 'Export / Generate IaC'],
 		['Ctrl+Z', 'Undo / Shift+Z Redo'],
 		['Esc', 'Close overlay'],
 	] as const) {
@@ -3190,10 +3345,33 @@ function renderFocusedWorkspace(selected: CanvasNodeSummary): HTMLElement {
 		overlay.append(staleBar);
 	}
 
+	const narrowTabs = el('div', 'cf-ws-narrow-tabs');
+	narrowTabs.setAttribute('role', 'tablist');
+	narrowTabs.setAttribute('aria-label', 'Workspace pane selector');
+	for (const [paneId, paneLabel] of [
+		['inputs', `Inputs (${references.length})`],
+		['parameters', 'Parameters'],
+		['results', 'Results'],
+	] as const) {
+		const tabBtn = el('button', 'cf-seg-btn', paneLabel);
+		tabBtn.type = 'button';
+		tabBtn.setAttribute('role', 'tab');
+		tabBtn.setAttribute('aria-selected', String(workspaceNarrowTab === paneId));
+		tabBtn.setAttribute('aria-pressed', String(workspaceNarrowTab === paneId));
+		tabBtn.addEventListener('click', () => {
+			workspaceNarrowTab = paneId;
+			render();
+		});
+		narrowTabs.append(tabBtn);
+	}
+	overlay.append(narrowTabs);
+
 	const columns = el('div', 'cf-workspace-columns');
+	columns.dataset.activePane = workspaceNarrowTab;
 
 	// Left pane — Inputs & Typed Reference Picker (n8n pattern)
 	const leftPane = el('aside', 'cf-ws-pane');
+	leftPane.dataset.pane = 'inputs';
 	leftPane.append(el('h2', 'cf-ws-pane-title', 'Inputs'));
 	leftPane.append(renderDepListSection('Upstream resources', upstream, true));
 
@@ -3231,6 +3409,7 @@ function renderFocusedWorkspace(selected: CanvasNodeSummary): HTMLElement {
 
 	// Center pane — Schema-backed Parameters form (or explicit schema-absent fallback)
 	const centerPane = el('div', 'cf-ws-pane cf-ws-center');
+	centerPane.dataset.pane = 'parameters';
 	centerPane.append(el('h2', 'cf-ws-pane-title', 'Parameters (Unsaved Draft Preview)'));
 
 	if (schema && draft) {
@@ -3286,6 +3465,7 @@ function renderFocusedWorkspace(selected: CanvasNodeSummary): HTMLElement {
 
 	// Right pane — Results (Findings | HCL Preview | Outputs)
 	const rightPane = el('aside', 'cf-ws-pane');
+	rightPane.dataset.pane = 'results';
 	rightPane.append(el('h2', 'cf-ws-pane-title', 'Results'));
 
 	const tabs = el('div', 'cf-segmented');
@@ -3495,6 +3675,7 @@ function renderTimeline(): HTMLElement {
 			);
 			cliCard.append(cliHead);
 			if (engineValidateReport.diagnostics.length > 0) {
+				const currentForDiag = activeGraph();
 				const diagList = el('div', 'cf-dep-list');
 				for (const diag of engineValidateReport.diagnostics) {
 					const loc = diag.filename
@@ -3507,6 +3688,18 @@ function renderTimeline(): HTMLElement {
 					);
 					if (diag.detail) {
 						row.append(el('div', 'cf-muted', diag.detail));
+					}
+					const matchedNode = currentForDiag
+						? matchDiagnosticTargetNode(
+							{ code: diag.address ?? '', message: `${diag.address ?? ''} ${diag.summary} ${diag.detail ?? ''}` },
+							currentForDiag
+						)
+						: undefined;
+					if (matchedNode) {
+						const revealBtn = el('button', 'cf-btn cf-diag-reveal-btn', `Reveal ${matchedNode.name} on Canvas`);
+						revealBtn.type = 'button';
+						revealBtn.addEventListener('click', () => revealNodeOnCanvas(matchedNode.id));
+						row.append(revealBtn);
 					}
 					diagList.append(row);
 				}
@@ -5593,6 +5786,25 @@ window.addEventListener('keydown', event => {
 	if (mod && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'y') {
 		event.preventDefault();
 		performRedo();
+		return;
+	}
+	const anyOverlayOpen = state.focusedWorkspaceOpen || hclReviewOpen || exportModalOpen || templatesModalOpen || extractModuleModalOpen || historyModalOpen || reviewModalOpen || explainNodeId !== null || drilledModuleId !== null;
+	if (!anyOverlayOpen && mod && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'c') {
+		if (!window.getSelection()?.toString() && copySelectedResources()) {
+			event.preventDefault();
+		}
+		return;
+	}
+	if (!anyOverlayOpen && mod && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'v') {
+		if (draftClipboard && pasteCopiedResources()) {
+			event.preventDefault();
+		}
+		return;
+	}
+	if (!anyOverlayOpen && !mod && !event.altKey && (event.key === 'Delete' || event.key === 'Backspace')) {
+		if (deleteSelectedResources()) {
+			event.preventDefault();
+		}
 		return;
 	}
 	if (event.key === '/') {

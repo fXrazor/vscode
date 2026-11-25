@@ -39,9 +39,16 @@ export type DraftEdit =
 	| { readonly type: 'insertPattern'; readonly patternName: string; readonly nodes: readonly CanvasNodeSummary[]; readonly edges: readonly CanvasEdgeSummary[]; readonly drafts: Readonly<Record<string, ResourceDraft>> }
 	| { readonly type: 'duplicateResource'; readonly sourceNodeId: string; readonly newNodeId: string; readonly newName: string }
 	| { readonly type: 'deleteResource'; readonly nodeId: string }
+	| { readonly type: 'deleteResources'; readonly nodeIds: readonly string[] }
 	| { readonly type: 'connectResources'; readonly fromId: string; readonly toId: string; readonly kind?: string }
 	| { readonly type: 'updateDraft'; readonly nodeId: string; readonly draft: ResourceDraft }
 	| { readonly type: 'restoreSnapshot'; readonly reason: string; readonly snapshot: DraftState };
+
+export interface DraftClipboard {
+	readonly nodes: readonly CanvasNodeSummary[];
+	readonly edges: readonly CanvasEdgeSummary[];
+	readonly drafts: Readonly<Record<string, ResourceDraft>>;
+}
 
 export interface DraftChangeSummary {
 	readonly dirty: boolean;
@@ -266,6 +273,32 @@ function reduceState(state: DraftState, edit: DraftEdit): { readonly next: Draft
 				},
 			};
 		}
+		case 'deleteResources': {
+			const idSet = new Set(edit.nodeIds);
+			const targets = state.nodes.filter(n => idSet.has(n.id));
+			if (targets.length === 0) {
+				return undefined;
+			}
+			const addedSet = new Set(state.addedIds);
+			const nextDrafts = { ...state.drafts };
+			const newlyDeleted: string[] = [];
+			for (const target of targets) {
+				delete nextDrafts[target.id];
+				if (!addedSet.has(target.id)) {
+					newlyDeleted.push(target.id);
+				}
+			}
+			return {
+				reason: targets.length === 1 ? `Delete ${targets[0].name}` : `Delete ${targets.length} resources`,
+				next: {
+					nodes: state.nodes.filter(n => !idSet.has(n.id)),
+					edges: state.edges.filter(e => !idSet.has(e.fromId) && !idSet.has(e.toId)),
+					drafts: nextDrafts,
+					addedIds: state.addedIds.filter(id => !idSet.has(id)),
+					deletedIds: [...state.deletedIds, ...newlyDeleted],
+				},
+			};
+		}
 		case 'connectResources': {
 			const hasFrom = state.nodes.some(n => n.id === edit.fromId);
 			const hasTo = state.nodes.some(n => n.id === edit.toId);
@@ -328,6 +361,96 @@ export function undoDraftEdit(doc: DraftDocument): DraftDocument {
 		present: last.snapshot,
 		past: doc.past.slice(0, -1),
 		future: [{ reason: last.reason, snapshot: doc.present }, ...doc.future],
+	};
+}
+
+/** Captures the selected nodes, their internal edges, and any in-memory drafts for copy/paste. */
+export function copySelectionToClipboard(doc: DraftDocument, nodeIds: readonly string[]): DraftClipboard | undefined {
+	const selected = new Set(nodeIds);
+	const nodes = doc.present.nodes.filter(n => selected.has(n.id));
+	if (nodes.length === 0) {
+		return undefined;
+	}
+	const edges = doc.present.edges.filter(e => selected.has(e.fromId) && selected.has(e.toId));
+	const drafts: Record<string, ResourceDraft> = {};
+	for (const node of nodes) {
+		const existing = doc.present.drafts[node.id];
+		if (existing) {
+			drafts[node.id] = {
+				...existing,
+				attributes: { ...existing.attributes },
+				blocks: existing.blocks.map(b => ({ ...b, attributes: { ...b.attributes } })),
+			};
+		}
+	}
+	return { nodes, edges, drafts };
+}
+
+/** Builds a single atomic undoable `insertPattern` edit from a captured clipboard with unique resource names and remapped internal edges. */
+export function pasteClipboardEdit(
+	doc: DraftDocument,
+	clipboard: DraftClipboard,
+	idPrefix: string
+): { readonly edit: Extract<DraftEdit, { type: 'insertPattern' }>; readonly idMap: ReadonlyMap<string, string> } | undefined {
+	if (clipboard.nodes.length === 0) {
+		return undefined;
+	}
+	const workingNodes: CanvasNodeSummary[] = [...doc.present.nodes];
+	const pastedNodes: CanvasNodeSummary[] = [];
+	const idMap = new Map<string, string>();
+	const pastedDrafts: Record<string, ResourceDraft> = {};
+
+	clipboard.nodes.forEach((src, index) => {
+		const newId = `${idPrefix}-${index + 1}`;
+		const newName = uniqueResourceName(workingNodes, `${src.name}_copy`);
+		const label = src.resourceType ? `${src.resourceType}.${newName}` : newName;
+		const copyNode: CanvasNodeSummary = {
+			id: newId,
+			kind: src.kind,
+			resourceType: src.resourceType,
+			name: newName,
+			label,
+			hasSource: false,
+		};
+		workingNodes.push(copyNode);
+		pastedNodes.push(copyNode);
+		idMap.set(src.id, newId);
+
+		const srcDraft = clipboard.drafts[src.id];
+		if (srcDraft) {
+			const nextAttrs = { ...srcDraft.attributes };
+			if (nextAttrs.name?.kind === 'literal') {
+				nextAttrs.name = { kind: 'literal', value: newName };
+			}
+			pastedDrafts[newId] = {
+				...srcDraft,
+				draftId: `draft:${newId}:${doc.baseSourceRevision.slice(0, 8)}`,
+				baseSourceRevision: doc.baseSourceRevision,
+				label: newName,
+				attributes: nextAttrs,
+				blocks: srcDraft.blocks.map((b, bi) => ({ ...b, id: `${newId}-blk-${bi}`, attributes: { ...b.attributes } })),
+			};
+		}
+	});
+
+	const pastedEdges: CanvasEdgeSummary[] = [];
+	for (const edge of clipboard.edges) {
+		const fromId = idMap.get(edge.fromId);
+		const toId = idMap.get(edge.toId);
+		if (fromId && toId) {
+			pastedEdges.push({ fromId, toId, kind: edge.kind });
+		}
+	}
+
+	return {
+		idMap,
+		edit: {
+			type: 'insertPattern',
+			patternName: pastedNodes.length === 1 ? `Paste ${pastedNodes[0].name}` : `Paste ${pastedNodes.length} resources`,
+			nodes: pastedNodes,
+			edges: pastedEdges,
+			drafts: pastedDrafts,
+		},
 	};
 }
 
