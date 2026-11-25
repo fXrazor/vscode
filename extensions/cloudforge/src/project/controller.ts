@@ -17,15 +17,17 @@ import {
 	type ExtensionContext,
 	type WorkspaceFolder
 } from 'vscode';
-import { validateImportSelections, type ImportSelection, type ImportSelectionError } from '../importSelections';
+import { isValidArchitectureName, validateImportSelections, type ImportSelection, type ImportSelectionError } from '../importSelections';
 import { findProjectRootTerraformFiles, findTerraformImportCandidates } from '../terraformDetection';
 import { ensureGit, repositoryRemote } from './git';
 import {
+	buildArchitectureSwitchItems,
 	cloneUrlPrefix,
 	isPathComponent,
 	parseCreatedProject,
 	parseInspection,
 	parseProjectResult,
+	sanitizeRemoteUrl,
 	selectDefaultArchitecture,
 	suggestArchitectureName,
 	validateCloneUrl,
@@ -44,10 +46,14 @@ const IGNORED_ROOT_TERRAFORM_KEY = 'cloudforge.ignoredRootTerraform';
 const LAST_ARCHITECTURE_NAME_KEY = 'cloudforge.lastArchitectureName';
 const PENDING_CLONE_KEY = 'cloudforge.pendingClone';
 const PENDING_CLONE_LIFETIME_MS = 15 * 60 * 1000;
+const WORKSPACE_FOLDER_ADD_TIMEOUT_MS = 5000;
 
-/** Shows an architecture's graph in the Stage 1 graph view and read-only canvas. */
+/** Shows an architecture's graph in the Stage 1 graph view and Architecture Canvas. */
 export interface GraphHost {
 	show(workspaceId: string, architectureId: string, architectureName?: string): Promise<void>;
+	openCanvas?(focusMode?: boolean): Promise<void>;
+	validateArchitecture?(): Promise<void>;
+	openTemplates?(): void;
 }
 
 interface PendingClone {
@@ -61,6 +67,7 @@ interface PendingClone {
  */
 export class ProjectController implements Disposable {
 	private project: ProjectResult | undefined;
+	private activeArchitectureIdValue: string | undefined;
 	private connecting: Promise<void> | undefined;
 	/** Set when the user declined consent; cleared only by an explicit refresh. */
 	private consentDeclined = false;
@@ -77,6 +84,10 @@ export class ProjectController implements Disposable {
 
 	get current(): ProjectResult | undefined {
 		return this.project;
+	}
+
+	get activeArchitectureId(): string | undefined {
+		return this.activeArchitectureIdValue;
 	}
 
 	/** The folder that holds the project marker: the workspace file's folder, or the single folder. */
@@ -158,6 +169,10 @@ export class ProjectController implements Disposable {
 
 	/** Reloads the project without prompting (after a change on disk or in the window). */
 	async refresh(): Promise<void> {
+		if (this.connecting) {
+			await this.connecting;
+			return;
+		}
 		const result = await callProjectService('openProject', {});
 		if (result.ok) {
 			this.accept(result.value);
@@ -176,13 +191,138 @@ export class ProjectController implements Disposable {
 		void window.showInformationMessage(l10n.t('CloudForge will ask again before reading this project.'));
 	}
 
-	async openArchitecture(architectureId: string): Promise<void> {
+	async openArchitecture(architectureId: string): Promise<boolean> {
 		const architecture = this.project?.architectures.find(item => item.architectureId === architectureId);
-		if (this.project && architecture) {
-			this.hasAutoOpenedArchitecture = true;
-			void this.context.workspaceState.update(LAST_ARCHITECTURE_NAME_KEY, architecture.displayName);
-			await this.graph.show(this.project.workspaceId, architecture.architectureId, architecture.displayName);
+		if (!this.project || !architecture) {
+			return false;
 		}
+		this.hasAutoOpenedArchitecture = true;
+		this.activeArchitectureIdValue = architecture.architectureId;
+		void this.context.workspaceState.update(LAST_ARCHITECTURE_NAME_KEY, architecture.displayName);
+		this.changeEmitter.fire();
+		await this.graph.show(this.project.workspaceId, architecture.architectureId, architecture.displayName);
+		return true;
+	}
+
+	/** Opens an architecture and immediately reveals (or focuses full-screen) its Studio Canvas. */
+	async openArchitectureCanvas(architectureId: string, focusMode = false): Promise<void> {
+		const opened = await this.openArchitecture(architectureId);
+		if (opened) {
+			await this.graph.openCanvas?.(focusMode);
+		}
+	}
+
+	/** Opens an architecture and immediately starts validation. */
+	async validateProjectArchitecture(architectureId: string): Promise<void> {
+		const opened = await this.openArchitecture(architectureId);
+		if (opened) {
+			await this.graph.validateArchitecture?.();
+		}
+	}
+
+	/** Opens a quick switcher across every architecture in the current project. */
+	async switchArchitecture(): Promise<void> {
+		const project = this.project;
+		if (!project) {
+			void window.showInformationMessage(l10n.t('Open a CloudForge project before switching architectures.'));
+			return;
+		}
+		const items = buildArchitectureSwitchItems(project, this.activeArchitectureIdValue);
+		type SwitchPick =
+			| { readonly label: string; readonly description?: string; readonly detail?: string; readonly pickType: 'arch'; readonly architectureId: string; readonly available: boolean }
+			| { readonly label: string; readonly description?: string; readonly pickType: 'action'; readonly action: 'create' | 'template' | 'clone' };
+		const picks: SwitchPick[] = items.map(item => ({
+			label: `${item.active ? '$(check) ' : '$(type-hierarchy) '}${item.displayName}`,
+			description: item.active
+				? l10n.t('{0} · active', item.sourceLabel)
+				: item.available
+					? item.sourceLabel
+					: l10n.t('{0} · unavailable', item.sourceLabel),
+			detail: !item.available && item.statusReason ? repositoryStatusDetail(item.statusReason) : undefined,
+			pickType: 'arch',
+			architectureId: item.architectureId,
+			available: item.available,
+		}));
+		picks.push(
+			{ label: `$(add) ${l10n.t('New Architecture…')}`, description: l10n.t('Create under architectures/'), pickType: 'action', action: 'create' },
+			{ label: `$(library) ${l10n.t('New Architecture from Template…')}`, description: l10n.t('Browse offline Azure / AWS / GCP templates'), pickType: 'action', action: 'template' },
+			{ label: `$(repo-clone) ${l10n.t('Clone Repository into Project…')}`, description: l10n.t('GitHub, GitLab, Bitbucket, or URL'), pickType: 'action', action: 'clone' },
+		);
+		const picked = await window.showQuickPick(picks, {
+			title: l10n.t('Switch CloudForge Architecture ({0})', project.displayName),
+			placeHolder: l10n.t('Choose an architecture to open in the Canvas'),
+			matchOnDescription: true,
+		});
+		if (!picked) {
+			return;
+		}
+		if (picked.pickType === 'action') {
+			if (picked.action === 'create') {
+				await this.createArchitecture();
+			} else if (picked.action === 'template') {
+				this.graph.openTemplates?.();
+			} else {
+				await this.cloneRepository();
+			}
+			return;
+		}
+		if (!picked.available) {
+			void window.showWarningMessage(l10n.t('That architecture is unavailable because its repository is not active in this window.'));
+			return;
+		}
+		await this.openArchitectureCanvas(picked.architectureId, false);
+	}
+
+	/** Reveals a local architecture folder (`architectures/<name>/`) in the VS Code Explorer. */
+	async revealArchitectureFolder(architectureId: string): Promise<void> {
+		const folder = this.projectFolder();
+		const architecture = this.project?.architectures.find(item => item.architectureId === architectureId);
+		if (!folder || !architecture || architecture.source !== 'local' || !isPathComponent(architecture.displayName)) {
+			return;
+		}
+		const target = Uri.joinPath(folder, ARCHITECTURES_FOLDER, architecture.displayName);
+		if (await exists(target)) {
+			await commands.executeCommand('revealInExplorer', target);
+		}
+	}
+
+	/** Reveals an available repository folder in the VS Code Explorer. */
+	async revealRepositoryFolder(repositoryId: string): Promise<void> {
+		const repository = this.project?.repositories.find(item => item.repositoryId === repositoryId);
+		const folder = repository?.workspaceFolderIndex === undefined ? undefined : workspace.workspaceFolders?.[repository.workspaceFolderIndex];
+		if (folder) {
+			await commands.executeCommand('revealInExplorer', folder.uri);
+		}
+	}
+
+	/** Re-attaches a `notInWorkspace` repository folder back into the active window. */
+	async reattachRepository(repositoryId: string): Promise<void> {
+		const project = this.project;
+		const repository = project?.repositories.find(item => item.repositoryId === repositoryId);
+		if (!project || !repository || repository.status !== 'notInWorkspace') {
+			return;
+		}
+		const folder = this.projectFolder();
+		if (folder && repository.location === 'project' && isPathComponent(repository.displayName)) {
+			const candidate = Uri.joinPath(folder, REPOSITORIES_FOLDER, repository.displayName);
+			if (await exists(candidate)) {
+				const added = await this.addFolderToWorkspace(candidate);
+				if (added) {
+					await this.connect();
+					return;
+				}
+			}
+		}
+		await commands.executeCommand('workbench.action.addRootFolder');
+	}
+
+	/** Resets dismissed import prompts (`Don't Ask for This Repo` / root `.tf` adoption) and re-scans. */
+	async resetIgnoredImports(): Promise<void> {
+		this.offered.clear();
+		await this.context.workspaceState.update(IGNORED_FOLDERS_KEY, undefined);
+		await this.context.workspaceState.update(IGNORED_ROOT_TERRAFORM_KEY, undefined);
+		void window.showInformationMessage(l10n.t('Reset dismissed CloudForge import prompts for this window.'));
+		await this.connect(true);
 	}
 
 	async removeRepository(repositoryId: string): Promise<void> {
@@ -200,7 +340,11 @@ export class ProjectController implements Disposable {
 		if (choice !== remove) {
 			return;
 		}
+		const folder = repository.workspaceFolderIndex === undefined ? undefined : workspace.workspaceFolders?.[repository.workspaceFolderIndex];
 		const result = await callProjectService('removeRepository', { workspaceId: project.workspaceId, repositoryId });
+		if (folder) {
+			this.offered.delete(folder.uri.toString());
+		}
 		this.handleProjectChange(result);
 	}
 
@@ -234,6 +378,11 @@ export class ProjectController implements Disposable {
 				return;
 			}
 		}
+		if (inspection.truncated) {
+			void window.showWarningMessage(
+				l10n.t('{0} reached the CloudForge inspection limit, so only the first {1} Terraform root(s) are shown.', inspection.displayName, inspection.terraformRoots.length)
+			);
+		}
 		const choices = inspection.terraformRoots.filter(root => !root.imported);
 		if (choices.length === 0) {
 			void window.showInformationMessage(l10n.t('Every Terraform root in {0} is already imported.', inspection.displayName));
@@ -241,7 +390,13 @@ export class ProjectController implements Disposable {
 		}
 		const picked = await window.showQuickPick(
 			choices.map(root => ({ label: root.rootPath.length ? root.rootPath.join('/') : inspection.displayName, description: root.displayName, picked: choices.length === 1, root })),
-			{ canPickMany: true, title: l10n.t('Import Terraform from {0}', inspection.displayName), placeHolder: l10n.t('Choose the Terraform roots to show as architectures') }
+			{
+				canPickMany: true,
+				title: l10n.t('Import Terraform from {0}', inspection.displayName),
+				placeHolder: inspection.truncated
+					? l10n.t('Choose Terraform roots to import (scan was truncated at service limits)')
+					: l10n.t('Choose the Terraform roots to show as architectures')
+			}
 		);
 		if (!picked || picked.length === 0) {
 			return;
@@ -272,21 +427,24 @@ export class ProjectController implements Disposable {
 			void window.showErrorMessage(invalid);
 			return;
 		}
-		const remote = await repositoryRemote(folder.uri);
+		const rawRemote = await repositoryRemote(folder.uri);
+		const remote = rawRemote ? sanitizeRemoteUrl(rawRemote) : undefined;
 		const imported = await callProjectService('importRepository', {
 			workspaceId: project.workspaceId,
 			inspectionId: inspection.inspectionId,
 			selections,
-			...(remote && validateCloneUrl(remote) === undefined ? { remote } : {})
+			...(remote ? { remote } : {})
 		});
 		const updated = this.handleProjectChange(imported);
 		const first = updated?.importedArchitectureIds[0];
 		if (updated && first) {
 			const architecture = updated.architectures.find(item => item.architectureId === first);
 			this.hasAutoOpenedArchitecture = true;
+			this.activeArchitectureIdValue = first;
 			if (architecture) {
 				void this.context.workspaceState.update(LAST_ARCHITECTURE_NAME_KEY, architecture.displayName);
 			}
+			this.changeEmitter.fire();
 			await this.graph.show(updated.workspaceId, first, architecture?.displayName);
 		}
 	}
@@ -328,17 +486,45 @@ export class ProjectController implements Disposable {
 		let index = folders.findIndex(item => item.uri.toString() === cloned.toString());
 		if (index < 0) {
 			index = folders.length;
-			const added = new Promise<void>(resolve => {
-				const listener = workspace.onDidChangeWorkspaceFolders(() => { listener.dispose(); resolve(); });
-			});
-			if (!workspace.updateWorkspaceFolders(index, 0, { uri: cloned })) {
+			const added = await this.addFolderToWorkspace(cloned);
+			if (!added) {
 				void window.showErrorMessage(l10n.t('The repository was cloned but could not be added to this window.'));
 				return;
 			}
-			await added;
+			const updatedFolders = workspace.workspaceFolders ?? [];
+			const resolvedIndex = updatedFolders.findIndex(item => item.uri.toString() === cloned.toString());
+			if (resolvedIndex >= 0) {
+				index = resolvedIndex;
+			}
 		}
 		await this.refresh();
 		await this.offerImport(index, true);
+	}
+
+	/** Adds a folder to the current multi-root workspace and waits safely with disposal & timeout. */
+	private async addFolderToWorkspace(uri: Uri): Promise<boolean> {
+		const folders = workspace.workspaceFolders ?? [];
+		if (folders.some(item => item.uri.toString() === uri.toString())) {
+			return true;
+		}
+		let listener: Disposable | undefined;
+		let timeout: ReturnType<typeof setTimeout> | undefined;
+		const waitForChange = new Promise<void>(resolve => {
+			listener = workspace.onDidChangeWorkspaceFolders(() => resolve());
+			timeout = setTimeout(resolve, WORKSPACE_FOLDER_ADD_TIMEOUT_MS);
+		});
+		try {
+			if (!workspace.updateWorkspaceFolders(folders.length, 0, { uri })) {
+				return false;
+			}
+			await waitForChange;
+			return true;
+		} finally {
+			listener?.dispose();
+			if (timeout !== undefined) {
+				clearTimeout(timeout);
+			}
+		}
 	}
 
 	/** Creates a project in a folder the user picks (the broker opens the picker) and opens it. */
@@ -346,7 +532,7 @@ export class ProjectController implements Disposable {
 		const name = await window.showInputBox({
 			title: l10n.t('Create a CloudForge project'),
 			prompt: l10n.t('Project name. You will choose the folder to create it in next.'),
-			validateInput: value => isPathComponent(value.trim()) ? undefined : l10n.t('Use a valid Windows folder name.')
+			validateInput: value => isValidArchitectureName(value.trim()) ? undefined : l10n.t('Use a valid Windows folder name.')
 		});
 		if (name === undefined) {
 			return false;
@@ -396,10 +582,10 @@ export class ProjectController implements Disposable {
 		const rawName = await window.showInputBox({
 			title: l10n.t('New CloudForge architecture'),
 			prompt: l10n.t('Architecture name (created under architectures/<name>/)'),
-			value: isPathComponent(defaultName) ? defaultName : 'main',
+			value: isValidArchitectureName(defaultName) ? defaultName : 'main',
 			validateInput: value => {
 				const trimmed = value.trim();
-				if (!isPathComponent(trimmed)) {
+				if (!isValidArchitectureName(trimmed)) {
 					return l10n.t('Use a valid Windows folder name.');
 				}
 				if (existingNames.has(trimmed.toLowerCase())) {
@@ -447,7 +633,7 @@ export class ProjectController implements Disposable {
 			return;
 		}
 		const existingNames = new Set(project.architectures.map(a => a.displayName.toLowerCase()));
-		const safeBase = isPathComponent(defaultName) ? defaultName : 'template';
+		const safeBase = isValidArchitectureName(defaultName) ? defaultName : 'template';
 		let suggested = safeBase;
 		let suffix = 2;
 		while (existingNames.has(suggested.toLowerCase())) {
@@ -459,7 +645,7 @@ export class ProjectController implements Disposable {
 			value: suggested,
 			validateInput: value => {
 				const trimmed = value.trim();
-				if (!isPathComponent(trimmed)) {
+				if (!isValidArchitectureName(trimmed)) {
 					return l10n.t('Use a valid Windows folder name.');
 				}
 				if (existingNames.has(trimmed.toLowerCase())) {
@@ -681,6 +867,9 @@ export class ProjectController implements Disposable {
 
 	private setProject(project: ProjectResult | undefined): void {
 		this.project = project;
+		if (!project || (this.activeArchitectureIdValue && !project.architectures.some(arch => arch.architectureId === this.activeArchitectureIdValue))) {
+			this.activeArchitectureIdValue = undefined;
+		}
 		void commands.executeCommand('setContext', 'cloudforge.projectOpen', !!project);
 		this.changeEmitter.fire();
 	}
@@ -731,4 +920,13 @@ async function pickProvider(): Promise<CloneProvider | undefined> {
 	];
 	const picked = await window.showQuickPick(items, { title: l10n.t('Clone into a CloudForge project'), placeHolder: l10n.t('Where is the repository?') });
 	return picked?.provider;
+}
+
+function repositoryStatusDetail(status: 'available' | 'notInWorkspace' | 'missing' | 'changed'): string {
+	switch (status) {
+		case 'notInWorkspace': return l10n.t('Repository folder is not added to this workspace window.');
+		case 'missing': return l10n.t('Repository folder is missing on disk. Use Clone Again or Remove from Project.');
+		case 'changed': return l10n.t('Repository folder changed on disk. Import it again.');
+		case 'available': return '';
+	}
 }

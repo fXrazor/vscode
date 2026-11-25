@@ -17,6 +17,7 @@ import {
 	TreeItem,
 	TreeItemCollapsibleState,
 	Uri,
+	ViewColumn,
 	window,
 	workspace,
 	type Event,
@@ -25,6 +26,7 @@ import {
 	type TreeView
 } from 'vscode';
 import { activateProjects } from './project/index';
+import { findWorkspacePreset, isWorkspacePresetId, WORKSPACE_PRESETS, type WorkspacePresetId } from './project/workspacePresets';
 import { CloudForgeCanvasPanel } from './canvas/canvasPanel';
 import { orientServiceEdgesForCanvas } from './canvas/layout';
 import { isValidTfFileName, type CanvasCatalogueSnapshot, type CanvasCloudRegionsPayload, type CanvasEngineValidateReport, type CanvasGraphSnapshot } from './canvas/protocol';
@@ -165,8 +167,14 @@ class CloudForgeGraphProvider implements TreeDataProvider<GraphTreeItem> {
 			const edges = this.graph?.edges ?? [];
 			const hasConnections = edges.some(edge => edge.fromId === element.node.id || edge.toId === element.node.id);
 			const item = new TreeItem(element.node.label, hasConnections ? TreeItemCollapsibleState.Collapsed : TreeItemCollapsibleState.None);
-			item.description = element.node.resourceType ?? element.node.kind;
-			item.tooltip = element.node.kind + ': ' + element.node.name;
+			const typeLabel = element.node.resourceType ?? element.node.kind;
+			const sourceLabel = element.node.sourceFile
+				? `${element.node.sourceFile}${element.node.sourceLine ? `:${element.node.sourceLine}` : ''}`
+				: undefined;
+			item.description = sourceLabel ? `${typeLabel} · ${sourceLabel}` : typeLabel;
+			item.tooltip = sourceLabel
+				? `${element.node.kind}: ${element.node.name}\n${sourceLabel}`
+				: `${element.node.kind}: ${element.node.name}`;
 			item.contextValue = 'cloudForgeResource';
 			return item;
 		}
@@ -1068,8 +1076,68 @@ export function activate(context: ExtensionContext): void {
 		const graph = provider.getGraph();
 		canvas.show(graph ? toCanvasSnapshot(graph, currentArchitectureName) : undefined, false);
 	}));
+	async function applyWorkspacePreset(requestedId?: unknown): Promise<void> {
+		let presetId: WorkspacePresetId | undefined = isWorkspacePresetId(requestedId) ? requestedId : undefined;
+		if (!presetId) {
+			const picked = await window.showQuickPick(
+				WORKSPACE_PRESETS.map(preset => ({
+					label: `${preset.icon} ${preset.label}`,
+					description: preset.description,
+					detail: preset.detail,
+					presetId: preset.id,
+				})),
+				{
+					title: l10n.t('CloudForge Workspace Layout'),
+					placeHolder: l10n.t('Choose a workspace layout preset'),
+				}
+			);
+			if (!picked) {
+				return;
+			}
+			presetId = picked.presetId;
+		}
+		const preset = findWorkspacePreset(presetId);
+		const graph = provider.getGraph();
+		if (preset.focusMode) {
+			canvas.show(graph ? toCanvasSnapshot(graph, currentArchitectureName) : undefined, false);
+			await setCanvasFocusMode(true);
+			return;
+		}
+		if (focusModeActive) {
+			await setCanvasFocusMode(false);
+		}
+		if (preset.hideSecondarySidebar) {
+			await commands.executeCommand('workbench.action.closeAuxiliaryBar').then(undefined, () => undefined);
+		}
+		if (preset.hideBottomPanel) {
+			await commands.executeCommand('workbench.action.closePanel').then(undefined, () => undefined);
+		}
+		if (preset.showPrimarySidebar) {
+			await commands.executeCommand('cloudforge.projects.focus').then(undefined, () => undefined);
+		}
+		if (preset.editorLayout) {
+			await commands.executeCommand('vscode.setEditorLayout', preset.editorLayout).then(undefined, () => undefined);
+		}
+		canvas.show(graph ? toCanvasSnapshot(graph, currentArchitectureName) : undefined, false);
+		if (preset.id === 'architecture-code') {
+			const sourceNode = graph?.nodes.find(node => node.hasSource);
+			if (graph && sourceNode) {
+				await commands.executeCommand('workbench.action.focusSecondEditorGroup').then(undefined, () => undefined);
+				await openNodeSource(graph.workspaceId, graph.architectureId, graph.sourceRevision, sourceNode.id);
+			} else {
+				const tfFiles = await workspace.findFiles('**/*.tf', '**/.terraform/**', 1);
+				if (tfFiles.length > 0) {
+					await window.showTextDocument(tfFiles[0], { viewColumn: ViewColumn.Two, preserveFocus: true }).then(undefined, () => undefined);
+				}
+			}
+		}
+	}
+
 	context.subscriptions.push(commands.registerCommand('cloudforge.toggleCanvasFocusMode', () => {
 		return setCanvasFocusMode();
+	}));
+	context.subscriptions.push(commands.registerCommand('cloudforge.applyWorkspacePreset', (presetId?: unknown) => {
+		return applyWorkspacePreset(presetId);
 	}));
 	context.subscriptions.push({
 		dispose() {
@@ -1260,6 +1328,23 @@ export function activate(context: ExtensionContext): void {
 				canvas.show(toCanvasSnapshot(loaded, currentArchitectureName), true);
 			}
 			await commands.executeCommand('cloudforge.resources.focus');
+		},
+		async openCanvas(focusMode = false) {
+			const graph = provider.getGraph();
+			canvas.show(graph ? toCanvasSnapshot(graph, currentArchitectureName) : undefined, false);
+			if (focusMode) {
+				await setCanvasFocusMode(true);
+			}
+		},
+		async validateArchitecture() {
+			const graph = provider.getGraph();
+			if (graph) {
+				canvas.triggerValidation(toCanvasSnapshot(graph, currentArchitectureName), 'architecture');
+			}
+		},
+		openTemplates() {
+			const graph = provider.getGraph();
+			canvas.openTemplates(graph ? toCanvasSnapshot(graph, currentArchitectureName) : undefined);
 		}
 	});
 }

@@ -49,6 +49,18 @@
 				"icon": "$(add)"
 			},
 			{
+				"command": "cloudforge.switchArchitecture",
+				"title": "%command.switchArchitecture%",
+				"category": "%displayName%",
+				"icon": "$(arrow-swap)"
+			},
+			{
+				"command": "cloudforge.applyWorkspacePreset",
+				"title": "%command.applyWorkspacePreset%",
+				"category": "%displayName%",
+				"icon": "$(layout)"
+			},
+			{
 				"command": "cloudforge.importRepository",
 				"title": "%command.importRepository%",
 				"category": "%displayName%",
@@ -66,6 +78,11 @@
 				"category": "%displayName%"
 			},
 			{
+				"command": "cloudforge.resetIgnoredImports",
+				"title": "%command.resetIgnoredImports%",
+				"category": "%displayName%"
+			},
+			{
 				"command": "cloudforge.installGit",
 				"title": "%command.installGit%",
 				"category": "%displayName%"
@@ -74,6 +91,42 @@
 				"command": "cloudforge.openArchitecture",
 				"title": "%command.openArchitecture%",
 				"category": "%displayName%"
+			},
+			{
+				"command": "cloudforge.openArchitectureCanvas",
+				"title": "%command.openArchitectureCanvas%",
+				"category": "%displayName%",
+				"icon": "$(type-hierarchy)"
+			},
+			{
+				"command": "cloudforge.openArchitectureFocus",
+				"title": "%command.openArchitectureFocus%",
+				"category": "%displayName%",
+				"icon": "$(screen-full)"
+			},
+			{
+				"command": "cloudforge.validateProjectArchitecture",
+				"title": "%command.validateProjectArchitecture%",
+				"category": "%displayName%",
+				"icon": "$(check-all)"
+			},
+			{
+				"command": "cloudforge.revealArchitectureFolder",
+				"title": "%command.revealArchitectureFolder%",
+				"category": "%displayName%",
+				"icon": "$(folder-opened)"
+			},
+			{
+				"command": "cloudforge.revealRepositoryFolder",
+				"title": "%command.revealRepositoryFolder%",
+				"category": "%displayName%",
+				"icon": "$(folder-opened)"
+			},
+			{
+				"command": "cloudforge.reattachRepository",
+				"title": "%command.reattachRepository%",
+				"category": "%displayName%",
+				"icon": "$(root-folder-opened)"
 			},
 			{
 				"command": "cloudforge.removeRepository",
@@ -135,6 +188,17 @@
 				"command": "cloudforge.toggleCanvasFocusMode",
 				"key": "ctrl+alt+f",
 				"mac": "cmd+alt+f"
+			},
+			{
+				"command": "cloudforge.switchArchitecture",
+				"key": "ctrl+alt+a",
+				"mac": "cmd+alt+a",
+				"when": "cloudforge.projectOpen"
+			},
+			{
+				"command": "cloudforge.applyWorkspacePreset",
+				"key": "ctrl+alt+l",
+				"mac": "cmd+alt+l"
 			}
 		],
 		"views": {
@@ -172,12 +236,40 @@
 					"when": "false"
 				},
 				{
+					"command": "cloudforge.openArchitectureCanvas",
+					"when": "false"
+				},
+				{
+					"command": "cloudforge.openArchitectureFocus",
+					"when": "false"
+				},
+				{
+					"command": "cloudforge.validateProjectArchitecture",
+					"when": "false"
+				},
+				{
+					"command": "cloudforge.revealArchitectureFolder",
+					"when": "false"
+				},
+				{
+					"command": "cloudforge.revealRepositoryFolder",
+					"when": "false"
+				},
+				{
+					"command": "cloudforge.reattachRepository",
+					"when": "false"
+				},
+				{
 					"command": "cloudforge.removeRepository",
 					"when": "false"
 				},
 				{
 					"command": "cloudforge.cloneRepositoryAgain",
 					"when": "false"
+				},
+				{
+					"command": "cloudforge.switchArchitecture",
+					"when": "cloudforge.projectOpen"
 				},
 				{
 					"command": "cloudforge.importRepository",
@@ -190,33 +282,52 @@
 				{
 					"command": "cloudforge.forgetProjectAccess",
 					"when": "cloudforge.projectOpen"
+				},
+				{
+					"command": "cloudforge.resetIgnoredImports",
+					"when": "cloudforge.projectOpen"
 				}
 			],
 			"view/title": [
 				{
-					"command": "cloudforge.createArchitecture",
+					"command": "cloudforge.switchArchitecture",
 					"when": "view == cloudforge.projects && cloudforge.projectOpen",
 					"group": "navigation@0"
 				},
 				{
-					"command": "cloudforge.openTemplateLibrary",
-					"when": "view == cloudforge.projects",
+					"command": "cloudforge.createArchitecture",
+					"when": "view == cloudforge.projects && cloudforge.projectOpen",
 					"group": "navigation@1"
 				},
 				{
-					"command": "cloudforge.cloneRepository",
+					"command": "cloudforge.openTemplateLibrary",
 					"when": "view == cloudforge.projects",
 					"group": "navigation@2"
 				},
 				{
-					"command": "cloudforge.refreshProject",
+					"command": "cloudforge.cloneRepository",
 					"when": "view == cloudforge.projects",
 					"group": "navigation@3"
 				},
 				{
-					"command": "cloudforge.forgetProjectAccess",
+					"command": "cloudforge.refreshProject",
+					"when": "view == cloudforge.projects",
+					"group": "navigation@4"
+				},
+				{
+					"command": "cloudforge.applyWorkspacePreset",
+					"when": "view == cloudforge.projects",
+					"group": "project@0"
+				},
+				{
+					"command": "cloudforge.resetIgnoredImports",
 					"when": "view == cloudforge.projects && cloudforge.projectOpen",
 					"group": "project@1"
+				},
+				{
+					"command": "cloudforge.forgetProjectAccess",
+					"when": "view == cloudforge.projects && cloudforge.projectOpen",
+					"group": "project@2"
 				},
 				{
 					"command": "cloudforge.openCanvas",
@@ -224,12 +335,52 @@
 					"group": "navigation@1"
 				},
 				{
-					"command": "cloudforge.validateArchitecture",
+					"command": "cloudforge.applyWorkspacePreset",
 					"when": "view == cloudforge.resources",
 					"group": "navigation@2"
+				},
+				{
+					"command": "cloudforge.validateArchitecture",
+					"when": "view == cloudforge.resources",
+					"group": "navigation@3"
 				}
 			],
 			"view/item/context": [
+				{
+					"command": "cloudforge.openArchitectureCanvas",
+					"when": "view == cloudforge.projects && viewItem =~ /^cloudforge\\.architecture\\..*\\.readable$/",
+					"group": "inline@1"
+				},
+				{
+					"command": "cloudforge.openArchitectureFocus",
+					"when": "view == cloudforge.projects && viewItem =~ /^cloudforge\\.architecture\\..*\\.readable$/",
+					"group": "inline@2"
+				},
+				{
+					"command": "cloudforge.validateProjectArchitecture",
+					"when": "view == cloudforge.projects && viewItem =~ /^cloudforge\\.architecture\\..*\\.readable$/",
+					"group": "1_actions@1"
+				},
+				{
+					"command": "cloudforge.revealArchitectureFolder",
+					"when": "view == cloudforge.projects && viewItem == cloudforge.architecture.local.readable",
+					"group": "1_actions@2"
+				},
+				{
+					"command": "cloudforge.importRepository",
+					"when": "view == cloudforge.projects && viewItem =~ /^cloudforge\\.repository\\.available/",
+					"group": "inline@1"
+				},
+				{
+					"command": "cloudforge.revealRepositoryFolder",
+					"when": "view == cloudforge.projects && viewItem =~ /^cloudforge\\.repository\\.available/",
+					"group": "1_actions@1"
+				},
+				{
+					"command": "cloudforge.reattachRepository",
+					"when": "view == cloudforge.projects && viewItem =~ /^cloudforge\\.repository\\.notInWorkspace/",
+					"group": "inline@1"
+				},
 				{
 					"command": "cloudforge.cloneRepositoryAgain",
 					"when": "view == cloudforge.projects && viewItem =~ /^cloudforge\\.repository\\.missing\\.remote$/",

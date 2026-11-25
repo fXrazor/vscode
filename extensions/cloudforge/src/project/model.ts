@@ -94,6 +94,16 @@ export function isPathComponent(value: unknown): value is string {
 	return isText(value, 255) && value.trim() === value && !value.endsWith('.') && !/[<>:"/\\|?*]/.test(value);
 }
 
+/** Strict folder/architecture name matching the Rust service's Windows reserved-name & staging rules. */
+export function isSafeFolderName(value: unknown): value is string {
+	if (!isPathComponent(value)) {
+		return false;
+	}
+	const stem = value.split('.', 1)[0];
+	return !value.toLowerCase().startsWith('.cloudforge-staging-')
+		&& !/^(?:CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|(?:COM|LPT)[1-9\u00B9\u00B2\u00B3])$/i.test(stem);
+}
+
 function parseRepository(value: unknown): ProjectRepository | undefined {
 	if (!isRecord(value) || !isOpaqueId(value.repositoryId) || !isText(value.displayName) || (value.location !== 'project' && value.location !== 'external')) {
 		return undefined;
@@ -265,12 +275,97 @@ export function repositoryFolderName(url: string): string | undefined {
 
 /** A default architecture name for a root that does not clash with existing names. */
 export function suggestArchitectureName(candidate: RootCandidate, repositoryName: string, taken: ReadonlySet<string>): string {
-	const base = candidate.rootPath.length === 0 ? repositoryName : candidate.rootPath.join(' ');
-	let name = isPathComponent(base) ? base : candidate.displayName;
+	const rawBase = candidate.rootPath.length === 0 ? repositoryName : candidate.rootPath.join(' ');
+	const base = isSafeFolderName(rawBase)
+		? rawBase
+		: isSafeFolderName(candidate.displayName)
+			? candidate.displayName
+			: 'architecture';
+	let name = base;
 	for (let suffix = 2; taken.has(name.toLowerCase()); suffix++) {
 		name = `${base} ${suffix}`;
 	}
 	return name;
+}
+
+/**
+ * Strips embedded credentials (`user:token@`) from HTTP(S) Git remote URLs before storing or
+ * forwarding them to the CloudForge service. Preserves SSH (`git@host:path`, `ssh://git@host/...`).
+ * Returns `undefined` if the resulting URL is not a valid remote clone URL.
+ */
+export function sanitizeRemoteUrl(input: string): string | undefined {
+	const trimmed = input.trim();
+	if (validateCloneUrl(trimmed) !== undefined) {
+		return undefined;
+	}
+	const httpMatch = /^(https?:\/\/)([^/?#]+)([/?#].*)$/i.exec(trimmed);
+	if (httpMatch) {
+		const [, scheme, authority, rest] = httpMatch;
+		const atIndex = authority.lastIndexOf('@');
+		const cleaned = atIndex >= 0 ? `${scheme}${authority.slice(atIndex + 1)}${rest}` : trimmed;
+		return validateCloneUrl(cleaned) === undefined ? cleaned : undefined;
+	}
+	return trimmed;
+}
+
+/**
+ * Normalizes local filesystem paths for cross-API equality checks (e.g., matching a VS Code
+ * WorkspaceFolder against `vscode.git` repository `rootUri.fsPath` on Windows where drive casing
+ * or trailing slashes can differ).
+ */
+export function normalizeFsPathForMatch(fsPath: string, caseInsensitive = true): string {
+	const unified = fsPath.replace(/\\/g, '/').replace(/\/+$/, '');
+	return caseInsensitive ? unified.toLowerCase() : unified;
+}
+
+export interface ArchitectureSwitchItem {
+	readonly architectureId: string;
+	readonly displayName: string;
+	readonly sourceLabel: string;
+	readonly source: 'local' | 'repository';
+	readonly available: boolean;
+	readonly active: boolean;
+	readonly statusReason?: RepositoryStatus;
+}
+
+/** Builds sorted quick-switch descriptors for every architecture in a project (active first, then available, then unavailable). */
+export function buildArchitectureSwitchItems(
+	project: ProjectResult,
+	activeArchitectureId?: string
+): ArchitectureSwitchItem[] {
+	const reposById = new Map(project.repositories.map(repo => [repo.repositoryId, repo]));
+	const items: ArchitectureSwitchItem[] = project.architectures.map(arch => {
+		if (arch.source === 'local') {
+			return {
+				architectureId: arch.architectureId,
+				displayName: arch.displayName,
+				sourceLabel: 'Project architecture',
+				source: 'local',
+				available: true,
+				active: arch.architectureId === activeArchitectureId,
+			};
+		}
+		const repo = arch.repositoryId ? reposById.get(arch.repositoryId) : undefined;
+		const available = repo?.status === 'available';
+		return {
+			architectureId: arch.architectureId,
+			displayName: arch.displayName,
+			sourceLabel: repo ? repo.displayName : 'Repository',
+			source: 'repository',
+			available,
+			active: arch.architectureId === activeArchitectureId,
+			...(!available && repo ? { statusReason: repo.status } : {}),
+		};
+	});
+	return items.sort((a, b) => {
+		if (a.active !== b.active) {
+			return a.active ? -1 : 1;
+		}
+		if (a.available !== b.available) {
+			return a.available ? -1 : 1;
+		}
+		return a.displayName.localeCompare(b.displayName);
+	});
 }
 
 /** Describes a finding's kind without ever showing a value. */

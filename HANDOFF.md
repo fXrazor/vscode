@@ -1101,6 +1101,34 @@ Built and live-smoked the updated Windows x64 installer from `Z:\CloudForge-Code
 1. User can run [CloudForgeProofSetup-x64-d7c58cc29fe.exe](Z:/CFStage/CloudForgeProofSetup-x64-d7c58cc29fe.exe) directly (fresh install or in-place upgrade over `%LOCALAPPDATA%\Programs\CloudForge Proof`; no uninstall needed).
 2. Wire live Rust Stage 9B (`terraform plan -json` / `tofu plan -json`) once guarded plan capture lands in `Z:\CloudForge`.
 
+### Project Integrations Hardening, Quick Architecture Switcher & Built-In Workspace Layout Presets (2026-11-25)
+
+Implemented on `fxrazor/continue-project-handoff-review` in `E:\Orca\CloudForge-Code\dace` (fast-forward merged to `Z:\CloudForge-Code` `main` and pushed to `origin/main`). **Zero overlap with concurrent Claude Rust engine work (`Z:\CloudForge` untouched) or Codex Studio whiteboard work (`extensions/cloudforge/studio/` untouched); no unnecessary Windows installer rebuild triggered.**
+
+- **Project Integration Bug Fixes & Hardening ([importSelections.ts](extensions/cloudforge/src/importSelections.ts), [model.ts](extensions/cloudforge/src/project/model.ts), [git.ts](extensions/cloudforge/src/project/git.ts), [controller.ts](extensions/cloudforge/src/project/controller.ts), [index.ts](extensions/cloudforge/src/project/index.ts)):**
+  - Enforced strict Windows reserved-name & staging-prefix validation (`isValidArchitectureName` / `isSafeFolderName` rejecting `CON`, `PRN`, `AUX`, `NUL`, `COM1..9`, `LPT1..9`, `.cloudforge-staging-*`) across `createProject`, `createArchitecture`, `createArchitectureFromTemplate`, and `suggestArchitectureName`.
+  - Fixed `repositoryRemote()` on Windows using normalized case-insensitive path matching (`normalizeFsPathForMatch`) and added `sanitizeRemoteUrl()` to strip embedded HTTP(S) `user:token@` credentials before forwarding remotes to `importRepository` (preserving SSH remotes).
+  - Fixed `cloudforge.importRepository` inline `view/item/context` argument extraction (`{ index }` on unimported folders & `{ repository: { workspaceFolderIndex } }` on available repos so clicking inline Import no longer forces a redundant folder picker).
+  - Fixed `cloneRepository` `onDidChangeWorkspaceFolders` listener leak when `updateWorkspaceFolders` fails and added a 5 s bounded timeout (`addFolderToWorkspace`), synchronized `refresh()` with `connecting`, surfaced `inspection.truncated` warnings during import, cleared `offered` state on `removeRepository`, added **Reset Ignored Import Prompts** (`cloudforge.resetIgnoredImports`), and added debounced (`500 ms`) `FileSystemWatcher` auto-refresh on `cloudforge.project.json` and `architectures/*/cloudforge.architecture.json`.
+- **Multi-Architecture Explorer & Graph Ergonomics ([projectsView.ts](extensions/cloudforge/src/project/projectsView.ts), [controller.ts](extensions/cloudforge/src/project/controller.ts), [extension.ts](extensions/cloudforge/src/extension.ts), [package.json](extensions/cloudforge/package.json), [package.nls.json](extensions/cloudforge/package.nls.json)):**
+  - Tracked `activeArchitectureId` in `ProjectController` and highlighted the active architecture in `CloudForge Project` (`active` badge + accent icon) alongside per-repository and local architecture counts.
+  - Added **CloudForge: Switch Architecture…** (`cloudforge.switchArchitecture`, `Ctrl+Alt+A` / `Cmd+Alt+A`, `buildArchitectureSwitchItems`) with active/available/unavailable status and quick actions (New Architecture, Template Library, Clone Repository).
+  - Added inline & context actions on `CloudForge Project` items: **Open Architecture Canvas**, **Open Canvas in Focus Mode**, **Validate Architecture**, **Reveal Architecture/Repository Folder in Explorer**, **Import Additional Roots…** (on available repos), and **Add Repository Folder to Workspace…** (`cloudforge.reattachRepository` on `notInWorkspace` repos).
+  - Surfaced corresponding `<sourceFile>:<sourceLine>` (e.g., `azurerm_subnet · network.tf:8`) directly on native `CloudForge Graph` resource tree items and tooltips.
+- **Built-In Workspace Layout Presets (Spike D, Zero Core Patches) ([workspacePresets.ts](extensions/cloudforge/src/project/workspacePresets.ts), [extension.ts](extensions/cloudforge/src/extension.ts)):**
+  - Added **CloudForge: Switch Workspace Layout…** (`cloudforge.applyWorkspacePreset`, `Ctrl+Alt+L` / `Cmd+Alt+L`) with 3 presets: **Canvas Focus (Full Screen)**, **Architecture + Code (Split View)** (60% Canvas left / 40% `.tf` source right with Chat & Bottom Panel hidden), and **Project Overview (Default Workbench)**.
+
+| Check (no full desktop/installer rebuild) | Verified result |
+| --- | --- |
+| `node extensions/cloudforge/esbuild.mts`, TS6 (`tsc6`), TS7 (`tsc`), `oxlint`, `hygiene` (all 9 changed/added TS files) | Passed (`0` errors, `0` warnings). |
+| `CLOUDFORGE_REPO=Z:\CloudForge node --test extensions/cloudforge/test/*.test.ts` | **69/69 root extension tests passed** (`0` skipped; includes 6 new test suites in [projectIntegrations.test.ts](extensions/cloudforge/test/projectIntegrations.test.ts)). |
+| Live isolated Code OSS desktop verification (`.agents/skills/launch/scripts/launch.ps1` + `@playwright/cli` over CDP) | **Passed** (`0` page errors; verified `CloudForge: Switch Workspace Layout…` transitioning live through **Architecture + Code (Split View)** (`2` groups `649px / 433px` = exact 60/40, `auxW=0`, `sidebarW=300`), **Canvas Focus (Full Screen)** (`fullscreen=true`, `sidebarW=0`, `auxW=0`, `statusH=0`), and **Project Overview (Default Workbench)** (`1` group, `fullscreen=false`, `sidebarW=300`, `statusH=28`); screenshot visually inspected). |
+
+**Next actions:**
+1. User can keep using [CloudForgeProofSetup-x64-d7c58cc29fe.exe](Z:/CFStage/CloudForgeProofSetup-x64-d7c58cc29fe.exe), or rebuild the installer via `pwsh -NoProfile -ExecutionPolicy Bypass -File build/cloudforge/package-win32-x64.ps1` once Claude's Rust engine improvements and Codex's Studio whiteboard updates merge to package everything in one combined update.
+2. Wire live Rust Stage 9B (`terraform plan -json` / `tofu plan -json`) once guarded plan capture lands in `Z:\CloudForge`.
+
+
 
 
 
