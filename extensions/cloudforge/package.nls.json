@@ -1,7 +1,7 @@
 {
 	"displayName": "CloudForge",
 	"description": "Open local workspaces and inspect read-only infrastructure graphs.",
-	"command.showProofStatus": "Show Proof Status",
+	"command.showProofStatus": "Show Service Status",
 	"command.openWorkspace": "Open Workspace",
 	"view.resources": "CloudForge Graph",
 	"view.resources.welcome": "Open a folder with [CloudForge: Open Workspace](command:cloudforge.openWorkspace) to inspect its resources.",
