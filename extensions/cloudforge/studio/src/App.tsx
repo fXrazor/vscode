@@ -194,7 +194,7 @@ export function Studio() {
 					if (!graph || !parsed || parsed.sourceRevision !== graph.sourceRevision || incoming.sourceRevision !== graph.sourceRevision || current !== hostBaselineRef.current) {
 						break;
 					}
-					const hydrated = hydrateResourceValues(current, graph, parsed.resources);
+					const hydrated = hydrateResourceValues(current, graph, parsed.resources, parsed.variables);
 					if (hydrated !== current) {
 						dispatch({ type: 'rebase', architecture: hydrated });
 						setHostBaseline(hydrated);

@@ -13,6 +13,7 @@ import { projectResourceFiles } from './terraformProjection.ts';
 import { describeMerge } from './draftSaveMerge.ts';
 import { buildResourceDraft, parseSchemaPreview } from './resourceDraft.ts';
 import { hydrateResourceValues, parseResourceValues } from './resourceValues.ts';
+import { terraformCode as codeFor } from './terraformProjection.ts';
 import { sampleArchitecture as schemaSample } from './fixture.ts';
 import { explicitResourceReferences, inheritedDependencies } from './resourceHierarchy.ts';
 import { terraformCode } from './terraformProjection.ts';
@@ -433,4 +434,27 @@ test('the canvas takes literal values from the files and keeps its own for expre
 	assert.deepEqual(next.settings, network.settings);
 	assert.equal(hydrateResourceValues(architecture, snapshot, []), architecture);
 	assert.equal(parseResourceValues({ resources: [] }), undefined);
+});
+
+test('variables declared in the files become canvas variables and var. fields become bindings', () => {
+	const architecture = { ...schemaSample(), variables: [] };
+	const network = architecture.resources.find(resource => resource.id === 'network')!;
+	const name = network.terraformName ?? network.name;
+	const snapshot = {
+		workspaceId: 'w', architectureId: 'a', architectureName: 'a', sourceRevision: 'f'.repeat(64), status: 'complete' as const, edges: [], diagnostics: [],
+		nodes: [{ id: 'network', kind: 'resource', resourceType: 'azurerm_virtual_network', name, label: name, hasSource: true, sourceFile: 'main.tf' }],
+	};
+	const parsed = parseResourceValues({
+		sourceRevision: 'f'.repeat(64),
+		resources: [{ address: 'azurerm_virtual_network.' + name, file: 'main.tf', attributes: { address_space: { kind: 'expression', text: 'var.space' } }, blocks: [] }],
+		variables: [
+			{ name: 'space', file: 'variables.tf', type: 'list(string)', description: 'Ranges', sensitive: false, default: { kind: 'literal', value: ['10.0.0.0/16'] } },
+			{ name: 'key', file: 'variables.tf', sensitive: true, default: { kind: 'redacted' } },
+			{ name: '../bad', file: 'variables.tf', sensitive: false },
+		],
+	})!;
+	assert.equal(parsed.variables.length, 2);
+	const hydrated = hydrateResourceValues(architecture, snapshot, parsed.resources, parsed.variables);
+	assert.deepEqual(hydrated.variables?.map(item => [item.name, item.type, item.sensitive, item.defaultValue]), [['space', 'list(string)', false, ['10.0.0.0/16']], ['key', 'string', true, undefined]]);
+	assert.match(codeFor(hydrated, 'network'), /address_space\s*=\s*var\.space/);
 });

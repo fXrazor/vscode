@@ -8,7 +8,7 @@ Covers everything built in both repos on 25 November 2026 (updated 17:30 for thr
 - [ ] Rust: `node docs/protocol/fixtures/check-fixtures.mjs` reports the fixtures consistent.
 - [ ] Code OSS: build with the new service binary staged, then run the electron-main test `src/vs/code/test/electron-main/cloudForgeServiceChannel.test.ts`.
 - [ ] Code OSS: full type-check (`npm run compile` or the usual watch build). This covers `cloudForgeService.contribution.ts`, which couldn't be checked in the cloud.
-- [ ] Studio: `pnpm check` and tests (105 expected) in `extensions/cloudforge/studio`; extension tests (70 expected).
+- [ ] Studio: `pnpm check` and tests (106 expected) in `extensions/cloudforge/studio`; extension tests (70 expected).
 
 Use a test project with at least two architectures and one `.tf` file that has comments, a `tags = local.tags` line, a `lifecycle` block and a `dynamic` block.
 
@@ -56,7 +56,8 @@ Use a test project with at least two architectures and one `.tf` file that has c
 ## 6. The canvas shows what the files say
 
 - [ ] Open an architecture whose `.tf` sets a non-default `location` (for example `westeurope`) and a resource `name`. The canvas form shows those values, not the catalogue defaults.
-- [ ] A field written as an expression (for example `var.location`) keeps the canvas value, and saving leaves the expression in the file untouched.
+- [ ] A field written as exactly `var.NAME` shows as bound to the variable NAME on the canvas, and the variables panel lists the `variable` blocks from your files (type, description, default; a sensitive default is never shown).
+- [ ] Other expressions (for example `azurerm_resource_group.rg.location`) keep the canvas value, and saving leaves the expression in the file untouched.
 - [ ] A `password` or `secret` attribute never shows its value on the canvas.
 - [ ] Edit something on the canvas quickly while the architecture is still loading. Your edit isn't overwritten when the file values arrive.
 

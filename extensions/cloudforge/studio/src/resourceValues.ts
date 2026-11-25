@@ -12,6 +12,8 @@ import { providerRegions } from './fixture.ts';
 import type { Architecture, Resource, ResourceBlock } from './model.ts';
 import { projectTerraform } from './terraformProjection.ts';
 import type { HostGraphSnapshot } from './webviewBridge.ts';
+import { bindingKey, type FieldTarget } from './fieldBindings.ts';
+import { variableTypes, type VariableDefinition, type VariableValue } from './variables.ts';
 
 export type FileValue =
 	| { readonly kind: 'literal'; readonly value: unknown }
@@ -22,6 +24,15 @@ export interface FileBlockValues {
 	readonly name: string;
 	readonly attributes: Readonly<Record<string, FileValue>>;
 	readonly blocks: readonly FileBlockValues[];
+}
+
+export interface FileVariable {
+	readonly name: string;
+	readonly file: string;
+	readonly type?: string;
+	readonly description?: string;
+	readonly sensitive: boolean;
+	readonly default?: FileValue;
 }
 
 export interface FileResourceValues {
@@ -69,7 +80,7 @@ function parseBlocks(value: unknown, depth: number): FileBlockValues[] {
 }
 
 /** Validates a `readResourceValues` result; anything malformed is dropped. */
-export function parseResourceValues(value: unknown): { readonly sourceRevision: string; readonly resources: readonly FileResourceValues[] } | undefined {
+export function parseResourceValues(value: unknown): { readonly sourceRevision: string; readonly resources: readonly FileResourceValues[]; readonly variables: readonly FileVariable[] } | undefined {
 	if (!isRecord(value) || typeof value.sourceRevision !== 'string' || !Array.isArray(value.resources)) {
 		return undefined;
 	}
@@ -81,7 +92,57 @@ export function parseResourceValues(value: unknown): { readonly sourceRevision: 
 			attributes: parseAttributes(item.attributes),
 			blocks: parseBlocks(item.blocks, 0),
 		}));
-	return { sourceRevision: value.sourceRevision, resources };
+	const variables: FileVariable[] = (Array.isArray(value.variables) ? value.variables : []).slice(0, MAX_RESOURCES).filter(isRecord)
+		.filter(item => typeof item.name === 'string' && /^[A-Za-z_][A-Za-z0-9_-]{0,127}$/.test(item.name) && typeof item.file === 'string')
+		.map(item => {
+			const parsedDefault = parseAttributes({ default: item.default }).default;
+			return {
+				name: item.name as string,
+				file: item.file as string,
+				sensitive: item.sensitive === true,
+				...(typeof item.type === 'string' ? { type: item.type } : {}),
+				...(typeof item.description === 'string' ? { description: item.description } : {}),
+				...(parsedDefault ? { default: parsedDefault } : {}),
+			};
+		});
+	return { sourceRevision: value.sourceRevision, resources, variables };
+}
+
+const variableTypeOf = (text: string | undefined): VariableDefinition['type'] => {
+	const compact = (text ?? '').replace(/\s+/g, '');
+	return (variableTypes as readonly string[]).includes(compact) ? compact as VariableDefinition['type'] : text === undefined ? 'string' : 'any';
+};
+
+function isVariableValue(value: unknown): value is VariableValue {
+	if (value === null || ['string', 'number', 'boolean'].includes(typeof value)) {
+		return true;
+	}
+	if (Array.isArray(value)) {
+		return value.every(isVariableValue);
+	}
+	return isRecord(value) && Object.values(value).every(isVariableValue);
+}
+
+/** Canvas variables for the file's `variable` blocks that the canvas does not have yet. */
+export function variablesFromFiles(existing: readonly VariableDefinition[] | undefined, variables: readonly FileVariable[]): VariableDefinition[] {
+	const names = new Set((existing ?? []).map(item => item.name));
+	const added: VariableDefinition[] = [];
+	for (const variable of variables) {
+		if (names.has(variable.name)) {
+			continue;
+		}
+		names.add(variable.name);
+		const fallback = variable.default?.kind === 'literal' && isVariableValue(variable.default.value) ? variable.default.value : undefined;
+		added.push({
+			id: 'file-variable:' + variable.name,
+			name: variable.name,
+			type: variableTypeOf(variable.type),
+			description: variable.description ?? '',
+			sensitive: variable.sensitive,
+			...(fallback !== undefined ? { defaultValue: fallback } : {}),
+		});
+	}
+	return added;
 }
 
 /** The file value at a projection path such as `['ip_configuration', '0', 'name']`. */
@@ -159,7 +220,10 @@ const regionCode = (name: string) => name.toLowerCase().replace(/\s/g, '');
  * `architecture` with each resource's name, region, settings and block values taken from the
  * files. Returns the same object when nothing changes.
  */
-export function hydrateResourceValues(architecture: Architecture, snapshot: HostGraphSnapshot, values: readonly FileResourceValues[]): Architecture {
+export function hydrateResourceValues(architecture: Architecture, snapshot: HostGraphSnapshot, values: readonly FileResourceValues[], fileVariables: readonly FileVariable[] = []): Architecture {
+	const newVariables = variablesFromFiles(architecture.variables, fileVariables);
+	const variables = [...(architecture.variables ?? []), ...newVariables];
+	const variableIdByName = new Map(variables.map(item => [item.name, item.id]));
 	const byAddress = new Map(values.map(item => [item.address, item]));
 	const addressById = new Map<string, string>();
 	for (const node of snapshot.nodes) {
@@ -181,6 +245,17 @@ export function hydrateResourceValues(architecture: Architecture, snapshot: Host
 		const literal = (path: readonly string[]) => {
 			const found = valueAt(file, path);
 			return found?.kind === 'literal' ? found.value : undefined;
+		};
+		// A field written as exactly `var.NAME` becomes a canvas variable binding.
+		const bindVariable = (path: readonly string[], target: FieldTarget) => {
+			const found = valueAt(file, path);
+			const name = found?.kind === 'expression' ? /^var\.([A-Za-z_][A-Za-z0-9_-]*)$/.exec(found.text.trim())?.[1] : undefined;
+			const variableId = name ? variableIdByName.get(name) : undefined;
+			const key = bindingKey(target);
+			if (variableId && next.fieldBindings?.[key]?.variableId !== variableId) {
+				next.fieldBindings = { ...next.fieldBindings, [key]: { variableId } };
+				touched = true;
+			}
 		};
 		if (resource.kind === 'module') {
 			for (const [setting, attribute] of [['Source', 'source'], ['Version', 'version']] as const) {
@@ -204,6 +279,9 @@ export function hydrateResourceValues(architecture: Architecture, snapshot: Host
 				return undefined;
 			};
 			for (const binding of bindings.get(resource.id) ?? []) {
+				const target: FieldTarget = binding.target === 'name' ? { kind: 'name' } : binding.target === 'region' ? { kind: 'region' }
+					: binding.target === 'setting' ? { kind: 'setting', name: binding.key } : { kind: 'block', blockId: binding.blockId!, name: binding.key };
+				bindVariable(binding.path, target);
 				const value = literal(binding.path);
 				if (value === undefined) {
 					continue;
@@ -252,5 +330,8 @@ export function hydrateResourceValues(architecture: Architecture, snapshot: Host
 		changed = true;
 		return next;
 	});
-	return changed ? { ...architecture, resources } : architecture;
+	if (!changed && newVariables.length === 0) {
+		return architecture;
+	}
+	return { ...architecture, resources, ...(newVariables.length ? { variables } : {}) };
 }
