@@ -8,6 +8,7 @@ import { test } from 'node:test';
 import { isValidTfFileName, parseWebviewMessage, type CanvasGraphSnapshot } from '../src/canvas/protocol.ts';
 import {
 	draftSaveErrorMessage,
+	formatEnginePlanReportText,
 	mapRustFormSchemaToCanvasFormSchema,
 	mapServiceValidationPollToRun,
 	parseCatalogueSnapshots,
@@ -16,6 +17,7 @@ import {
 	parseDetectedEngines,
 	parseDraftSaveApply,
 	parseDraftSavePreview,
+	parseEnginePlanReport,
 	parseEngineValidateReport,
 	parseExportAuditReport,
 	parseModuleInspection,
@@ -419,4 +421,88 @@ test('Stage 9A local engine discovery and CLI validate adapters sanitize payload
 	assert.equal(report.errorCount, 1);
 	assert.equal(report.diagnostics[0].filename, 'main.tf');
 	assert.equal(report.diagnostics[0].line, 3);
+});
+
+test('Stage 9B guarded local engine plan adapters sanitize planned/failed responses and never carry literal values', () => {
+	assert.deepStrictEqual(parseWebviewMessage({ type: 'requestEnginePlan' }), { type: 'requestEnginePlan' });
+	assert.deepStrictEqual(parseWebviewMessage({ type: 'requestEnginePlan', engine: 'terraform' }), { type: 'requestEnginePlan', engine: 'terraform' });
+	assert.equal(parseWebviewMessage({ type: 'requestEnginePlan', engine: 'powershell' }), undefined);
+
+	const planned = parseEnginePlanReport({
+		sourceRevision: 'b'.repeat(64),
+		engine: 'openTofu',
+		engineVersion: '1.13.9',
+		engineInferred: true,
+		status: 'planned',
+		formatVersion: '1.2',
+		errored: false,
+		durationMs: 312,
+		summary: { create: 1, update: 1, replace: 0, delete: 0, read: 0, noOp: 0, total: 2 },
+		resourceChanges: [
+			{
+				address: 'azurerm_resource_group.hub',
+				mode: 'managed',
+				typeName: 'azurerm_resource_group',
+				name: 'hub',
+				providerName: 'registry.opentofu.org/hashicorp/azurerm',
+				actions: ['create'],
+				actionKind: 'create',
+				hasSensitiveAttributes: false,
+				changedAttributePaths: ['location', 'name'],
+				after: { secret_value: 'SHOULD_BE_STRIPPED' },
+			},
+			{
+				address: 'azurerm_key_vault_secret.api',
+				mode: 'managed',
+				typeName: 'azurerm_key_vault_secret',
+				name: 'api',
+				actions: ['update'],
+				actionKind: 'update',
+				hasSensitiveAttributes: true,
+				changedAttributePaths: ['value'],
+			},
+		],
+		outputChanges: [
+			{ name: 'db_password', actions: ['create'], sensitive: true, after: 'TOP_SECRET' },
+		],
+		diagnostics: [],
+		truncated: false,
+	});
+	assert.ok(planned);
+	assert.equal(planned.status, 'planned');
+	assert.equal(planned.summary.create, 1);
+	assert.equal(planned.summary.update, 1);
+	assert.equal(planned.resourceChanges.length, 2);
+	assert.equal(planned.resourceChanges[1].hasSensitiveAttributes, true);
+	assert.equal(planned.outputChanges[0].sensitive, true);
+	assert.equal(JSON.stringify(planned).includes('SHOULD_BE_STRIPPED'), false);
+	assert.equal(JSON.stringify(planned).includes('TOP_SECRET'), false);
+
+	const formatted = formatEnginePlanReportText(planned, 'Hub Network');
+	assert.ok(formatted.includes('OpenTofu 1.13.9'));
+	assert.ok(formatted.includes('+1 create · ~1 update'));
+	assert.ok(formatted.includes('[create] azurerm_resource_group.hub [location, name]'));
+	assert.ok(formatted.includes('(sensitive attributes redacted)'));
+	assert.ok(formatted.includes('output.db_password (sensitive)'));
+
+	const failed = parseEnginePlanReport({
+		sourceRevision: 'b'.repeat(64),
+		engine: 'terraform',
+		engineVersion: '1.15.8',
+		engineInferred: false,
+		status: 'failed',
+		errored: true,
+		durationMs: 85,
+		summary: { create: 0, update: 0, replace: 0, delete: 0, read: 0, noOp: 0, total: 0 },
+		resourceChanges: [],
+		outputChanges: [],
+		diagnostics: [
+			{ severity: 'error', summary: 'Inconsistent dependency lock file', filename: 'main.tf', line: 1 },
+		],
+		truncated: false,
+	});
+	assert.ok(failed);
+	assert.equal(failed.status, 'failed');
+	assert.equal(failed.diagnostics.length, 1);
+	assert.equal(parseEnginePlanReport({ status: 'unknown' }), undefined);
 });

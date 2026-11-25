@@ -53,6 +53,7 @@ export interface GraphHost {
 	show(workspaceId: string, architectureId: string, architectureName?: string): Promise<void>;
 	openCanvas?(focusMode?: boolean): Promise<void>;
 	validateArchitecture?(): Promise<void>;
+	planArchitecture?(): Promise<void>;
 	openTemplates?(): void;
 }
 
@@ -217,6 +218,14 @@ export class ProjectController implements Disposable {
 		const opened = await this.openArchitecture(architectureId);
 		if (opened) {
 			await this.graph.validateArchitecture?.();
+		}
+	}
+
+	/** Opens an architecture and previews a local credential-free OpenTofu/Terraform plan. */
+	async planProjectArchitecture(architectureId: string): Promise<void> {
+		const opened = await this.openArchitecture(architectureId);
+		if (opened) {
+			await this.graph.planArchitecture?.();
 		}
 	}
 

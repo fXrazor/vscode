@@ -12,6 +12,7 @@ import {
 	l10n,
 	languages,
 	Position,
+	ProgressLocation,
 	Range,
 	StatusBarAlignment,
 	TreeItem,
@@ -29,11 +30,12 @@ import { activateProjects } from './project/index';
 import { findWorkspacePreset, isWorkspacePresetId, WORKSPACE_PRESETS, type WorkspacePresetId } from './project/workspacePresets';
 import { CloudForgeCanvasPanel } from './canvas/canvasPanel';
 import { orientServiceEdgesForCanvas } from './canvas/layout';
-import { isValidTfFileName, type CanvasCatalogueSnapshot, type CanvasCloudRegionsPayload, type CanvasEngineValidateReport, type CanvasGraphSnapshot } from './canvas/protocol';
+import { isValidTfFileName, type CanvasCatalogueSnapshot, type CanvasCloudRegionsPayload, type CanvasEnginePlanActionKind, type CanvasEnginePlanReport, type CanvasEngineValidateDiagnostic, type CanvasGraphSnapshot } from './canvas/protocol';
 import { lookupBundledSchema, type FormSchema } from './canvas/schemaForm';
 import { findTemplateById } from './canvas/templateLibrary';
 import {
 	draftSaveErrorMessage,
+	formatEnginePlanReportText,
 	mapRustFormSchemaToCanvasFormSchema,
 	mapServiceValidationPollToRun,
 	parseCatalogueSnapshots,
@@ -42,6 +44,7 @@ import {
 	parseDetectedEngines,
 	parseDraftSaveApply,
 	parseDraftSavePreview,
+	parseEnginePlanReport,
 	parseEngineValidateReport,
 	parseExportAuditReport,
 	parseModuleInspection,
@@ -526,6 +529,7 @@ export function activate(context: ExtensionContext): void {
 	const provider = new CloudForgeGraphProvider();
 	const treeView = window.createTreeView('cloudforge.resources', { treeDataProvider: provider });
 	const problems = languages.createDiagnosticCollection('cloudforge');
+	const planOutput = window.createOutputChannel(l10n.t('CloudForge Plan'));
 	const statusBar = window.createStatusBarItem(StatusBarAlignment.Left, 100);
 	statusBar.command = 'cloudforge.openCanvas';
 	statusBar.name = l10n.t('CloudForge Architecture');
@@ -543,7 +547,10 @@ export function activate(context: ExtensionContext): void {
 		return DiagnosticSeverity.Information;
 	}
 
-	function syncProblems(graph: ArchitectureGraph | undefined, cliReport?: CanvasEngineValidateReport): void {
+	function syncProblems(
+		graph: ArchitectureGraph | undefined,
+		cliReport?: { readonly engine: 'openTofu' | 'terraform'; readonly diagnostics: readonly CanvasEngineValidateDiagnostic[] }
+	): void {
 		problems.clear();
 		if (!graph) {
 			return;
@@ -750,6 +757,152 @@ export function activate(context: ExtensionContext): void {
 		}
 		syncProblems(provider.getGraph(), report);
 		return { ok: true as const, report };
+	}
+
+	async function runArchitectureEnginePlan(
+		workspaceId: string,
+		architectureId: string,
+		sourceRevision: string,
+		engine?: 'openTofu' | 'terraform'
+	) {
+		const result = await callService<unknown>('runEnginePlan', {
+			workspaceId,
+			architectureId,
+			expectedSourceRevision: sourceRevision,
+			...(engine ? { engine } : {}),
+		});
+		if (!result.ok) {
+			const message = result.error.code === 'STALE_SOURCE'
+				? l10n.t('The Terraform source changed on disk. Refresh the graph before running a local plan.')
+				: result.error.code === 'WORKSPACE_UNAVAILABLE'
+					? l10n.t('No compatible local OpenTofu or Terraform CLI engine was found or plan capture returned unusable output.')
+					: result.error.code === 'LIMIT_EXCEEDED'
+						? l10n.t('Local plan capture exceeded its time or output limit.')
+						: l10n.t('Local CLI plan capture could not complete.');
+			return { ok: false as const, message };
+		}
+		const report = parseEnginePlanReport(result.value);
+		if (!report) {
+			return { ok: false as const, message: l10n.t('The CloudForge service returned an invalid local plan report.') };
+		}
+		syncProblems(provider.getGraph(), report);
+		return { ok: true as const, report };
+	}
+
+	function planActionIcon(kind: CanvasEnginePlanActionKind): string {
+		switch (kind) {
+			case 'create': return '$(diff-added)';
+			case 'update': return '$(diff-modified)';
+			case 'replace': return '$(diff-renamed)';
+			case 'delete': return '$(diff-removed)';
+			case 'read': return '$(eye)';
+			case 'no-op': return '$(dash)';
+		}
+	}
+
+	async function runAndPresentLocalPlan(graph: ArchitectureGraph): Promise<void> {
+		const outcome = await window.withProgress(
+			{
+				location: ProgressLocation.Notification,
+				title: l10n.t('CloudForge: Running credential-free local plan for {0}…', currentArchitectureName),
+				cancellable: false,
+			},
+			() => runArchitectureEnginePlan(graph.workspaceId, graph.architectureId, graph.sourceRevision)
+		);
+		if (!outcome.ok) {
+			void window.showErrorMessage(outcome.message);
+			return;
+		}
+		const report: CanvasEnginePlanReport = outcome.report;
+		planOutput.clear();
+		planOutput.append(formatEnginePlanReportText(report, currentArchitectureName));
+
+		const engineLabel = report.engine === 'openTofu' ? 'OpenTofu' : 'Terraform';
+		if (report.status === 'failed') {
+			const openOutput = l10n.t('Open Plan Output');
+			const showProblems = l10n.t('Show Problems');
+			const firstDiag = report.diagnostics[0]?.summary;
+			const msg = firstDiag
+				? l10n.t('{0} {1} plan failed: {2}', engineLabel, report.engineVersion, firstDiag)
+				: l10n.t('{0} {1} plan failed. Ensure providers are initialized locally and check Problems.', engineLabel, report.engineVersion);
+			const choice = await window.showWarningMessage(msg, openOutput, showProblems);
+			if (choice === openOutput) {
+				planOutput.show(true);
+			} else if (choice === showProblems) {
+				await commands.executeCommand('workbench.actions.view.problems');
+			}
+			return;
+		}
+
+		type PlanPick =
+			| { readonly label: string; readonly description?: string; readonly detail?: string; readonly pickKind: 'resource'; readonly address: string; readonly typeName: string; readonly name: string }
+			| { readonly label: string; readonly description?: string; readonly pickKind: 'output' }
+			| { readonly label: string; readonly description?: string; readonly pickKind: 'openOutput' };
+		const picks: PlanPick[] = [];
+		for (const rc of report.resourceChanges) {
+			const attrs = rc.changedAttributePaths.length > 0 ? rc.changedAttributePaths.join(', ') : undefined;
+			const sens = rc.hasSensitiveAttributes ? l10n.t('sensitive values redacted') : undefined;
+			picks.push({
+				label: `${planActionIcon(rc.actionKind)} ${rc.address}`,
+				description: `${rc.actionKind}${sens ? ` · $(lock) ${sens}` : ''}`,
+				detail: attrs ? l10n.t('Changed attributes: {0}', attrs) : undefined,
+				pickKind: 'resource',
+				address: rc.address,
+				typeName: rc.typeName,
+				name: rc.name,
+			});
+		}
+		for (const out of report.outputChanges) {
+			picks.push({
+				label: `$(symbol-variable) output.${out.name}`,
+				description: `${out.actions.join('/')}${out.sensitive ? ` · $(lock) ${l10n.t('sensitive')}` : ''}`,
+				pickKind: 'output',
+			});
+		}
+		picks.push({
+			label: `$(output) ${l10n.t('Open Full Plan Output ({0} {1})', engineLabel, report.engineVersion)}`,
+			description: l10n.t('{0} ms · rev {1}', report.durationMs, report.sourceRevision.slice(0, 8)),
+			pickKind: 'openOutput',
+		});
+
+		const s = report.summary;
+		const summaryTitle = l10n.t(
+			'Local Plan: +{0} create · ~{1} update · +/-{2} replace · -{3} delete ({4} {5})',
+			s.create,
+			s.update,
+			s.replace,
+			s.delete,
+			engineLabel,
+			report.engineVersion
+		);
+		const picked = await window.showQuickPick(picks, {
+			title: summaryTitle,
+			placeHolder: report.truncated
+				? l10n.t('Select a resource change to reveal it in Canvas & source (plan truncated at service bounds)')
+				: l10n.t('Select a resource change to reveal it in Canvas & source'),
+			matchOnDescription: true,
+			matchOnDetail: true,
+		});
+		if (!picked) {
+			return;
+		}
+		if (picked.pickKind === 'openOutput' || picked.pickKind === 'output') {
+			planOutput.show(true);
+			return;
+		}
+		const currentGraph = provider.getGraph();
+		const targetNode = currentGraph?.nodes.find(node =>
+			node.name === picked.address ||
+			(node.resourceType === picked.typeName && (node.label === picked.name || node.name.endsWith(`.${picked.name}`)))
+		);
+		if (currentGraph && targetNode) {
+			canvas.selectNode(targetNode.id);
+			if (targetNode.hasSource) {
+				await openNodeSource(currentGraph.workspaceId, currentGraph.architectureId, currentGraph.sourceRevision, targetNode.id);
+			}
+		} else {
+			planOutput.show(true);
+		}
 	}
 
 	async function cancelServiceValidation(): Promise<void> {
@@ -1007,6 +1160,7 @@ export function activate(context: ExtensionContext): void {
 		onDiffCatalogueSnapshots: diffArchitectureCatalogueSnapshots,
 		onDetectEngines: detectLocalEngines,
 		onRunEngineValidate: runArchitectureEngineValidate,
+		onRunEnginePlan: runArchitectureEnginePlan,
 		async onExportArtifact(format, suggestedFileName, content, encoding) {
 			const folder = workspace.workspaceFolders?.[0]?.uri;
 			const defaultUri = folder ? Uri.joinPath(folder, suggestedFileName) : Uri.file(suggestedFileName);
@@ -1059,7 +1213,7 @@ export function activate(context: ExtensionContext): void {
 		isFocusModeActive: () => focusModeActive,
 	});
 
-	context.subscriptions.push(provider, treeView, problems, canvas, statusBar);
+	context.subscriptions.push(provider, treeView, problems, planOutput, canvas, statusBar);
 	context.subscriptions.push(treeView.onDidChangeSelection(event => {
 		const resource = event.selection.find(item => item.type === 'resource');
 		const graph = provider.getGraph();
@@ -1190,6 +1344,14 @@ export function activate(context: ExtensionContext): void {
 			return;
 		}
 		canvas.triggerValidation(toCanvasSnapshot(graph, currentArchitectureName), 'architecture');
+	}));
+	context.subscriptions.push(commands.registerCommand('cloudforge.runEnginePlan', async () => {
+		const graph = provider.getGraph();
+		if (!graph) {
+			void window.showInformationMessage(l10n.t('Open an architecture before previewing a local plan.'));
+			return;
+		}
+		await runAndPresentLocalPlan(graph);
 	}));
 	context.subscriptions.push(commands.registerCommand('cloudforge.cancelValidation', () => {
 		canvas.cancelValidation();
@@ -1340,6 +1502,12 @@ export function activate(context: ExtensionContext): void {
 			const graph = provider.getGraph();
 			if (graph) {
 				canvas.triggerValidation(toCanvasSnapshot(graph, currentArchitectureName), 'architecture');
+			}
+		},
+		async planArchitecture() {
+			const graph = provider.getGraph();
+			if (graph) {
+				await runAndPresentLocalPlan(graph);
 			}
 		},
 		openTemplates() {

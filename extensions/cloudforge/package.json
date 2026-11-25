@@ -111,6 +111,12 @@
 				"icon": "$(check-all)"
 			},
 			{
+				"command": "cloudforge.planProjectArchitecture",
+				"title": "%command.planProjectArchitecture%",
+				"category": "%displayName%",
+				"icon": "$(diff)"
+			},
+			{
 				"command": "cloudforge.revealArchitectureFolder",
 				"title": "%command.revealArchitectureFolder%",
 				"category": "%displayName%",
@@ -159,6 +165,12 @@
 				"icon": "$(check-all)"
 			},
 			{
+				"command": "cloudforge.runEnginePlan",
+				"title": "%command.runEnginePlan%",
+				"category": "%displayName%",
+				"icon": "$(diff)"
+			},
+			{
 				"command": "cloudforge.cancelValidation",
 				"title": "%command.cancelValidation%",
 				"category": "%displayName%",
@@ -199,6 +211,11 @@
 				"command": "cloudforge.applyWorkspacePreset",
 				"key": "ctrl+alt+l",
 				"mac": "cmd+alt+l"
+			},
+			{
+				"command": "cloudforge.runEnginePlan",
+				"key": "ctrl+alt+p",
+				"mac": "cmd+alt+p"
 			}
 		],
 		"views": {
@@ -245,6 +262,10 @@
 				},
 				{
 					"command": "cloudforge.validateProjectArchitecture",
+					"when": "false"
+				},
+				{
+					"command": "cloudforge.planProjectArchitecture",
 					"when": "false"
 				},
 				{
@@ -343,6 +364,11 @@
 					"command": "cloudforge.validateArchitecture",
 					"when": "view == cloudforge.resources",
 					"group": "navigation@3"
+				},
+				{
+					"command": "cloudforge.runEnginePlan",
+					"when": "view == cloudforge.resources",
+					"group": "navigation@4"
 				}
 			],
 			"view/item/context": [
@@ -362,9 +388,14 @@
 					"group": "1_actions@1"
 				},
 				{
+					"command": "cloudforge.planProjectArchitecture",
+					"when": "view == cloudforge.projects && viewItem =~ /^cloudforge\\.architecture\\..*\\.readable$/",
+					"group": "1_actions@2"
+				},
+				{
 					"command": "cloudforge.revealArchitectureFolder",
 					"when": "view == cloudforge.projects && viewItem == cloudforge.architecture.local.readable",
-					"group": "1_actions@2"
+					"group": "1_actions@3"
 				},
 				{
 					"command": "cloudforge.importRepository",

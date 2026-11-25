@@ -16,6 +16,11 @@ import type {
 	CanvasDetectedEngine,
 	CanvasDiagnosticSummary,
 	CanvasEdgeSummary,
+	CanvasEnginePlanActionKind,
+	CanvasEnginePlanOutputChange,
+	CanvasEnginePlanReport,
+	CanvasEnginePlanResourceChange,
+	CanvasEnginePlanSummary,
 	CanvasEngineValidateDiagnostic,
 	CanvasEngineValidateReport,
 	CanvasExportAuditReport,
@@ -1407,4 +1412,214 @@ export function parseEngineValidateReport(value: unknown): CanvasEngineValidateR
 		diagnostics,
 		truncated: value.truncated,
 	};
+}
+
+// ============================================================================
+// Stage 9B: Guarded Local Engine Plan Capture (`runEnginePlan`) Adapters
+// ============================================================================
+
+const PLAN_ACTIONS: ReadonlySet<string> = new Set(['no-op', 'create', 'read', 'update', 'delete']);
+const PLAN_ACTION_KINDS: ReadonlySet<string> = new Set<CanvasEnginePlanActionKind>(['create', 'update', 'replace', 'delete', 'read', 'no-op']);
+const MAX_PLAN_RESOURCE_CHANGES = 500;
+const MAX_PLAN_OUTPUT_CHANGES = 200;
+const MAX_PLAN_CHANGED_PATHS = 64;
+const MAX_PLAN_DIAGNOSTICS = 100;
+
+function parsePlanSummary(value: unknown): CanvasEnginePlanSummary | undefined {
+	if (
+		!isRecord(value) ||
+		!isNonNegativeInt(value.create) ||
+		!isNonNegativeInt(value.update) ||
+		!isNonNegativeInt(value.replace) ||
+		!isNonNegativeInt(value.delete) ||
+		!isNonNegativeInt(value.read) ||
+		!isNonNegativeInt(value.noOp) ||
+		!isNonNegativeInt(value.total)
+	) {
+		return undefined;
+	}
+	return {
+		create: value.create,
+		update: value.update,
+		replace: value.replace,
+		delete: value.delete,
+		read: value.read,
+		noOp: value.noOp,
+		total: value.total,
+	};
+}
+
+function parsePlanActions(value: unknown): string[] {
+	if (!Array.isArray(value)) {
+		return ['no-op'];
+	}
+	const out: string[] = [];
+	for (const item of value.slice(0, 4)) {
+		if (typeof item === 'string' && PLAN_ACTIONS.has(item)) {
+			out.push(item);
+		}
+	}
+	return out.length > 0 ? out : ['no-op'];
+}
+
+function parseValidateDiagnostics(raw: readonly unknown[], limit: number): CanvasEngineValidateDiagnostic[] {
+	const diagnostics: CanvasEngineValidateDiagnostic[] = [];
+	for (const item of raw.slice(0, limit)) {
+		if (
+			!isRecord(item) ||
+			(item.severity !== 'error' && item.severity !== 'warning') ||
+			!isNonEmptyString(item.summary, 300)
+		) {
+			continue;
+		}
+		const line = typeof item.line === 'number' && Number.isSafeInteger(item.line) && item.line >= 1 ? item.line : undefined;
+		const column = typeof item.column === 'number' && Number.isSafeInteger(item.column) && item.column >= 1 ? item.column : undefined;
+		diagnostics.push({
+			severity: item.severity,
+			summary: item.summary,
+			...(isNonEmptyString(item.detail, 600) ? { detail: item.detail } : {}),
+			...(isNonEmptyString(item.address, 256) ? { address: item.address } : {}),
+			...(isNonEmptyString(item.filename, 255) ? { filename: item.filename } : {}),
+			...(line !== undefined ? { line } : {}),
+			...(column !== undefined ? { column } : {}),
+		});
+	}
+	return diagnostics;
+}
+
+/**
+ * Strictly parses a Rust Stage 9B `runEnginePlan` response, allowing only structural action
+ * summaries, top-level changed attribute names, sensitivity booleans, and sanitized diagnostics.
+ */
+export function parseEnginePlanReport(value: unknown): CanvasEnginePlanReport | undefined {
+	if (
+		!isRecord(value) ||
+		!isSha256(value.sourceRevision) ||
+		(value.engine !== 'openTofu' && value.engine !== 'terraform') ||
+		!isNonEmptyString(value.engineVersion, 64) ||
+		typeof value.engineInferred !== 'boolean' ||
+		(value.status !== 'planned' && value.status !== 'failed') ||
+		typeof value.errored !== 'boolean' ||
+		!isNonNegativeInt(value.durationMs) ||
+		!Array.isArray(value.resourceChanges) ||
+		!Array.isArray(value.outputChanges) ||
+		!Array.isArray(value.diagnostics) ||
+		typeof value.truncated !== 'boolean'
+	) {
+		return undefined;
+	}
+	const summary = parsePlanSummary(value.summary);
+	if (!summary) {
+		return undefined;
+	}
+
+	const resourceChanges: CanvasEnginePlanResourceChange[] = [];
+	for (const item of value.resourceChanges.slice(0, MAX_PLAN_RESOURCE_CHANGES)) {
+		if (
+			!isRecord(item) ||
+			!isNonEmptyString(item.address, 256) ||
+			(item.mode !== 'managed' && item.mode !== 'data') ||
+			!isNonEmptyString(item.typeName, 128) ||
+			!isNonEmptyString(item.name, 128) ||
+			typeof item.actionKind !== 'string' || !PLAN_ACTION_KINDS.has(item.actionKind) ||
+			typeof item.hasSensitiveAttributes !== 'boolean'
+		) {
+			continue;
+		}
+		const changedAttributePaths: string[] = [];
+		if (Array.isArray(item.changedAttributePaths)) {
+			for (const path of item.changedAttributePaths.slice(0, MAX_PLAN_CHANGED_PATHS)) {
+				if (isNonEmptyString(path, 128)) {
+					changedAttributePaths.push(path);
+				}
+			}
+		}
+		resourceChanges.push({
+			address: item.address,
+			...(isNonEmptyString(item.moduleAddress, 256) ? { moduleAddress: item.moduleAddress } : {}),
+			mode: item.mode,
+			typeName: item.typeName,
+			name: item.name,
+			...(isNonEmptyString(item.providerName, 256) ? { providerName: item.providerName } : {}),
+			actions: parsePlanActions(item.actions),
+			actionKind: item.actionKind as CanvasEnginePlanActionKind,
+			hasSensitiveAttributes: item.hasSensitiveAttributes,
+			changedAttributePaths,
+		});
+	}
+
+	const outputChanges: CanvasEnginePlanOutputChange[] = [];
+	for (const item of value.outputChanges.slice(0, MAX_PLAN_OUTPUT_CHANGES)) {
+		if (
+			!isRecord(item) ||
+			!isNonEmptyString(item.name, 128) ||
+			typeof item.sensitive !== 'boolean'
+		) {
+			continue;
+		}
+		outputChanges.push({
+			name: item.name,
+			actions: parsePlanActions(item.actions),
+			sensitive: item.sensitive,
+		});
+	}
+
+	const diagnostics = parseValidateDiagnostics(value.diagnostics, MAX_PLAN_DIAGNOSTICS);
+	const formatVersion = isNonEmptyString(value.formatVersion, 32) ? value.formatVersion : undefined;
+
+	return {
+		sourceRevision: value.sourceRevision,
+		engine: value.engine,
+		engineVersion: value.engineVersion,
+		engineInferred: value.engineInferred,
+		status: value.status,
+		...(formatVersion ? { formatVersion } : {}),
+		errored: value.errored,
+		durationMs: value.durationMs,
+		summary,
+		resourceChanges,
+		outputChanges,
+		diagnostics,
+		truncated: value.truncated || value.resourceChanges.length > MAX_PLAN_RESOURCE_CHANGES || value.outputChanges.length > MAX_PLAN_OUTPUT_CHANGES,
+	};
+}
+
+/** Formats a zero-secret structural plan report for the CloudForge Plan output channel. */
+export function formatEnginePlanReportText(report: CanvasEnginePlanReport, architectureName: string): string {
+	const engineLabel = report.engine === 'openTofu' ? 'OpenTofu' : 'Terraform';
+	const lines: string[] = [
+		`CloudForge Local Plan (${architectureName})`,
+		`Engine: ${engineLabel} ${report.engineVersion}${report.engineInferred ? ' (inferred)' : ''} · rev ${report.sourceRevision.slice(0, 8)} · ${report.durationMs} ms`,
+		`Status: ${report.status === 'planned' ? (report.errored ? 'planned (errored)' : 'planned') : 'failed'} (credential-free, -refresh=false -lock=false, zero workspace files written)`,
+	];
+	if (report.status === 'planned') {
+		const s = report.summary;
+		lines.push(`Summary: +${s.create} create · ~${s.update} update · +/-${s.replace} replace · -${s.delete} delete · ${s.read} read · ${s.noOp} no-op (${s.total} total)`);
+		if (report.resourceChanges.length > 0) {
+			lines.push('', 'Resource changes:');
+			for (const rc of report.resourceChanges) {
+				const attrs = rc.changedAttributePaths.length > 0 ? ` [${rc.changedAttributePaths.join(', ')}]` : '';
+				const sens = rc.hasSensitiveAttributes ? ' (sensitive attributes redacted)' : '';
+				lines.push(`  [${rc.actionKind}] ${rc.address}${attrs}${sens}`);
+			}
+		}
+		if (report.outputChanges.length > 0) {
+			lines.push('', 'Output changes:');
+			for (const out of report.outputChanges) {
+				const sens = out.sensitive ? ' (sensitive)' : '';
+				lines.push(`  [${out.actions.join('/')}] output.${out.name}${sens}`);
+			}
+		}
+	}
+	if (report.diagnostics.length > 0) {
+		lines.push('', 'Diagnostics:');
+		for (const diag of report.diagnostics) {
+			const loc = diag.filename ? ` (${diag.filename}${diag.line ? `:${diag.line}` : ''})` : '';
+			lines.push(`  [${diag.severity}] ${diag.summary}${loc}${diag.detail ? ` — ${diag.detail}` : ''}`);
+		}
+	}
+	if (report.truncated) {
+		lines.push('', 'Note: Plan output exceeded service bounds and was truncated.');
+	}
+	return lines.join('\n') + '\n';
 }

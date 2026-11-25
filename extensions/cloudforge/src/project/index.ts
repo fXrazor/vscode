@@ -63,6 +63,10 @@ export function activateProjects(context: ExtensionContext, graph: GraphHost): P
 			const id = extractArchitectureId(arg);
 			return id ? controller.validateProjectArchitecture(id) : undefined;
 		}),
+		commands.registerCommand('cloudforge.planProjectArchitecture', (arg?: unknown) => {
+			const id = extractArchitectureId(arg);
+			return id ? controller.planProjectArchitecture(id) : undefined;
+		}),
 		commands.registerCommand('cloudforge.revealArchitectureFolder', (arg?: unknown) => {
 			const id = extractArchitectureId(arg);
 			return id ? controller.revealArchitectureFolder(id) : undefined;

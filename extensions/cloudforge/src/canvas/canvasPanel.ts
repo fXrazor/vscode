@@ -14,6 +14,7 @@ import {
 	type CanvasCloudRegionsPayload,
 	type CanvasDependencyReport,
 	type CanvasDetectedEngine,
+	type CanvasEnginePlanReport,
 	type CanvasEngineValidateReport,
 	type CanvasExportAuditReport,
 	type CanvasGraphSnapshot,
@@ -84,6 +85,12 @@ export interface CanvasPanelHost {
 		sourceRevision: string,
 		engine?: 'openTofu' | 'terraform'
 	): Promise<{ readonly ok: true; readonly report: CanvasEngineValidateReport } | { readonly ok: false; readonly message: string }>;
+	onRunEnginePlan?(
+		workspaceId: string,
+		architectureId: string,
+		sourceRevision: string,
+		engine?: 'openTofu' | 'terraform'
+	): Promise<{ readonly ok: true; readonly report: CanvasEnginePlanReport } | { readonly ok: false; readonly message: string }>;
 	onExportArtifact?(
 		format: ExportFormat,
 		suggestedFileName: string,
@@ -508,6 +515,27 @@ export class CloudForgeCanvasPanel implements Disposable {
 						this.post({ type: 'engineValidateReport', report: outcome.report });
 					} else {
 						this.post({ type: 'engineValidateReport', report: null, error: outcome.message });
+					}
+				}
+				return;
+			}
+			case 'requestEnginePlan': {
+				const graph = this.graph;
+				if (!graph || !this.host.onRunEnginePlan) {
+					this.post({ type: 'enginePlanReport', report: null, error: l10n.t('Local CLI plan capture is not available in this window.') });
+					return;
+				}
+				const outcome = await this.host.onRunEnginePlan(
+					graph.workspaceId,
+					graph.architectureId,
+					graph.sourceRevision,
+					message.engine
+				);
+				if (this.panel && this.ready) {
+					if (outcome.ok) {
+						this.post({ type: 'enginePlanReport', report: outcome.report });
+					} else {
+						this.post({ type: 'enginePlanReport', report: null, error: outcome.message });
 					}
 				}
 				return;

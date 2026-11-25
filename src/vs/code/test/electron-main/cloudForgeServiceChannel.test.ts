@@ -319,11 +319,13 @@ suite('CloudForgeServiceChannel', () => {
 		await call(1, 'createWorkspaceFile', { workspaceId });
 		await call(1, 'removeRepository', { workspaceId, repositoryId: `${workspaceId}-repository-1` });
 		await call(1, 'installGit', {});
+		await call(1, 'runEnginePlan', { workspaceId, architectureId: `${workspaceId}-architecture-1`, engine: 'openTofu' });
 		assert.deepStrictEqual(callsByWindow(), {
 			1: [
 				{ method: 'createWorkspaceFile', params: { workspaceId } },
 				{ method: 'removeRepository', params: { workspaceId, repositoryId: `${workspaceId}-repository-1` } },
 				{ method: 'installGit', params: {}, timeoutMs: 11 * 60 * 1000 },
+				{ method: 'runEnginePlan', params: { workspaceId, architectureId: `${workspaceId}-architecture-1`, engine: 'openTofu' }, timeoutMs: 2 * 60 * 1000 },
 			]
 		});
 		await broker.stop();
@@ -475,6 +477,35 @@ suite('CloudForgeServiceChannel', () => {
 			workspaceId: 'workspace-1',
 			architectureId: 'workspace-1-architecture-1',
 			engine: 'bash'
+		}), undefined);
+
+		assert.deepStrictEqual(validateCloudForgeServiceParams('runEnginePlan', {
+			workspaceId: 'workspace-1',
+			architectureId: 'workspace-1-architecture-1',
+			expectedSourceRevision: rev,
+			engine: 'terraform'
+		}), {
+			workspaceId: 'workspace-1',
+			architectureId: 'workspace-1-architecture-1',
+			expectedSourceRevision: rev,
+			engine: 'terraform'
+		});
+		assert.deepStrictEqual(validateCloudForgeServiceParams('runEnginePlan', {
+			workspaceId: 'workspace-1',
+			architectureId: 'workspace-1-architecture-1'
+		}), {
+			workspaceId: 'workspace-1',
+			architectureId: 'workspace-1-architecture-1'
+		});
+		assert.strictEqual(validateCloudForgeServiceParams('runEnginePlan', {
+			workspaceId: 'workspace-1',
+			architectureId: 'workspace-1-architecture-1',
+			engine: 'cmd'
+		}), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('runEnginePlan', {
+			workspaceId: 'workspace-1',
+			architectureId: 'workspace-1-architecture-1',
+			workingDir: 'C:\\evil'
 		}), undefined);
 	});
 });

@@ -1128,6 +1128,29 @@ Implemented on `fxrazor/continue-project-handoff-review` in `E:\Orca\CloudForge-
 1. User can keep using [CloudForgeProofSetup-x64-d7c58cc29fe.exe](Z:/CFStage/CloudForgeProofSetup-x64-d7c58cc29fe.exe), or rebuild the installer via `pwsh -NoProfile -ExecutionPolicy Bypass -File build/cloudforge/package-win32-x64.ps1` once Claude's Rust engine improvements and Codex's Studio whiteboard updates merge to package everything in one combined update.
 2. Wire live Rust Stage 9B (`terraform plan -json` / `tofu plan -json`) once guarded plan capture lands in `Z:\CloudForge`.
 
+### Stage 9B Desktop Integration: Guarded Local Engine Plan Capture (`runEnginePlan`) (2026-11-25)
+
+Implemented on `fxrazor/continue-project-handoff-review` in `E:\Orca\CloudForge-Code\dace` (fast-forward merged to `Z:\CloudForge-Code` `main` and pushed to `origin/main`), targeting the newly landed Rust Stage 9B service (`E:\Orca\CloudForge\umibozu`, commit `6d6c71df064760190df89b874bcb369f71c32d6c`, archived at `Z:\CFStage\service-6d6c71d\cloudforge-service.exe`, SHA-256 `b243f0d00ef93bc0243cb915e3083aa5c826e7aae1bd471174b112b6f9be7c10`). **Zero overlap with Claude (`Z:\CloudForge` untouched) or Codex (`extensions/cloudforge/studio/` untouched); no unnecessary Windows installer rebuild triggered.**
+
+- **Electron Main Broker & Workbench Bridge ([cloudForgeService.ts](src/vs/code/electron-main/cloudForgeService.ts), [cloudForgeServiceChannel.ts](src/vs/code/electron-main/cloudForgeServiceChannel.ts), [cloudForgeServiceChannel.test.ts](src/vs/code/test/electron-main/cloudForgeServiceChannel.test.ts), [cloudForgeService.contribution.ts](src/vs/workbench/electron-browser/cloudForgeService.contribution.ts)):**
+  - Allowlisted `runEnginePlan` across `CloudForgeServiceMethod`, `validateCloudForgeServiceParams` (strict opaque IDs, optional 64-hex `expectedSourceRevision`, optional `engine: 'openTofu' | 'terraform'`, zero paths/extra keys), and `_cloudforge.callService` active-workspace/architecture scope guard.
+  - Configured a dedicated `120 s` broker timeout (`enginePlanTimeoutMs = 2 * 60 * 1000`) covering Rust's 60 s `plan` + 30 s `show -json` budget so long plans never spuriously time out at 30 s.
+- **Extension Protocol, Strict Sanitized Adapter & Native Plan Review ([protocol.ts](extensions/cloudforge/src/canvas/protocol.ts), [serviceAdapters.ts](extensions/cloudforge/src/canvas/serviceAdapters.ts), [canvasPanel.ts](extensions/cloudforge/src/canvas/canvasPanel.ts), [extension.ts](extensions/cloudforge/src/extension.ts), [controller.ts](extensions/cloudforge/src/project/controller.ts), [index.ts](extensions/cloudforge/src/project/index.ts), [package.json](extensions/cloudforge/package.json), [package.nls.json](extensions/cloudforge/package.nls.json), [serviceAdapters.test.ts](extensions/cloudforge/test/serviceAdapters.test.ts)):**
+  - Added canonical Stage 9B protocol types (`CanvasEnginePlanReport`, `CanvasEnginePlanSummary`, `CanvasEnginePlanResourceChange`, `CanvasEnginePlanOutputChange`, `requestEnginePlan` -> `enginePlanReport`), strict allowlist parser `parseEnginePlanReport` (stripping any unexpected literal/sensitive fields, enforcing `500` resource / `200` output / `64` attribute-path / `100` diagnostic bounds), and zero-secret formatter `formatEnginePlanReportText`.
+  - Added **CloudForge: Preview Local Plan (OpenTofu / Terraform)** (`cloudforge.runEnginePlan`, shortcut **`Ctrl+Alt+P`** / `Cmd+Alt+P`, `CloudForge Graph` title action, and `CloudForge Project` architecture context action `cloudforge.planProjectArchitecture`). Runs credential-free local plan capture with progress notification, syncs returned diagnostics to VS Code **Problems**, writes a clean zero-secret report to the **`CloudForge Plan`** Output Channel, and opens an interactive **Local Plan Review QuickPick** where selecting any resource change focuses that node in the Studio Canvas and opens its `.tf` source location.
+
+| Check (no full desktop/installer rebuild) | Verified result |
+| --- | --- |
+| `esbuild.mts`, TS6 & TS7 (`extensions/cloudforge/tsconfig.json`), TS7 (`src/tsconfig.json`), `oxlint` & `hygiene` (all 11 changed TS files) | Passed (`0` errors, `0` warnings). |
+| `CLOUDFORGE_REPO=Z:\CloudForge node --test extensions/cloudforge/test/*.test.ts` | **70/70 root extension tests passed** (`0` skipped; includes new Stage 9B adapter/formatter/protocol test suite). |
+| `node build/next/index.ts transpile` + `scripts\test.bat --run src/vs/code/test/electron-main/cloudForgeServiceChannel.test.ts --run src/vs/code/test/electron-main/cloudForgeService.test.ts` | **43/43 Electron-main tests passed** (including `runEnginePlan` validation, extra-key/path rejection, and 120 s timeout forwarding). |
+| Live Stage 9B Rust RPC smoke (`stage9b-live-rpc-verify.mjs` against real `Z:\CFStage\service-6d6c71d\cloudforge-service.exe`, commit `6d6c71d`) | **2/2 passed**: live `openTofu 1.13.9` `status: "planned"` (`202 ms`, `env_name` + sensitive `secret_out`, zero secret sentinel leaks, zero workspace files written) and live `status: "failed"` on uninitialized provider (`Inconsistent dependency lock file` sanitized NDJSON diagnostic). |
+
+**Next actions:**
+1. Once Codex's Studio whiteboard branch merges cleanly into `main`, wire Studio's `IssuesPanel` / topbar to consume the ready `requestEnginePlan` -> `enginePlanReport` Webview protocol (no extension-host or Electron-main changes needed).
+2. When ready to ship one combined Windows x64 installer containing PR #1 Studio whiteboard upgrades + Project Integrations + Stage 9B Local Plan Capture, run `pwsh -NoProfile -ExecutionPolicy Bypass -File build/cloudforge/package-win32-x64.ps1` against `Z:\CFStage\service-6d6c71d\cloudforge-service.exe` (`ServiceCommit`: `6d6c71df064760190df89b874bcb369f71c32d6c`, `ServiceSha256`: `b243f0d00ef93bc0243cb915e3083aa5c826e7aae1bd471174b112b6f9be7c10`).
+
+
 
 
 

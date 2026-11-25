@@ -40,11 +40,13 @@ const cloudForgeMethods: ReadonlySet<string> = new Set<CloudForgeServiceMethod>(
 	'previewDraftSave', 'applyDraftSave',
 	'inspectDependencies', 'listCloudRegions', 'readModule',
 	'diffCatalogueSnapshots', 'auditExportReadiness',
-	'detectEngines', 'runEngineValidate'
+	'detectEngines', 'runEngineValidate', 'runEnginePlan'
 ]);
 
 /** The service allows `installGit` 10 minutes; the broker waits a little longer for its reply. */
 const installGitTimeoutMs = 11 * 60 * 1000;
+/** Stage 9B `runEnginePlan` allows 60 s for `plan` + 30 s for `show -json`; the broker waits 120 s. */
+const enginePlanTimeoutMs = 2 * 60 * 1000;
 const maxPathLength = 32767;
 const maxNameLength = 255;
 const maxRemoteBytes = 2048;
@@ -506,7 +508,8 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 			};
 		}
 		case 'auditExportReadiness':
-		case 'runEngineValidate': {
+		case 'runEngineValidate':
+		case 'runEnginePlan': {
 			if (!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'expectedSourceRevision', 'engine']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId)) {
 				return undefined;
 			}
@@ -756,7 +759,12 @@ export class CloudForgeServiceBroker implements IServerChannel<string> {
 			if (request.kind === 'failure') {
 				return safeFailure(new CloudForgeServiceError(request.code)) as T;
 			}
-			let value = await service.call(method, request.params, method === 'installGit' ? installGitTimeoutMs : undefined);
+			const timeoutMs = method === 'installGit'
+				? installGitTimeoutMs
+				: method === 'runEnginePlan'
+					? enginePlanTimeoutMs
+					: undefined;
+			let value = await service.call(method, request.params, timeoutMs);
 			if (method === 'createProject') {
 				value = completeCreateProject(value, request.params.parentPath);
 			}
