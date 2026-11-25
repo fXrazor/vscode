@@ -1277,3 +1277,23 @@ Implemented on `fxrazor/auto-open-and-stage3-4` in `Z:\CloudForge-Code\.claude\w
 1. When ready for signed releases, install a Windows Authenticode certificate on the build host and pass `-SignCertificateThumbprint <40-hex>` + `-RequireSignedService` to `build/cloudforge/package-win32-x64.ps1`.
 2. Next roadmap slice (on user approval): explicit-opt-in verified provider archive download/staging into the Stage 10 mirror store (or local ZIP import into `MirrorStore`), or the AI Builder vertical slice from `Z:\CloudForge\docs\research\bb-agent-ide.md`.
 
+### Stage 10B & 10C Local Mirror Archive Import, Lease-Guarded Eviction, Integrity Audit, & Quota Cleanup Planning (2026-11-25)
+
+Implemented on `fxrazor/auto-open-and-stage3-4` in `Z:\CloudForge-Code\.claude\worktrees\auto-open-stage3-4` (`d97f8f4a954` Stage 10B → `d1cc562f0c3` Stage 10C, fast-forward merged onto `Z:\CloudForge-Code` `main`), paired with Rust `Z:\CloudForge` Stage 10B/10C service `b1f57acf8a20fb7b6f90a8177c26aab2b2017060` (`4,027,904` bytes, SHA-256 `bb7d2ac833d17e365cb70a7fa9d4a6f980ea309db873dee25396c7f4d71d91e0`, archived at `Z:\CFStage\service-b1f57ac\cloudforge-service.exe`).
+
+- **Electron-main broker & Workbench bridge ([cloudForgeService.ts](src/vs/code/electron-main/cloudForgeService.ts), [cloudForgeServiceChannel.ts](src/vs/code/electron-main/cloudForgeServiceChannel.ts), [cloudForgeService.contribution.ts](src/vs/workbench/electron-browser/cloudForgeService.contribution.ts), [cloudForgeServiceChannel.test.ts](src/vs/code/test/electron-main/cloudForgeServiceChannel.test.ts)):**
+  - Added strict parameter validation for `importMirrorPackage` (rejecting any extension-supplied `archivePath` and supplying it strictly from Electron-main's native `.zip` dialog `pickMirrorArchive`, blocking UNC/device paths with `SCOPE_DENIED`, with a 65 s timeout), `evictMirrorPackage`, `verifyMirrorIntegrity` (65 s timeout), and `planMirrorCleanup` (active-window scope check when scoped to an architecture).
+- **Extension host & Command Palette ([extension.ts](extensions/cloudforge/src/extension.ts), [package.json](extensions/cloudforge/package.json), [package.nls.json](extensions/cloudforge/package.nls.json)):**
+  - Added **CloudForge: Import Provider Archive (.zip) into Local Mirror…** (pre-fills first missing provider from active architecture readiness), **CloudForge: Remove Package from Local Provider Mirror…** (modal confirmation + reclaimed bytes), **CloudForge: Verify Local Provider Mirror Integrity**, and **CloudForge: Plan Local Mirror Quota Cleanup…** (one-click eviction of unpinned candidates while marking active-architecture locked providers protected).
+
+| Check (run on `d1cc562f0c3` + Rust Stage 10C `b1f57ac`) | Verified result |
+| --- | --- |
+| `node build/hygiene.ts` (5 paths), `node build/oxlint.ts` (4 paths), `node extensions/cloudforge/esbuild.mts` | Passed (`0` errors, `0` warnings). |
+| `CLOUDFORGE_REPO=E:\Orca\CloudForge\umibozu node --test extensions/cloudforge/test/*.test.ts` | **84/84 root extension tests passed** (`0` skipped). |
+| `node build/next/index.ts transpile` & `scripts\test.bat --run src/vs/code/test/electron-main/cloudForgeServiceChannel.test.ts --run src/vs/code/test/electron-main/cloudForgeService.test.ts` | **45/45 Electron-main tests passed** (includes `importMirrorPackage` native `.zip` picker, UNC refusal, and 65 s timeout assertions). |
+| Windows x64 installer packaging & installed upgrade | Deferred in this turn because `Z:\CFStage` had an active sibling `ISCC.exe` build and `CloudForge Proof.exe` was running. Ready to package with `Z:\CFStage\service-b1f57ac\cloudforge-service.exe` (`b1f57ac`, SHA-256 `bb7d2ac833d17e365cb70a7fa9d4a6f980ea309db873dee25396c7f4d71d91e0`) once `Z:\CFStage` is idle. |
+
+**Next actions:**
+1. Once `Z:\CFStage` is idle and `CloudForge Proof.exe` is closed, package `d1cc562f0c3` (or latest `main`) with `Z:\CFStage\service-b1f57ac\cloudforge-service.exe` via `build/cloudforge/package-win32-x64.ps1`, run live smoke, and upgrade `%LOCALAPPDATA%\Programs\CloudForge Proof`.
+2. Next roadmap slice (on user approval): signed release build (`-SignCertificateThumbprint` + `-RequireSignedService`) or the AI Builder vertical slice from `Z:\CloudForge\docs\research\bb-agent-ide.md`.
+
