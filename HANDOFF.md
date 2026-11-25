@@ -1006,6 +1006,32 @@ Implemented on `fxrazor/continue-project-handoff-review` in `E:\Orca\CloudForge-
 1. Optionally wire `build/lib/extensions.ts` / `build/cloudforge/package-win32-x64.ps1` to run `studio` `build:webview` automatically before packaging when ready to ship Studio Preview in the Windows installer (keeping `cloudforge.canvasEngine` default `classic` until full parity is verified).
 2. Wire live Stage 9B (`terraform plan -json` / `tofu plan -json`) once the Rust sidecar adds guarded plan capture, then package one combined Windows x64 installer covering Stage 9B + Studio Preview.
 
+### Studio Automated Packaging Pipeline (`esbuild.webview.mts` & `package-win32-x64.ps1`) + Live Desktop Service Parity (`viewState`, Stages 6–8) (2026-11-25)
+
+Implemented on `fxrazor/continue-project-handoff-review` in `E:\Orca\CloudForge-Code\dace` (fast-forward merged to `Z:\CloudForge-Code` `main` and pushed to `origin/main`). **No unnecessary Windows installer build was triggered** (`%LOCALAPPDATA%\Programs\CloudForge Proof` remains verified at `407d56014c1` + Rust Stage 9A `ef4be9d`; `Z:\CloudForge` remains at Stage 9A `6814623` / `ef4be9d` and was not edited).
+
+- **Turnkey Packaging Integration ([esbuild.webview.mts](extensions/cloudforge/esbuild.webview.mts), [studio/build.ts](extensions/cloudforge/studio/build.ts), [package-win32-x64.ps1](build/cloudforge/package-win32-x64.ps1)):**
+  - Added `--outdir <path>` support to `extensions/cloudforge/studio/build.ts` and wired `didBuild(resolvedMediaOutDir)` in `extensions/cloudforge/esbuild.webview.mts` so every local build and every `gulp vscode-win32-x64-min` (`--outputRoot`) build automatically stages slimmed Studio Webview assets (`media/studio/studio.{js,css}`, icons, catalogues, HCL-only Monaco) alongside Classic `media/canvas.{js,css}` when `studio/node_modules` is present (skipping cleanly when absent).
+  - Updated `build/cloudforge/package-win32-x64.ps1` to ensure `extensions/cloudforge/studio/node_modules` is installed via `corepack pnpm install --frozen-lockfile` when building fresh, and added payload hygiene gates verifying both Classic and Studio assets are present while excluding `studio/`, `canvas-src/`, `src/`, `test/`, and `*.tsbuildinfo`.
+- **Full Live Rust Service Parity in Studio ([webviewBridge.ts](extensions/cloudforge/studio/src/webviewBridge.ts), [serviceAdapter.ts](extensions/cloudforge/studio/src/serviceAdapter.ts), [serviceAdapter.test.ts](extensions/cloudforge/studio/src/serviceAdapter.test.ts), [App.tsx](extensions/cloudforge/studio/src/App.tsx), [ResourceFields.tsx](extensions/cloudforge/studio/src/ResourceFields.tsx), [ResourceWorkspace.tsx](extensions/cloudforge/studio/src/ResourceWorkspace.tsx), [IssuesPanel.tsx](extensions/cloudforge/studio/src/IssuesPanel.tsx), [VisualTopbar.tsx](extensions/cloudforge/studio/src/VisualTopbar.tsx), [editor-refinement.css](extensions/cloudforge/studio/src/editor-refinement.css)):**
+  - **Outbound `viewState` persistence (`buildHostViewState`):** Debounced sync of Studio's `mode`, `theme`, `selectedId`, `focusedWorkspaceOpen`, `inspectorOpen`, `libraryOpen`, `viewports`, and per-renderer `nodePositions` back to `CloudForgeCanvasPanel` `workspaceState` when connected to a real workspace architecture, restoring `inspectorOpen` and `viewports` on load.
+  - **Stage 6 Live Cloud Regions (`resolveProviderRegions`):** Consumes `cloudRegions` payloads from the host to populate the `Region` picker dynamically across Azure, AWS, and Google Cloud.
+  - **Stages 6 & 8 Workspace Readiness:** Surfaces `dependencyReport` (engine, lockfile state, locked provider versions) and `exportAuditReport` (reproducibility, lock entries, module count, unresolved reasons) in a compact collapsible **Workspace readiness** card inside `IssuesPanel`.
+  - **Stage 7 Child Module Inspection:** Adds `requestModule` -> `moduleInspection` support on `module` resources in Inspector & Resource Workspace (`Child module interface` showing sourceKind, source, typed inputs with required/sensitive tags, outputs, and nested child modules).
+  - **Honest Empty-Workspace Guard:** Disables hosted Validate & hides Save when no workspace architecture is loaded (`Sample preview` mode).
+
+| Check (no full desktop/installer rebuild) | Verified result |
+| --- | --- |
+| Studio `check`, `test`, `build` (`extensions/cloudforge/studio`) | Passed (**72/72 studio tests**, including `buildHostViewState` and `resolveProviderRegions`). |
+| `node extensions/cloudforge/esbuild.webview.mts` + `--outputRoot` packaging dry-run | Passed (verified both Classic `media/canvas.{js,css}` and Studio `media/studio/{studio.js,studio.css,assets/catalogue/azure.json,assets/monaco/vs/loader.js}` staged automatically under `--outputRoot`). |
+| PowerShell AST syntax check (`package-win32-x64.ps1`), `oxlint`, `hygiene` (`esbuild.webview.mts`) | Passed (`0` errors, `0` warnings). |
+| `CLOUDFORGE_REPO=Z:\CloudForge node --test extensions/cloudforge/test/*.test.ts` | **62/62 root extension tests passed** (`0` skipped). |
+| Headless Edge Playwright E2E (`studio-host-bridge-verify.mjs`) | **5/5 passed** (`0` console/page errors; verified outbound `viewState`, live Rust `FormSchema`, Stage 6 `Sweden Central` region hydration, Stage 7 `monitoring` child module inspection, Stage 8 `Reproducible` readiness card, Stage 9A `OpenTofu validate` reveal, and guarded save `Preview -> Apply -> Refresh`; screenshots inspected). |
+
+**Next actions:**
+1. Wire live Rust Stage 9B (`terraform plan -json` / `tofu plan -json`) once the Rust sidecar (`Z:\CloudForge`) adds guarded plan capture.
+2. When ready to ship a new combined Windows x64 installer (including Multi-Cloud Authoring Polish + Opt-In Studio Preview + Stage 9A/9B), run `build/cloudforge/package-win32-x64.ps1` (pass `-SignCertificateThumbprint <40-hex>` + `-RequireSignedService` for signed releases).
+
 
 
 

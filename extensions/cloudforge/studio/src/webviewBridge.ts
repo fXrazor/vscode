@@ -51,12 +51,108 @@ export interface HostPoint {
 	readonly y: number;
 }
 
+export interface HostViewport {
+	readonly x: number;
+	readonly y: number;
+	readonly zoom: number;
+}
+
 export interface HostViewState {
-	readonly mode?: 'visual' | 'technical';
-	readonly theme?: 'workbench' | 'light' | 'dark';
-	readonly selectedId?: string | null;
-	readonly inspectorOpen?: boolean;
-	readonly nodePositions?: Partial<Record<'visual' | 'technical', Readonly<Record<string, HostPoint>>>>;
+	readonly mode: 'visual' | 'technical';
+	readonly theme: 'workbench' | 'light' | 'dark';
+	readonly grid: 'lines' | 'dots' | 'none';
+	readonly selectedId: string | null;
+	readonly focusedWorkspaceOpen: boolean;
+	readonly inspectorOpen: boolean;
+	readonly listOpen: boolean;
+	readonly collapsedGroups: readonly string[];
+	readonly viewports: Partial<Record<'visual' | 'technical', HostViewport>>;
+	readonly hiddenLayers: readonly string[];
+	readonly snapToGrid: boolean;
+	readonly frames: readonly unknown[];
+	readonly annotations: readonly unknown[];
+	readonly nodePositions: Partial<Record<'visual' | 'technical', Readonly<Record<string, HostPoint>>>>;
+	readonly checkpoints: readonly unknown[];
+	readonly sampleContext: unknown;
+}
+
+export interface HostCloudRegion {
+	readonly name: string;
+	readonly displayName: string;
+	readonly availabilityZones: readonly string[];
+	readonly geography?: string;
+}
+
+export interface HostCloudRegionsPayload {
+	readonly provider: 'azure' | 'aws' | 'google';
+	readonly source: 'authenticatedScopeApi' | 'bundledPublicFallback';
+	readonly refreshedAt: string;
+	readonly stale: boolean;
+	readonly isFallback: boolean;
+	readonly regions: readonly HostCloudRegion[];
+}
+
+export interface HostProviderDependency {
+	readonly display: string;
+	readonly status: 'locked' | 'unlocked' | 'lockOutsideConstraints' | 'noMatchingRelease' | 'conflict';
+	readonly lockedVersion?: string;
+	readonly conflictCount: number;
+	readonly requirementCount: number;
+}
+
+export interface HostDependencyReport {
+	readonly sourceRevision: string;
+	readonly engine: 'opentofu' | 'terraform';
+	readonly engineInferred: boolean;
+	readonly lockState: 'absent' | 'valid' | 'invalid' | 'unreadable';
+	readonly providers: readonly HostProviderDependency[];
+	readonly unusedLockEntries: readonly string[];
+	readonly diagnosticCount: number;
+}
+
+export interface HostExportAuditReport {
+	readonly sourceRevision: string;
+	readonly engine: 'openTofu' | 'terraform';
+	readonly engineInferred: boolean;
+	readonly reproducible: boolean;
+	readonly lockState: 'absent' | 'valid' | 'invalid' | 'unreadable';
+	readonly lockEntryCount: number;
+	readonly moduleCount: number;
+	readonly unresolvedReasonKinds: readonly string[];
+}
+
+export interface HostModuleVariable {
+	readonly name: string;
+	readonly typeExpr?: string;
+	readonly description?: string;
+	readonly required: boolean;
+	readonly sensitive: boolean;
+	readonly hasDefault: boolean;
+}
+
+export interface HostModuleOutput {
+	readonly name: string;
+	readonly description?: string;
+	readonly sensitive: boolean;
+}
+
+export interface HostChildModuleRef {
+	readonly name: string;
+	readonly source: string;
+	readonly isLocal: boolean;
+}
+
+export interface HostModuleInspection {
+	readonly modulePath: readonly string[];
+	readonly status: 'local' | 'external';
+	readonly sourceKind: 'local' | 'registry' | 'git' | 'remote';
+	readonly source: string;
+	readonly moduleRevision?: string;
+	readonly passedInputs: readonly string[];
+	readonly variables: readonly HostModuleVariable[];
+	readonly outputs: readonly HostModuleOutput[];
+	readonly childModules: readonly HostChildModuleRef[];
+	readonly graph: HostGraphSnapshot | null;
 }
 
 export interface HostNotice {
@@ -165,7 +261,7 @@ export interface HostEngineValidateReport {
 }
 
 export type HostInboundMessage =
-	| { readonly type: 'graph'; readonly graph: HostGraphSnapshot; readonly viewState?: HostViewState; readonly notice?: HostNotice | null }
+	| { readonly type: 'graph'; readonly graph: HostGraphSnapshot; readonly viewState?: Partial<HostViewState>; readonly notice?: HostNotice | null }
 	| { readonly type: 'selectNode'; readonly nodeId: string | null }
 	| { readonly type: 'notice'; readonly notice: HostNotice | null }
 	| { readonly type: 'empty'; readonly message: string }
@@ -174,6 +270,10 @@ export type HostInboundMessage =
 	| { readonly type: 'draftSaveApplied'; readonly result: { readonly ok: true; readonly applied: HostDraftSaveApplied } | { readonly ok: false; readonly error: HostDraftSaveError } }
 	| { readonly type: 'catalogueSnapshots'; readonly snapshots: readonly HostCatalogueSnapshot[] }
 	| { readonly type: 'liveSchema'; readonly typeName: string; readonly schema: HostFormSchema | null }
+	| { readonly type: 'cloudRegions'; readonly data: HostCloudRegionsPayload }
+	| { readonly type: 'dependencyReport'; readonly report: HostDependencyReport | null }
+	| { readonly type: 'exportAuditReport'; readonly report: HostExportAuditReport | null }
+	| { readonly type: 'moduleInspection'; readonly modulePath: readonly string[]; readonly inspection: HostModuleInspection | null; readonly error?: string }
 	| { readonly type: 'detectedEngines'; readonly engines: readonly HostDetectedEngine[] }
 	| { readonly type: 'engineValidateReport'; readonly report: HostEngineValidateReport | null; readonly error?: string }
 	| { readonly type: 'exportResult'; readonly ok: boolean; readonly message: string };
@@ -183,11 +283,13 @@ export type HostOutboundMessage =
 	| { readonly type: 'selectNode'; readonly nodeId: string | null }
 	| { readonly type: 'openSource'; readonly nodeId: string }
 	| { readonly type: 'refresh' }
+	| { readonly type: 'viewState'; readonly state: HostViewState }
 	| { readonly type: 'requestValidation'; readonly scope: 'architecture' | 'resource'; readonly nodeId?: string }
 	| { readonly type: 'cancelValidation' }
 	| { readonly type: 'requestDraftSavePreview'; readonly fileName: string; readonly contents: string }
 	| { readonly type: 'applyDraftSave'; readonly fileName: string; readonly contents: string; readonly previewToken: string }
 	| { readonly type: 'requestSchema'; readonly kind: 'resource' | 'dataSource'; readonly typeName: string }
+	| { readonly type: 'requestModule'; readonly modulePath: readonly string[] }
 	| { readonly type: 'requestEngineValidate'; readonly engine?: 'openTofu' | 'terraform' }
 	| { readonly type: 'exportArtifact'; readonly format: 'svg' | 'png' | 'markdown'; readonly suggestedFileName: string; readonly content: string; readonly encoding: 'utf8' | 'base64' };
 

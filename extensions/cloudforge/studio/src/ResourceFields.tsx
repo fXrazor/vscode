@@ -11,6 +11,15 @@ import { SchemaField } from './SchemaField.tsx';
 import { bindingKey, canBindField, eligibleReferenceTargets, fieldDefinition, fieldTargetPath, regionAttribute, resourceRefBindingIssue, variableBindingIssue, type FieldTarget } from './fieldBindings.ts';
 import { inheritedReference, inheritedReferences, isResourceContainer, resourcePlacement } from './resourceHierarchy.ts';
 import type { LiveSchemaMap } from './liveSchema.ts';
+import type { HostCloudRegionsPayload, HostModuleInspection } from './webviewBridge.ts';
+import { resolveProviderRegions } from './serviceAdapter.ts';
+
+export interface ResourceModuleInspectionProps {
+	readonly loading: boolean;
+	readonly inspection: HostModuleInspection | null;
+	readonly error?: string;
+	readonly onInspect: () => void;
+}
 
 function fieldState(resource:Resource,architecture:Architecture|undefined,target:FieldTarget,dispatch:Dispatch<Action>,onManageVariables?:()=>void,onRevealResource?:(id:string)=>void,liveSchemas?:LiveSchemaMap) {
 	const path = fieldTargetPath(resource,target);
@@ -22,10 +31,11 @@ function fieldState(resource:Resource,architecture:Architecture|undefined,target
 		inheritance:available?{available,reference:architecture&&inheritedReference(architecture,resource,path),onInherit:(enabled:boolean)=>dispatch({type:'useInheritance',id:resource.id,target,enabled}),onReveal:onRevealResource}:undefined};
 }
 
-export function ResourceFields({ resource, dispatch, architecture, compactMetadata = false, onManageVariables, onRevealResource, liveSchemas }: { resource: Resource; dispatch: Dispatch<Action>; architecture?: Architecture; compactMetadata?: boolean; onManageVariables?: () => void; onRevealResource?:(id:string)=>void; liveSchemas?: LiveSchemaMap }) {
+export function ResourceFields({ resource, dispatch, architecture, compactMetadata = false, onManageVariables, onRevealResource, liveSchemas, cloudRegions, moduleInspection }: { resource: Resource; dispatch: Dispatch<Action>; architecture?: Architecture; compactMetadata?: boolean; onManageVariables?: () => void; onRevealResource?:(id:string)=>void; liveSchemas?: LiveSchemaMap; cloudRegions?: Readonly<Partial<Record<'azure' | 'aws' | 'google', HostCloudRegionsPayload>>>; moduleInspection?: ResourceModuleInspectionProps }) {
 	const typeName = resourceDefinition(resource).type;
 	const liveSchema = liveSchemas?.[typeName];
 	const properties = editableFields(resource, liveSchemas);
+	const regionOptions = resolveProviderRegions(resource.provider, cloudRegions);
 	function binding(target: FieldTarget) {
 		return fieldState(resource,architecture,target,dispatch,onManageVariables,onRevealResource,liveSchemas);
 	}
@@ -68,7 +78,7 @@ export function ResourceFields({ resource, dispatch, architecture, compactMetada
 			<details className="form-section" open>
 				<summary>Main Parameters</summary>
 				<div className="form-section-body">
-					{regionAttribute(resource)&&<SchemaField name="Region" value={resource.region} definition={{name:'region',type:'string',description:'Cloud region for this resource.',options:providerRegions[resource.provider]}} onChange={value => dispatch({ type:'update', id:resource.id, patch:{region:value} })} {...binding({kind:'region'})}/>}
+					{regionAttribute(resource)&&<SchemaField name="Region" value={resource.region} definition={{name:'region',type:'string',description:'Cloud region for this resource.',options:regionOptions}} onChange={value => dispatch({ type:'update', id:resource.id, patch:{region:value} })} {...binding({kind:'region'})}/>}
 					{settings.filter(([name]) => !poolFields.includes(name)).map(([name, value]) => field(name, value))}
 					{settings.some(([name]) => poolFields.includes(name)) && <details className="nested-block" open>
 						<summary>Default Node Pool<span>{poolFields.length} fields</span></summary>
@@ -76,6 +86,62 @@ export function ResourceFields({ resource, dispatch, architecture, compactMetada
 					</details>}
 				</div>
 			</details>
+			{resource.kind === 'module' && moduleInspection && (
+				<details className="form-section module-inspection-section" open>
+					<summary>Child module interface<span className="schema-type">{moduleInspection.inspection ? moduleInspection.inspection.status : 'Rust Stage 7'}</span></summary>
+					<div className="form-section-body">
+						<div className="module-inspect-actions">
+							<button type="button" className="quiet-button" disabled={moduleInspection.loading} onClick={moduleInspection.onInspect}>
+								{moduleInspection.loading ? 'Inspecting module…' : moduleInspection.inspection ? 'Refresh module inspection' : 'Inspect child module'}
+							</button>
+						</div>
+						{moduleInspection.error && <p className="field-help module-inspect-error">{moduleInspection.error}</p>}
+						{moduleInspection.inspection && (
+							<div className="module-inspect-details">
+								<p className="field-help"><code>{moduleInspection.inspection.sourceKind}</code> · <code>{moduleInspection.inspection.source}</code></p>
+								{moduleInspection.inspection.variables.length > 0 && (
+									<div className="module-inspect-group">
+										<strong>Inputs ({moduleInspection.inspection.variables.length})</strong>
+										<ul>
+											{moduleInspection.inspection.variables.map(item => (
+												<li key={item.name}>
+													<code>{item.name}</code>
+													{item.typeExpr && <small>{item.typeExpr}</small>}
+													{item.required && <em>required</em>}
+													{item.sensitive && <em>sensitive</em>}
+												</li>
+											))}
+										</ul>
+									</div>
+								)}
+								{moduleInspection.inspection.outputs.length > 0 && (
+									<div className="module-inspect-group">
+										<strong>Outputs ({moduleInspection.inspection.outputs.length})</strong>
+										<ul>
+											{moduleInspection.inspection.outputs.map(item => (
+												<li key={item.name}>
+													<code>{item.name}</code>
+													{item.sensitive && <em>sensitive</em>}
+												</li>
+											))}
+										</ul>
+									</div>
+								)}
+								{moduleInspection.inspection.childModules.length > 0 && (
+									<div className="module-inspect-group">
+										<strong>Nested child modules ({moduleInspection.inspection.childModules.length})</strong>
+										<ul>
+											{moduleInspection.inspection.childModules.map(child => (
+												<li key={child.name}><code>{child.name}</code><small>{child.source}</small></li>
+											))}
+										</ul>
+									</div>
+								)}
+							</div>
+						)}
+					</div>
+				</details>
+			)}
 			<NestedBlocks blocks={resource.blocks} definitions={additionalBlocks(resource, liveSchemas)} scope="resource" resource={resource} architecture={architecture} dispatch={dispatch} onManageVariables={onManageVariables} onRevealResource={onRevealResource} liveSchemas={liveSchemas}
 				onChange={blocks => dispatch({ type: 'update', id: resource.id, patch: { blocks } })} />
 			{(resource.catalogue || liveSchema) && <details className="form-section advanced-properties"><summary>Advanced properties<span className="schema-type">{liveSchema ? liveSchema.providerSource + ' ' + liveSchema.providerVersion : 'Optional additions'}</span></summary><div className="form-section-body"><p className="field-help">{liveSchema ? 'Add optional arguments from the version-matched Rust provider schema. Required arguments stay in Main Parameters.' : 'Add optional arguments from the bundled catalogue. Required arguments stay in Main Parameters.'}</p><label className="add-provider-property">Add property<select aria-label="Add provider property" value="" onChange={event=>{const field=properties.find(field=>field.name===event.target.value);if(field) {dispatch({type:'update',id:resource.id,patch:{settings:{...resource.settings,[field.name]:field.default===undefined?'':typeof field.default==='string'?field.default:JSON.stringify(field.default)}}});}}}><option value="">Choose an optional property…</option>{properties.filter(field=>!field.required&&!['name','location','region'].includes(field.name)&&!Object.hasOwn(resource.settings,field.name)).map(field=><option key={field.name} value={field.name}>{field.name} · {field.type}</option>)}</select></label></div></details>}

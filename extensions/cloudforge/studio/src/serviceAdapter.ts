@@ -24,16 +24,19 @@ import { bindingKey, type ResourceRefBinding } from './fieldBindings.ts';
 import { fitResourceContainers, isResourceContainer, resourceAddress, resourcePlacement } from './resourceHierarchy.ts';
 import { terraformCode } from './terraformProjection.ts';
 import type {
+	HostCloudRegionsPayload,
 	HostEngineValidateReport,
 	HostGraphSnapshot,
 	HostNodeSummary,
+	HostPoint,
 	HostValidationRun,
+	HostViewport,
 	HostViewState,
 } from './webviewBridge.ts';
 
 export interface ProjectGraphOptions {
 	readonly previousArchitecture?: Architecture;
-	readonly viewState?: HostViewState;
+	readonly viewState?: Partial<HostViewState>;
 }
 
 export interface ProjectedGraphResult {
@@ -632,4 +635,94 @@ export function buildDraftSavePayload(architecture: Architecture, fileName?: str
 		fileName: safeName,
 		contents: terraformCode(architecture),
 	};
+}
+
+/**
+ * Serialize Studio's presentation state (mode, theme, selection, inspector, viewports, and
+ * node positions) into the canonical `CanvasViewState` contract persisted by `CloudForgeCanvasPanel`.
+ */
+export function buildHostViewState(params: {
+	readonly architecture: Architecture;
+	readonly mode: 'visual' | 'technical';
+	readonly theme: 'light' | 'dark';
+	readonly selectedId: string;
+	readonly focusedWorkspaceOpen: boolean;
+	readonly inspectorOpen: boolean;
+	readonly libraryOpen: boolean;
+	readonly viewports?: Partial<Record<'visual' | 'technical', HostViewport>>;
+}): HostViewState {
+	const visualPositions: Record<string, HostPoint> = {};
+	const technicalPositions: Record<string, HostPoint> = {};
+	for (const resource of params.architecture.resources.slice(0, 512)) {
+		if (Number.isFinite(resource.positions.visual.x) && Number.isFinite(resource.positions.visual.y)) {
+			visualPositions[resource.id] = {
+				x: Math.round(resource.positions.visual.x),
+				y: Math.round(resource.positions.visual.y),
+			};
+		}
+		if (Number.isFinite(resource.positions.technical.x) && Number.isFinite(resource.positions.technical.y)) {
+			technicalPositions[resource.id] = {
+				x: Math.round(resource.positions.technical.x),
+				y: Math.round(resource.positions.technical.y),
+			};
+		}
+	}
+
+	const viewports: Partial<Record<'visual' | 'technical', HostViewport>> = {};
+	for (const key of ['visual', 'technical'] as const) {
+		const vp = params.viewports?.[key];
+		if (vp && Number.isFinite(vp.x) && Number.isFinite(vp.y) && Number.isFinite(vp.zoom) && vp.zoom >= 0.05 && vp.zoom <= 8) {
+			viewports[key] = { x: vp.x, y: vp.y, zoom: vp.zoom };
+		}
+	}
+
+	return {
+		mode: params.mode,
+		theme: params.theme,
+		grid: 'lines',
+		selectedId: params.selectedId || null,
+		focusedWorkspaceOpen: !!params.selectedId && params.focusedWorkspaceOpen,
+		inspectorOpen: params.inspectorOpen,
+		listOpen: params.libraryOpen,
+		collapsedGroups: [],
+		viewports,
+		hiddenLayers: [],
+		snapToGrid: true,
+		frames: [],
+		annotations: [],
+		nodePositions: {
+			...(Object.keys(visualPositions).length ? { visual: visualPositions } : {}),
+			...(Object.keys(technicalPositions).length ? { technical: technicalPositions } : {}),
+		},
+		checkpoints: [],
+		sampleContext: null,
+	};
+}
+
+/** Merge Rust Stage 6 `cloudRegions` payloads into Studio's per-provider region options. */
+export function resolveProviderRegions(
+	provider: Provider,
+	hostRegions?: Readonly<Partial<Record<'azure' | 'aws' | 'google', HostCloudRegionsPayload>>>
+): string[] {
+	const hostKey = provider === 'gcp' ? 'google' : provider;
+	const payload = hostRegions?.[hostKey];
+	if (!payload || payload.regions.length === 0) {
+		return [...providerRegions[provider]];
+	}
+	const out: string[] = [];
+	const seen = new Set<string>();
+	for (const region of payload.regions) {
+		const label = provider === 'azure' ? (region.displayName || region.name) : region.name;
+		if (label && !seen.has(label)) {
+			seen.add(label);
+			out.push(label);
+		}
+	}
+	for (const fallback of providerRegions[provider]) {
+		if (!seen.has(fallback)) {
+			seen.add(fallback);
+			out.push(fallback);
+		}
+	}
+	return out;
 }

@@ -88,6 +88,17 @@ try {
     }
 
     if (-not $UseBuiltDesktop) {
+        $studioDir = Join-Path $repo 'extensions/cloudforge/studio'
+        if ((Test-Path -LiteralPath (Join-Path $studioDir 'package.json') -PathType Leaf) -and
+            -not (Test-Path -LiteralPath (Join-Path $studioDir 'node_modules') -PathType Container)) {
+            Push-Location -LiteralPath $studioDir
+            try {
+                corepack pnpm install --frozen-lockfile
+                if ($LASTEXITCODE -ne 0) { throw 'CloudForge Studio dependency install failed.' }
+            } finally {
+                Pop-Location
+            }
+        }
         corepack pnpm run gulp vscode-win32-x64-min
         if ($LASTEXITCODE -ne 0) { throw 'CloudForge desktop packaging failed.' }
     }
@@ -97,6 +108,26 @@ try {
     $packedProduct = Get-Content -LiteralPath (Join-Path $app 'product.json') -Raw | ConvertFrom-Json
     if ($packedProduct.commit -cne $productCommit -or $packedProduct.applicationName -cne $product.applicationName) {
         throw 'The staged desktop does not match the current proof checkout.'
+    }
+
+    $packedCloudForge = Join-Path $app 'extensions/cloudforge'
+    foreach ($requiredRel in @(
+        'dist/extension.js',
+        'media/canvas.js',
+        'media/canvas-style.css',
+        'media/studio/studio.js',
+        'media/studio/studio.css',
+        'media/studio/assets/catalogue/azure.json',
+        'media/studio/assets/monaco/vs/loader.js'
+    )) {
+        if (-not (Test-Path -LiteralPath (Join-Path $packedCloudForge $requiredRel) -PathType Leaf)) {
+            throw "Missing required CloudForge packaged asset: $requiredRel"
+        }
+    }
+    foreach ($forbiddenRel in @('studio', 'canvas-src', 'src', 'test', 'tsconfig.typecheck.tsbuildinfo')) {
+        if (Test-Path -LiteralPath (Join-Path $packedCloudForge $forbiddenRel)) {
+            throw "Unexpected source or build artifact in packaged CloudForge extension: $forbiddenRel"
+        }
     }
 
     $packedSample = Join-Path $app 'extensions/ms-vscode.js-debug'

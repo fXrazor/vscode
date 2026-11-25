@@ -5,13 +5,16 @@
 import { CircleCheck, TriangleAlert, CircleAlert, ChevronRight, ShieldCheck, Terminal } from 'lucide-react';
 import type { Architecture } from './model.ts';
 import type { Diagnostic } from './diagnostics.ts';
-import type { HostEngineValidateReport, HostValidationRun } from './webviewBridge.ts';
+import type { HostDependencyReport, HostEngineValidateReport, HostExportAuditReport, HostValidationRun } from './webviewBridge.ts';
 
 export interface IssuesHostContext {
 	readonly isHosted: boolean;
+	readonly hasWorkspace?: boolean;
 	readonly sourceRevision?: string;
 	readonly validationRun?: HostValidationRun | null;
 	readonly engineReport?: HostEngineValidateReport | null;
+	readonly dependencyReport?: HostDependencyReport | null;
+	readonly exportAuditReport?: HostExportAuditReport | null;
 	readonly availableEngine?: 'openTofu' | 'terraform';
 	readonly validating?: boolean;
 	readonly onRunValidation?: () => void;
@@ -34,9 +37,39 @@ export function IssuesPanel({architecture,findings,onReveal,host}:{architecture:
 			: 'Checks use bundled resource metadata. Terraform and cloud provider validation have not run.';
 	return <section className="issues-panel"><h2>{host?.isHosted ? 'Checks & validation' : 'Local checks'}</h2><p className="field-help">{summary}</p>
 		{host?.isHosted && <div className="issues-host-actions">
-			{host.onRunValidation && <button type="button" className="quiet-button" disabled={host.validating} onClick={host.onRunValidation}><ShieldCheck size={14} /><span>{host.validating ? 'Validating…' : 'Validate'}</span></button>}
-			{host.availableEngine && host.onRunEngineValidate && <button type="button" className="quiet-button" disabled={host.validating} onClick={host.onRunEngineValidate}><Terminal size={14} /><span>{host.availableEngine === 'openTofu' ? 'OpenTofu' : 'Terraform'} validate</span></button>}
+			{host.onRunValidation && <button type="button" className="quiet-button" disabled={host.validating || !host.hasWorkspace} title={host.hasWorkspace ? 'Run Rust service validation' : 'Open an architecture in CloudForge Project to validate'} onClick={host.onRunValidation}><ShieldCheck size={14} /><span>{host.validating ? 'Validating…' : 'Validate'}</span></button>}
+			{host.availableEngine && host.onRunEngineValidate && <button type="button" className="quiet-button" disabled={host.validating || !host.hasWorkspace} title={host.hasWorkspace ? 'Run CLI validate -json' : 'Open an architecture in CloudForge Project to validate'} onClick={host.onRunEngineValidate}><Terminal size={14} /><span>{host.availableEngine === 'openTofu' ? 'OpenTofu' : 'Terraform'} validate</span></button>}
 		</div>}
+		{host?.isHosted && (host.dependencyReport || host.exportAuditReport) && (
+			<details className="workspace-readiness-card">
+				<summary>Workspace readiness<span>{host.exportAuditReport ? (host.exportAuditReport.reproducible ? 'Reproducible' : 'Action needed') : host.dependencyReport?.lockState}</span></summary>
+				<div className="workspace-readiness-body">
+					{host.dependencyReport && (
+						<div className="readiness-group">
+							<p className="field-help">Engine: <code>{host.dependencyReport.engine}</code> · Lockfile: <code>{host.dependencyReport.lockState}</code></p>
+							{host.dependencyReport.providers.length > 0 && (
+								<ul className="readiness-list">
+									{host.dependencyReport.providers.map(provider => (
+										<li key={provider.display}>
+											<code>{provider.display}</code>
+											<span>{provider.lockedVersion ? 'v' + provider.lockedVersion : provider.status}</span>
+										</li>
+									))}
+								</ul>
+							)}
+						</div>
+					)}
+					{host.exportAuditReport && (
+						<div className="readiness-group">
+							<p className="field-help">Export audit: <strong>{host.exportAuditReport.reproducible ? 'Reproducible' : 'Not yet reproducible'}</strong> · {host.exportAuditReport.lockEntryCount} lock entries · {host.exportAuditReport.moduleCount} modules</p>
+							{host.exportAuditReport.unresolvedReasonKinds.length > 0 && (
+								<p className="field-help">Unresolved: {host.exportAuditReport.unresolvedReasonKinds.join(', ')}</p>
+							)}
+						</div>
+					)}
+				</div>
+			</details>
+		)}
 		{!findings.length&&<p className="issues-clear"><CircleCheck size={16}/>{host?.engineReport?.valid ? 'CLI validation and local checks passed.' : 'No issues found by current checks.'}</p>}
 		{(['error','warning'] as const).map(severity=>{const items=findings.filter(item=>item.severity===severity);return items.length?<div key={severity}><h3>{severity==='error'?'Errors':'Warnings'} <span>{items.length}</span></h3>{items.map(item=><button className={'issue-card '+severity} key={item.id} onClick={()=>onReveal(item)}>{severity==='error'?<CircleAlert size={15}/>:<TriangleAlert size={15}/>}<span><strong>{architecture.resources.find(resource=>resource.id===item.resourceId)?.name??'Architecture'}{item.source && item.source !== 'local' && <em className={'issue-source-tag source-' + item.source}>{sourceBadgeLabel[item.source]}</em>}</strong><span>{item.message}</span>{item.remediation && <small>{item.remediation}</small>}{item.path&&<code>{item.path}</code>}</span><ChevronRight size={14}/></button>)}</div>:null;})}
 	</section>;

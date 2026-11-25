@@ -29,9 +29,9 @@ import { architectureDiagnostics, type Diagnostic } from './diagnostics.ts';
 import { IssuesPanel, focusResourceField } from './IssuesPanel.tsx';
 import { resourcePlacement } from './resourceHierarchy.ts';
 import { workflowTemplate } from './workflowTemplate.ts';
-import { createHostBridge, type HostDetectedEngine, type HostDraftSaveError, type HostDraftSavePreview, type HostEngineValidateReport, type HostGraphSnapshot, type HostNotice, type HostValidationRun } from './webviewBridge.ts';
+import { createHostBridge, type HostCloudRegionsPayload, type HostDependencyReport, type HostDetectedEngine, type HostDraftSaveError, type HostDraftSavePreview, type HostEngineValidateReport, type HostExportAuditReport, type HostGraphSnapshot, type HostModuleInspection, type HostNotice, type HostValidationRun } from './webviewBridge.ts';
 import type { LiveSchemaMap } from './liveSchema.ts';
-import { buildDraftSavePayload, projectGraphSnapshotToArchitecture, projectHostDiagnostics, sanitizeDraftTfFileName } from './serviceAdapter.ts';
+import { buildDraftSavePayload, buildHostViewState, projectGraphSnapshotToArchitecture, projectHostDiagnostics, sanitizeDraftTfFileName } from './serviceAdapter.ts';
 import { DraftSaveDialog } from './DraftSaveDialog.tsx';
 import { presentationSvg } from './exportPresentation.ts';
 
@@ -73,6 +73,10 @@ export function Studio() {
 	const [hostNotice, setHostNotice] = useState<HostNotice | null>(null);
 	const [liveSchemas, setLiveSchemas] = useState<LiveSchemaMap>({});
 	const requestedSchemasRef = useRef<Set<string>>(new Set());
+	const [hostCloudRegions, setHostCloudRegions] = useState<Partial<Record<'azure' | 'aws' | 'google', HostCloudRegionsPayload>>>({});
+	const [dependencyReport, setDependencyReport] = useState<HostDependencyReport | null>(null);
+	const [exportAuditReport, setExportAuditReport] = useState<HostExportAuditReport | null>(null);
+	const [moduleInspections, setModuleInspections] = useState<Record<string, { loading: boolean; inspection: HostModuleInspection | null; error?: string }>>({});
 	const [validationRun, setValidationRun] = useState<HostValidationRun | null>(null);
 	const [detectedEngines, setDetectedEngines] = useState<readonly HostDetectedEngine[]>([]);
 	const [engineReport, setEngineReport] = useState<HostEngineValidateReport | null>(null);
@@ -134,6 +138,12 @@ export function Studio() {
 					} else if (incoming.viewState?.theme === 'workbench') {
 						setTheme(detectInitialTheme(true));
 					}
+					if (typeof incoming.viewState?.inspectorOpen === 'boolean') {
+						setInspectorOpen(incoming.viewState.inspectorOpen);
+					}
+					if (incoming.viewState?.viewports) {
+						viewport.current = { ...viewport.current, ...incoming.viewState.viewports };
+					}
 					dispatch({ type: 'replace', architecture: projected.architecture });
 					if (incoming.viewState?.selectedId && projected.architecture.resources.some(r => r.id === incoming.viewState?.selectedId)) {
 						setSelectedId(incoming.viewState.selectedId);
@@ -164,6 +174,23 @@ export function Studio() {
 						setLiveSchemas(prev => ({ ...prev, [incoming.typeName]: incoming.schema! }));
 					}
 					break;
+				case 'cloudRegions':
+					setHostCloudRegions(prev => ({ ...prev, [incoming.data.provider]: incoming.data }));
+					break;
+				case 'dependencyReport':
+					setDependencyReport(incoming.report);
+					break;
+				case 'exportAuditReport':
+					setExportAuditReport(incoming.report);
+					break;
+				case 'moduleInspection': {
+					const modKey = incoming.modulePath.join('.');
+					setModuleInspections(prev => ({
+						...prev,
+						[modKey]: { loading: false, inspection: incoming.inspection, error: incoming.error },
+					}));
+					break;
+				}
 				case 'validationRunUpdate':
 					setValidationRun(incoming.run);
 					setValidating(incoming.run.outcome === 'running');
@@ -234,6 +261,41 @@ export function Studio() {
 		}
 		hostBridge.post({ type: 'selectNode', nodeId: selectedId || null });
 	}, [hostBridge, selectedId]);
+
+	// Persist Studio presentation state (mode, theme, selection, panels, viewports, node positions)
+	// back to the extension host's workspaceState when connected to a real workspace architecture.
+	useEffect(() => {
+		if (!hostBridge.isHosted || !hostSnapshot) {
+			return;
+		}
+		const timer = setTimeout(() => {
+			hostBridge.post({
+				type: 'viewState',
+				state: buildHostViewState({
+					architecture,
+					mode,
+					theme,
+					selectedId,
+					focusedWorkspaceOpen: workspaceOpen,
+					inspectorOpen,
+					libraryOpen,
+					viewports: viewport.current,
+				}),
+			});
+		}, 350);
+		return () => clearTimeout(timer);
+	}, [hostBridge, hostSnapshot, architecture, mode, theme, selectedId, workspaceOpen, inspectorOpen, libraryOpen]);
+
+	const inspectModuleResource = useCallback((moduleName: string) => {
+		if (!hostBridge.isHosted || !hostSnapshot || !moduleName) {
+			return;
+		}
+		setModuleInspections(prev => ({
+			...prev,
+			[moduleName]: { loading: true, inspection: prev[moduleName]?.inspection ?? null },
+		}));
+		hostBridge.post({ type: 'requestModule', modulePath: [moduleName] });
+	}, [hostBridge, hostSnapshot]);
 
 	const openResource = useCallback((id: string) => {
 		setSelectedId(id);
@@ -515,14 +577,14 @@ export function Studio() {
 						<div className="form-action-row"><span className="form-action-spacer" />{hostBridge.isHosted && hasSourceById[selected.id] && <button aria-label="Open Terraform source" title="Open Terraform source in editor" onClick={() => hostBridge.post({ type: 'openSource', nodeId: selected.id })}><FileCode2 /></button>}<button aria-label="Open focused resource workspace" title="Open focused resource workspace" onClick={() => openDetails(selected.id)}><PanelsTopLeft /></button><button aria-label="Focus selected resource" title="Focus selected resource" onClick={() => { void flow?.fitView({ nodes: [{ id: selected.id }], padding: 0.5, maxZoom: 1.5 }); }}><Scan /></button></div>
      </>}
      <div className={'inspector-content'+(detailTab==='code'&&inspectorCategory==='resources'?' inspector-content-code':'')}>
-     {detailTab === 'issues' ? <IssuesPanel architecture={architecture} findings={findings} onReveal={revealIssue} host={hostBridge.isHosted ? { isHosted: true, sourceRevision: hostSnapshot?.sourceRevision, validationRun, engineReport, availableEngine, validating, onRunValidation: runHostValidation, onRunEngineValidate: runHostEngineValidate } : undefined}/> : inspectorCategory === 'variables' ? null : <>
+     {detailTab === 'issues' ? <IssuesPanel architecture={architecture} findings={findings} onReveal={revealIssue} host={hostBridge.isHosted ? { isHosted: true, hasWorkspace: !!hostSnapshot, sourceRevision: hostSnapshot?.sourceRevision, validationRun, engineReport, dependencyReport, exportAuditReport, availableEngine, validating, onRunValidation: runHostValidation, onRunEngineValidate: runHostEngineValidate } : undefined}/> : inspectorCategory === 'variables' ? null : <>
 
 					{detailTab === 'code' && !selected ? null : overview ? (
 						<ArchitectureOverview architecture={architecture} onSelect={id => { setSelectedId(id); setOverview(false); setDetailTab('form'); }} />
       ) : selected ? (
 						<>
        {detailTab === 'form' && <div>
-							<ResourceFields resource={selected} dispatch={dispatch} architecture={architecture} liveSchemas={liveSchemas} onRevealResource={openResource} onManageVariables={()=>{setInspectorCategory('variables');setDetailTab('form');requestAnimationFrame(()=>variablesButton.current?.focus());}} />
+							<ResourceFields resource={selected} dispatch={dispatch} architecture={architecture} liveSchemas={liveSchemas} cloudRegions={hostCloudRegions} moduleInspection={hostBridge.isHosted && hostSnapshot && selected.kind === 'module' ? { loading: !!moduleInspections[selected.name]?.loading, inspection: moduleInspections[selected.name]?.inspection ?? null, error: moduleInspections[selected.name]?.error, onInspect: () => inspectModuleResource(selected.name) } : undefined} onRevealResource={openResource} onManageVariables={()=>{setInspectorCategory('variables');setDetailTab('form');requestAnimationFrame(()=>variablesButton.current?.focus());}} />
 							<div className="inspector-section"><h3>Connections</h3>
 								<p>{architecture.connections.filter(connection => connection.target === selected.id).length} incoming · {architecture.connections.filter(connection => connection.source === selected.id).length} outgoing</p>
 								<span className="muted">Design relationships</span>
@@ -545,7 +607,7 @@ export function Studio() {
 				</aside>
 			</div>
 			{message&&<div className="studio-action-status" role="status">{message}</div>}<footer className="sr-only"><span>{hostBridge.isHosted ? (hostSnapshot ? 'Connected · rev ' + hostSnapshot.sourceRevision.slice(0, 8) : 'Connecting') : (history.past.length ? 'Modified draft' : 'Original sample') + ' · In-memory preview'}</span></footer>
-			{workspaceResource && <ResourceWorkspace open={workspaceOpen} resource={workspaceResource} architecture={architecture} dispatch={dispatch} liveSchemas={liveSchemas} hostDiagnostics={hostFindings} hasSource={hostBridge.isHosted && !!hasSourceById[workspaceResource.id]} onOpenSource={hostBridge.isHosted ? () => hostBridge.post({ type: 'openSource', nodeId: workspaceResource.id }) : undefined} onNavigate={id=>{setWorkspaceResourceId(id);setSelectedId(id);}} onClose={() => setWorkspaceOpen(false)} />}
+			{workspaceResource && <ResourceWorkspace open={workspaceOpen} resource={workspaceResource} architecture={architecture} dispatch={dispatch} liveSchemas={liveSchemas} cloudRegions={hostCloudRegions} moduleInspection={hostBridge.isHosted && hostSnapshot && workspaceResource.kind === 'module' ? { loading: !!moduleInspections[workspaceResource.name]?.loading, inspection: moduleInspections[workspaceResource.name]?.inspection ?? null, error: moduleInspections[workspaceResource.name]?.error, onInspect: () => inspectModuleResource(workspaceResource.name) } : undefined} hostDiagnostics={hostFindings} hasSource={hostBridge.isHosted && !!hasSourceById[workspaceResource.id]} onOpenSource={hostBridge.isHosted ? () => hostBridge.post({ type: 'openSource', nodeId: workspaceResource.id }) : undefined} onNavigate={id=>{setWorkspaceResourceId(id);setSelectedId(id);}} onClose={() => setWorkspaceOpen(false)} />}
 			{hostBridge.isHosted && <DraftSaveDialog open={saveDialogOpen} fileName={saveFileName} contents={saveContents} busy={saving} preview={savePreview} error={saveError} onFileNameChange={setSaveFileName} onRefreshPreview={refreshDraftSavePreview} onApply={applyHostDraftSave} onClose={() => setSaveDialogOpen(false)} />}
 			{moduleImportOpen && <ModuleImport onClose={() => setModuleImportOpen(false)} onImport={importModule} />}
 		</div>

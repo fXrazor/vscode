@@ -219,3 +219,21 @@ html, body, #root { margin: 0; padding: 0; width: 100%; height: 100%; overflow: 
 .draft-save-footer button { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 6px 14px; font-size: 12px; }
 .draft-save-footer button.primary-button { background: var(--accent); color: var(--on-accent, #ffffff); border-color: var(--accent); }
 .studio.theme-dark .draft-save-footer button.primary-button { color: #141a23; }
+
+/* Workspace readiness & Stage 7 module inspection */
+.workspace-readiness-card { margin: 0 0 14px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2); }
+.workspace-readiness-card > summary { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; font-size: 12px; font-weight: 550; cursor: pointer; }
+.workspace-readiness-card > summary span { font-size: 11px; font-weight: 500; color: var(--muted); }
+.workspace-readiness-body { padding: 0 10px 10px; display: grid; gap: 8px; border-top: 1px solid var(--border); }
+.readiness-group { padding-top: 8px; display: grid; gap: 6px; }
+.readiness-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 11px; }
+.readiness-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.readiness-list span { color: var(--muted); font-family: var(--font-code); }
+.module-inspect-actions { display: flex; gap: 8px; }
+.module-inspect-error { color: var(--danger); }
+.module-inspect-details { display: grid; gap: 10px; }
+.module-inspect-group { display: grid; gap: 4px; font-size: 11px; }
+.module-inspect-group ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.module-inspect-group li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.module-inspect-group small { color: var(--muted); }
+.module-inspect-group em { font-style: normal; padding: 1px 5px; border-radius: 999px; font-size: 10px; background: var(--accent-soft); color: var(--accent-ink, var(--accent)); }

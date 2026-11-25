@@ -7,7 +7,7 @@ import * as Tabs from '@radix-ui/react-tabs';
 import { ArrowLeft, Code2, PanelRight, Variable, X, SlidersHorizontal, CircleCheck, TriangleAlert, Unplug, Layers, ChevronRight, CircleHelp, FileCode2 } from 'lucide-react';
 import type { Action, Architecture, Resource } from './model.ts';
 import { providerNames, resourceDefinition } from './fixture.ts';
-import { ResourceFields } from './ResourceFields.tsx';
+import { ResourceFields, type ResourceModuleInspectionProps } from './ResourceFields.tsx';
 import { CodePanel } from './CodePanel.tsx';
 import { VariablePanel } from './VariablePanel.tsx';
 import { architectureDiagnostics, type Diagnostic } from './diagnostics.ts';
@@ -15,12 +15,13 @@ import { explicitResourceReferences, inheritedReferences } from './resourceHiera
 import { focusResourceField } from './IssuesPanel.tsx';
 import { PaneResizeHandle } from './PaneResizeHandle.tsx';
 import type { LiveSchemaMap } from './liveSchema.ts';
+import type { HostCloudRegionsPayload } from './webviewBridge.ts';
 
 /** One resource, one form and one architecture; code and context are computed projections. */
-export function ResourceWorkspace({ resource, architecture, dispatch, open, onClose, onNavigate, liveSchemas, hostDiagnostics, hasSource, onOpenSource }: {
+export function ResourceWorkspace({ resource, architecture, dispatch, open, onClose, onNavigate, liveSchemas, cloudRegions, moduleInspection, hostDiagnostics, hasSource, onOpenSource }: {
 	resource: Resource; architecture: Architecture; dispatch: Dispatch<Action>; open: boolean;
 	onClose: () => void; onNavigate: (id: string) => void;
-	liveSchemas?: LiveSchemaMap; hostDiagnostics?: readonly Diagnostic[]; hasSource?: boolean; onOpenSource?: () => void;
+	liveSchemas?: LiveSchemaMap; cloudRegions?: Readonly<Partial<Record<'azure' | 'aws' | 'google', HostCloudRegionsPayload>>>; moduleInspection?: ResourceModuleInspectionProps; hostDiagnostics?: readonly Diagnostic[]; hasSource?: boolean; onOpenSource?: () => void;
 }) {
 	const dialog = useRef<HTMLDialogElement>(null);
 	const backdropPress = useRef(false);
@@ -84,7 +85,7 @@ export function ResourceWorkspace({ resource, architecture, dispatch, open, onCl
 			<section className="workspace-code" aria-label="Node Terraform pane"><CodePanel resource={resource} architecture={architecture} dispatch={dispatch} compact hidden={!open || !codeOpen} /><PaneResizeHandle side="workspace-code" width={codeWidth} minimum={280} onCommit={setCodeWidth} /></section>
 			<section className="workspace-parameters" aria-label="Node parameters">
 				<div className="workspace-pane-heading"><SlidersHorizontal size={17} /><div><h3>Parameters</h3><p>Changes update this resource and its Terraform draft.</p></div></div>
-				<ResourceFields resource={resource} architecture={architecture} dispatch={dispatch} liveSchemas={liveSchemas} onRevealResource={onNavigate} onManageVariables={() => { showContext('variables'); requestAnimationFrame(() => variablesTab.current?.focus()); }} />
+				<ResourceFields resource={resource} architecture={architecture} dispatch={dispatch} liveSchemas={liveSchemas} cloudRegions={cloudRegions} moduleInspection={moduleInspection} onRevealResource={onNavigate} onManageVariables={() => { showContext('variables'); requestAnimationFrame(() => variablesTab.current?.focus()); }} />
 			</section>
 			<aside className="workspace-context" aria-label="Node context"><Tabs.Root className="workspace-context-root" value={contextTab} onValueChange={setContextTab}>
 				<Tabs.List className="workspace-context-tabs" aria-label="Node context tabs"><Tabs.Trigger value="links">Connections</Tabs.Trigger><Tabs.Trigger value="variables" ref={variablesTab}>Variables</Tabs.Trigger><Tabs.Trigger value="checks">Checks{issues.length ? <span className="workspace-tab-count">{issues.length}</span> : null}</Tabs.Trigger></Tabs.List>

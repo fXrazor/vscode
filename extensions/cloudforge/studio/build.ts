@@ -8,9 +8,13 @@ import path from 'node:path';
 
 const directory = import.meta.dirname;
 const stageMedia = process.argv.includes('--stage-media');
-const output = stageMedia
-	? path.resolve(directory, '..', 'media', 'studio')
-	: path.join(directory, 'dist');
+const outdirFlagIndex = process.argv.indexOf('--outdir');
+const explicitOutdir = outdirFlagIndex >= 0 ? process.argv[outdirFlagIndex + 1] : undefined;
+const output = explicitOutdir
+	? path.resolve(explicitOutdir)
+	: stageMedia
+		? path.resolve(directory, '..', 'media', 'studio')
+		: path.join(directory, 'dist');
 
 async function copyStudioAssets(targetDir: string, slimMonaco: boolean): Promise<void> {
 	const srcAssets = path.join(directory, 'assets');

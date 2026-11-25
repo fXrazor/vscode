@@ -8,10 +8,10 @@ import { createHistory, historyReducer } from './model.ts';
 import { liveSchemaAttributes, liveSchemaBlocks, liveSchemaOutputs, type HostFormSchema } from './liveSchema.ts';
 import { additionalBlocks, editableFields } from './formDefinition.ts';
 import { architectureDiagnostics } from './diagnostics.ts';
-import { buildDraftSavePayload, projectGraphSnapshotToArchitecture, projectHostDiagnostics } from './serviceAdapter.ts';
+import { buildDraftSavePayload, buildHostViewState, projectGraphSnapshotToArchitecture, projectHostDiagnostics, resolveProviderRegions } from './serviceAdapter.ts';
 import { explicitResourceReferences, inheritedDependencies } from './resourceHierarchy.ts';
 import { terraformCode } from './terraformProjection.ts';
-import type { HostEngineValidateReport, HostGraphSnapshot, HostValidationRun } from './webviewBridge.ts';
+import type { HostCloudRegionsPayload, HostEngineValidateReport, HostGraphSnapshot, HostValidationRun } from './webviewBridge.ts';
 
 const SAMPLE_LIVE_SCHEMA: HostFormSchema = {
 	kind: 'resource',
@@ -242,4 +242,59 @@ test('historyReducer replace resets undo/redo history cleanly for live workspace
 	assert.equal(h.past.length, 0);
 	assert.equal(h.future.length, 0);
 	assert.equal(h.present.name, 'Initial');
+});
+
+test('buildHostViewState serializes positions, mode, theme, selection, and viewports cleanly', () => {
+	const snapshot: HostGraphSnapshot = {
+		workspaceId: 'ws-1',
+		architectureId: 'arch-1',
+		architectureName: 'Persist',
+		sourceRevision: '5'.repeat(64),
+		status: 'complete',
+		nodes: [{ id: 'rg-1', kind: 'resource', resourceType: 'azurerm_resource_group', name: 'rg_one', label: 'rg_one', hasSource: true }],
+		edges: [],
+		diagnostics: [],
+	};
+	const { architecture } = projectGraphSnapshotToArchitecture(snapshot);
+	const state = buildHostViewState({
+		architecture,
+		mode: 'technical',
+		theme: 'dark',
+		selectedId: 'rg-1',
+		focusedWorkspaceOpen: true,
+		inspectorOpen: true,
+		libraryOpen: false,
+		viewports: { technical: { x: 10, y: 20, zoom: 1.25 }, visual: { x: 0, y: 0, zoom: 99 } },
+	});
+	assert.equal(state.mode, 'technical');
+	assert.equal(state.theme, 'dark');
+	assert.equal(state.selectedId, 'rg-1');
+	assert.equal(state.focusedWorkspaceOpen, true);
+	assert.equal(state.inspectorOpen, true);
+	assert.equal(state.listOpen, false);
+	assert.deepEqual(state.viewports.technical, { x: 10, y: 20, zoom: 1.25 });
+	assert.equal(state.viewports.visual, undefined, 'out-of-bounds zoom must be omitted');
+	assert.equal(typeof state.nodePositions.visual?.['rg-1']?.x, 'number');
+});
+
+test('resolveProviderRegions merges live Rust Stage 6 cloudRegions with fallback defaults', () => {
+	const azurePayload: HostCloudRegionsPayload = {
+		provider: 'azure',
+		source: 'authenticatedScopeApi',
+		refreshedAt: '2026-11-25T12:00:00Z',
+		stale: false,
+		isFallback: false,
+		regions: [
+			{ name: 'swedencentral', displayName: 'Sweden Central', availabilityZones: ['1', '2', '3'] },
+			{ name: 'uksouth', displayName: 'UK South', availabilityZones: ['1', '2', '3'] },
+		],
+	};
+	const regions = resolveProviderRegions('azure', { azure: azurePayload });
+	assert.equal(regions[0], 'Sweden Central');
+	assert.equal(regions.includes('UK South'), true);
+	assert.equal(regions.filter(r => r === 'UK South').length, 1, 'no duplicate regions');
+	assert.equal(regions.includes('West Europe'), true, 'fallback regions preserved');
+
+	const gcpFallback = resolveProviderRegions('gcp', { azure: azurePayload });
+	assert.equal(gcpFallback.includes('europe-west2'), true);
 });
