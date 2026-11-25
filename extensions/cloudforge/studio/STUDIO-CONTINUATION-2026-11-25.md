@@ -14,7 +14,7 @@ Dale approved continuing the proposed point-endpoint pass in this chat. No furth
 
 **Latest additions:** evaluate D3.js (Dale wrote “ds3”) for a large technical graph; support limited editing with a strict separation of graph presentation from project edits; give the graph a more tasteful visual design, including curved routes as an option. These extend this plan. They do not authorize another architecture model or implicit topology changes from positioning.
 
-Worktree: `C:/Users/dalep/.codex/worktrees/infrastructure-studio/CloudForge-Code`; branch `codex/studio-whiteboard-2`; integration owner Codex. Last clean research commit: `f48b9c15b3d`. The commit containing this master handoff preserves the guarded experiment and safety correction; resolve its revision with `git log -1 -- extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md` from the repository root. Nothing here is a product-release or installed Workbench/service verification claim. Do not merge PR #1 or push main/Claude's branch.
+Worktree: `C:/Users/dalep/.codex/worktrees/infrastructure-studio/CloudForge-Code`; branch `codex/studio-whiteboard-2`; integration owner Codex. Research commit: `f48b9c15b3d`; verified graph-isolation code checkpoint: `129b58e0eeb` (pushed). The commit containing this master handoff preserves the guarded experiment and safety correction; resolve its revision with `git log -1 -- extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md` from the repository root. Nothing here is a product-release or installed Workbench/service verification claim. Do not merge PR #1 or push main/Claude's branch.
 
 #### Binding state and interaction contract
 
@@ -83,6 +83,18 @@ These are proposed experiments, not measured results or a dependency decision. T
 D3's force simulation mutates its node objects. A prototype must use detached graph-layout DTOs; never pass `Architecture.resources`, their position objects or canonical connection records into a simulation/link force. `fx`/`fy` pins belong to graph presentation. Stop/settle layout by default, isolate expensive computation and reject stale revision results. [D3 force simulation](https://d3js.org/d3-force/simulation), [React Flow layout comparison](https://reactflow.dev/learn/layouting/layouting).
 
 The visual direction is a calm engineering graph: compact official provider icons, readable identity/type, restrained category colour, concise validation badges and details on demand. Curved Bézier routes are a candidate for path tracing; compare with orthogonal routes around compound groups. Route style is presentation only. Highlight selected upstream/downstream paths; dim unrelated context; animate only a selected trace or a transition, then settle. Avoid permanent particle motion, glowing lines, duplicated form cards or an undifferentiated hairball. Include reduced motion, strong contrast, accessible edge labels and keyboard source navigation. Use Impeccable for the phase's critique/polish, preserving the product identity.
+
+#### Latest graph annotation — attachment rows and density controls (Phases 2–3)
+
+Dale's [React Flow Database Schema Node reference](https://reactflow.dev/ui/components/database-schema-node) demonstrates labelled row-level connection points. Apply the concept to real resource attachments/references, rather than treating infrastructure as database columns or attaching every line to one central dot. This is a **queued design requirement**, not implemented by the safety checkpoint.
+
+- Prototype compact rows for evidenced NICs, identities, security/routing associations or other actual relationships. A row must explain its field and endpoint; do not create ports for arbitrary compatible resources or every scalar setting.
+- Let the rendered graph node grow to a bounded number of visible rows. At overview zoom, collapse them to semantic groups/counts; on selection/expansion reveal the relevant rows and curved paths. Compare an initial 4–6-row limit with real fixtures rather than allowing unlimited card height.
+- For high-degree resources, show a counted group such as “+12 attachments”, neighbour focus and edge aggregation with an inspectable membership list. Preserve category distinctions and exact endpoints when grouping; avoid a dense fan of near-identical lines and unreadable spacing.
+- Use stable port IDs derived from resource ID, field path and referenced endpoint identity, not current array indices or screen position. Node expansion and port geometry belong to GraphViewState. Node growth must never resize an Architecture icon/container or change semantic history.
+- If React Flow is selected, map unique handles through `sourceHandle`/`targetHandle` and refresh measured internals after handle changes. If D3/Canvas is selected, derive equivalent row-anchor coordinates and hit targets from the same detached graph DTO. [Dynamic and multiple handles](https://reactflow.dev/learn/customization/handles), [Updating node internals](https://reactflow.dev/api-reference/hooks/use-update-node-internals).
+
+Verify 1/2/6/50/200 attachments, expanded/collapsed states, stable handles after reordering/refresh, curve crossings and label collisions, keyboard inspection, both themes, zoom-dependent detail and zero canonical-model changes. No shadcn/table dependency or example installation command was executed; use the existing product styling and choose dependencies only in the renderer evaluation.
 
 #### Checkpoint verification and remaining gaps
 
