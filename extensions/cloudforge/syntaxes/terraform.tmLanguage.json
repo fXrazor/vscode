@@ -1,0 +1,291 @@
+{
+	"name": "Terraform",
+	"scopeName": "source.hcl.terraform",
+	"patterns": [
+		{
+			"include": "#comments"
+		},
+		{
+			"include": "#block-declarations"
+		},
+		{
+			"include": "#heredocs"
+		},
+		{
+			"include": "#strings"
+		},
+		{
+			"include": "#keywords"
+		},
+		{
+			"include": "#constants"
+		},
+		{
+			"include": "#numbers"
+		},
+		{
+			"include": "#references"
+		},
+		{
+			"include": "#functions"
+		},
+		{
+			"include": "#attributes"
+		},
+		{
+			"include": "#operators"
+		}
+	],
+	"repository": {
+		"comments": {
+			"patterns": [
+				{
+					"name": "comment.line.number-sign.terraform",
+					"match": "#.*$"
+				},
+				{
+					"name": "comment.line.double-slash.terraform",
+					"match": "//.*$"
+				},
+				{
+					"name": "comment.block.terraform",
+					"begin": "/\\*",
+					"end": "\\*/"
+				}
+			]
+		},
+		"block-declarations": {
+			"patterns": [
+				{
+					"match": "^\\s*\\b(resource|data)\\b\\s+\"([A-Za-z0-9_-]+)\"\\s+\"([A-Za-z0-9_-]+)\"",
+					"captures": {
+						"1": {
+							"name": "storage.type.terraform"
+						},
+						"2": {
+							"name": "entity.name.type.terraform"
+						},
+						"3": {
+							"name": "entity.name.label.terraform"
+						}
+					}
+				},
+				{
+					"match": "^\\s*\\b(module|variable|output|provider|check)\\b\\s+\"([A-Za-z0-9_-]+)\"",
+					"captures": {
+						"1": {
+							"name": "storage.type.terraform"
+						},
+						"2": {
+							"name": "entity.name.label.terraform"
+						}
+					}
+				},
+				{
+					"match": "^\\s*\\b(locals|terraform|moved|import|removed|required_providers|backend|lifecycle|dynamic|ingress|egress|connection|provisioner|timeouts|precondition|postcondition)\\b(?=\\s*[{\"A-Za-z0-9_-])",
+					"captures": {
+						"1": {
+							"name": "storage.type.terraform"
+						}
+					}
+				}
+			]
+		},
+		"heredocs": {
+			"patterns": [
+				{
+					"name": "string.unquoted.heredoc.terraform",
+					"begin": "<<-?([A-Za-z_][A-Za-z0-9_-]*)\\s*$",
+					"beginCaptures": {
+						"0": {
+							"name": "punctuation.definition.string.begin.terraform"
+						}
+					},
+					"end": "^\\s*\\1\\s*$",
+					"endCaptures": {
+						"0": {
+							"name": "punctuation.definition.string.end.terraform"
+						}
+					},
+					"patterns": [
+						{
+							"include": "#interpolation"
+						}
+					]
+				}
+			]
+		},
+		"strings": {
+			"patterns": [
+				{
+					"name": "string.quoted.double.terraform",
+					"begin": "\"",
+					"beginCaptures": {
+						"0": {
+							"name": "punctuation.definition.string.begin.terraform"
+						}
+					},
+					"end": "\"",
+					"endCaptures": {
+						"0": {
+							"name": "punctuation.definition.string.end.terraform"
+						}
+					},
+					"patterns": [
+						{
+							"name": "constant.character.escape.terraform",
+							"match": "\\\\(?:[nrt\"\\\\]|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8})"
+						},
+						{
+							"include": "#interpolation"
+						}
+					]
+				}
+			]
+		},
+		"interpolation": {
+			"patterns": [
+				{
+					"name": "meta.interpolation.terraform",
+					"begin": "(?<!\\$)\\$\\{",
+					"beginCaptures": {
+						"0": {
+							"name": "punctuation.section.interpolation.begin.terraform"
+						}
+					},
+					"end": "\\}",
+					"endCaptures": {
+						"0": {
+							"name": "punctuation.section.interpolation.end.terraform"
+						}
+					},
+					"patterns": [
+						{
+							"include": "#strings"
+						},
+						{
+							"include": "#keywords"
+						},
+						{
+							"include": "#constants"
+						},
+						{
+							"include": "#numbers"
+						},
+						{
+							"include": "#references"
+						},
+						{
+							"include": "#functions"
+						},
+						{
+							"include": "#operators"
+						}
+					]
+				},
+				{
+					"name": "meta.directive.terraform",
+					"begin": "(?<!%)%\\{",
+					"beginCaptures": {
+						"0": {
+							"name": "punctuation.section.directive.begin.terraform"
+						}
+					},
+					"end": "\\}",
+					"endCaptures": {
+						"0": {
+							"name": "punctuation.section.directive.end.terraform"
+						}
+					},
+					"patterns": [
+						{
+							"include": "#strings"
+						},
+						{
+							"include": "#keywords"
+						},
+						{
+							"include": "#references"
+						}
+					]
+				}
+			]
+		},
+		"keywords": {
+			"patterns": [
+				{
+					"name": "keyword.control.terraform",
+					"match": "\\b(for|in|if|else|endif|endfor)\\b"
+				},
+				{
+					"name": "keyword.other.terraform",
+					"match": "\\b(for_each|count|depends_on|provider|providers|source|version|required_version|default|type|description|sensitive|nullable|value|condition|error_message|create_before_destroy|prevent_destroy|ignore_changes|replace_triggered_by)\\b(?=\\s*=)"
+				}
+			]
+		},
+		"constants": {
+			"patterns": [
+				{
+					"name": "constant.language.boolean.terraform",
+					"match": "\\b(true|false)\\b"
+				},
+				{
+					"name": "constant.language.null.terraform",
+					"match": "\\bnull\\b"
+				}
+			]
+		},
+		"numbers": {
+			"patterns": [
+				{
+					"name": "constant.numeric.terraform",
+					"match": "\\b[0-9]+(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?\\b"
+				}
+			]
+		},
+		"references": {
+			"patterns": [
+				{
+					"match": "\\b(var|local|module|data|each|self|count|path|terraform)\\b(?=\\.)",
+					"captures": {
+						"1": {
+							"name": "variable.language.terraform"
+						}
+					}
+				}
+			]
+		},
+		"functions": {
+			"patterns": [
+				{
+					"match": "\\b([A-Za-z_][A-Za-z0-9_-]*)\\s*(?=\\()",
+					"captures": {
+						"1": {
+							"name": "support.function.terraform"
+						}
+					}
+				}
+			]
+		},
+		"attributes": {
+			"patterns": [
+				{
+					"match": "^\\s*([A-Za-z_][A-Za-z0-9_-]*)\\s*(?==(?!=))",
+					"captures": {
+						"1": {
+							"name": "variable.other.member.terraform"
+						}
+					}
+				}
+			]
+		},
+		"operators": {
+			"patterns": [
+				{
+					"name": "keyword.operator.terraform",
+					"match": "=>|==|!=|<=|>=|&&|\\|\\||\\.\\.\\.|[=+\\-*/%<>!?:]"
+				}
+			]
+		}
+	}
+}

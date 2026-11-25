@@ -1,7 +1,7 @@
 import { shapeDefinition, shapeTextColor, shapeStrokeDash } from './shapes.ts';
 import { inkDefaults } from './ink.ts';
 import { rotatedCorners } from './rotation.ts';
-import { connectionPath, connectionDash } from './connectionGeometry.ts';
+import { connectionPath, connectionDash, connectionPathBounds } from './connectionGeometry.ts';
 import { connectionAnchor } from './designConnections.ts';
 import type { Architecture, BoardItem } from './model.ts';
 import { sceneOrder } from './canvasOperations.ts';
@@ -49,6 +49,10 @@ function drawingMarkup(item: BoardItem): string {
 /** Export the presentation projection, independent of viewport, panels or active mode. */
 export async function presentationSvg(architecture: Architecture): Promise<string> {
  const points = [...architecture.resources.map(resource => isResourceContainer(resource)?{...resource.positions.visual,...resourceDimensions(architecture,resource,'visual')}:{ x:resource.positions.visual.x+resourceIconSize(resource)/2-70,y:resource.positions.visual.y,width:140,height:resourceIconSize(resource)+44 }), ...architecture.items.map(item => { if (!item.rotation) { return { ...item.positions.visual, width: item.width, height: item.height }; } const corners = rotatedCorners(item.positions.visual.x, item.positions.visual.y, item.width, item.height, item.rotation); const left = Math.min(...corners.map(c => c.x)); const top = Math.min(...corners.map(c => c.y)); return { x: left, y: top, width: Math.max(...corners.map(c => c.x)) - left, height: Math.max(...corners.map(c => c.y)) - top }; })];
+ for (const connection of architecture.connections) {
+  const source = connectionAnchor(architecture, connection.source, 'source', 'visual'); const target = connectionAnchor(architecture, connection.target, 'target', 'visual');
+  if (source && target) { points.push(connectionPathBounds(connection, source.x, source.y, target.x, target.y)); }
+ }
  const x = Math.min(0, ...points.map(point => point.x)) - 40;
  const y = Math.min(0, ...points.map(point => point.y)) - 70;
  const width = Math.max(400, ...points.map(point => point.x + point.width)) - x + 40;

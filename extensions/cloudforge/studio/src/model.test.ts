@@ -1,3 +1,4 @@
+import { elementEndpoint, endpointElementId } from './connectionEndpoints.ts';
 import { applyTerraformDraft, terraformCode } from './terraformProjection.ts';
 /*---------------------------------------------------------------------------------------------
  *  Copyright (c) Microsoft Corporation. All rights reserved.
@@ -210,7 +211,7 @@ test('copying a frame preserves internal links, remaps stable IDs and nested blo
 	assert.equal(cloned.resources.at(-fragment.resources.length)!.positions.visual.x, fragment.resources[0].positions.visual.x + 30);
 	assert.ok(cloned.resources.at(-fragment.resources.length)!.blocks[0].blocks[0].id.startsWith('clone-'));
 	assert.equal(cloned.connections.length, architecture.connections.length + fragment.connections.length);
-	assert.ok(cloned.connections.slice(architecture.connections.length).every(link => link.source.startsWith('clone-') && link.target.startsWith('clone-')));
+	assert.ok(cloned.connections.slice(architecture.connections.length).every(link => endpointElementId(link.source)!.startsWith('clone-') && endpointElementId(link.target)!.startsWith('clone-')));
 	assert.equal(new Set(cloned.resources.map(resource => resource.name)).size, cloned.resources.length);
 	assert.ok(cloned.resources.every(resource => !resource.terraformName || /^[A-Za-z_][A-Za-z0-9_-]*$/.test(resource.terraformName)));
 });
@@ -243,18 +244,18 @@ test('layer commands preserve frame backgrounds and export drawing order and typ
 });
 
 test('connection direction reversal and label formatting share history and export without changing configuration', async () => {
-	const architecture: Architecture = { name: 'Links', resources: [], items: [drawing('a', 0), drawing('b', 400)], connections: [{ id: 'link', source: 'a', target: 'b', endArrow: true }] };
+	const architecture: Architecture = { name: 'Links', resources: [], items: [drawing('a', 0), drawing('b', 400)], connections: [{ id: 'link', source: elementEndpoint('a'), target: elementEndpoint('b'), endArrow: true }] };
 	const styled = historyReducer(createHistory(architecture), { type: 'updateConnection', id: 'link', patch: { label: 'traffic', labelFontSize: 20, labelColor: '#123456', labelPosition: 'above' } });
 	const reversed = historyReducer(styled, { type: 'reverseConnection', id: 'link' });
 	assert.equal(reversed.present.connections[0].id, 'link');
-	assert.equal(reversed.present.connections[0].source, 'b');
-	assert.equal(reversed.present.connections[0].target, 'a');
+	assert.equal(endpointElementId(reversed.present.connections[0].source), 'b');
+	assert.equal(endpointElementId(reversed.present.connections[0].target), 'a');
 	assert.equal(reversed.present.connections[0].endArrow, true);
 	assert.deepEqual(historyReducer(reversed, { type: 'undo' }).present, styled.present);
 	const svg = await presentationSvg(reversed.present);
 	assert.ok(svg.includes('font-size="20" fill="#123456">traffic'));
 	assert.deepEqual(reversed.present.items, architecture.items);
-	const duplicate = createHistory({ ...architecture, connections: [...architecture.connections, { id: 'other', source: 'b', target: 'a' }] });
+	const duplicate = createHistory({ ...architecture, connections: [...architecture.connections, { id: 'other', source: elementEndpoint('b'), target: elementEndpoint('a') }] });
 	assert.equal(historyReducer(duplicate, { type: 'reverseConnection', id: 'link' }), duplicate);
 	assert.equal(historyReducer(styled, { type: 'updateConnection', id: 'link', patch: { labelFontSize: NaN } }), styled);
 });
@@ -276,14 +277,14 @@ test('drawings connect by stable IDs and delete with attached links in one undo 
 	assert.deepEqual(resized.present.connections, moved.present.connections);
 	const deleted = historyReducer(moved, { type: 'deleteItem', id: 'a' });
 	assert.equal(deleted.past.length, moved.past.length + 1);
-	assert.ok(!deleted.present.connections.some(link => link.source === 'a' || link.target === 'a'));
+	assert.ok(!deleted.present.connections.some(link => endpointElementId(link.source) === 'a' || endpointElementId(link.target) === 'a'));
 	assert.deepEqual(historyReducer(deleted, { type: 'undo' }).present, moved.present);
 	assert.ok(!connectableElements(sampleArchitecture()).some(element => sampleArchitecture().items.some(item => item.kind === 'frame' && item.id === element.id)));
 });
 
 test('drawing connectors retain geometry and escaped labels in presentation export', async () => {
 	const item = (id: string, x: number): BoardItem => ({ id, kind: 'note', text: id, width: 200, height: 100, members: [], positions: { visual: { x, y: 100 }, technical: { x, y: 200 } } });
-	const svg = await presentationSvg({ name: 'Drawing flow', resources: [], items: [item('a', 50), item('b', 400)], connections: [{ id: 'a-b', source: 'a', target: 'b', routing: 'straight', label: '<Review>' }] });
+	const svg = await presentationSvg({ name: 'Drawing flow', resources: [], items: [item('a', 50), item('b', 400)], connections: [{ id: 'a-b', source: elementEndpoint('a'), target: elementEndpoint('b'), routing: 'straight', label: '<Review>' }] });
 	assert.ok(svg.includes('M 250,150L 400,150') || svg.includes('M250,150L400,150') || svg.includes('M 250 150L 400 150'), svg);
 	assert.ok(svg.includes('&lt;Review&gt;'));
 });
@@ -303,7 +304,7 @@ test('connection appearance and deletion use shared history without changing Ter
 });
 
 test('connection geometry uses distinct straight, elbow and curve projections', () => {
-	const connection = { id: 'link', source: 'a', target: 'b' };
+	const connection = { id: 'link', source: elementEndpoint('a'), target: elementEndpoint('b') };
 	const paths = (['straight','elbow','curve'] as const).map(routing => connectionPath({ ...connection, routing }, 0, 0, 200, 100)[0]);
 	assert.equal(new Set(paths).size, 3); assert.ok(paths[2].includes('C'));
 	assert.equal(connectionDash(connection), undefined);
@@ -360,7 +361,7 @@ test('semantic edits and resource positions share one history across both render
 test('deleting a resource removes its connections and undo restores them together', () => {
 	const initial = createHistory(sampleArchitecture());
 	const deleted = historyReducer(initial, { type: 'delete', id: 'subnet' });
-	assert.equal(deleted.present.connections.some(connection => connection.source === 'subnet' || connection.target === 'subnet'), false);
+	assert.equal(deleted.present.connections.some(connection => endpointElementId(connection.source) === 'subnet' || endpointElementId(connection.target) === 'subnet'), false);
 	assert.deepEqual(historyReducer(deleted, { type: 'undo' }).present, initial.present);
 });
 
@@ -409,7 +410,7 @@ test('inserting a template is one undo step for resources and their relationship
  const template=sampleArchitecture();
  template.resources=template.resources.slice(0,2).map(resource=>({...resource,id:'template-'+resource.id}));
  template.items=[];
- template.connections=[{id:'template-link',source:'template-network',target:'template-subnet'}];
+ template.connections=[{id:'template-link',source:elementEndpoint('template-network'),target:elementEndpoint('template-subnet')}];
  const added=historyReducer(initial,{type:'insert',architecture:template});
  assert.equal(added.present.resources.length,initial.present.resources.length+2);
  assert.ok(added.present.connections.some(edge=>edge.id==='template-link'));

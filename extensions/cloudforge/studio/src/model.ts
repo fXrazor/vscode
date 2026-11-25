@@ -3,7 +3,9 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 import { variableError, variableUses, type VariableDefinition } from './variables.ts';
-import { canConnect } from './designConnections.ts';
+import { canConnect, canConnectEndpoints } from './designConnections.ts';
+import { elementEndpoint, endpointKey, normaliseArchitectureConnections, type ArchitectureInput, type DesignEndpoint } from './connectionEndpoints.ts';
+export type { DesignEndpoint } from './connectionEndpoints.ts';
 import { applyCanvasCommand, canvasElements, type CanvasCommand } from './canvasOperations.ts';
 import { bindingKey, acceptsResourceRefs, acceptsVariable, canBindField, fieldDefinition, fieldTargetPath, findResourceBlock, pruneBlockBindings, pruneBlockResourceRefs, type FieldTarget, type ResourceRefBinding, type ResourceRefEntry, type VariableBinding } from './fieldBindings.ts';
 import { fitResourceContainers, isResourceContainer, reparentResource, resourcePlacement, terraformIdentifier } from './resourceHierarchy.ts';
@@ -64,7 +66,7 @@ export interface Architecture {
 }
 
 export interface DesignConnection {
-	id: string; source: string; target: string;
+	id: string; source: DesignEndpoint; target: DesignEndpoint;
 	label?: string;
 	labelFontSize?: number;
 	labelColor?: string;
@@ -123,6 +125,8 @@ export type Edit =
 	| { type: 'updateConnection'; id: string; patch: Partial<Omit<DesignConnection, 'id' | 'source' | 'target'>> }
 	| { type: 'reverseConnection'; id: string }
 	| { type: 'deleteConnection'; id: string }
+	| { type: 'connectEndpoints'; id: string; source: DesignEndpoint; target: DesignEndpoint }
+	| { type: 'reconnectConnection'; id: string; side: 'source' | 'target'; endpoint: DesignEndpoint }
 	| { type: 'update'; id: string; patch: Partial<Pick<Resource, 'name' | 'terraformName' | 'label' | 'iconKind' | 'region' | 'settings' | 'blocks'>> }
 	| { type: 'move'; id: string; mode: DesignMode; position: Position }
 	| { type: 'applyResourceCode'; resources: Resource[] }
@@ -147,8 +151,8 @@ export type Action = Edit | { type: 'undo' } | { type: 'redo' } | { type: 'repla
 	/** A live refresh of the same architecture: keeps undo/redo, rebased onto the refreshed state. */
 	| { type: 'rebase'; architecture: Architecture; base?: Architecture };
 
-export function createHistory(architecture: Architecture): History {
-	return { past: [], present: architecture, future: [] };
+export function createHistory(architecture: ArchitectureInput): History {
+	return { past: [], present: normaliseArchitectureConnections(architecture), future: [] };
 }
 
 function editArchitecture(architecture: Architecture, action: Edit): Architecture {
@@ -221,13 +225,14 @@ function editArchitecture(architecture: Architecture, action: Edit): Architectur
 		}
 		case 'reverseConnection': {
 			const connection = architecture.connections.find(item => item.id === action.id);
-			if (!connection || !canConnect(architecture, connection.target, connection.source)) { return architecture; }
+			if (!connection || !canConnectEndpoints(architecture, connection.target, connection.source, connection.id)) { return architecture; }
 			return { ...architecture, connections: architecture.connections.map(item => item.id === action.id ? { ...item, source: item.target, target: item.source } : item) };
 		}
 		case 'updateConnection': {
 			const connection = architecture.connections.find(connection => connection.id === action.id);
 			if (!connection) { return architecture; }
 			const patch = action.patch;
+			if ('source' in patch || 'target' in patch || 'id' in patch) { return architecture; }
 			if (patch.width !== undefined && (!Number.isFinite(patch.width) || patch.width < 1 || patch.width > 8)
 				|| patch.stroke !== undefined && !/^#[0-9a-f]{6}$/i.test(patch.stroke)
 				|| patch.routing !== undefined && !['straight', 'elbow', 'curve'].includes(patch.routing)
@@ -241,6 +246,17 @@ function editArchitecture(architecture: Architecture, action: Edit): Architectur
 		}
 		case 'deleteConnection':
 			return architecture.connections.some(connection => connection.id === action.id) ? { ...architecture, connections: architecture.connections.filter(connection => connection.id !== action.id) } : architecture;
+		case 'connectEndpoints': {
+			if (!action.id || action.id.includes('->') || architecture.connections.some(link => link.id === action.id) || !canConnectEndpoints(architecture, action.source, action.target)) { return architecture; }
+			return { ...architecture, connections: [...architecture.connections, { id: action.id, source: action.source, target: action.target }] };
+		}
+		case 'reconnectConnection': {
+			const link = architecture.connections.find(item => item.id === action.id);
+			if (!link || link.id.includes('->') || !['source', 'target'].includes(action.side) || endpointKey(link[action.side], action.side) === endpointKey(action.endpoint, action.side)) { return architecture; }
+			const next = { ...link, [action.side]: action.endpoint };
+			if (!canConnectEndpoints(architecture, next.source, next.target, link.id)) { return architecture; }
+			return { ...architecture, connections: architecture.connections.map(item => item.id === link.id ? next : item) };
+		}
 		case 'importVariables': {
 			const variables = [...(architecture.variables ?? [])];
 			for (const imported of action.variables) {
@@ -315,8 +331,8 @@ function editArchitecture(architecture: Architecture, action: Edit): Architectur
 				...architecture,
 				connections: [...architecture.connections, {
 					id: action.source + '-' + action.target,
-					source: action.source,
-					target: action.target
+					source: elementEndpoint(action.source),
+					target: elementEndpoint(action.target)
 				}]
 			};
 	}
@@ -327,7 +343,7 @@ export function historyReducer(history: History, action: Action): History {
 		return createHistory(action.architecture);
 	}
 	if (action.type === 'rebase') {
-		return rebaseHistory(history, action.architecture, action.base);
+		return rebaseHistory(history, normaliseArchitectureConnections(action.architecture), action.base && normaliseArchitectureConnections(action.base));
 	}
 	if (action.type === 'undo') {
 		const previous = history.past.at(-1);

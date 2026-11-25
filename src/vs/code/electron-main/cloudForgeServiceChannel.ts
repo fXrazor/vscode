@@ -42,11 +42,21 @@ const cloudForgeMethods: ReadonlySet<string> = new Set<CloudForgeServiceMethod>(
 	'inspectDependencies', 'readResourceValues', 'listCloudRegions', 'readModule',
 	'summarizeState', 'listCloudConnections', 'setCloudConnection', 'storeCloudKey', 'removeCloudConnection', 'checkCloudSignIn',
 	'diffCatalogueSnapshots', 'auditExportReadiness',
-	'detectEngines', 'runEngineValidate'
+	'detectEngines', 'runEngineValidate', 'runEnginePlan',
+	'listMirrorPackages', 'checkOfflineMirrorReadiness', 'runEngineInitOffline', 'extractProviderSchemaFromMirror',
+	'importMirrorPackage', 'evictMirrorPackage', 'verifyMirrorIntegrity', 'planMirrorCleanup'
 ]);
 
 /** The service allows `installGit` 10 minutes; the broker waits a little longer for its reply. */
 const installGitTimeoutMs = 11 * 60 * 1000;
+/** Stage 9B `runEnginePlan` allows 60 s for `plan` + 30 s for `show -json`; the broker waits 120 s. */
+const enginePlanTimeoutMs = 2 * 60 * 1000;
+/** Stage 10 `runEngineInitOffline` allows 120 s; the broker waits 125 s. */
+const engineInitOfflineTimeoutMs = 125 * 1000;
+/** Stage 10 `extractProviderSchemaFromMirror` allows 120 s init + 120 s schema; the broker waits 245 s. */
+const extractMirrorSchemaTimeoutMs = 245 * 1000;
+/** Stage 10B `importMirrorPackage` streams & verifies large provider ZIP archives; wait 65 s. */
+const importMirrorPackageTimeoutMs = 65 * 1000;
 const maxPathLength = 32767;
 const maxNameLength = 255;
 const maxRemoteBytes = 2048;
@@ -711,7 +721,9 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 			};
 		}
 		case 'auditExportReadiness':
-		case 'runEngineValidate': {
+		case 'runEngineValidate':
+		case 'runEnginePlan':
+		case 'runEngineInitOffline': {
 			if (!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'expectedSourceRevision', 'engine']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId)) {
 				return undefined;
 			}
@@ -728,7 +740,132 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 				...(value.engine === undefined ? {} : { engine: value.engine })
 			};
 		}
+		case 'checkOfflineMirrorReadiness': {
+			if (!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'expectedSourceRevision', 'engine', 'platforms']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId)) {
+				return undefined;
+			}
+			if (value.expectedSourceRevision !== undefined && (typeof value.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(value.expectedSourceRevision))) {
+				return undefined;
+			}
+			if (value.engine !== undefined && value.engine !== 'openTofu' && value.engine !== 'terraform') {
+				return undefined;
+			}
+			let platforms: string[] | undefined;
+			if (value.platforms !== undefined) {
+				if (!Array.isArray(value.platforms) || value.platforms.length === 0 || value.platforms.length > 8) {
+					return undefined;
+				}
+				platforms = [];
+				for (const item of value.platforms) {
+					if (typeof item !== 'string' || !/^[a-z0-9]{1,32}_[a-z0-9]{1,32}$/.test(item)) {
+						return undefined;
+					}
+					platforms.push(item);
+				}
+			}
+			return {
+				workspaceId: value.workspaceId,
+				architectureId: value.architectureId,
+				...(value.expectedSourceRevision === undefined ? {} : { expectedSourceRevision: value.expectedSourceRevision }),
+				...(value.engine === undefined ? {} : { engine: value.engine }),
+				...(platforms === undefined ? {} : { platforms })
+			};
+		}
+		case 'extractProviderSchemaFromMirror': {
+			if (!hasOnlyKeys(value, ['address', 'version', 'engine']) || typeof value.address !== 'string' || !isSnapshotSegment(value.version)) {
+				return undefined;
+			}
+			const segments = value.address.split('/');
+			if (segments.length !== 3 || !segments.every(isSnapshotSegment)) {
+				return undefined;
+			}
+			if (value.engine !== undefined && value.engine !== 'openTofu' && value.engine !== 'terraform') {
+				return undefined;
+			}
+			return {
+				address: value.address,
+				version: value.version,
+				...(value.engine === undefined ? {} : { engine: value.engine })
+			};
+		}
+		case 'importMirrorPackage': {
+			// `archivePath` is strictly broker-owned (supplied via Electron-main native .zip picker).
+			if (
+				!hasOnlyKeys(value, ['address', 'version', 'platform', 'expectedSha256', 'publisher']) ||
+				typeof value.address !== 'string' ||
+				!isSnapshotSegment(value.version) ||
+				typeof value.platform !== 'string' || !/^[a-z0-9]{1,32}_[a-z0-9]{1,32}$/.test(value.platform) ||
+				typeof value.expectedSha256 !== 'string' || !/^[0-9a-fA-F]{64}$/.test(value.expectedSha256)
+			) {
+				return undefined;
+			}
+			const segments = value.address.split('/');
+			if (segments.length !== 3 || !segments.every(isSnapshotSegment)) {
+				return undefined;
+			}
+			if (value.publisher !== undefined && !isScopeText(value.publisher)) {
+				return undefined;
+			}
+			return {
+				address: value.address,
+				version: value.version,
+				platform: value.platform,
+				expectedSha256: value.expectedSha256.toLowerCase(),
+				...(value.publisher === undefined ? {} : { publisher: value.publisher.trim() })
+			};
+		}
+		case 'evictMirrorPackage': {
+			if (
+				!hasOnlyKeys(value, ['address', 'version', 'platform']) ||
+				typeof value.address !== 'string' ||
+				!isSnapshotSegment(value.version) ||
+				typeof value.platform !== 'string' || !/^[a-z0-9]{1,32}_[a-z0-9]{1,32}$/.test(value.platform)
+			) {
+				return undefined;
+			}
+			const segments = value.address.split('/');
+			if (segments.length !== 3 || !segments.every(isSnapshotSegment)) {
+				return undefined;
+			}
+			return {
+				address: value.address,
+				version: value.version,
+				platform: value.platform
+			};
+		}
+		case 'planMirrorCleanup': {
+			if (!hasOnlyKeys(value, ['quotaBytes', 'workspaceId', 'architectureId', 'expectedSourceRevision', 'engine'])) {
+				return undefined;
+			}
+			if (typeof value.quotaBytes !== 'number' || !Number.isSafeInteger(value.quotaBytes) || value.quotaBytes < 0) {
+				return undefined;
+			}
+			const hasWs = value.workspaceId !== undefined;
+			const hasArch = value.architectureId !== undefined;
+			if (hasWs !== hasArch) {
+				return undefined;
+			}
+			if (hasWs && (!isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId))) {
+				return undefined;
+			}
+			if (value.expectedSourceRevision !== undefined) {
+				if (!hasWs || typeof value.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(value.expectedSourceRevision)) {
+					return undefined;
+				}
+			}
+			if (value.engine !== undefined && value.engine !== 'openTofu' && value.engine !== 'terraform') {
+				return undefined;
+			}
+			return {
+				quotaBytes: value.quotaBytes,
+				...(hasWs ? { workspaceId: value.workspaceId, architectureId: value.architectureId } : {}),
+				...(value.expectedSourceRevision === undefined ? {} : { expectedSourceRevision: value.expectedSourceRevision }),
+				...(value.engine === undefined ? {} : { engine: value.engine })
+			};
+		}
 		case 'detectEngines':
+		case 'listMirrorPackages':
+		case 'verifyMirrorIntegrity':
 			return hasOnlyKeys(value, []) ? {} : undefined;
 		case 'listCloudRegions': {
 			if (!hasOnlyKeys(value, ['provider', 'scope', 'configuredRegions'])) {
@@ -819,6 +956,8 @@ export interface ICloudForgeRequestContext {
 	pickParentFolder(): Promise<string | undefined>;
 	/** Opens a native schema JSON file picker owned by the calling window. `undefined` when cancelled. */
 	pickSchemaFile?(): Promise<string | undefined>;
+	/** Opens a native provider `.zip` archive picker owned by the calling window. `undefined` when cancelled. */
+	pickMirrorArchive?(): Promise<string | undefined>;
 }
 
 export type CloudForgeResolvedRequest =
@@ -872,6 +1011,16 @@ export async function resolveCloudForgeRequest(method: CloudForgeServiceMethod, 
 				return { kind: 'failure', code: 'SCOPE_DENIED' };
 			}
 			return { kind: 'call', params: { schemaPath } };
+		}
+		case 'importMirrorPackage': {
+			const archivePath = await context.pickMirrorArchive?.();
+			if (archivePath === undefined) {
+				return { kind: 'failure', code: 'CANCELLED' };
+			}
+			if (!isLocalPath(archivePath)) {
+				return { kind: 'failure', code: 'SCOPE_DENIED' };
+			}
+			return { kind: 'call', params: { ...params, archivePath } };
 		}
 		default:
 			return { kind: 'call', params };
@@ -956,12 +1105,24 @@ export class CloudForgeServiceBroker implements IServerChannel<string> {
 			const request = await resolveCloudForgeRequest(method, params, {
 				resolveScope: () => resolveCloudForgeWindowScope(window.openedWorkspace, configPath => this.workspacesManagementMainService.resolveLocalWorkspace(configPath)),
 				pickParentFolder: () => this.pickParentFolder(window.win ?? undefined),
-				pickSchemaFile: () => this.pickSchemaFile(window.win ?? undefined)
+				pickSchemaFile: () => this.pickSchemaFile(window.win ?? undefined),
+				pickMirrorArchive: () => this.pickMirrorArchive(window.win ?? undefined)
 			});
 			if (request.kind === 'failure') {
 				return safeFailure(new CloudForgeServiceError(request.code)) as T;
 			}
-			let value = await service.call(method, request.params, method === 'installGit' ? installGitTimeoutMs : undefined);
+			const timeoutMs = method === 'installGit'
+				? installGitTimeoutMs
+				: method === 'runEnginePlan'
+					? enginePlanTimeoutMs
+					: method === 'runEngineInitOffline'
+						? engineInitOfflineTimeoutMs
+						: method === 'extractProviderSchemaFromMirror'
+							? extractMirrorSchemaTimeoutMs
+							: method === 'importMirrorPackage' || method === 'verifyMirrorIntegrity'
+								? importMirrorPackageTimeoutMs
+								: undefined;
+			let value = await service.call(method, request.params, timeoutMs);
 			if (method === 'createProject') {
 				value = completeCreateProject(value, request.params.parentPath);
 			}
@@ -1006,6 +1167,19 @@ export class CloudForgeServiceBroker implements IServerChannel<string> {
 			buttonLabel: localize('cloudForge.inspectSchema', "Inspect Schema"),
 			properties: ['openFile'],
 			filters: [{ name: localize('cloudForge.schemaJsonFilter', "Provider Schema JSON"), extensions: ['json'] }]
+		}, window);
+		if (result.canceled || result.filePaths.length !== 1) {
+			return undefined;
+		}
+		return result.filePaths[0];
+	}
+
+	private async pickMirrorArchive(window: electron.BrowserWindow | undefined): Promise<string | undefined> {
+		const result = await this.dialogMainService.showOpenDialog({
+			title: localize('cloudForge.pickMirrorArchive', "Choose Provider Archive (.zip) to Import into Local Mirror"),
+			buttonLabel: localize('cloudForge.importMirrorArchive', "Import Archive"),
+			properties: ['openFile'],
+			filters: [{ name: localize('cloudForge.providerZipFilter', "Provider Archive (.zip)"), extensions: ['zip'] }]
 		}, window);
 		if (result.canceled || result.filePaths.length !== 1) {
 			return undefined;

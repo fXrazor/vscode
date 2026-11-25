@@ -8,6 +8,7 @@ import { test } from 'node:test';
 import { isValidTfFileName, parseWebviewMessage, type CanvasGraphSnapshot } from '../src/canvas/protocol.ts';
 import {
 	draftSaveErrorMessage,
+	formatEnginePlanReportText,
 	mapRustFormSchemaToCanvasFormSchema,
 	mapServiceValidationPollToRun,
 	parseCatalogueSnapshots,
@@ -19,9 +20,13 @@ import {
 	parseSaveAllApply,
 	parseSaveAllPreview,
 	parseSchemaPreview,
+	parseEngineInitOfflineReport,
+	parseEnginePlanReport,
 	parseEngineValidateReport,
 	parseExportAuditReport,
+	parseMirrorPackages,
 	parseModuleInspection,
+	parseOfflineMirrorReadiness,
 	parseSchemaDiffReport,
 	parseValidationPoll,
 	parseValidationStart,
@@ -504,4 +509,142 @@ test('save-all preview and apply results are validated and messages are bounded'
 	assert.equal(parseWebviewMessage({ type: 'requestSaveAllPreview', files: [{ fileName: '../a.tf', contents: '' }] }), undefined);
 	assert.equal(parseWebviewMessage({ type: 'requestSaveAllPreview', files: [{ type: 'applyDraftSave', fileName: 'a.tf', contents: '' }] }), undefined);
 	assert.deepEqual(parseWebviewMessage({ type: 'applySaveAll', previewToken: 'save-' + 'd'.repeat(32) }), { type: 'applySaveAll', previewToken: 'save-' + 'd'.repeat(32) });
+});
+
+test('Stage 9B guarded local engine plan adapters sanitize planned/failed responses and never carry literal values', () => {
+	assert.deepStrictEqual(parseWebviewMessage({ type: 'requestEnginePlan' }), { type: 'requestEnginePlan' });
+	assert.deepStrictEqual(parseWebviewMessage({ type: 'requestEnginePlan', engine: 'terraform' }), { type: 'requestEnginePlan', engine: 'terraform' });
+	assert.equal(parseWebviewMessage({ type: 'requestEnginePlan', engine: 'powershell' }), undefined);
+
+	const planned = parseEnginePlanReport({
+		sourceRevision: 'b'.repeat(64),
+		engine: 'openTofu',
+		engineVersion: '1.13.9',
+		engineInferred: true,
+		status: 'planned',
+		formatVersion: '1.2',
+		errored: false,
+		durationMs: 312,
+		summary: { create: 1, update: 1, replace: 0, delete: 0, read: 0, noOp: 0, total: 2 },
+		resourceChanges: [
+			{
+				address: 'azurerm_resource_group.hub',
+				mode: 'managed',
+				typeName: 'azurerm_resource_group',
+				name: 'hub',
+				providerName: 'registry.opentofu.org/hashicorp/azurerm',
+				actions: ['create'],
+				actionKind: 'create',
+				hasSensitiveAttributes: false,
+				changedAttributePaths: ['location', 'name'],
+				after: { secret_value: 'SHOULD_BE_STRIPPED' },
+			},
+			{
+				address: 'azurerm_key_vault_secret.api',
+				mode: 'managed',
+				typeName: 'azurerm_key_vault_secret',
+				name: 'api',
+				actions: ['update'],
+				actionKind: 'update',
+				hasSensitiveAttributes: true,
+				changedAttributePaths: ['value'],
+			},
+		],
+		outputChanges: [
+			{ name: 'db_password', actions: ['create'], sensitive: true, after: 'TOP_SECRET' },
+		],
+		diagnostics: [],
+		truncated: false,
+	});
+	assert.ok(planned);
+	assert.equal(planned.status, 'planned');
+	assert.equal(planned.summary.create, 1);
+	assert.equal(planned.summary.update, 1);
+	assert.equal(planned.resourceChanges.length, 2);
+	assert.equal(planned.resourceChanges[1].hasSensitiveAttributes, true);
+	assert.equal(planned.outputChanges[0].sensitive, true);
+	assert.equal(JSON.stringify(planned).includes('SHOULD_BE_STRIPPED'), false);
+	assert.equal(JSON.stringify(planned).includes('TOP_SECRET'), false);
+
+	const formatted = formatEnginePlanReportText(planned, 'Hub Network');
+	assert.ok(formatted.includes('OpenTofu 1.13.9'));
+	assert.ok(formatted.includes('+1 create · ~1 update'));
+	assert.ok(formatted.includes('[create] azurerm_resource_group.hub [location, name]'));
+	assert.ok(formatted.includes('(sensitive attributes redacted)'));
+	assert.ok(formatted.includes('output.db_password (sensitive)'));
+
+	const failed = parseEnginePlanReport({
+		sourceRevision: 'b'.repeat(64),
+		engine: 'terraform',
+		engineVersion: '1.15.8',
+		engineInferred: false,
+		status: 'failed',
+		errored: true,
+		durationMs: 85,
+		summary: { create: 0, update: 0, replace: 0, delete: 0, read: 0, noOp: 0, total: 0 },
+		resourceChanges: [],
+		outputChanges: [],
+		diagnostics: [
+			{ severity: 'error', summary: 'Inconsistent dependency lock file', filename: 'main.tf', line: 1 },
+		],
+		truncated: false,
+	});
+	assert.ok(failed);
+	assert.equal(failed.status, 'failed');
+	assert.equal(failed.diagnostics.length, 1);
+	assert.equal(parseEnginePlanReport({ status: 'unknown' }), undefined);
+});
+
+test('Stage 10 mirror package, readiness, offline init adapters and webview protocol enforce bounds', () => {
+	const sha = 'c'.repeat(64);
+	const packages = parseMirrorPackages({
+		packages: [
+			{
+				key: { address: 'registry.terraform.io/hashicorp/azurerm', version: '5.14.0', platform: 'windows_amd64' },
+				sizeBytes: 1024,
+				sha256: sha,
+				recordedAt: '2026-11-25T00:00:00Z',
+				publisher: 'HashiCorp',
+			},
+			{ key: { address: '', version: '1.0.0', platform: 'windows_amd64' }, sizeBytes: 10, sha256: sha, recordedAt: '2026-11-25T00:00:00Z' },
+		],
+	});
+	assert.equal(packages.length, 1);
+	assert.equal(packages[0].key.address, 'registry.terraform.io/hashicorp/azurerm');
+	assert.equal(packages[0].publisher, 'HashiCorp');
+
+	const readiness = parseOfflineMirrorReadiness({
+		sourceRevision: sha,
+		engine: 'openTofu',
+		engineInferred: true,
+		lockState: 'valid',
+		isReady: false,
+		ready: [{ address: 'registry.terraform.io/hashicorp/azurerm', version: '5.14.0', platform: 'windows_amd64' }],
+		missing: [{ address: 'registry.terraform.io/hashicorp/azurerm', version: '5.14.0', platform: 'linux_amd64' }],
+		corrupted: [],
+	});
+	assert.ok(readiness);
+	assert.equal(readiness.isReady, false);
+	assert.equal(readiness.ready.length, 1);
+	assert.equal(readiness.missing.length, 1);
+	assert.equal(parseOfflineMirrorReadiness({ isReady: true }), undefined);
+
+	const initReport = parseEngineInitOfflineReport({
+		sourceRevision: sha,
+		engine: 'openTofu',
+		engineVersion: '1.13.9',
+		engineInferred: true,
+		status: 'initialized',
+		exitCode: 0,
+		durationMs: 140,
+		summary: 'Offline mirror initialization succeeded (lock file: valid, 1 provider package(s)).',
+	});
+	assert.ok(initReport);
+	assert.equal(initReport.status, 'initialized');
+	assert.equal(initReport.exitCode, 0);
+	assert.equal(parseEngineInitOfflineReport({ status: 'weird' }), undefined);
+
+	assert.deepEqual(parseWebviewMessage({ type: 'requestEngineInitOffline' }), { type: 'requestEngineInitOffline' });
+	assert.deepEqual(parseWebviewMessage({ type: 'requestEngineInitOffline', engine: 'terraform' }), { type: 'requestEngineInitOffline', engine: 'terraform' });
+	assert.equal(parseWebviewMessage({ type: 'requestEngineInitOffline', engine: 'bash' }), undefined);
 });

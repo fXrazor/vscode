@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { commands, env, extensions, l10n, ProgressLocation, Uri, window, workspace } from 'vscode';
-import { parseGitInstall } from './model';
+import { normalizeFsPathForMatch, parseGitInstall, sanitizeRemoteUrl } from './model';
 import { callProjectService, showProjectError } from './service';
 
 const GIT_DOWNLOAD_PAGE = 'https://git-scm.com/download/win';
@@ -41,15 +41,21 @@ export async function isGitMissing(): Promise<boolean> {
 	return !!git && !git.enabled && workspace.getConfiguration('git').get<boolean>('enabled') !== false;
 }
 
-/** The `origin` (or first) fetch URL of the Git repository at a folder, when Git knows it. */
+/** The credential-free `origin` (or first) fetch URL of the Git repository at a folder, when Git knows it. */
 export async function repositoryRemote(folder: Uri): Promise<string | undefined> {
 	const git = await gitExtension();
 	if (!git?.enabled) {
 		return undefined;
 	}
-	const repository = git.getAPI(1).repositories.find(candidate => candidate.rootUri.toString() === folder.toString());
+	const isWindows = process.platform === 'win32';
+	const targetPath = normalizeFsPathForMatch(folder.fsPath, isWindows);
+	const repository = git.getAPI(1).repositories.find(candidate =>
+		candidate.rootUri.toString() === folder.toString() ||
+		normalizeFsPathForMatch(candidate.rootUri.fsPath, isWindows) === targetPath
+	);
 	const remotes = repository?.state.remotes ?? [];
-	return (remotes.find(remote => remote.name === 'origin') ?? remotes[0])?.fetchUrl;
+	const raw = (remotes.find(remote => remote.name === 'origin') ?? remotes[0])?.fetchUrl;
+	return raw ? sanitizeRemoteUrl(raw) : undefined;
 }
 
 /**

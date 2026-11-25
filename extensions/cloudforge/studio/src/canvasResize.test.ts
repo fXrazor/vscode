@@ -5,6 +5,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHistory, historyReducer, type Architecture, type BoardItem } from './model.ts';
+import { resizeAnchorPoint, resizeAnchors } from './canvasOperations.ts';
+import { dragScale, scaledSelectionBounds } from './selectionGeometry.ts';
 
 const item = (id: string, x: number, y: number, width: number, height: number, extra: Partial<BoardItem> = {}): BoardItem => ({ id, kind: 'shape', text: id, positions: { visual: { x, y }, technical: { x, y } }, width, height, members: [], ...extra });
 const board = (items: BoardItem[]): Architecture => ({ name: 'Board', resources: [], items, connections: [] });
@@ -60,4 +62,58 @@ test('dragging the selection corner gives a proportional scale within limits', a
 	assert.equal(dragScale(bounds, 0, 100), 2, 'the larger proportional change wins');
 	assert.equal(dragScale(bounds, -500, -500), 0.25);
 	assert.equal(dragScale(bounds, 5000, 0), 4);
+});
+
+function boundsOf(items: BoardItem[]) {
+	const x = Math.min(...items.map(item => item.positions.visual.x)); const y = Math.min(...items.map(item => item.positions.visual.y));
+	return { x, y, width: Math.max(...items.map(item => item.positions.visual.x + item.width)) - x, height: Math.max(...items.map(item => item.positions.visual.y + item.height)) - y };
+}
+
+test('every fixed corner is preserved by a grouped resize in either renderer with one Undo/Redo', () => {
+	const architecture = { ...board([item('a', 100, 100, 100, 50), item('b', 300, 200, 40, 40)]), groups: [{ id: 'group', label: 'Group', members: ['a', 'b'] }] };
+	const bounds = boundsOf(architecture.items);
+	for (const mode of ['visual', 'technical'] as const) {
+		for (const anchor of resizeAnchors) {
+			let h = historyReducer(createHistory(architecture), { type: 'canvas', command: { kind: 'resize', ids: ['a'], mode, scale: 2, anchor } });
+			assert.equal(h.past.length, 1);
+			assert.deepEqual(resizeAnchorPoint(boundsOf(h.present.items), anchor), resizeAnchorPoint(bounds, anchor), anchor);
+			assert.deepEqual(h.present.items.map(item => item.width), [200, 80]);
+			for (const item of h.present.items) { assert.deepEqual(item.positions.technical, item.positions.visual); }
+			const resized = h.present;
+			h = historyReducer(h, { type: 'undo' });
+			assert.deepEqual(h.present, architecture);
+			h = historyReducer(h, { type: 'redo' });
+			assert.deepEqual(h.present, resized);
+		}
+	}
+});
+
+test('size clamps and rounding keep the fixed corner while locked drawings remain untouched', () => {
+	const locked = item('locked', 9000, 9000, 100, 100, { canvasLocked: true });
+	const architecture = board([item('a', 100, 100, 3900, 2000), item('b', 4200, 2200, 100, 50), locked]);
+	const before = boundsOf(architecture.items.slice(0, 2));
+	for (const scale of [0.25, 1.33, 4]) {
+		for (const anchor of resizeAnchors) {
+			const h = historyReducer(createHistory(architecture), { type: 'canvas', command: { kind: 'resize', ids: ['a', 'b', 'locked'], mode: 'visual', scale, anchor } });
+			assert.deepEqual(resizeAnchorPoint(boundsOf(h.present.items.slice(0, 2)), anchor), resizeAnchorPoint(before, anchor));
+			assert.deepEqual(h.present.items[2], locked);
+			assert.ok(h.present.items.every(item => item.width <= 4000 && item.height <= 4000));
+		}
+	}
+});
+
+test('invalid resize anchors do not consume history', () => {
+	const h = createHistory(board([item('a', 0, 0, 100, 50)]));
+	assert.equal(historyReducer(h, { type: 'canvas', command: { kind: 'resize', ids: ['a'], mode: 'visual', scale: 2, anchor: 'centre' as never } }), h);
+});
+
+test('corner drag previews keep the opposite corner fixed for growth and shrink', () => {
+	const bounds = { x: 20, y: 40, width: 200, height: 100 };
+	for (const corner of resizeAnchors) {
+		const anchor = resizeAnchors.find(value => value.startsWith(corner.startsWith('top') ? 'bottom' : 'top') && value.endsWith(corner.endsWith('left') ? 'right' : 'left'))!;
+		const dx = corner.endsWith('right') ? 100 : -100; const dy = corner.startsWith('bottom') ? 50 : -50;
+		assert.equal(dragScale(bounds, dx, dy, corner), 1.5);
+		assert.equal(dragScale(bounds, -dx, -dy, corner), 0.5);
+		for (const scale of [0.5, 1.5]) { assert.deepEqual(resizeAnchorPoint(scaledSelectionBounds(bounds, scale, anchor), anchor), resizeAnchorPoint(bounds, anchor)); }
+	}
 });

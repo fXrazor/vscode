@@ -60,7 +60,9 @@ export type CloudForgeServiceMethod =
 	| 'summarizeState' | 'listCloudConnections' | 'setCloudConnection' | 'storeCloudKey' | 'removeCloudConnection' | 'checkCloudSignIn'
 	| 'inspectDependencies' | 'listCloudRegions' | 'readModule'
 	| 'diffCatalogueSnapshots' | 'auditExportReadiness'
-	| 'detectEngines' | 'runEngineValidate';
+	| 'detectEngines' | 'runEngineValidate' | 'runEnginePlan'
+	| 'listMirrorPackages' | 'checkOfflineMirrorReadiness' | 'runEngineInitOffline' | 'extractProviderSchemaFromMirror'
+	| 'importMirrorPackage' | 'evictMirrorPackage' | 'verifyMirrorIntegrity' | 'planMirrorCleanup';
 
 export class CloudForgeServiceError extends Error {
 	constructor(readonly code: string, readonly kind?: string) {

@@ -2,6 +2,7 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
+import { endpointElementId, remapEndpoint } from './connectionEndpoints.ts';
 import { VariablePanel } from './VariablePanel.tsx';
 import { exportableArchitecture } from './variables.ts';
 import type { ShapeId } from './shapes.ts';
@@ -29,7 +30,7 @@ import { architectureDiagnostics, type Diagnostic } from './diagnostics.ts';
 import { IssuesPanel, focusResourceField } from './IssuesPanel.tsx';
 import { resourcePlacement } from './resourceHierarchy.ts';
 import { workflowTemplate } from './workflowTemplate.ts';
-import { createHostBridge, type HostCloudRegionsPayload, type HostDependencyReport, type HostDetectedEngine, type HostDraftSaveError, type HostDraftSavePreview, type HostEngineValidateReport, type HostSaveAllPreview, type HostExportAuditReport, type HostGraphSnapshot, type HostModuleInspection, type HostNotice, type HostValidationRun } from './webviewBridge.ts';
+import { createHostBridge, type HostCloudRegionsPayload, type HostDependencyReport, type HostDetectedEngine, type HostDraftSaveError, type HostDraftSavePreview, type HostEngineInitOfflineReport, type HostEnginePlanReport, type HostEngineValidateReport, type HostSaveAllPreview, type HostExportAuditReport, type HostGraphSnapshot, type HostModuleInspection, type HostNotice, type HostOfflineMirrorReadiness, type HostValidationRun } from './webviewBridge.ts';
 import type { LiveSchemaMap } from './liveSchema.ts';
 import { parseSchemaPreview, type SchemaPreview } from './resourceDraft.ts';
 import { hydrateResourceValues, parseResourceValues } from './resourceValues.ts';
@@ -89,11 +90,16 @@ export function Studio() {
 	const [hostCloudRegions, setHostCloudRegions] = useState<Partial<Record<'azure' | 'aws' | 'google', HostCloudRegionsPayload>>>({});
 	const [dependencyReport, setDependencyReport] = useState<HostDependencyReport | null>(null);
 	const [exportAuditReport, setExportAuditReport] = useState<HostExportAuditReport | null>(null);
+	const [offlineMirrorReadiness, setOfflineMirrorReadiness] = useState<HostOfflineMirrorReadiness | null>(null);
+	const [engineInitReport, setEngineInitReport] = useState<HostEngineInitOfflineReport | null>(null);
 	const [moduleInspections, setModuleInspections] = useState<Record<string, { loading: boolean; inspection: HostModuleInspection | null; error?: string }>>({});
 	const [validationRun, setValidationRun] = useState<HostValidationRun | null>(null);
 	const [detectedEngines, setDetectedEngines] = useState<readonly HostDetectedEngine[]>([]);
 	const [engineReport, setEngineReport] = useState<HostEngineValidateReport | null>(null);
+	const [enginePlanReport, setEnginePlanReport] = useState<HostEnginePlanReport | null>(null);
 	const [validating, setValidating] = useState(false);
+	const [planning, setPlanning] = useState(false);
+	const [initializingOffline, setInitializingOffline] = useState(false);
 	const [saveDialogOpen, setSaveDialogOpen] = useState(false);
 	const [saveFileName, setSaveFileName] = useState('cloudforge-studio.tf');
 	const [saveContents, setSaveContents] = useState('');
@@ -153,6 +159,8 @@ export function Studio() {
 					});
 					setHostSnapshot(incoming.graph);
 					hostGraphRef.current = incoming.graph;
+					setEnginePlanReport(null);
+					setEngineInitReport(null);
 					setHasSourceById(projected.hasSourceById);
 					setHostNotice(incoming.notice ?? null);
 					setSaveFileName(defaultTargetTfFile(projected.architecture, incoming.viewState?.selectedId ?? undefined));
@@ -234,6 +242,19 @@ export function Studio() {
 				case 'exportAuditReport':
 					setExportAuditReport(incoming.report);
 					break;
+				case 'offlineMirrorReadiness':
+					setOfflineMirrorReadiness(incoming.report);
+					break;
+				case 'engineInitOfflineReport':
+					setInitializingOffline(false);
+					if (incoming.report) {
+						setEngineInitReport(incoming.report);
+						const label = incoming.report.engine === 'openTofu' ? 'OpenTofu' : 'Terraform';
+						setMessage(`${label} offline init: ${incoming.report.status} (${incoming.report.durationMs} ms)`);
+					} else if (incoming.error) {
+						setMessage(incoming.error);
+					}
+					break;
 				case 'moduleInspection': {
 					const modKey = incoming.modulePath.join('.');
 					setModuleInspections(prev => ({
@@ -257,6 +278,18 @@ export function Studio() {
 					if (incoming.report) {
 						setEngineReport(incoming.report);
 						setMessage((incoming.report.engine === 'openTofu' ? 'OpenTofu' : 'Terraform') + ' validate: ' + (incoming.report.valid ? 'valid' : incoming.report.errorCount + ' error(s)'));
+					} else if (incoming.error) {
+						setMessage(incoming.error);
+					}
+					break;
+				case 'enginePlanReport':
+					setPlanning(false);
+					if (incoming.report) {
+						setEnginePlanReport(incoming.report);
+						const label = incoming.report.engine === 'openTofu' ? 'OpenTofu' : 'Terraform';
+						setMessage(incoming.report.status === 'planned'
+							? `${label} plan: +${incoming.report.summary.create} ~${incoming.report.summary.update} ±${incoming.report.summary.replace} -${incoming.report.summary.delete} (${incoming.report.outputChanges.length} outputs)`
+							: `${label} plan reported diagnostics`);
 					} else if (incoming.error) {
 						setMessage(incoming.error);
 					}
@@ -428,6 +461,22 @@ export function Studio() {
 		}
 		setValidating(true);
 		hostBridge.post(availableEngine ? { type: 'requestEngineValidate', engine: availableEngine } : { type: 'requestEngineValidate' });
+	}, [hostBridge, availableEngine]);
+
+	const runHostEnginePlan = useCallback(() => {
+		if (!hostBridge.isHosted) {
+			return;
+		}
+		setPlanning(true);
+		hostBridge.post(availableEngine ? { type: 'requestEnginePlan', engine: availableEngine } : { type: 'requestEnginePlan' });
+	}, [hostBridge, availableEngine]);
+
+	const runHostEngineInitOffline = useCallback(() => {
+		if (!hostBridge.isHosted) {
+			return;
+		}
+		setInitializingOffline(true);
+		hostBridge.post(availableEngine ? { type: 'requestEngineInitOffline', engine: availableEngine } : { type: 'requestEngineInitOffline' });
 	}, [hostBridge, availableEngine]);
 
 	const openDraftSave = useCallback((requestedFileName?: string) => {
@@ -645,7 +694,7 @@ export function Studio() {
   const ids=new Map([...pattern.resources,...pattern.items].map(item=>[item.id,crypto.randomUUID()]));
   const suffix=crypto.randomUUID().slice(0,4);
   const resources=pattern.resources.filter(resource=>wanted.includes(resource.id)).map(resource=>({...resource,id:ids.get(resource.id)!,parentId:resource.parentId&&wanted.includes(resource.parentId)?ids.get(resource.parentId):undefined,name:resource.name+'-'+suffix,positions:{visual:{x:resource.positions.visual.x,y:resource.positions.visual.y+1300},technical:{x:resource.positions.technical.x,y:resource.positions.technical.y+1300}}}));
-  dispatch({type:'insert',architecture:{name:pattern.name,resources,items:[],connections:pattern.connections.filter(edge=>wanted.includes(edge.source)&&wanted.includes(edge.target)).map(edge=>({...edge,id:crypto.randomUUID(),source:ids.get(edge.source)!,target:ids.get(edge.target)!}))}});
+  dispatch({type:'insert',architecture:{name:pattern.name,resources,items:[],connections:pattern.connections.filter(edge=>wanted.includes(endpointElementId(edge.source)??'')&&wanted.includes(endpointElementId(edge.target)??'')).map(edge=>({...edge,id:crypto.randomUUID(),source:remapEndpoint(edge.source,Object.fromEntries(ids),0)!,target:remapEndpoint(edge.target,Object.fromEntries(ids),0)!}))}});
   setSelectedId(resources[0].id); setOverview(true); setInspectorOpen(true);
   void flow?.fitView({nodes:resources.map(resource=>({id:resource.id})),padding:0.2});
  }
@@ -749,7 +798,7 @@ export function Studio() {
 						<div className="form-action-row"><span className="form-action-spacer" />{hostBridge.isHosted && hasSourceById[selected.id] && <button aria-label="Open Terraform source" title="Open Terraform source in editor" onClick={() => hostBridge.post({ type: 'openSource', nodeId: selected.id })}><FileCode2 /></button>}<button aria-label="Open focused resource workspace" title="Open focused resource workspace" onClick={() => openDetails(selected.id)}><PanelsTopLeft /></button><button aria-label="Focus selected resource" title="Focus selected resource" onClick={() => { void flow?.fitView({ nodes: [{ id: selected.id }], padding: 0.5, maxZoom: 1.5 }); }}><Scan /></button></div>
      </>}
      <div className={'inspector-content'+(detailTab==='code'&&inspectorCategory==='resources'?' inspector-content-code':'')}>
-     {detailTab === 'issues' ? <IssuesPanel architecture={architecture} findings={findings} onReveal={revealIssue} host={hostBridge.isHosted ? { isHosted: true, hasWorkspace: !!hostSnapshot, sourceRevision: hostSnapshot?.sourceRevision, validationRun, engineReport, dependencyReport, exportAuditReport, availableEngine, validating, onRunValidation: runHostValidation, onRunEngineValidate: runHostEngineValidate, onOpenLocation: openIssueLocation } : undefined}/> : inspectorCategory === 'variables' ? null : <>
+     {detailTab === 'issues' ? <IssuesPanel architecture={architecture} findings={findings} onReveal={revealIssue} host={hostBridge.isHosted ? { isHosted: true, hasWorkspace: !!hostSnapshot, sourceRevision: hostSnapshot?.sourceRevision, validationRun, engineReport, enginePlanReport, dependencyReport, exportAuditReport, offlineMirrorReadiness, engineInitReport, availableEngine, validating, planning, initializingOffline, onRunValidation: runHostValidation, onRunEngineValidate: runHostEngineValidate, onOpenLocation: openIssueLocation, onRunEnginePlan: runHostEnginePlan, onRunEngineInitOffline: runHostEngineInitOffline } : undefined}/> : inspectorCategory === 'variables' ? null : <>
 
 					{detailTab === 'code' && !selected ? null : overview ? (
 						<ArchitectureOverview architecture={architecture} onSelect={id => { setSelectedId(id); setOverview(false); setDetailTab('form'); }} />
@@ -758,7 +807,7 @@ export function Studio() {
        {detailTab === 'form' && <div>
 							<ResourceFields resource={selected} dispatch={dispatch} architecture={architecture} liveSchemas={liveSchemas} cloudRegions={hostCloudRegions} moduleInspection={hostBridge.isHosted && hostSnapshot && selected.kind === 'module' ? { loading: !!moduleInspections[selected.name]?.loading, inspection: moduleInspections[selected.name]?.inspection ?? null, error: moduleInspections[selected.name]?.error, onInspect: () => inspectModuleResource(selected.name) } : undefined} hasSource={hostBridge.isHosted && !!hasSourceById[selected.id]} onOpenSource={hostBridge.isHosted ? () => hostBridge.post({ type: 'openSource', nodeId: selected.id }) : undefined} onRevealResource={openResource} onManageVariables={()=>{setInspectorCategory('variables');setDetailTab('form');requestAnimationFrame(()=>variablesButton.current?.focus());}} />
 							<div className="inspector-section"><h3>Connections</h3>
-								<p>{architecture.connections.filter(connection => connection.target === selected.id).length} incoming · {architecture.connections.filter(connection => connection.source === selected.id).length} outgoing</p>
+								<p>{architecture.connections.filter(connection => endpointElementId(connection.target) === selected.id).length} incoming · {architecture.connections.filter(connection => endpointElementId(connection.source) === selected.id).length} outgoing</p>
 								<span className="muted">Design relationships</span>
 							</div>
 							<button className="delete-button" disabled={selected.canvasLocked} onClick={() => { dispatch({ type: 'delete', id: selected.id }); setSelectedId(''); setMessage('Resource removed. Undo restores its connections.'); }}>Delete Resource</button>

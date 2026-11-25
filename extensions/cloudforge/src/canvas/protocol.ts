@@ -302,6 +302,94 @@ export interface CanvasEngineValidateReport {
 	readonly truncated: boolean;
 }
 
+export type CanvasEnginePlanActionKind = 'create' | 'update' | 'replace' | 'delete' | 'read' | 'no-op';
+
+export interface CanvasEnginePlanSummary {
+	readonly create: number;
+	readonly update: number;
+	readonly replace: number;
+	readonly delete: number;
+	readonly read: number;
+	readonly noOp: number;
+	readonly total: number;
+}
+
+export interface CanvasEnginePlanResourceChange {
+	readonly address: string;
+	readonly moduleAddress?: string;
+	readonly mode: 'managed' | 'data';
+	readonly typeName: string;
+	readonly name: string;
+	readonly providerName?: string;
+	readonly actions: readonly string[];
+	readonly actionKind: CanvasEnginePlanActionKind;
+	readonly hasSensitiveAttributes: boolean;
+	readonly changedAttributePaths: readonly string[];
+}
+
+export interface CanvasEnginePlanOutputChange {
+	readonly name: string;
+	readonly actions: readonly string[];
+	readonly sensitive: boolean;
+}
+
+export interface CanvasEnginePlanReport {
+	readonly sourceRevision: string;
+	readonly engine: 'openTofu' | 'terraform';
+	readonly engineVersion: string;
+	readonly engineInferred: boolean;
+	readonly status: 'planned' | 'failed';
+	readonly formatVersion?: string;
+	readonly errored: boolean;
+	readonly durationMs: number;
+	readonly summary: CanvasEnginePlanSummary;
+	readonly resourceChanges: readonly CanvasEnginePlanResourceChange[];
+	readonly outputChanges: readonly CanvasEnginePlanOutputChange[];
+	readonly diagnostics: readonly CanvasEngineValidateDiagnostic[];
+	readonly truncated: boolean;
+}
+
+export interface CanvasMirrorPackageKey {
+	readonly address: string;
+	readonly version: string;
+	readonly platform: string;
+}
+
+export interface CanvasMirrorPackageSummary {
+	readonly key: CanvasMirrorPackageKey;
+	readonly sizeBytes: number;
+	readonly sha256: string;
+	readonly recordedAt: string;
+	readonly publisher?: string;
+}
+
+export interface CanvasCorruptedMirrorPackage {
+	readonly key: CanvasMirrorPackageKey;
+	readonly reason: string;
+}
+
+export interface CanvasOfflineMirrorReadiness {
+	readonly sourceRevision: string;
+	readonly engine: 'openTofu' | 'terraform';
+	readonly engineInferred: boolean;
+	readonly lockState: 'absent' | 'valid' | 'invalid' | 'unreadable';
+	readonly isReady: boolean;
+	readonly ready: readonly CanvasMirrorPackageKey[];
+	readonly missing: readonly CanvasMirrorPackageKey[];
+	readonly corrupted: readonly CanvasCorruptedMirrorPackage[];
+}
+
+export interface CanvasEngineInitOfflineReport {
+	readonly sourceRevision: string;
+	readonly engine: 'openTofu' | 'terraform';
+	readonly engineVersion: string;
+	readonly engineInferred: boolean;
+	readonly status: 'initialized' | 'failed';
+	readonly exitCode: number;
+	readonly durationMs: number;
+	readonly summary: string;
+}
+
 export interface CanvasViewport {
 	readonly x: number;
 	readonly y: number;
@@ -482,6 +570,20 @@ export type ExtensionToWebviewMessage =
 		readonly error?: string;
 	}
 	| {
+		readonly type: 'enginePlanReport';
+		readonly report: CanvasEnginePlanReport | null;
+		readonly error?: string;
+	}
+	| {
+		readonly type: 'offlineMirrorReadiness';
+		readonly report: CanvasOfflineMirrorReadiness | null;
+	}
+	| {
+		readonly type: 'engineInitOfflineReport';
+		readonly report: CanvasEngineInitOfflineReport | null;
+		readonly error?: string;
+	}
+	| {
 		readonly type: 'openExport';
 	}
 	| {
@@ -520,6 +622,8 @@ export type WebviewToExtensionMessage =
 		readonly toKey: { readonly address: string; readonly version: string; readonly formatVersion: string; readonly sha256: string };
 	}
 	| { readonly type: 'requestEngineValidate'; readonly engine?: 'openTofu' | 'terraform' }
+	| { readonly type: 'requestEnginePlan'; readonly engine?: 'openTofu' | 'terraform' }
+	| { readonly type: 'requestEngineInitOffline'; readonly engine?: 'openTofu' | 'terraform' }
 	| { readonly type: 'exportArtifact'; readonly format: ExportFormat; readonly suggestedFileName: string; readonly content: string; readonly encoding: 'utf8' | 'base64' }
 	| { readonly type: 'useTemplateAsArchitecture'; readonly templateId: string };
 
@@ -1072,6 +1176,18 @@ export function parseWebviewMessage(value: unknown): WebviewToExtensionMessage |
 				return undefined;
 			}
 			return value.engine ? { type: 'requestEngineValidate', engine: value.engine } : { type: 'requestEngineValidate' };
+		}
+		case 'requestEnginePlan': {
+			if (value.engine !== undefined && value.engine !== 'openTofu' && value.engine !== 'terraform') {
+				return undefined;
+			}
+			return value.engine ? { type: 'requestEnginePlan', engine: value.engine } : { type: 'requestEnginePlan' };
+		}
+		case 'requestEngineInitOffline': {
+			if (value.engine !== undefined && value.engine !== 'openTofu' && value.engine !== 'terraform') {
+				return undefined;
+			}
+			return value.engine ? { type: 'requestEngineInitOffline', engine: value.engine } : { type: 'requestEngineInitOffline' };
 		}
 		case 'exportArtifact': {
 			if (

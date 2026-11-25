@@ -6,7 +6,7 @@ import { shapeDefinition, shapeStrokeDash } from './shapes.ts';
 import { inkDefaults } from './ink.ts';
 import { DrawingText } from './DrawingText.tsx';
 import { memo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import { dragRotation } from './rotation.ts';
+import { dragRotation, drawingResizeVisible } from './rotation.ts';
 import { LockKeyhole, TriangleAlert, Variable } from 'lucide-react';
 import { Handle, Position, NodeResizer, type Node, type NodeProps } from '@xyflow/react';
 import type { DesignMode, Resource, BoardItem, Action, Architecture } from './model.ts';
@@ -71,7 +71,7 @@ export const BoardNode = memo(function BoardNode({ data, selected }: NodeProps<B
 	const [turning, setTurning] = useState<number>();
 	const rotation = turning ?? item.rotation ?? 0;
 	return (<>
-		<NodeResizer isVisible={selected && !item.canvasLocked} minWidth={item.kind === 'ink' ? 16 : 140} minHeight={item.kind === 'ink' ? 16 : 80}
+		<NodeResizer isVisible={drawingResizeVisible(item, selected, rotation)} minWidth={item.kind === 'ink' ? 16 : 140} minHeight={item.kind === 'ink' ? 16 : 80}
 				onResizeEnd={(_, size) => dispatch({ type: 'resizeItem', id: item.id, mode: data.mode, position: { x: size.x, y: size.y }, width: size.width, height: size.height })} />
 		<div className={'board-item ' + item.kind + (selected ? ' is-selected' : '')}
    style={{ rotate: rotation ? rotation + 'deg' : undefined, background: item.kind === 'shape' || item.kind === 'ink' ? undefined : item.fill, opacity: item.opacity ?? 1, ...(item.kind !== 'shape' && item.kind !== 'text' && item.kind !== 'ink' ? { borderColor: item.strokeColor, borderWidth: item.strokeWidth, borderStyle: item.strokeStyle } : {}) }}>

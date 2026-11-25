@@ -16,11 +16,14 @@ import {
 	type CanvasCloudRegionsPayload,
 	type CanvasDependencyReport,
 	type CanvasDetectedEngine,
+	type CanvasEngineInitOfflineReport,
+	type CanvasEnginePlanReport,
 	type CanvasEngineValidateReport,
 	type CanvasExportAuditReport,
 	type CanvasGraphSnapshot,
 	type CanvasModuleInspection,
 	type CanvasNotice,
+	type CanvasOfflineMirrorReadiness,
 	type CanvasSchemaDiffReport,
 	type CanvasViewState,
 	type DraftSaveApplyResult,
@@ -113,6 +116,23 @@ export interface CanvasPanelHost {
 		sourceRevision: string,
 		engine?: 'openTofu' | 'terraform'
 	): Promise<{ readonly ok: true; readonly report: CanvasEngineValidateReport } | { readonly ok: false; readonly message: string }>;
+	onRunEnginePlan?(
+		workspaceId: string,
+		architectureId: string,
+		sourceRevision: string,
+		engine?: 'openTofu' | 'terraform'
+	): Promise<{ readonly ok: true; readonly report: CanvasEnginePlanReport } | { readonly ok: false; readonly message: string }>;
+	onCheckOfflineMirrorReadiness?(
+		workspaceId: string,
+		architectureId: string,
+		sourceRevision: string
+	): Promise<CanvasOfflineMirrorReadiness | undefined>;
+	onRunEngineInitOffline?(
+		workspaceId: string,
+		architectureId: string,
+		sourceRevision: string,
+		engine?: 'openTofu' | 'terraform'
+	): Promise<{ readonly ok: true; readonly report: CanvasEngineInitOfflineReport } | { readonly ok: false; readonly message: string }>;
 	onExportArtifact?(
 		format: ExportFormat,
 		suggestedFileName: string,
@@ -136,6 +156,7 @@ export class CloudForgeCanvasPanel implements Disposable {
 	private graph: CanvasGraphSnapshot | undefined;
 	private notice: CanvasNotice | null = null;
 	private pendingValidation: { readonly scope: 'architecture' | 'resource'; readonly nodeId?: string } | undefined;
+	private pendingSelectNodeId: string | undefined;
 	private pendingOpenExport = false;
 	private pendingOpenTemplates = false;
 	private readonly disposables: Disposable[] = [];
@@ -216,6 +237,25 @@ export class CloudForgeCanvasPanel implements Disposable {
 			return;
 		}
 		this.post({ type: 'selectNode', nodeId });
+	}
+
+	/** Opens or reveals the Architecture Canvas and selects a specific resource node. */
+	revealNode(graph: CanvasGraphSnapshot | undefined, nodeId: string): void {
+		if (!this.panel) {
+			this.pendingSelectNodeId = nodeId;
+			this.show(graph, false);
+			return;
+		}
+		if (graph) {
+			this.graph = graph;
+			this.panel.title = this.panelTitle(graph);
+		}
+		this.panel.reveal(this.panel.viewColumn ?? ViewColumn.One, false);
+		if (this.ready) {
+			this.post({ type: 'selectNode', nodeId });
+		} else {
+			this.pendingSelectNodeId = nodeId;
+		}
 	}
 
 	/** Displays a stale, unavailable, or coverage notice inside the open canvas. */
@@ -317,6 +357,7 @@ export class CloudForgeCanvasPanel implements Disposable {
 				this.panel = undefined;
 				this.ready = false;
 				this.pendingValidation = undefined;
+				this.pendingSelectNodeId = undefined;
 				this.pendingOpenExport = false;
 				this.pendingOpenTemplates = false;
 				void this.host.onCancelValidation?.();
@@ -338,6 +379,11 @@ export class CloudForgeCanvasPanel implements Disposable {
 				this.ready = true;
 				this.postCurrentState();
 				this.post({ type: 'focusModeChanged', active: !!this.host.isFocusModeActive?.() });
+				if (this.pendingSelectNodeId) {
+					const selectId = this.pendingSelectNodeId;
+					this.pendingSelectNodeId = undefined;
+					this.post({ type: 'selectNode', nodeId: selectId });
+				}
 				if (this.host.onLoadCatalogueSnapshots) {
 					void this.host.onLoadCatalogueSnapshots().then(snapshots => {
 						if (this.ready && snapshots.length > 0) {
@@ -605,6 +651,48 @@ export class CloudForgeCanvasPanel implements Disposable {
 				}
 				return;
 			}
+			case 'requestEnginePlan': {
+				const graph = this.graph;
+				if (!graph || !this.host.onRunEnginePlan) {
+					this.post({ type: 'enginePlanReport', report: null, error: l10n.t('Local CLI plan capture is not available in this window.') });
+					return;
+				}
+				const outcome = await this.host.onRunEnginePlan(
+					graph.workspaceId,
+					graph.architectureId,
+					graph.sourceRevision,
+					message.engine
+				);
+				if (this.panel && this.ready) {
+					if (outcome.ok) {
+						this.post({ type: 'enginePlanReport', report: outcome.report });
+					} else {
+						this.post({ type: 'enginePlanReport', report: null, error: outcome.message });
+					}
+				}
+				return;
+			}
+			case 'requestEngineInitOffline': {
+				const graph = this.graph;
+				if (!graph || !this.host.onRunEngineInitOffline) {
+					this.post({ type: 'engineInitOfflineReport', report: null, error: l10n.t('Offline mirror initialization is not available in this window.') });
+					return;
+				}
+				const outcome = await this.host.onRunEngineInitOffline(
+					graph.workspaceId,
+					graph.architectureId,
+					graph.sourceRevision,
+					message.engine
+				);
+				if (this.panel && this.ready) {
+					if (outcome.ok) {
+						this.post({ type: 'engineInitOfflineReport', report: outcome.report });
+					} else {
+						this.post({ type: 'engineInitOfflineReport', report: null, error: outcome.message });
+					}
+				}
+				return;
+			}
 			case 'exportArtifact': {
 				if (!this.host.onExportArtifact) {
 					this.post({ type: 'exportResult', ok: false, message: l10n.t('Export is not available in this window.') });
@@ -729,6 +817,14 @@ export class CloudForgeCanvasPanel implements Disposable {
 			void this.host.onAuditExportReadiness(snapshot.workspaceId, snapshot.architectureId, snapshot.sourceRevision).then(report => {
 				if (this.ready && this.graph?.workspaceId === snapshot.workspaceId && this.graph?.architectureId === snapshot.architectureId && this.graph?.sourceRevision === snapshot.sourceRevision) {
 					this.post({ type: 'exportAuditReport', report: report ?? null });
+				}
+			});
+		}
+		if (this.host.onCheckOfflineMirrorReadiness) {
+			const snapshot = this.graph;
+			void this.host.onCheckOfflineMirrorReadiness(snapshot.workspaceId, snapshot.architectureId, snapshot.sourceRevision).then(report => {
+				if (this.ready && this.graph?.workspaceId === snapshot.workspaceId && this.graph?.architectureId === snapshot.architectureId && this.graph?.sourceRevision === snapshot.sourceRevision) {
+					this.post({ type: 'offlineMirrorReadiness', report: report ?? null });
 				}
 			});
 		}

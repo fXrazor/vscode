@@ -2,7 +2,12 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-import type { Position } from './model.ts';
+import type { BoardItem, Position } from './model.ts';
+
+/** React Flow's resize frame is axis-aligned; rotated drawings use Appearance dimensions. */
+export function drawingResizeVisible(item: BoardItem, selected: boolean, angle = item.rotation ?? 0): boolean {
+	return selected && !item.canvasLocked && Number.isFinite(angle) && angle % 360 === 0;
+}
 
 /** Angle of a pointer around a centre: 0° points up, clockwise positive, in [0, 360). */
 export function pointerAngle(centre: Position, pointer: Position): number {

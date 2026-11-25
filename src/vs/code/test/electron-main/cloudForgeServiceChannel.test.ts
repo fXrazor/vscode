@@ -349,11 +349,13 @@ suite('CloudForgeServiceChannel', () => {
 		await call(1, 'createWorkspaceFile', { workspaceId });
 		await call(1, 'removeRepository', { workspaceId, repositoryId: `${workspaceId}-repository-1` });
 		await call(1, 'installGit', {});
+		await call(1, 'runEnginePlan', { workspaceId, architectureId: `${workspaceId}-architecture-1`, engine: 'openTofu' });
 		assert.deepStrictEqual(callsByWindow(), {
 			1: [
 				{ method: 'createWorkspaceFile', params: { workspaceId } },
 				{ method: 'removeRepository', params: { workspaceId, repositoryId: `${workspaceId}-repository-1` } },
 				{ method: 'installGit', params: {}, timeoutMs: 11 * 60 * 1000 },
+				{ method: 'runEnginePlan', params: { workspaceId, architectureId: `${workspaceId}-architecture-1`, engine: 'openTofu' }, timeoutMs: 2 * 60 * 1000 },
 			]
 		});
 		await broker.stop();
@@ -549,5 +551,195 @@ suite('CloudForgeServiceChannel', () => {
 			architectureId: 'workspace-1-architecture-1',
 			engine: 'bash'
 		}), undefined);
+
+		assert.deepStrictEqual(validateCloudForgeServiceParams('runEnginePlan', {
+			workspaceId: 'workspace-1',
+			architectureId: 'workspace-1-architecture-1',
+			expectedSourceRevision: rev,
+			engine: 'terraform'
+		}), {
+			workspaceId: 'workspace-1',
+			architectureId: 'workspace-1-architecture-1',
+			expectedSourceRevision: rev,
+			engine: 'terraform'
+		});
+		assert.deepStrictEqual(validateCloudForgeServiceParams('runEnginePlan', {
+			workspaceId: 'workspace-1',
+			architectureId: 'workspace-1-architecture-1'
+		}), {
+			workspaceId: 'workspace-1',
+			architectureId: 'workspace-1-architecture-1'
+		});
+		assert.strictEqual(validateCloudForgeServiceParams('runEnginePlan', {
+			workspaceId: 'workspace-1',
+			architectureId: 'workspace-1-architecture-1',
+			engine: 'cmd'
+		}), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('runEnginePlan', {
+			workspaceId: 'workspace-1',
+			architectureId: 'workspace-1-architecture-1',
+			workingDir: 'C:\\evil'
+		}), undefined);
+	});
+
+	test('validates Stage 10 mirror, offline init, and schema extraction parameters and rejects paths', () => {
+		const rev = 'b'.repeat(64);
+		assert.deepStrictEqual(validateCloudForgeServiceParams('listMirrorPackages', {}), {});
+		assert.strictEqual(validateCloudForgeServiceParams('listMirrorPackages', { mirrorPath: 'C:\\mirror' }), undefined);
+
+		assert.deepStrictEqual(validateCloudForgeServiceParams('checkOfflineMirrorReadiness', {
+			workspaceId: 'workspace-1',
+			architectureId: 'workspace-1-architecture-1',
+			expectedSourceRevision: rev,
+			engine: 'openTofu',
+			platforms: ['windows_amd64', 'linux_amd64']
+		}), {
+			workspaceId: 'workspace-1',
+			architectureId: 'workspace-1-architecture-1',
+			expectedSourceRevision: rev,
+			engine: 'openTofu',
+			platforms: ['windows_amd64', 'linux_amd64']
+		});
+		assert.strictEqual(validateCloudForgeServiceParams('checkOfflineMirrorReadiness', {
+			workspaceId: 'workspace-1',
+			architectureId: 'workspace-1-architecture-1',
+			platforms: []
+		}), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('checkOfflineMirrorReadiness', {
+			workspaceId: 'workspace-1',
+			architectureId: 'workspace-1-architecture-1',
+			platforms: ['../escape']
+		}), undefined);
+
+		assert.deepStrictEqual(validateCloudForgeServiceParams('runEngineInitOffline', {
+			workspaceId: 'workspace-1',
+			architectureId: 'workspace-1-architecture-1',
+			expectedSourceRevision: rev,
+			engine: 'terraform'
+		}), {
+			workspaceId: 'workspace-1',
+			architectureId: 'workspace-1-architecture-1',
+			expectedSourceRevision: rev,
+			engine: 'terraform'
+		});
+		assert.strictEqual(validateCloudForgeServiceParams('runEngineInitOffline', {
+			workspaceId: 'workspace-1',
+			architectureId: 'workspace-1-architecture-1',
+			cliConfigPath: 'C:\\evil.tofurc'
+		}), undefined);
+
+		assert.deepStrictEqual(validateCloudForgeServiceParams('extractProviderSchemaFromMirror', {
+			address: 'registry.terraform.io/hashicorp/azurerm',
+			version: '5.14.0',
+			engine: 'openTofu'
+		}), {
+			address: 'registry.terraform.io/hashicorp/azurerm',
+			version: '5.14.0',
+			engine: 'openTofu'
+		});
+		assert.strictEqual(validateCloudForgeServiceParams('extractProviderSchemaFromMirror', {
+			address: 'hashicorp/azurerm',
+			version: '5.14.0'
+		}), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('extractProviderSchemaFromMirror', {
+			address: 'registry.terraform.io/hashicorp/azurerm',
+			version: '../5.14.0'
+		}), undefined);
+
+		const sha = 'a'.repeat(64);
+		assert.deepStrictEqual(validateCloudForgeServiceParams('importMirrorPackage', {
+			address: 'registry.terraform.io/hashicorp/azurerm',
+			version: '5.14.0',
+			platform: 'windows_amd64',
+			expectedSha256: sha.toUpperCase(),
+			publisher: ' HashiCorp '
+		}), {
+			address: 'registry.terraform.io/hashicorp/azurerm',
+			version: '5.14.0',
+			platform: 'windows_amd64',
+			expectedSha256: sha,
+			publisher: 'HashiCorp'
+		});
+		// Extension host may never supply `archivePath`.
+		assert.strictEqual(validateCloudForgeServiceParams('importMirrorPackage', {
+			archivePath: 'C:\\evil.zip',
+			address: 'registry.terraform.io/hashicorp/azurerm',
+			version: '5.14.0',
+			platform: 'windows_amd64',
+			expectedSha256: sha
+		}), undefined);
+
+		assert.deepStrictEqual(validateCloudForgeServiceParams('evictMirrorPackage', {
+			address: 'registry.terraform.io/hashicorp/azurerm',
+			version: '5.14.0',
+			platform: 'windows_amd64'
+		}), {
+			address: 'registry.terraform.io/hashicorp/azurerm',
+			version: '5.14.0',
+			platform: 'windows_amd64'
+		});
+		assert.strictEqual(validateCloudForgeServiceParams('evictMirrorPackage', {
+			address: 'hashicorp/azurerm',
+			version: '5.14.0',
+			platform: 'windows_amd64'
+		}), undefined);
+
+		assert.deepStrictEqual(validateCloudForgeServiceParams('verifyMirrorIntegrity', {}), {});
+		assert.strictEqual(validateCloudForgeServiceParams('verifyMirrorIntegrity', { mirrorPath: 'C:\\mirror' }), undefined);
+
+		assert.deepStrictEqual(validateCloudForgeServiceParams('planMirrorCleanup', {
+			quotaBytes: 536870912,
+			workspaceId: 'workspace-1',
+			architectureId: 'workspace-1-architecture-1',
+			expectedSourceRevision: rev,
+			engine: 'openTofu'
+		}), {
+			quotaBytes: 536870912,
+			workspaceId: 'workspace-1',
+			architectureId: 'workspace-1-architecture-1',
+			expectedSourceRevision: rev,
+			engine: 'openTofu'
+		});
+		assert.deepStrictEqual(validateCloudForgeServiceParams('planMirrorCleanup', { quotaBytes: 0 }), { quotaBytes: 0 });
+		assert.strictEqual(validateCloudForgeServiceParams('planMirrorCleanup', { quotaBytes: -1 }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('planMirrorCleanup', { quotaBytes: 1024, workspaceId: 'workspace-1' }), undefined);
+	});
+
+	test('picks a local .zip archive in Electron main for importMirrorPackage and blocks UNC paths', async () => {
+		const sha = 'a'.repeat(64);
+		const params = {
+			address: 'registry.terraform.io/hashicorp/azurerm',
+			version: '5.14.0',
+			platform: 'windows_amd64',
+			expectedSha256: sha,
+			publisher: 'HashiCorp'
+		};
+
+		const cancelled = createBroker([contosoWindow]);
+		assert.deepStrictEqual(await cancelled.call(1, 'importMirrorPackage', params), {
+			ok: false,
+			error: { code: 'CANCELLED', message: 'The CloudForge request was cancelled.' }
+		});
+		assert.deepStrictEqual(cancelled.dialogs.map(dialog => dialog.properties), [['openFile']]);
+		assert.deepStrictEqual(cancelled.callsByWindow(), { 1: [] });
+
+		const unc = createBroker([contosoWindow], { picked: ['\\\\server\\share\\provider.zip'] });
+		assert.deepStrictEqual(await unc.call(1, 'importMirrorPackage', params), {
+			ok: false,
+			error: { code: 'SCOPE_DENIED', message: 'The requested CloudForge workspace is not active in this window.' }
+		});
+		assert.deepStrictEqual(unc.callsByWindow(), { 1: [] });
+
+		const local = createBroker([contosoWindow], {
+			picked: ['D:\\Mirrors\\terraform-provider-azurerm_5.14.0_windows_amd64.zip'],
+			reply: () => ({ created: true, package: { key: { address: params.address, version: params.version, platform: params.platform }, sizeBytes: 1024, sha256: sha, recordedAt: '2026-11-25T00:00:00Z' } })
+		});
+		const imported = await local.call(1, 'importMirrorPackage', params);
+		assert.strictEqual(imported.ok, true);
+		assert.deepStrictEqual(local.callsByWindow(), {
+			1: [{ method: 'importMirrorPackage', params: { ...params, archivePath: 'D:\\Mirrors\\terraform-provider-azurerm_5.14.0_windows_amd64.zip' }, timeoutMs: 65000 }]
+		});
+
+		await Promise.all([cancelled, unc, local].map(item => item.broker.stop()));
 	});
 });

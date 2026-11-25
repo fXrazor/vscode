@@ -1,8 +1,8 @@
-import type { Dispatch } from 'react';
+import type { Dispatch, ReactNode } from 'react';
 import { ArrowRightLeft, Trash2, X } from 'lucide-react';
 import type { Action, DesignConnection } from './model.ts';
 
-export function ConnectionTools({ connection, dispatch, onClose }: { connection: DesignConnection; dispatch: Dispatch<Action>; onClose: () => void }) {
+export function ConnectionTools({ connection, dispatch, onClose, children }: { connection: DesignConnection; dispatch: Dispatch<Action>; onClose: () => void; children?: ReactNode }) {
 	const update = (patch: Partial<DesignConnection>) => dispatch({ type: 'updateConnection', id: connection.id, patch });
 	return <section className="connection-tools nodrag nopan" aria-label="Edit design connection" onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); onClose(); } }}>
 		<header><strong>Design connection</strong><span>Visual link · no Terraform dependency</span><button aria-label="Close connection tools" onClick={onClose}><X size={14}/></button></header>
@@ -22,5 +22,6 @@ export function ConnectionTools({ connection, dispatch, onClose }: { connection:
 			<button aria-label="Reverse connection direction" title="Reverse connection direction" onClick={() => dispatch({ type: 'reverseConnection', id: connection.id })}><ArrowRightLeft size={15}/></button>
 			<button aria-label="Delete design connection" onClick={() => { dispatch({ type: 'deleteConnection', id: connection.id }); onClose(); }}><Trash2 size={15}/></button>
 		</div>
+		{children}
 	</section>;
 }

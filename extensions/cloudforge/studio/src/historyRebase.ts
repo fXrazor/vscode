@@ -3,6 +3,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import type { Architecture } from './model.ts';
+import { endpointExists } from './connectionEndpoints.ts';
 
 /**
  * Snapshot-based history cannot simply survive a live refresh: undoing would restore a stale
@@ -120,7 +121,7 @@ export function rebaseSnapshot(snapshot: Architecture, base: Architecture, incom
 			: resource),
 		items,
 		connections: mergeKeyed(snapshot.connections, base.connections, incoming.connections)
-			.filter(connection => endpointIds.has(connection.source) && endpointIds.has(connection.target)),
+			.filter(connection => endpointExists(connection.source, endpointIds) && endpointExists(connection.target, endpointIds)),
 	};
 	if (snapshot.variables || incoming.variables) {
 		merged.variables = mergeKeyed(snapshot.variables, base.variables, incoming.variables);

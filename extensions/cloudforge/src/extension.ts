@@ -12,11 +12,13 @@ import {
 	l10n,
 	languages,
 	Position,
+	ProgressLocation,
 	Range,
 	StatusBarAlignment,
 	TreeItem,
 	TreeItemCollapsibleState,
 	Uri,
+	ViewColumn,
 	window,
 	workspace,
 	type Event,
@@ -25,14 +27,36 @@ import {
 	type TreeView
 } from 'vscode';
 import { activateProjects } from './project/index';
+import { registerTerraformEditorProviders } from './editor/providers';
+import {
+	extractTerraformReferenceAtPosition,
+	findTerraformBlockAtLine,
+	matchBlockToGraphNode,
+	matchReferenceToGraphNode,
+	parseTerraformDocumentBlocks
+} from './editor/terraformLanguage';
+import {
+	formatReadinessReportText,
+	formatResourceExplanationMarkdown,
+	formatSchemaDiffReportText,
+	groupUpgradeableSnapshots,
+	sanitizeExportStem
+} from './project/architectureTools';
+import { findWorkspacePreset, isWorkspacePresetId, WORKSPACE_PRESETS, type WorkspacePresetId } from './project/workspacePresets';
+import { explainResource } from './canvas/advisorRecipes';
 import { CloudForgeCanvasPanel } from './canvas/canvasPanel';
-import { orientServiceEdgesForCanvas } from './canvas/layout';
-import { isValidTfFileName, type CanvasCatalogueSnapshot, type CanvasCatalogueTypes, type CanvasCloudRegionsPayload, type CanvasEngineValidateReport, type CanvasGraphSnapshot } from './canvas/protocol';
+import { createDraftDocument } from './canvas/draftDocument';
+import { renderArchitectureMarkdownReport } from './canvas/exportDiagram';
+import { generateTargetIac, type GeneratorTarget } from './canvas/generators';
+import { buildCanvasProjection, orientServiceEdgesForCanvas } from './canvas/layout';
+import { estimateArchitectureCost, evaluateArchitecturePolicies } from './canvas/planReview';
+import { isValidTfFileName, type CanvasCatalogueSnapshot, type CanvasCatalogueTypes, type CanvasCloudRegionsPayload, type CanvasEnginePlanActionKind, type CanvasEnginePlanReport, type CanvasEngineValidateDiagnostic, type CanvasGraphSnapshot } from './canvas/protocol';
 import { lookupBundledSchema, type FormSchema } from './canvas/schemaForm';
 import { findTemplateById } from './canvas/templateLibrary';
 import { activateSidePanel } from './sidePanel/sidePanel';
 import {
 	draftSaveErrorMessage,
+	formatEnginePlanReportText,
 	mapRustFormSchemaToCanvasFormSchema,
 	mapServiceValidationPollToRun,
 	parseCatalogueSnapshots,
@@ -41,11 +65,15 @@ import {
 	parseDetectedEngines,
 	parseDraftSaveApply,
 	parseDraftSavePreview,
+	parseEngineInitOfflineReport,
+	parseEnginePlanReport,
 	parseSaveAllApply,
 	parseSaveAllPreview,
 	parseEngineValidateReport,
 	parseExportAuditReport,
+	parseMirrorPackages,
 	parseModuleInspection,
+	parseOfflineMirrorReadiness,
 	parseSchemaDiffReport,
 	parseValidationPoll,
 	parseValidationStart,
@@ -172,8 +200,14 @@ class CloudForgeGraphProvider implements TreeDataProvider<GraphTreeItem> {
 			const edges = this.graph?.edges ?? [];
 			const hasConnections = edges.some(edge => edge.fromId === element.node.id || edge.toId === element.node.id);
 			const item = new TreeItem(element.node.label, hasConnections ? TreeItemCollapsibleState.Collapsed : TreeItemCollapsibleState.None);
-			item.description = element.node.resourceType ?? element.node.kind;
-			item.tooltip = element.node.kind + ': ' + element.node.name;
+			const typeLabel = element.node.resourceType ?? element.node.kind;
+			const sourceLabel = element.node.sourceFile
+				? `${element.node.sourceFile}${element.node.sourceLine ? `:${element.node.sourceLine}` : ''}`
+				: undefined;
+			item.description = sourceLabel ? `${typeLabel} · ${sourceLabel}` : typeLabel;
+			item.tooltip = sourceLabel
+				? `${element.node.kind}: ${element.node.name}\n${sourceLabel}`
+				: `${element.node.kind}: ${element.node.name}`;
 			item.contextValue = 'cloudForgeResource';
 			return item;
 		}
@@ -529,11 +563,15 @@ export function activate(context: ExtensionContext): void {
 	const panelTreeView = window.createTreeView('cloudforge.panel.resources', { treeDataProvider: provider });
 	context.subscriptions.push(panelTreeView, provider.onDidChangeTreeData(() => { panelTreeView.message = graphMessage(provider.getGraph()); }));
 	const problems = languages.createDiagnosticCollection('cloudforge');
+	const planOutput = window.createOutputChannel(l10n.t('CloudForge Plan'));
+	const readinessOutput = window.createOutputChannel(l10n.t('CloudForge Readiness'));
+	const schemaDiffOutput = window.createOutputChannel(l10n.t('CloudForge Schema Diff'));
 	const statusBar = window.createStatusBarItem(StatusBarAlignment.Left, 100);
 	statusBar.command = 'cloudforge.openCanvas';
 	statusBar.name = l10n.t('CloudForge Architecture');
 	let currentArchitectureName = l10n.t('Architecture');
 	const projectControllerRef: { current?: ReturnType<typeof activateProjects> } = {};
+	const terraformProvidersRef: { current?: ReturnType<typeof registerTerraformEditorProviders> } = {};
 
 	function toVsSeverity(raw: string): DiagnosticSeverity {
 		const lower = raw.toLowerCase();
@@ -546,7 +584,10 @@ export function activate(context: ExtensionContext): void {
 		return DiagnosticSeverity.Information;
 	}
 
-	function syncProblems(graph: ArchitectureGraph | undefined, cliReport?: CanvasEngineValidateReport): void {
+	function syncProblems(
+		graph: ArchitectureGraph | undefined,
+		cliReport?: { readonly engine: 'openTofu' | 'terraform'; readonly diagnostics: readonly CanvasEngineValidateDiagnostic[] }
+	): void {
 		problems.clear();
 		if (!graph) {
 			return;
@@ -595,6 +636,7 @@ export function activate(context: ExtensionContext): void {
 	}
 
 	function updateStatusBar(graph: ArchitectureGraph | undefined): void {
+		terraformProvidersRef.current?.refresh();
 		if (!graph) {
 			statusBar.hide();
 			return;
@@ -772,6 +814,201 @@ export function activate(context: ExtensionContext): void {
 		}
 		syncProblems(provider.getGraph(), report);
 		return { ok: true as const, report };
+	}
+
+	async function runArchitectureEnginePlan(
+		workspaceId: string,
+		architectureId: string,
+		sourceRevision: string,
+		engine?: 'openTofu' | 'terraform'
+	) {
+		const result = await callService<unknown>('runEnginePlan', {
+			workspaceId,
+			architectureId,
+			expectedSourceRevision: sourceRevision,
+			...(engine ? { engine } : {}),
+		});
+		if (!result.ok) {
+			const message = result.error.code === 'STALE_SOURCE'
+				? l10n.t('The Terraform source changed on disk. Refresh the graph before running a local plan.')
+				: result.error.code === 'WORKSPACE_UNAVAILABLE'
+					? l10n.t('No compatible local OpenTofu or Terraform CLI engine was found or plan capture returned unusable output.')
+					: result.error.code === 'LIMIT_EXCEEDED'
+						? l10n.t('Local plan capture exceeded its time or output limit.')
+						: l10n.t('Local CLI plan capture could not complete.');
+			return { ok: false as const, message };
+		}
+		const report = parseEnginePlanReport(result.value);
+		if (!report) {
+			return { ok: false as const, message: l10n.t('The CloudForge service returned an invalid local plan report.') };
+		}
+		syncProblems(provider.getGraph(), report);
+		return { ok: true as const, report };
+	}
+
+	async function checkArchitectureOfflineMirrorReadiness(
+		workspaceId: string,
+		architectureId: string,
+		sourceRevision: string
+	) {
+		const result = await callService<unknown>('checkOfflineMirrorReadiness', {
+			workspaceId,
+			architectureId,
+			expectedSourceRevision: sourceRevision,
+		});
+		if (!result.ok) {
+			return undefined;
+		}
+		return parseOfflineMirrorReadiness(result.value);
+	}
+
+	async function runArchitectureEngineInitOffline(
+		workspaceId: string,
+		architectureId: string,
+		sourceRevision: string,
+		engine?: 'openTofu' | 'terraform'
+	) {
+		const result = await callService<unknown>('runEngineInitOffline', {
+			workspaceId,
+			architectureId,
+			expectedSourceRevision: sourceRevision,
+			...(engine ? { engine } : {}),
+		});
+		if (!result.ok) {
+			const message = result.error.code === 'STALE_SOURCE'
+				? l10n.t('The Terraform source changed on disk. Refresh the graph before running offline init.')
+				: result.error.code === 'SCOPE_DENIED'
+					? l10n.t('Offline init is only allowed on writable project architectures, not read-only imported repositories.')
+					: result.error.code === 'SCHEMA_UNAVAILABLE'
+						? l10n.t('One or more locked providers are missing or unverified in the local offline mirror.')
+						: result.error.code === 'WORKSPACE_UNAVAILABLE'
+							? l10n.t('No compatible local OpenTofu or Terraform CLI engine was found.')
+							: result.error.code === 'LIMIT_EXCEEDED'
+								? l10n.t('Offline init exceeded its time or output limit.')
+								: l10n.t('Offline mirror initialization could not complete.');
+			return { ok: false as const, message };
+		}
+		const report = parseEngineInitOfflineReport(result.value);
+		if (!report) {
+			return { ok: false as const, message: l10n.t('The CloudForge service returned an invalid offline init report.') };
+		}
+		return { ok: true as const, report };
+	}
+
+	function planActionIcon(kind: CanvasEnginePlanActionKind): string {
+		switch (kind) {
+			case 'create': return '$(diff-added)';
+			case 'update': return '$(diff-modified)';
+			case 'replace': return '$(diff-renamed)';
+			case 'delete': return '$(diff-removed)';
+			case 'read': return '$(eye)';
+			case 'no-op': return '$(dash)';
+		}
+	}
+
+	async function runAndPresentLocalPlan(graph: ArchitectureGraph): Promise<void> {
+		const outcome = await window.withProgress(
+			{
+				location: ProgressLocation.Notification,
+				title: l10n.t('CloudForge: Running credential-free local plan for {0}…', currentArchitectureName),
+				cancellable: false,
+			},
+			() => runArchitectureEnginePlan(graph.workspaceId, graph.architectureId, graph.sourceRevision)
+		);
+		if (!outcome.ok) {
+			void window.showErrorMessage(outcome.message);
+			return;
+		}
+		const report: CanvasEnginePlanReport = outcome.report;
+		planOutput.clear();
+		planOutput.append(formatEnginePlanReportText(report, currentArchitectureName));
+
+		const engineLabel = report.engine === 'openTofu' ? 'OpenTofu' : 'Terraform';
+		if (report.status === 'failed') {
+			const openOutput = l10n.t('Open Plan Output');
+			const showProblems = l10n.t('Show Problems');
+			const firstDiag = report.diagnostics[0]?.summary;
+			const msg = firstDiag
+				? l10n.t('{0} {1} plan failed: {2}', engineLabel, report.engineVersion, firstDiag)
+				: l10n.t('{0} {1} plan failed. Ensure providers are initialized locally and check Problems.', engineLabel, report.engineVersion);
+			const choice = await window.showWarningMessage(msg, openOutput, showProblems);
+			if (choice === openOutput) {
+				planOutput.show(true);
+			} else if (choice === showProblems) {
+				await commands.executeCommand('workbench.actions.view.problems');
+			}
+			return;
+		}
+
+		type PlanPick =
+			| { readonly label: string; readonly description?: string; readonly detail?: string; readonly pickKind: 'resource'; readonly address: string; readonly typeName: string; readonly name: string }
+			| { readonly label: string; readonly description?: string; readonly pickKind: 'output' }
+			| { readonly label: string; readonly description?: string; readonly pickKind: 'openOutput' };
+		const picks: PlanPick[] = [];
+		for (const rc of report.resourceChanges) {
+			const attrs = rc.changedAttributePaths.length > 0 ? rc.changedAttributePaths.join(', ') : undefined;
+			const sens = rc.hasSensitiveAttributes ? l10n.t('sensitive values redacted') : undefined;
+			picks.push({
+				label: `${planActionIcon(rc.actionKind)} ${rc.address}`,
+				description: `${rc.actionKind}${sens ? ` · $(lock) ${sens}` : ''}`,
+				detail: attrs ? l10n.t('Changed attributes: {0}', attrs) : undefined,
+				pickKind: 'resource',
+				address: rc.address,
+				typeName: rc.typeName,
+				name: rc.name,
+			});
+		}
+		for (const out of report.outputChanges) {
+			picks.push({
+				label: `$(symbol-variable) output.${out.name}`,
+				description: `${out.actions.join('/')}${out.sensitive ? ` · $(lock) ${l10n.t('sensitive')}` : ''}`,
+				pickKind: 'output',
+			});
+		}
+		picks.push({
+			label: `$(output) ${l10n.t('Open Full Plan Output ({0} {1})', engineLabel, report.engineVersion)}`,
+			description: l10n.t('{0} ms · rev {1}', report.durationMs, report.sourceRevision.slice(0, 8)),
+			pickKind: 'openOutput',
+		});
+
+		const s = report.summary;
+		const summaryTitle = l10n.t(
+			'Local Plan: +{0} create · ~{1} update · +/-{2} replace · -{3} delete ({4} {5})',
+			s.create,
+			s.update,
+			s.replace,
+			s.delete,
+			engineLabel,
+			report.engineVersion
+		);
+		const picked = await window.showQuickPick(picks, {
+			title: summaryTitle,
+			placeHolder: report.truncated
+				? l10n.t('Select a resource change to reveal it in Canvas & source (plan truncated at service bounds)')
+				: l10n.t('Select a resource change to reveal it in Canvas & source'),
+			matchOnDescription: true,
+			matchOnDetail: true,
+		});
+		if (!picked) {
+			return;
+		}
+		if (picked.pickKind === 'openOutput' || picked.pickKind === 'output') {
+			planOutput.show(true);
+			return;
+		}
+		const currentGraph = provider.getGraph();
+		const targetNode = currentGraph?.nodes.find(node =>
+			node.name === picked.address ||
+			(node.resourceType === picked.typeName && (node.label === picked.name || node.name.endsWith(`.${picked.name}`)))
+		);
+		if (currentGraph && targetNode) {
+			canvas.selectNode(targetNode.id);
+			if (targetNode.hasSource) {
+				await openNodeSource(currentGraph.workspaceId, currentGraph.architectureId, currentGraph.sourceRevision, targetNode.id);
+			}
+		} else {
+			planOutput.show(true);
+		}
 	}
 
 	async function cancelServiceValidation(): Promise<void> {
@@ -1121,6 +1358,9 @@ export function activate(context: ExtensionContext): void {
 		onDiffCatalogueSnapshots: diffArchitectureCatalogueSnapshots,
 		onDetectEngines: detectLocalEngines,
 		onRunEngineValidate: runArchitectureEngineValidate,
+		onRunEnginePlan: runArchitectureEnginePlan,
+		onCheckOfflineMirrorReadiness: checkArchitectureOfflineMirrorReadiness,
+		onRunEngineInitOffline: runArchitectureEngineInitOffline,
 		async onExportArtifact(format, suggestedFileName, content, encoding) {
 			const folder = workspace.workspaceFolders?.[0]?.uri;
 			const defaultUri = folder ? Uri.joinPath(folder, suggestedFileName) : Uri.file(suggestedFileName);
@@ -1173,7 +1413,59 @@ export function activate(context: ExtensionContext): void {
 		isFocusModeActive: () => focusModeActive,
 	});
 
-	context.subscriptions.push(provider, treeView, problems, canvas, statusBar);
+	const terraformProviders = registerTerraformEditorProviders({
+		getActiveSnapshot() {
+			const graph = provider.getGraph();
+			return graph ? toCanvasSnapshot(graph, currentArchitectureName) : undefined;
+		},
+		getCachedSchema(kind, typeName) {
+			return cachedLiveSchemas.get(`${kind}:${typeName}`) ?? undefined;
+		},
+		listCachedSchemas() {
+			const out: FormSchema[] = [];
+			for (const schema of cachedLiveSchemas.values()) {
+				if (schema) {
+					out.push(schema);
+				}
+			}
+			return out;
+		},
+	});
+	terraformProvidersRef.current = terraformProviders;
+
+	function resolveNodeIdFromActiveEditor(graph: ArchitectureGraph): string | undefined {
+		const editor = window.activeTextEditor;
+		if (!editor) {
+			return undefined;
+		}
+		const doc = editor.document;
+		const lowerPath = doc.uri.path.toLowerCase();
+		if (!lowerPath.endsWith('.tf') && !lowerPath.endsWith('.tofu') && doc.languageId !== 'terraform' && doc.languageId !== 'hcl') {
+			return undefined;
+		}
+		const pos = editor.selection.active;
+		const ref = extractTerraformReferenceAtPosition(doc.lineAt(pos.line).text, pos.character);
+		if (ref) {
+			const matchedRef = matchReferenceToGraphNode(ref, graph.nodes);
+			if (matchedRef) {
+				return matchedRef.id;
+			}
+		}
+		const blocks = parseTerraformDocumentBlocks(doc.getText());
+		const block = findTerraformBlockAtLine(blocks, pos.line);
+		if (block) {
+			const pathStr = doc.uri.path;
+			const slashIdx = pathStr.lastIndexOf('/');
+			const baseName = slashIdx >= 0 ? pathStr.slice(slashIdx + 1) : pathStr;
+			const matchedBlock = matchBlockToGraphNode(block, graph.nodes, baseName);
+			if (matchedBlock) {
+				return matchedBlock.id;
+			}
+		}
+		return undefined;
+	}
+
+	context.subscriptions.push(provider, treeView, problems, planOutput, readinessOutput, schemaDiffOutput, canvas, statusBar, terraformProviders);
 	context.subscriptions.push(treeView.onDidChangeSelection(event => {
 		const resource = event.selection.find(item => item.type === 'resource');
 		const graph = provider.getGraph();
@@ -1190,8 +1482,104 @@ export function activate(context: ExtensionContext): void {
 		const graph = provider.getGraph();
 		canvas.show(graph ? toCanvasSnapshot(graph, currentArchitectureName) : undefined, false);
 	}));
+	context.subscriptions.push(commands.registerCommand('cloudforge.revealNodeInCanvas', async (arg?: unknown) => {
+		const graph = provider.getGraph();
+		if (!graph || graph.nodes.length === 0) {
+			void window.showInformationMessage(l10n.t('Open an architecture before revealing a resource in the Canvas.'));
+			return;
+		}
+		let nodeId: string | undefined;
+		if (typeof arg === 'string' && arg.length > 0) {
+			nodeId = arg;
+		} else {
+			nodeId = resolveNodeIdFromActiveEditor(graph);
+		}
+		if (!nodeId) {
+			const picked = await window.showQuickPick(
+				graph.nodes.map(node => ({
+					label: node.label,
+					description: `${node.resourceType ?? node.kind}${node.sourceFile ? ` · ${node.sourceFile}${node.sourceLine ? `:${node.sourceLine}` : ''}` : ''}`,
+					nodeId: node.id,
+				})),
+				{
+					title: l10n.t('Reveal Resource in Canvas ({0})', currentArchitectureName),
+					placeHolder: l10n.t('Choose a resource to select on the CloudForge Architecture Canvas'),
+					matchOnDescription: true,
+				}
+			);
+			if (!picked) {
+				return;
+			}
+			nodeId = picked.nodeId;
+		}
+		const target = graph.nodes.find(node => node.id === nodeId);
+		if (!target) {
+			return;
+		}
+		canvas.revealNode(toCanvasSnapshot(graph, currentArchitectureName), target.id);
+	}));
+	async function applyWorkspacePreset(requestedId?: unknown): Promise<void> {
+		let presetId: WorkspacePresetId | undefined = isWorkspacePresetId(requestedId) ? requestedId : undefined;
+		if (!presetId) {
+			const picked = await window.showQuickPick(
+				WORKSPACE_PRESETS.map(preset => ({
+					label: `${preset.icon} ${preset.label}`,
+					description: preset.description,
+					detail: preset.detail,
+					presetId: preset.id,
+				})),
+				{
+					title: l10n.t('CloudForge Workspace Layout'),
+					placeHolder: l10n.t('Choose a workspace layout preset'),
+				}
+			);
+			if (!picked) {
+				return;
+			}
+			presetId = picked.presetId;
+		}
+		const preset = findWorkspacePreset(presetId);
+		const graph = provider.getGraph();
+		if (preset.focusMode) {
+			canvas.show(graph ? toCanvasSnapshot(graph, currentArchitectureName) : undefined, false);
+			await setCanvasFocusMode(true);
+			return;
+		}
+		if (focusModeActive) {
+			await setCanvasFocusMode(false);
+		}
+		if (preset.hideSecondarySidebar) {
+			await commands.executeCommand('workbench.action.closeAuxiliaryBar').then(undefined, () => undefined);
+		}
+		if (preset.hideBottomPanel) {
+			await commands.executeCommand('workbench.action.closePanel').then(undefined, () => undefined);
+		}
+		if (preset.showPrimarySidebar) {
+			await commands.executeCommand('cloudforge.projects.focus').then(undefined, () => undefined);
+		}
+		if (preset.editorLayout) {
+			await commands.executeCommand('vscode.setEditorLayout', preset.editorLayout).then(undefined, () => undefined);
+		}
+		canvas.show(graph ? toCanvasSnapshot(graph, currentArchitectureName) : undefined, false);
+		if (preset.id === 'architecture-code') {
+			const sourceNode = graph?.nodes.find(node => node.hasSource);
+			if (graph && sourceNode) {
+				await commands.executeCommand('workbench.action.focusSecondEditorGroup').then(undefined, () => undefined);
+				await openNodeSource(graph.workspaceId, graph.architectureId, graph.sourceRevision, sourceNode.id);
+			} else {
+				const tfFiles = await workspace.findFiles('**/*.tf', '**/.terraform/**', 1);
+				if (tfFiles.length > 0) {
+					await window.showTextDocument(tfFiles[0], { viewColumn: ViewColumn.Two, preserveFocus: true }).then(undefined, () => undefined);
+				}
+			}
+		}
+	}
+
 	context.subscriptions.push(commands.registerCommand('cloudforge.toggleCanvasFocusMode', () => {
 		return setCanvasFocusMode();
+	}));
+	context.subscriptions.push(commands.registerCommand('cloudforge.applyWorkspacePreset', (presetId?: unknown) => {
+		return applyWorkspacePreset(presetId);
 	}));
 	context.subscriptions.push({
 		dispose() {
@@ -1258,6 +1646,349 @@ export function activate(context: ExtensionContext): void {
 			return;
 		}
 		canvas.triggerValidation(toCanvasSnapshot(graph, currentArchitectureName), 'architecture');
+	}));
+	context.subscriptions.push(commands.registerCommand('cloudforge.runEnginePlan', async () => {
+		const graph = provider.getGraph();
+		if (!graph) {
+			void window.showInformationMessage(l10n.t('Open an architecture before previewing a local plan.'));
+			return;
+		}
+		await runAndPresentLocalPlan(graph);
+	}));
+	context.subscriptions.push(commands.registerCommand('cloudforge.exportMultiTarget', async () => {
+		const graph = provider.getGraph();
+		if (!graph) {
+			void window.showInformationMessage(l10n.t('Open an architecture before exporting IaC or reports.'));
+			return;
+		}
+		const snapshot = toCanvasSnapshot(graph, currentArchitectureName);
+		type TargetPick = {
+			readonly label: string;
+			readonly description: string;
+			readonly target: GeneratorTarget | 'markdown';
+			readonly language: string;
+			readonly ext: string;
+			readonly filterName: string;
+		};
+		const picked = await window.showQuickPick<TargetPick>(
+			[
+				{ label: `$(markdown) ${l10n.t('Architecture Markdown Report')}`, description: '.md · Inventory, dependencies & provider lock summary', target: 'markdown', language: 'markdown', ext: '.md', filterName: 'Markdown Report' },
+				{ label: `$(file-code) ${l10n.t('Azure Bicep Preview')}`, description: '.bicep · Offline static mapper with coverage report', target: 'bicep', language: 'bicep', ext: '.bicep', filterName: 'Azure Bicep' },
+				{ label: `$(json) ${l10n.t('Azure ARM Template Preview')}`, description: '.json · ARM 2019-04-01 template schema', target: 'arm', language: 'json', ext: '.json', filterName: 'Azure ARM JSON' },
+				{ label: `$(file-code) ${l10n.t('AWS CloudFormation YAML Preview')}`, description: '.yaml · AWS CloudFormation resource mapping', target: 'cloudformation', language: 'yaml', ext: '.yaml', filterName: 'CloudFormation YAML' },
+				{ label: `$(file-code) ${l10n.t('Kubernetes Manifests YAML Preview')}`, description: '.yaml · Namespaces, deployments, services & policies', target: 'k8s', language: 'yaml', ext: '.yaml', filterName: 'Kubernetes YAML' },
+			],
+			{
+				title: l10n.t('Export CloudForge Architecture ({0})', currentArchitectureName),
+				placeHolder: l10n.t('Choose an export format to preview or save'),
+			}
+		);
+		if (!picked) {
+			return;
+		}
+
+		let content: string;
+		let summaryNote: string;
+		if (picked.target === 'markdown') {
+			const dependencyReport = await inspectArchitectureDependencies(graph.workspaceId, graph.architectureId, graph.sourceRevision);
+			const projection = buildCanvasProjection(snapshot, 'visual', '', new Set());
+			content = renderArchitectureMarkdownReport(snapshot, projection, {
+				scope: 'architecture',
+				theme: 'dark',
+				mode: 'visual',
+				includeValidation: false,
+				includeAnnotations: false,
+				includeProvenance: true,
+				frames: [],
+				annotations: [],
+				hiddenLayers: [],
+				dependencyReport: dependencyReport ?? null,
+			});
+			summaryNote = l10n.t('Generated Markdown report for {0} ({1} resources).', currentArchitectureName, snapshot.nodes.length);
+		} else {
+			const artifact = generateTargetIac(snapshot, {}, picked.target);
+			content = artifact.code;
+			summaryNote = l10n.t(
+				'Generated {0}: {1} mapped, {2} unmapped.',
+				artifact.label,
+				artifact.mappedCount,
+				artifact.unmappedCount
+			);
+		}
+
+		const doc = await workspace.openTextDocument({ content, language: picked.language });
+		await window.showTextDocument(doc, { preview: true });
+		const saveChoice = l10n.t('Save to File…');
+		const choice = await window.showInformationMessage(summaryNote, saveChoice);
+		if (choice === saveChoice) {
+			const folder = workspace.workspaceFolders?.[0]?.uri;
+			const fileName = `${sanitizeExportStem(currentArchitectureName)}${picked.ext}`;
+			const defaultUri = folder ? Uri.joinPath(folder, fileName) : Uri.file(fileName);
+			const targetUri = await window.showSaveDialog({
+				defaultUri,
+				filters: { [picked.filterName]: [picked.ext.slice(1)] },
+				saveLabel: l10n.t('Save Export'),
+				title: l10n.t('Save {0}', picked.filterName),
+			});
+			if (targetUri) {
+				await workspace.fs.writeFile(targetUri, Buffer.from(content, 'utf8'));
+				void window.showInformationMessage(l10n.t('Saved {0}.', targetUri.path.split('/').pop() ?? fileName));
+			}
+		}
+	}));
+	context.subscriptions.push(commands.registerCommand('cloudforge.inspectArchitectureReadiness', async () => {
+		const graph = provider.getGraph();
+		if (!graph) {
+			void window.showInformationMessage(l10n.t('Open an architecture before inspecting readiness, policy, and cost.'));
+			return;
+		}
+		const snapshot = toCanvasSnapshot(graph, currentArchitectureName);
+		const [dependencyReport, exportAudit] = await Promise.all([
+			inspectArchitectureDependencies(graph.workspaceId, graph.architectureId, graph.sourceRevision),
+			auditArchitectureExportReadiness(graph.workspaceId, graph.architectureId, graph.sourceRevision),
+		]);
+		const policyFindings = evaluateArchitecturePolicies(snapshot, {}, dependencyReport ?? null);
+		const costEstimate = estimateArchitectureCost(createDraftDocument(snapshot));
+
+		readinessOutput.clear();
+		readinessOutput.append(formatReadinessReportText({
+			architectureName: currentArchitectureName,
+			sourceRevision: graph.sourceRevision,
+			dependencyReport,
+			exportAudit,
+			policyFindings,
+			costEstimate,
+		}));
+
+		type ReadinessPick =
+			| { readonly label: string; readonly description?: string; readonly detail?: string; readonly pickKind: 'finding'; readonly nodeId: string | null }
+			| { readonly label: string; readonly description?: string; readonly detail?: string; readonly pickKind: 'openOutput' };
+		const picks: ReadinessPick[] = [];
+		if (exportAudit) {
+			picks.push({
+				label: `${exportAudit.reproducible ? '$(shield)' : '$(warning)'} ${l10n.t('Export Readiness: {0}', exportAudit.reproducible ? l10n.t('Reproducible') : l10n.t('Action Required'))}`,
+				description: l10n.t('lock: {0} ({1} entries) · {2} modules', exportAudit.lockState, exportAudit.lockEntryCount, exportAudit.moduleCount),
+				detail: exportAudit.unresolvedReasonKinds.length > 0 ? l10n.t('Unresolved: {0}', exportAudit.unresolvedReasonKinds.join(', ')) : undefined,
+				pickKind: 'openOutput',
+			});
+		}
+		picks.push({
+			label: `$(credit-card) ${l10n.t('Offline Cost Estimate: ${0}/mo USD', costEstimate.baselineTotalUsd.toFixed(2))}`,
+			description: l10n.t('{0} catalogued · {1} unknown', costEstimate.knownCount, costEstimate.unknownCount),
+			detail: costEstimate.pricingCatalog,
+			pickKind: 'openOutput',
+		});
+		for (const finding of policyFindings) {
+			const icon = finding.severity === 'error' ? '$(error)' : finding.severity === 'warning' ? '$(warning)' : '$(info)';
+			picks.push({
+				label: `${icon} ${finding.ruleId}: ${finding.title}`,
+				description: finding.resourceLabel,
+				detail: finding.remediation,
+				pickKind: 'finding',
+				nodeId: finding.nodeId,
+			});
+		}
+		picks.push({
+			label: `$(output) ${l10n.t('Open Full Readiness & Cost Report')}`,
+			description: l10n.t('CloudForge Readiness output channel'),
+			pickKind: 'openOutput',
+		});
+
+		const picked = await window.showQuickPick(picks, {
+			title: l10n.t('CloudForge Readiness, Policy & Cost ({0})', currentArchitectureName),
+			placeHolder: l10n.t('Select a finding to locate its resource or open the full report'),
+			matchOnDescription: true,
+			matchOnDetail: true,
+		});
+		if (!picked) {
+			return;
+		}
+		if (picked.pickKind === 'finding' && picked.nodeId) {
+			canvas.selectNode(picked.nodeId);
+			await openNodeSource(graph.workspaceId, graph.architectureId, graph.sourceRevision, picked.nodeId);
+			return;
+		}
+		readinessOutput.show(true);
+	}));
+	context.subscriptions.push(commands.registerCommand('cloudforge.diffProviderSchema', async () => {
+		const graph = provider.getGraph();
+		if (!graph) {
+			void window.showInformationMessage(l10n.t('Open an architecture before running a provider schema upgrade diff.'));
+			return;
+		}
+		const snapshots = await loadCatalogueSnapshots();
+		const groups = groupUpgradeableSnapshots(snapshots);
+		if (groups.length === 0) {
+			const importAction = l10n.t('Import Provider Schema…');
+			const choice = await window.showInformationMessage(
+				l10n.t('Import at least two versions of the same provider schema to diff upgrade impact.'),
+				importAction
+			);
+			if (choice === importAction) {
+				await commands.executeCommand('cloudforge.importProviderSchema');
+			}
+			return;
+		}
+		let group = groups[0];
+		if (groups.length > 1) {
+			const pickedGroup = await window.showQuickPick(
+				groups.map(item => ({
+					label: item.address,
+					description: l10n.t('{0} snapshots ({1})', item.snapshots.length, item.snapshots.map(s => s.version).join(', ')),
+					group: item,
+				})),
+				{ title: l10n.t('Choose Provider to Diff') }
+			);
+			if (!pickedGroup) {
+				return;
+			}
+			group = pickedGroup.group;
+		}
+		const fromPick = await window.showQuickPick(
+			group.snapshots.map(snap => ({
+				label: snap.version,
+				description: `format ${snap.formatVersion} · ${snap.sha256.slice(0, 8)}`,
+				detail: l10n.t('{0} resources · {1} data sources', snap.resourceCount, snap.dataSourceCount),
+				snap,
+			})),
+			{ title: l10n.t('Baseline (From) Version for {0}', group.address) }
+		);
+		if (!fromPick) {
+			return;
+		}
+		const toCandidates = group.snapshots.filter(s => s.sha256 !== fromPick.snap.sha256 || s.version !== fromPick.snap.version);
+		const toPick = await window.showQuickPick(
+			toCandidates.map(snap => ({
+				label: snap.version,
+				description: `format ${snap.formatVersion} · ${snap.sha256.slice(0, 8)}`,
+				detail: l10n.t('{0} resources · {1} data sources', snap.resourceCount, snap.dataSourceCount),
+				snap,
+			})),
+			{ title: l10n.t('Target (To) Version for {0}', group.address) }
+		);
+		if (!toPick) {
+			return;
+		}
+		const outcome = await window.withProgress(
+			{
+				location: ProgressLocation.Notification,
+				title: l10n.t('Diffing {0} {1} -> {2}…', group.address, fromPick.snap.version, toPick.snap.version),
+			},
+			() => diffArchitectureCatalogueSnapshots(
+				{ address: fromPick.snap.address, version: fromPick.snap.version, formatVersion: fromPick.snap.formatVersion, sha256: fromPick.snap.sha256 },
+				{ address: toPick.snap.address, version: toPick.snap.version, formatVersion: toPick.snap.formatVersion, sha256: toPick.snap.sha256 },
+				graph.workspaceId,
+				graph.architectureId,
+				graph.sourceRevision
+			)
+		);
+		if (!outcome.ok) {
+			void window.showErrorMessage(outcome.message);
+			return;
+		}
+		const report = outcome.report;
+		schemaDiffOutput.clear();
+		schemaDiffOutput.append(formatSchemaDiffReportText(report, currentArchitectureName));
+
+		type DiffPick =
+			| { readonly label: string; readonly description?: string; readonly detail?: string; readonly pickKind: 'impact'; readonly address: string; readonly typeName: string }
+			| { readonly label: string; readonly description?: string; readonly pickKind: 'openOutput' };
+		const picks: DiffPick[] = report.impactedArchitectureItems.map(item => ({
+			label: `${item.breaking ? '$(error)' : '$(info)'} ${item.resourceAddress}`,
+			description: `${item.typeName}.${item.path}${item.breaking ? ' · BREAKING' : ''}`,
+			detail: item.summary,
+			pickKind: 'impact',
+			address: item.resourceAddress,
+			typeName: item.typeName,
+		}));
+		picks.push({
+			label: `$(output) ${l10n.t('Open Full Schema Diff Output')}`,
+			description: l10n.t('+{0} / -{1} types · {2} path changes{3}', report.addedTypeCount, report.removedTypeCount, report.pathChangeCount, report.hasBreakingChanges ? ' · BREAKING' : ''),
+			pickKind: 'openOutput',
+		});
+
+		const selected = await window.showQuickPick(picks, {
+			title: l10n.t('Schema Upgrade Impact: {0} ({1} -> {2})', report.provider, report.fromVersion, report.toVersion),
+			placeHolder: report.impactedArchitectureItems.length > 0
+				? l10n.t('Select an impacted resource to inspect it in Canvas & source')
+				: l10n.t('No resources in {0} are impacted by this upgrade', currentArchitectureName),
+			matchOnDescription: true,
+			matchOnDetail: true,
+		});
+		if (!selected) {
+			return;
+		}
+		if (selected.pickKind === 'impact') {
+			const targetNode = graph.nodes.find(node =>
+				node.name === selected.address ||
+				(node.resourceType === selected.typeName && selected.address.endsWith(`.${node.label}`))
+			);
+			if (targetNode) {
+				canvas.selectNode(targetNode.id);
+				if (targetNode.hasSource) {
+					await openNodeSource(graph.workspaceId, graph.architectureId, graph.sourceRevision, targetNode.id);
+				}
+				return;
+			}
+		}
+		schemaDiffOutput.show(true);
+	}));
+	context.subscriptions.push(commands.registerCommand('cloudforge.explainResource', async (arg?: unknown) => {
+		const graph = provider.getGraph();
+		if (!graph || graph.nodes.length === 0) {
+			void window.showInformationMessage(l10n.t('Open an architecture before explaining a resource.'));
+			return;
+		}
+		let nodeId: string | undefined;
+		if (arg instanceof ResourceTreeItem) {
+			nodeId = arg.node.id;
+		} else if (typeof arg === 'string') {
+			nodeId = arg;
+		} else {
+			nodeId = resolveNodeIdFromActiveEditor(graph);
+		}
+		if (!nodeId) {
+			const picked = await window.showQuickPick(
+				graph.nodes.map(node => ({
+					label: node.label,
+					description: `${node.resourceType ?? node.kind}${node.sourceFile ? ` · ${node.sourceFile}${node.sourceLine ? `:${node.sourceLine}` : ''}` : ''}`,
+					nodeId: node.id,
+				})),
+				{
+					title: l10n.t('Explain CloudForge Resource ({0})', currentArchitectureName),
+					placeHolder: l10n.t('Choose a resource to inspect topology, cost, policy, and advisor guidance'),
+					matchOnDescription: true,
+				}
+			);
+			if (!picked) {
+				return;
+			}
+			nodeId = picked.nodeId;
+		}
+		const snapshot = toCanvasSnapshot(graph, currentArchitectureName);
+		const node = snapshot.nodes.find(item => item.id === nodeId);
+		if (!node) {
+			return;
+		}
+		let schema: FormSchema | undefined;
+		if (node.resourceType) {
+			const kind = node.kind === 'data' ? 'dataSource' : 'resource';
+			schema = (await loadResourceSchema(kind, node.resourceType))
+				?? lookupBundledSchema({ kind: node.kind, resourceType: node.resourceType });
+		}
+		const policyFindings = evaluateArchitecturePolicies(snapshot, {});
+		const costEstimate = estimateArchitectureCost(createDraftDocument(snapshot));
+		const explanation = explainResource(snapshot, node.id, {
+			schema,
+			policyFindings,
+			costEstimate,
+		});
+		if (!explanation) {
+			return;
+		}
+		const markdown = formatResourceExplanationMarkdown(explanation, currentArchitectureName);
+		const doc = await workspace.openTextDocument({ content: markdown, language: 'markdown' });
+		await window.showTextDocument(doc, { preview: true });
 	}));
 	context.subscriptions.push(commands.registerCommand('cloudforge.cancelValidation', () => {
 		canvas.cancelValidation();
@@ -1368,6 +2099,348 @@ export function activate(context: ExtensionContext): void {
 			l10n.t('Imported {0} {1} ({2} resources) into the CloudForge provider catalogue.', chosen.address, version.trim(), chosen.resources)
 		);
 	}));
+	context.subscriptions.push(commands.registerCommand('cloudforge.initArchitectureOffline', async () => {
+		const graph = provider.getGraph();
+		if (!graph) {
+			void window.showInformationMessage(l10n.t('Open an architecture before running offline mirror initialization.'));
+			return;
+		}
+		const outcome = await window.withProgress(
+			{
+				location: ProgressLocation.Notification,
+				title: l10n.t('CloudForge: Initializing {0} offline from local provider mirror…', currentArchitectureName),
+				cancellable: false,
+			},
+			() => runArchitectureEngineInitOffline(graph.workspaceId, graph.architectureId, graph.sourceRevision)
+		);
+		if (!outcome.ok) {
+			void window.showWarningMessage(outcome.message);
+			return;
+		}
+		const engineLabel = outcome.report.engine === 'openTofu' ? 'OpenTofu' : 'Terraform';
+		if (outcome.report.status === 'initialized') {
+			void window.showInformationMessage(
+				l10n.t('{0} {1} offline init succeeded in {2} ms. {3}', engineLabel, outcome.report.engineVersion, outcome.report.durationMs, outcome.report.summary)
+			);
+		} else {
+			void window.showWarningMessage(
+				l10n.t('{0} {1} offline init failed (exit {2}): {3}', engineLabel, outcome.report.engineVersion, outcome.report.exitCode, outcome.report.summary)
+			);
+		}
+	}));
+	context.subscriptions.push(commands.registerCommand('cloudforge.extractMirrorSchema', async () => {
+		const listed = await callService<unknown>('listMirrorPackages', {});
+		if (!listed.ok) {
+			showServiceError(listed.error);
+			return;
+		}
+		const winPackages = parseMirrorPackages(listed.value).filter(pkg => pkg.key.platform === 'windows_amd64');
+		if (winPackages.length === 0) {
+			void window.showInformationMessage(
+				l10n.t('No verified windows_amd64 provider packages were found in the local CloudForge mirror.')
+			);
+			return;
+		}
+		const picked = await window.showQuickPick(
+			winPackages.map(pkg => ({
+				label: `${pkg.key.address} ${pkg.key.version}`,
+				description: pkg.publisher ? `${pkg.publisher} · ${pkg.sha256.slice(0, 8)}` : pkg.sha256.slice(0, 8),
+				detail: l10n.t('windows_amd64 · {0} bytes · recorded {1}', pkg.sizeBytes, pkg.recordedAt),
+				pkg,
+			})),
+			{
+				title: l10n.t('Extract Provider Schema from Local Offline Mirror'),
+				placeHolder: l10n.t('Select a verified mirrored provider package to extract into the catalogue'),
+			}
+		);
+		if (!picked) {
+			return;
+		}
+		const extracted = await window.withProgress(
+			{
+				location: ProgressLocation.Notification,
+				title: l10n.t('Extracting {0} {1} schema offline from local mirror…', picked.pkg.key.address, picked.pkg.key.version),
+				cancellable: false,
+			},
+			() => callService<unknown>('extractProviderSchemaFromMirror', {
+				address: picked.pkg.key.address,
+				version: picked.pkg.key.version,
+			})
+		);
+		if (!extracted.ok) {
+			showServiceError(extracted.error);
+			return;
+		}
+		cachedCatalogueSnapshots = undefined;
+		cachedLiveSchemas.clear();
+		const graph = provider.getGraph();
+		if (graph) {
+			canvas.updateIfOpen(toCanvasSnapshot(graph, currentArchitectureName));
+		}
+		void window.showInformationMessage(
+			l10n.t('Extracted {0} {1} into the CloudForge provider catalogue from the local offline mirror.', picked.pkg.key.address, picked.pkg.key.version)
+		);
+	}));
+	context.subscriptions.push(commands.registerCommand('cloudforge.importMirrorPackage', async () => {
+		const graph = provider.getGraph();
+		let suggestedAddress = 'registry.terraform.io/hashicorp/azurerm';
+		let suggestedVersion = '';
+		let suggestedPlatform = 'windows_amd64';
+		if (graph) {
+			const readiness = await checkArchitectureOfflineMirrorReadiness(graph.workspaceId, graph.architectureId, graph.sourceRevision);
+			const firstMissing = readiness?.missing[0];
+			if (firstMissing) {
+				suggestedAddress = firstMissing.address;
+				suggestedVersion = firstMissing.version;
+				suggestedPlatform = firstMissing.platform;
+			}
+		}
+		const address = await window.showInputBox({
+			title: l10n.t('Provider Address (hostname/namespace/type)'),
+			value: suggestedAddress,
+			placeHolder: 'registry.terraform.io/hashicorp/azurerm',
+			validateInput: text => {
+				const parts = text.trim().split('/');
+				return parts.length === 3 && parts.every(p => /^[A-Za-z0-9._+-]+$/.test(p) && p !== '.' && p !== '..')
+					? undefined
+					: l10n.t('Enter a full 3-segment provider address such as registry.terraform.io/hashicorp/azurerm.');
+			},
+		});
+		if (!address) {
+			return;
+		}
+		const version = await window.showInputBox({
+			title: l10n.t('Provider Version for {0}', address.trim()),
+			value: suggestedVersion,
+			placeHolder: '5.14.0',
+			validateInput: text => /^[A-Za-z0-9._+-]+$/.test(text.trim()) ? undefined : l10n.t('Enter a provider release version such as 5.14.0.'),
+		});
+		if (!version) {
+			return;
+		}
+		const platformPick = await window.showQuickPick(
+			[
+				{ label: 'windows_amd64', description: l10n.t('Required for local Windows offline init & schema extraction') },
+				{ label: 'linux_amd64', description: l10n.t('CI / Linux offline mirror target') },
+			],
+			{
+				title: l10n.t('Target Platform for {0} {1}', address.trim(), version.trim()),
+				placeHolder: suggestedPlatform,
+			}
+		);
+		if (!platformPick) {
+			return;
+		}
+		const expectedSha256 = await window.showInputBox({
+			title: l10n.t('Expected SHA-256 Digest (64 hex characters)'),
+			placeHolder: '0123456789abcdef...',
+			validateInput: text => /^[0-9a-fA-F]{64}$/.test(text.trim())
+				? undefined
+				: l10n.t('Enter the verified 64-character SHA-256 hex digest for the provider .zip archive.'),
+		});
+		if (!expectedSha256) {
+			return;
+		}
+		const imported = await window.withProgress(
+			{
+				location: ProgressLocation.Notification,
+				title: l10n.t('Verifying and importing {0} {1} ({2}) into local mirror…', address.trim(), version.trim(), platformPick.label),
+				cancellable: false,
+			},
+			() => callService<unknown>('importMirrorPackage', {
+				address: address.trim(),
+				version: version.trim(),
+				platform: platformPick.label,
+				expectedSha256: expectedSha256.trim().toLowerCase(),
+			})
+		);
+		if (!imported.ok) {
+			if (imported.error.code !== 'CANCELLED') {
+				showServiceError(imported.error);
+			}
+			return;
+		}
+		const currentGraph = provider.getGraph();
+		if (currentGraph) {
+			canvas.updateIfOpen(toCanvasSnapshot(currentGraph, currentArchitectureName));
+		}
+		void window.showInformationMessage(
+			l10n.t('Verified and imported {0} {1} ({2}) into the local offline provider mirror.', address.trim(), version.trim(), platformPick.label)
+		);
+	}));
+	context.subscriptions.push(commands.registerCommand('cloudforge.evictMirrorPackage', async () => {
+		const listed = await callService<unknown>('listMirrorPackages', {});
+		if (!listed.ok) {
+			showServiceError(listed.error);
+			return;
+		}
+		const packages = parseMirrorPackages(listed.value);
+		if (packages.length === 0) {
+			void window.showInformationMessage(l10n.t('The local CloudForge provider mirror is currently empty.'));
+			return;
+		}
+		const picked = await window.showQuickPick(
+			packages.map(pkg => ({
+				label: `${pkg.key.address} ${pkg.key.version} (${pkg.key.platform})`,
+				description: `${pkg.sizeBytes} bytes · ${pkg.sha256.slice(0, 8)}`,
+				detail: pkg.publisher ? l10n.t('{0} · recorded {1}', pkg.publisher, pkg.recordedAt) : l10n.t('Recorded {0}', pkg.recordedAt),
+				pkg,
+			})),
+			{
+				title: l10n.t('Remove Package from Local Offline Mirror'),
+				placeHolder: l10n.t('Select a mirrored provider archive to remove'),
+			}
+		);
+		if (!picked) {
+			return;
+		}
+		const confirmAction = l10n.t('Remove Package');
+		const confirm = await window.showWarningMessage(
+			l10n.t('Remove {0} {1} ({2}) from the local offline provider mirror?', picked.pkg.key.address, picked.pkg.key.version, picked.pkg.key.platform),
+			{ modal: true },
+			confirmAction
+		);
+		if (confirm !== confirmAction) {
+			return;
+		}
+		const evicted = await callService<unknown>('evictMirrorPackage', {
+			address: picked.pkg.key.address,
+			version: picked.pkg.key.version,
+			platform: picked.pkg.key.platform,
+		});
+		if (!evicted.ok) {
+			showServiceError(evicted.error);
+			return;
+		}
+		const bytesReclaimed = isRecord(evicted.value) && typeof evicted.value.bytesReclaimed === 'number' ? evicted.value.bytesReclaimed : picked.pkg.sizeBytes;
+		const currentGraph = provider.getGraph();
+		if (currentGraph) {
+			canvas.updateIfOpen(toCanvasSnapshot(currentGraph, currentArchitectureName));
+		}
+		void window.showInformationMessage(
+			l10n.t('Removed {0} {1} ({2}) from the local mirror ({3} bytes reclaimed).', picked.pkg.key.address, picked.pkg.key.version, picked.pkg.key.platform, bytesReclaimed)
+		);
+	}));
+	context.subscriptions.push(commands.registerCommand('cloudforge.verifyMirrorIntegrity', async () => {
+		const verified = await window.withProgress(
+			{
+				location: ProgressLocation.Notification,
+				title: l10n.t('CloudForge: Verifying local offline provider mirror integrity…'),
+				cancellable: false,
+			},
+			() => callService<unknown>('verifyMirrorIntegrity', {})
+		);
+		if (!verified.ok) {
+			showServiceError(verified.error);
+			return;
+		}
+		if (!isRecord(verified.value)) {
+			void window.showErrorMessage(l10n.t('The CloudForge service returned an invalid mirror verification report.'));
+			return;
+		}
+		const verifiedCount = typeof verified.value.verifiedCount === 'number' ? verified.value.verifiedCount : 0;
+		const missingCount = typeof verified.value.missingArchiveCount === 'number' ? verified.value.missingArchiveCount : 0;
+		const corruptedCount = typeof verified.value.corruptedCount === 'number' ? verified.value.corruptedCount : 0;
+		const totalBytes = typeof verified.value.totalBytes === 'number' ? verified.value.totalBytes : 0;
+		const totalMiB = (totalBytes / (1024 * 1024)).toFixed(1);
+		if (missingCount === 0 && corruptedCount === 0) {
+			void window.showInformationMessage(
+				l10n.t('Local provider mirror verified: {0} intact package(s) ({1} MiB total).', verifiedCount, totalMiB)
+			);
+			return;
+		}
+		void window.showWarningMessage(
+			l10n.t('Local provider mirror integrity issues found: {0} verified, {1} missing archive(s), {2} corrupted.', verifiedCount, missingCount, corruptedCount)
+		);
+	}));
+	context.subscriptions.push(commands.registerCommand('cloudforge.planMirrorCleanup', async () => {
+		const quotaText = await window.showInputBox({
+			title: l10n.t('Target Local Provider Mirror Quota (MiB)'),
+			value: '512',
+			placeHolder: '512',
+			validateInput: text => /^\d+$/.test(text.trim()) ? undefined : l10n.t('Enter a non-negative integer quota in MiB.'),
+		});
+		if (quotaText === undefined) {
+			return;
+		}
+		const quotaBytes = Number(quotaText.trim()) * 1024 * 1024;
+		const graph = provider.getGraph();
+		const params: Record<string, unknown> = graph
+			? {
+				quotaBytes,
+				workspaceId: graph.workspaceId,
+				architectureId: graph.architectureId,
+				expectedSourceRevision: graph.sourceRevision,
+			}
+			: { quotaBytes };
+		const planned = await callService<unknown>('planMirrorCleanup', params);
+		if (!planned.ok) {
+			showServiceError(planned.error);
+			return;
+		}
+		if (!isRecord(planned.value)) {
+			void window.showErrorMessage(l10n.t('The CloudForge service returned an invalid mirror cleanup plan.'));
+			return;
+		}
+		const evictable = Array.isArray(planned.value.evictable) ? planned.value.evictable : [];
+		const pinned = Array.isArray(planned.value.pinnedRequiringReview) ? planned.value.pinnedRequiringReview : [];
+		const totalBytes = typeof planned.value.totalBytes === 'number' ? planned.value.totalBytes : 0;
+		const bytesOverQuota = typeof planned.value.bytesOverQuota === 'number' ? planned.value.bytesOverQuota : 0;
+		if (evictable.length === 0 && pinned.length === 0) {
+			void window.showInformationMessage(
+				l10n.t('Local provider mirror is within quota ({0} MiB used; {1} MiB limit).', (totalBytes / (1024 * 1024)).toFixed(1), quotaText.trim())
+			);
+			return;
+		}
+		type CleanupPick = {
+			readonly label: string;
+			readonly description: string;
+			readonly detail?: string;
+			readonly evictKey?: { readonly address: string; readonly version: string; readonly platform: string };
+		};
+		const picks: CleanupPick[] = [];
+		for (const item of evictable) {
+			if (!isRecord(item) || !isRecord(item.key) || typeof item.key.address !== 'string' || typeof item.key.version !== 'string' || typeof item.key.platform !== 'string') {
+				continue;
+			}
+			const bytes = typeof item.bytes === 'number' ? item.bytes : 0;
+			picks.push({
+				label: `$(trash) ${item.key.address} ${item.key.version} (${item.key.platform})`,
+				description: l10n.t('Evictable · {0} bytes', bytes),
+				detail: l10n.t('Select to remove this unpinned mirrored archive now'),
+				evictKey: { address: item.key.address, version: item.key.version, platform: item.key.platform },
+			});
+		}
+		for (const item of pinned) {
+			if (!isRecord(item) || !isRecord(item.key) || typeof item.key.address !== 'string' || typeof item.key.version !== 'string' || typeof item.key.platform !== 'string') {
+				continue;
+			}
+			const bytes = typeof item.bytes === 'number' ? item.bytes : 0;
+			picks.push({
+				label: `$(pin) ${item.key.address} ${item.key.version} (${item.key.platform})`,
+				description: l10n.t('Pinned by active architecture · {0} bytes (protected)', bytes),
+			});
+		}
+		const selected = await window.showQuickPick(picks, {
+			title: l10n.t('Mirror Cleanup Plan ({0} MiB over quota)', (bytesOverQuota / (1024 * 1024)).toFixed(1)),
+			placeHolder: l10n.t('Choose an unpinned candidate to remove, or press Escape to cancel'),
+		});
+		if (!selected?.evictKey) {
+			return;
+		}
+		const evicted = await callService<unknown>('evictMirrorPackage', selected.evictKey);
+		if (!evicted.ok) {
+			showServiceError(evicted.error);
+			return;
+		}
+		const currentGraph = provider.getGraph();
+		if (currentGraph) {
+			canvas.updateIfOpen(toCanvasSnapshot(currentGraph, currentArchitectureName));
+		}
+		void window.showInformationMessage(
+			l10n.t('Removed {0} {1} ({2}) from the local offline provider mirror.', selected.evictKey.address, selected.evictKey.version, selected.evictKey.platform)
+		);
+	}));
 	let opening: Promise<void> | undefined;
 	context.subscriptions.push(commands.registerCommand('cloudforge.openWorkspace', () => {
 		return opening ??= openWorkspace(provider, treeView, (loaded, architectureName) => {
@@ -1398,6 +2471,29 @@ export function activate(context: ExtensionContext): void {
 				canvas.show(toCanvasSnapshot(loaded, currentArchitectureName), true);
 			}
 			await commands.executeCommand(panelTreeView.visible ? 'cloudforge.panel.resources.focus' : 'cloudforge.resources.focus');
+		},
+		async openCanvas(focusMode = false) {
+			const graph = provider.getGraph();
+			canvas.show(graph ? toCanvasSnapshot(graph, currentArchitectureName) : undefined, false);
+			if (focusMode) {
+				await setCanvasFocusMode(true);
+			}
+		},
+		async validateArchitecture() {
+			const graph = provider.getGraph();
+			if (graph) {
+				canvas.triggerValidation(toCanvasSnapshot(graph, currentArchitectureName), 'architecture');
+			}
+		},
+		async planArchitecture() {
+			const graph = provider.getGraph();
+			if (graph) {
+				await runAndPresentLocalPlan(graph);
+			}
+		},
+		openTemplates() {
+			const graph = provider.getGraph();
+			canvas.openTemplates(graph ? toCanvasSnapshot(graph, currentArchitectureName) : undefined);
 		}
 	});
 

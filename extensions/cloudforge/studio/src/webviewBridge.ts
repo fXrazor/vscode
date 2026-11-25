@@ -297,6 +297,84 @@ export interface HostEngineValidateReport {
 	readonly truncated: boolean;
 }
 
+export interface HostEnginePlanSummary {
+	readonly create: number;
+	readonly update: number;
+	readonly replace: number;
+	readonly delete: number;
+	readonly read: number;
+	readonly noOp: number;
+	readonly total: number;
+}
+
+export interface HostEnginePlanResourceChange {
+	readonly address: string;
+	readonly moduleAddress?: string;
+	readonly mode: 'managed' | 'data';
+	readonly typeName: string;
+	readonly name: string;
+	readonly providerName?: string;
+	readonly actions: readonly string[];
+	readonly actionKind: 'create' | 'update' | 'replace' | 'delete' | 'read' | 'noOp';
+	readonly hasSensitiveAttributes: boolean;
+	readonly changedAttributePaths: readonly string[];
+}
+
+export interface HostEnginePlanOutputChange {
+	readonly name: string;
+	readonly actions: readonly string[];
+	readonly sensitive: boolean;
+}
+
+export interface HostEnginePlanReport {
+	readonly sourceRevision: string;
+	readonly engine: 'openTofu' | 'terraform';
+	readonly engineVersion: string;
+	readonly engineInferred: boolean;
+	readonly status: 'planned' | 'failed';
+	readonly formatVersion?: string;
+	readonly errored: boolean;
+	readonly durationMs: number;
+	readonly summary: HostEnginePlanSummary;
+	readonly resourceChanges: readonly HostEnginePlanResourceChange[];
+	readonly outputChanges: readonly HostEnginePlanOutputChange[];
+	readonly diagnostics: readonly HostEngineValidateDiagnostic[];
+	readonly truncated: boolean;
+}
+
+export interface HostMirrorPackageKey {
+	readonly address: string;
+	readonly version: string;
+	readonly platform: string;
+}
+
+export interface HostCorruptedMirrorPackage {
+	readonly key: HostMirrorPackageKey;
+	readonly reason: string;
+}
+
+export interface HostOfflineMirrorReadiness {
+	readonly sourceRevision: string;
+	readonly engine: 'openTofu' | 'terraform';
+	readonly engineInferred: boolean;
+	readonly lockState: 'absent' | 'valid' | 'invalid' | 'unreadable';
+	readonly isReady: boolean;
+	readonly ready: readonly HostMirrorPackageKey[];
+	readonly missing: readonly HostMirrorPackageKey[];
+	readonly corrupted: readonly HostCorruptedMirrorPackage[];
+}
+
+export interface HostEngineInitOfflineReport {
+	readonly sourceRevision: string;
+	readonly engine: 'openTofu' | 'terraform';
+	readonly engineVersion: string;
+	readonly engineInferred: boolean;
+	readonly status: 'initialized' | 'failed';
+	readonly exitCode: number;
+	readonly durationMs: number;
+	readonly summary: string;
+}
+
 export type HostInboundMessage =
 	| { readonly type: 'graph'; readonly graph: HostGraphSnapshot; readonly viewState?: Partial<HostViewState>; readonly notice?: HostNotice | null }
 	| { readonly type: 'selectNode'; readonly nodeId: string | null }
@@ -318,6 +396,9 @@ export type HostInboundMessage =
 	| { readonly type: 'moduleInspection'; readonly modulePath: readonly string[]; readonly inspection: HostModuleInspection | null; readonly error?: string }
 	| { readonly type: 'detectedEngines'; readonly engines: readonly HostDetectedEngine[] }
 	| { readonly type: 'engineValidateReport'; readonly report: HostEngineValidateReport | null; readonly error?: string }
+	| { readonly type: 'enginePlanReport'; readonly report: HostEnginePlanReport | null; readonly error?: string }
+	| { readonly type: 'offlineMirrorReadiness'; readonly report: HostOfflineMirrorReadiness | null }
+	| { readonly type: 'engineInitOfflineReport'; readonly report: HostEngineInitOfflineReport | null; readonly error?: string }
 	| { readonly type: 'runValidation'; readonly scope: 'architecture' | 'resource'; readonly nodeId?: string; readonly localOnly?: boolean }
 	| { readonly type: 'cancelValidation' }
 	| { readonly type: 'openExport' }
@@ -343,6 +424,8 @@ export type HostOutboundMessage =
 	| { readonly type: 'requestSchema'; readonly kind: 'resource' | 'dataSource'; readonly typeName: string }
 	| { readonly type: 'requestModule'; readonly modulePath: readonly string[] }
 	| { readonly type: 'requestEngineValidate'; readonly engine?: 'openTofu' | 'terraform' }
+	| { readonly type: 'requestEnginePlan'; readonly engine?: 'openTofu' | 'terraform' }
+	| { readonly type: 'requestEngineInitOffline'; readonly engine?: 'openTofu' | 'terraform' }
 	| { readonly type: 'exportArtifact'; readonly format: 'svg' | 'png' | 'markdown'; readonly suggestedFileName: string; readonly content: string; readonly encoding: 'utf8' | 'base64' };
 
 interface VsCodeWebviewApi {

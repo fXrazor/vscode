@@ -1403,7 +1403,7 @@ export class CodeApplication extends Disposable {
 
 		const disposables = this._register(new DisposableStore());
 
-		if (isWindows && process.arch === 'x64' && this.environmentMainService.isBuilt && this.productService.applicationName === 'cloudforge-proof') {
+		if (isWindows && process.arch === 'x64' && this.environmentMainService.isBuilt && (this.productService.applicationName === 'cloudforge' || this.productService.applicationName === 'cloudforge-proof')) {
 			const broker = this.cloudForgeServiceBroker = new CloudForgeServiceBroker(
 				this.environmentMainService.appRoot,
 				this.logService,
