@@ -34,15 +34,20 @@ const graph = (architectureId, revision, nodes) => ({ workspaceId: 'ws-e2e', arc
 const results = []; const errors = [];
 const check = (name, ok, detail = '') => { results.push({ name, ok }); console.log((ok ? 'PASS ' : 'FAIL ') + name + (detail ? ' — ' + detail : '')); };
 
-const browser = await chromium.launch(channel ? { channel } : {});
+// Never hang: a stuck browser or preview ends the run with a clear message.
+const watchdog = setTimeout(() => { console.error('FAIL watchdog — run exceeded 180 s; ' + results.length + ' checks done'); process.exit(3); }, 180_000);
+console.log('launching ' + (channel ?? 'bundled chromium') + ' …');
+const browser = await chromium.launch({ ...(channel ? { channel } : {}), timeout: 30_000 });
 const page = await browser.newPage({ viewport: { width: 1360, height: 860 } });
+page.setDefaultTimeout(10_000);
 page.on('pageerror', error => errors.push(error.message));
 page.on('console', message => { if (message.type() === 'error') { errors.push(message.text()); } });
 await page.addInitScript(() => {
 	window.__posted = [];
 	window.acquireVsCodeApi = () => ({ postMessage: message => window.__posted.push(message), getState: () => undefined, setState: () => {} });
 });
-await page.goto(url);
+await page.goto(url, { timeout: 20_000 });
+console.log('preview loaded');
 await page.waitForTimeout(1500);
 const send = async message => { await page.evaluate(data => window.postMessage(data, '*'), message); await page.waitForTimeout(500); };
 const undoEnabled = () => page.getByLabel('Undo', { exact: true }).isEnabled();
@@ -123,6 +128,7 @@ for (const width of [1360, 1024]) {
 }
 
 check('no console or page errors', errors.length === 0, errors.slice(0, 3).join(' | '));
+clearTimeout(watchdog);
 await browser.close();
 const failed = results.filter(result => !result.ok).length;
 console.log(`${results.length - failed}/${results.length} checks passed; screenshots in ${outDir}`);
