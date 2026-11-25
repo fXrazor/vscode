@@ -634,6 +634,8 @@ export function activate(context: ExtensionContext): void {
 	}
 
 	let activeValidation: { readonly workspaceId: string; readonly runId: string; cancelled: boolean } | undefined;
+	/** Token of the last focused save preview, so its apply sends only the token. */
+	let focusedSaveToken: string | undefined;
 	let validationAttempt = 0;
 	let lastValidationRunId: string | null = null;
 	let cachedCatalogueSnapshots: readonly CanvasCatalogueSnapshot[] | undefined;
@@ -995,13 +997,14 @@ export function activate(context: ExtensionContext): void {
 		},
 		onCancelValidation: cancelServiceValidation,
 		async onPreviewDraftSave(workspaceId, architectureId, expectedSourceRevision, fileName, contents) {
-			const result = await callService<unknown>('previewDraftSave', {
-				workspaceId,
-				architectureId,
-				expectedSourceRevision,
-				fileName,
-				contents,
-			});
+			// Focused save first: the service folds the canvas draft into the file on disk and keeps
+			// comments and fields the canvas does not show. If the file on disk does not parse, fall
+			// back to the whole-file preview so the user can still save.
+			const params = { workspaceId, architectureId, expectedSourceRevision, fileName, contents };
+			let result = await callService<unknown>('previewFocusedSave', params);
+			if (!result.ok && (result.error.code === 'UNSUPPORTED_FORMAT' || result.error.code === 'INVALID_PARAMS')) {
+				result = await callService<unknown>('previewDraftSave', params);
+			}
 			if (!result.ok) {
 				return { ok: false, error: draftSaveErrorMessage(result.error.code) };
 			}
@@ -1009,17 +1012,16 @@ export function activate(context: ExtensionContext): void {
 			if (!preview) {
 				return { ok: false, error: draftSaveErrorMessage('SERVICE_ERROR') };
 			}
+			focusedSaveToken = preview.merge ? preview.previewToken : undefined;
 			return { ok: true, preview };
 		},
 		async onApplyDraftSave(workspaceId, architectureId, expectedSourceRevision, fileName, contents, previewToken) {
-			const result = await callService<unknown>('applyDraftSave', {
-				workspaceId,
-				architectureId,
-				expectedSourceRevision,
-				fileName,
-				contents,
-				previewToken,
-			});
+			// A focused preview holds the merged text in the service; only the token goes back.
+			const focused = focusedSaveToken !== undefined && focusedSaveToken === previewToken;
+			focusedSaveToken = undefined;
+			const result = focused
+				? await callService<unknown>('applyFocusedSave', { workspaceId, architectureId, expectedSourceRevision, fileName, previewToken })
+				: await callService<unknown>('applyDraftSave', { workspaceId, architectureId, expectedSourceRevision, fileName, contents, previewToken });
 			if (!result.ok) {
 				return { ok: false, error: draftSaveErrorMessage(result.error.code) };
 			}

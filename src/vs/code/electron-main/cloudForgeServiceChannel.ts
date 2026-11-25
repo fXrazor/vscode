@@ -37,7 +37,7 @@ const cloudForgeMethods: ReadonlySet<string> = new Set<CloudForgeServiceMethod>(
 	'inspectCatalogueSchemaFile', 'importCatalogueSnapshot',
 	'listCatalogueSnapshots', 'listCatalogueTypes', 'getResourceFormSchema', 'getCatalogueCoverage', 'renderResourceDraft',
 	'startValidationRun', 'pollValidationRun', 'cancelValidationRun',
-	'previewDraftSave', 'applyDraftSave',
+	'previewDraftSave', 'applyDraftSave', 'previewFocusedSave', 'applyFocusedSave',
 	'inspectDependencies', 'listCloudRegions', 'readModule',
 	'diffCatalogueSnapshots', 'auditExportReadiness',
 	'detectEngines', 'runEngineValidate'
@@ -473,6 +473,48 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 				expectedSourceRevision: value.expectedSourceRevision,
 				fileName: value.fileName,
 				contents: value.contents,
+				previewToken: value.previewToken
+			};
+		}
+		case 'previewFocusedSave': {
+			const removeAddresses = value.removeAddresses;
+			if (
+				!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'expectedSourceRevision', 'fileName', 'contents', 'removeAddresses']) ||
+				!isOpaqueId(value.workspaceId) ||
+				!isOpaqueId(value.architectureId) ||
+				typeof value.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(value.expectedSourceRevision) ||
+				!isPathComponent(value.fileName) || value.fileName.startsWith('.') || !value.fileName.toLowerCase().endsWith('.tf') || value.fileName.length <= 3 ||
+				typeof value.contents !== 'string' || Buffer.byteLength(value.contents, 'utf8') > maxDraftBytes ||
+				(removeAddresses !== undefined && (!Array.isArray(removeAddresses) || removeAddresses.length > 256 ||
+					!removeAddresses.every(address => typeof address === 'string' && address.length > 0 && address.length <= 512)))
+			) {
+				return undefined;
+			}
+			return {
+				workspaceId: value.workspaceId,
+				architectureId: value.architectureId,
+				expectedSourceRevision: value.expectedSourceRevision,
+				fileName: value.fileName,
+				contents: value.contents,
+				...(removeAddresses === undefined ? {} : { removeAddresses: [...removeAddresses as string[]] })
+			};
+		}
+		case 'applyFocusedSave': {
+			if (
+				!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'expectedSourceRevision', 'fileName', 'previewToken']) ||
+				!isOpaqueId(value.workspaceId) ||
+				!isOpaqueId(value.architectureId) ||
+				typeof value.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(value.expectedSourceRevision) ||
+				!isPathComponent(value.fileName) || value.fileName.startsWith('.') || !value.fileName.toLowerCase().endsWith('.tf') || value.fileName.length <= 3 ||
+				!isOpaqueId(value.previewToken)
+			) {
+				return undefined;
+			}
+			return {
+				workspaceId: value.workspaceId,
+				architectureId: value.architectureId,
+				expectedSourceRevision: value.expectedSourceRevision,
+				fileName: value.fileName,
 				previewToken: value.previewToken
 			};
 		}

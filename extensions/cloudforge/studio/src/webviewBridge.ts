@@ -208,6 +208,17 @@ export interface HostDraftSavePreview {
 	readonly removedLines: number;
 	readonly findings: readonly HostDraftSaveFinding[];
 	readonly previewToken: string;
+	/** Present for a focused save: only these blocks change, the rest of the file is kept as written. */
+	readonly merge?: HostDraftSaveMerge;
+}
+
+export interface HostDraftSaveMerge {
+	readonly updated: readonly string[];
+	readonly added: readonly string[];
+	readonly removed: readonly string[];
+	readonly unchanged: number;
+	readonly preserved: number;
+	readonly skipped: readonly string[];
 }
 
 export interface HostDraftSaveApplied {

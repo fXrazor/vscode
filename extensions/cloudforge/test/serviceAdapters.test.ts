@@ -225,6 +225,19 @@ test('Stage 5 guarded save parsers and Webview protocol validation enforce stric
 	assert.ok(preview);
 	assert.equal(preview.created, true);
 	assert.equal(preview.findings.length, 1);
+	assert.equal(preview.merge, undefined);
+
+	const focusedBase = {
+		sourceRevision: 'b'.repeat(64), fileName: 'network.tf', created: false, afterSha256: 'c'.repeat(64),
+		addedLines: 1, removedLines: 1, findings: [], previewToken: 'save-' + 'd'.repeat(32), focused: true,
+	};
+	const focused = parseDraftSavePreview({
+		...focusedBase,
+		merge: { updated: ['aws_vpc.main'], added: [], removed: [], unchanged: 1, preserved: 2, skipped: [''] },
+	});
+	assert.deepEqual(focused?.merge, { updated: ['aws_vpc.main'], added: [], removed: [], unchanged: 1, preserved: 2, skipped: [] });
+	assert.equal(parseDraftSavePreview({ ...focusedBase, merge: { updated: 'x' } })?.merge, undefined);
+	assert.equal(parseDraftSavePreview({ ...focusedBase, focused: false, merge: { updated: [], added: [], removed: [], unchanged: 0, preserved: 0, skipped: [] } })?.merge, undefined);
 
 	const applied = parseDraftSaveApply({
 		fileName: 'network.tf',

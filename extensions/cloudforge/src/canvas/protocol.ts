@@ -104,6 +104,18 @@ export interface DraftSavePreviewResult {
 	readonly removedLines: number;
 	readonly findings: readonly DraftSaveFinding[];
 	readonly previewToken: string;
+	/** Present when the service folded the draft into the file on disk (`previewFocusedSave`). */
+	readonly merge?: DraftSaveMergeSummary;
+}
+
+/** Block addresses a focused save changes; everything else in the file is kept as written. */
+export interface DraftSaveMergeSummary {
+	readonly updated: readonly string[];
+	readonly added: readonly string[];
+	readonly removed: readonly string[];
+	readonly unchanged: number;
+	readonly preserved: number;
+	readonly skipped: readonly string[];
 }
 
 export interface DraftSaveApplyResult {

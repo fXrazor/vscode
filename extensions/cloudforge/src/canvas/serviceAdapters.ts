@@ -31,6 +31,7 @@ import type {
 	DraftSaveApplyResult,
 	DraftSaveError,
 	DraftSaveFinding,
+	DraftSaveMergeSummary,
 	DraftSavePreviewResult
 } from './protocol';
 import type {
@@ -930,7 +931,30 @@ export function parseDraftSavePreview(value: unknown): DraftSavePreviewResult | 
 		removedLines: value.removedLines,
 		findings,
 		previewToken: value.previewToken,
+		...(value.focused === true ? optionalMerge(value.merge) : {}),
 	};
+}
+
+function addressList(value: unknown): string[] | undefined {
+	if (!Array.isArray(value) || value.length > 2048) {
+		return undefined;
+	}
+	return value.filter((item): item is string => isNonEmptyString(item, 512));
+}
+
+/** Validates the `merge` summary of a focused save preview; a malformed summary is dropped. */
+function optionalMerge(value: unknown): { merge?: DraftSaveMergeSummary } {
+	if (!isRecord(value) || !isNonNegativeInt(value.unchanged) || !isNonNegativeInt(value.preserved)) {
+		return {};
+	}
+	const updated = addressList(value.updated);
+	const added = addressList(value.added);
+	const removed = addressList(value.removed);
+	const skipped = addressList(value.skipped);
+	if (!updated || !added || !removed || !skipped) {
+		return {};
+	}
+	return { merge: { updated, added, removed, unchanged: value.unchanged, preserved: value.preserved, skipped } };
 }
 
 export function parseDraftSaveApply(value: unknown): DraftSaveApplyResult | undefined {

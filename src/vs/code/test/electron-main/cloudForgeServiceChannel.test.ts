@@ -404,6 +404,13 @@ suite('CloudForgeServiceChannel', () => {
 		assert.strictEqual(validateCloudForgeServiceParams('previewDraftSave', { ...draftBase, fileName: 'secrets.tfvars' }), undefined);
 		assert.ok(validateCloudForgeServiceParams('applyDraftSave', { ...draftBase, previewToken: 'save-0123456789abcdef0123456789abcdef' }));
 		assert.strictEqual(validateCloudForgeServiceParams('applyDraftSave', { ...draftBase, previewToken: 'save-0123', extra: true }), undefined);
+		assert.ok(validateCloudForgeServiceParams('previewFocusedSave', draftBase));
+		assert.deepStrictEqual(validateCloudForgeServiceParams('previewFocusedSave', { ...draftBase, removeAddresses: ['aws_vpc.main'] }), { ...draftBase, removeAddresses: ['aws_vpc.main'] });
+		assert.strictEqual(validateCloudForgeServiceParams('previewFocusedSave', { ...draftBase, removeAddresses: [''] }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('previewFocusedSave', { ...draftBase, removeAddresses: 'aws_vpc.main' }), undefined);
+		const { contents: _contents, ...focusedApply } = { ...draftBase, previewToken: 'save-0123456789abcdef0123456789abcdef' };
+		assert.ok(validateCloudForgeServiceParams('applyFocusedSave', focusedApply));
+		assert.strictEqual(validateCloudForgeServiceParams('applyFocusedSave', { ...focusedApply, contents: 'x' }), undefined);
 
 		assert.ok(validateCloudForgeServiceParams('inspectDependencies', { workspaceId, architectureId: `${workspaceId}-architecture-1`, expectedSourceRevision: sha256, engine: 'opentofu' }));
 		assert.strictEqual(validateCloudForgeServiceParams('inspectDependencies', { workspaceId, architectureId: `${workspaceId}-architecture-1`, engine: 'pulumi' }), undefined);

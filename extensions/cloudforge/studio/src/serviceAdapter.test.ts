@@ -10,6 +10,7 @@ import { additionalBlocks, editableFields } from './formDefinition.ts';
 import { architectureDiagnostics, isStaleDiagnostic } from './diagnostics.ts';
 import { buildDraftSavePayload, buildHostViewState, defaultTargetTfFile, projectGraphSnapshotToArchitecture, projectHostDiagnostics, resolveProviderRegions } from './serviceAdapter.ts';
 import { projectResourceFiles } from './terraformProjection.ts';
+import { describeMerge } from './draftSaveMerge.ts';
 import { explicitResourceReferences, inheritedDependencies } from './resourceHierarchy.ts';
 import { terraformCode } from './terraformProjection.ts';
 import type { HostCloudRegionsPayload, HostEngineValidateReport, HostGraphSnapshot, HostValidationRun } from './webviewBridge.ts';
@@ -342,4 +343,19 @@ test('multi-file Terraform projects preserve per-resource sourceFile and scope g
 	assert.equal(computePayload.fileName, 'compute.tf');
 	assert.match(computePayload.contents, /resource "azurerm_linux_virtual_machine" "vm_app"/);
 	assert.doesNotMatch(computePayload.contents, /resource "azurerm_virtual_network" "vnet_hub"/);
+});
+
+test('focused save summary says what changes and what is kept', () => {
+	assert.deepEqual(describeMerge({ updated: ['aws_vpc.main'], added: ['aws_subnet.a'], removed: [], unchanged: 1, preserved: 2, skipped: [] }), [
+		'Updates aws_vpc.main',
+		'Adds aws_subnet.a',
+		'Keeps 3 other blocks exactly as written',
+		'Comments and fields the canvas does not show are kept',
+	]);
+	assert.deepEqual(describeMerge({ updated: [], added: [], removed: [], unchanged: 1, preserved: 0, skipped: ['a.b'] }), [
+		'No changes to write',
+		'Keeps 1 other block exactly as written',
+		'Comments and fields the canvas does not show are kept',
+		'Left alone because the address appears twice: a.b',
+	]);
 });
