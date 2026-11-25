@@ -1,4 +1,5 @@
 /* The existing CloudForge tokens and typography own both editor surfaces. */
+html, body, #root { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; }
 .studio .variable-configurator { padding: 0; height: 100%; min-height: 0; display: flex; flex-direction: column; }
 .studio .inspector-content:has(.variable-configurator) { display: flex; flex-direction: column; overflow: hidden; }
 .studio .variable-container:has(.variable-configurator) { flex: 1; min-height: 0; overflow: hidden; }
@@ -180,6 +181,7 @@
 .resource-ref-check { margin-left: auto; color: var(--accent); flex-shrink: 0; }
 
 /* Hosted Webview controls, validation provenance & guarded save dialog */
+.studio-action-status { max-width: min(580px, calc(100vw - 32px)); white-space: normal; text-align: center; line-height: 1.45; }
 .cloudlab-topbar .shell-preview.is-hosted { display: inline-flex; align-items: center; background: var(--accent-soft); color: var(--accent-ink, var(--accent)); border-color: transparent; font-family: var(--font-code); font-size: 11px; }
 @media (max-width: 1160px) { .cloudlab-topbar .shell-preview.is-hosted { display: none; } }
 .shell-preview.is-dirty { background: color-mix(in srgb, var(--warning, #d97706) 14%, transparent); color: var(--warning, #b45309); }

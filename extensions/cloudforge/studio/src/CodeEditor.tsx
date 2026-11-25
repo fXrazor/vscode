@@ -50,7 +50,7 @@ function loadMonaco(): Promise<Monaco> {
     }
     if (host.require) return start()
     const script = document.createElement("script")
-    script.src = "./assets/monaco/vs/loader.js"
+    script.src = new URL("./assets/monaco/vs/loader.js", document.baseURI).href
     script.onload = start
     script.onerror = () => { script.remove(); reject(new Error("Editor could not load")) }
     document.head.appendChild(script)

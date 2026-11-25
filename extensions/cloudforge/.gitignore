@@ -1,3 +1,4 @@
 # Ignore built webview media
 media/*.js
 media/*.css
+media/studio/

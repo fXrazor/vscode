@@ -35,11 +35,20 @@ import { buildDraftSavePayload, projectGraphSnapshotToArchitecture, projectHostD
 import { DraftSaveDialog } from './DraftSaveDialog.tsx';
 import { presentationSvg } from './exportPresentation.ts';
 
+function detectInitialTheme(isHosted: boolean): 'light' | 'dark' {
+	if (!isHosted || typeof document === 'undefined') {
+		return 'light';
+	}
+	return document.body.classList.contains('vscode-dark') || document.body.classList.contains('vscode-high-contrast')
+		? 'dark'
+		: 'light';
+}
+
 export function Studio() {
 	const hostBridge = useMemo(() => createHostBridge(), []);
 	const [history, dispatch] = useReducer(historyReducer, undefined, () => createHistory(sampleArchitecture()));
 	const [mode, setMode] = useState<DesignMode>('visual');
-	const [theme, setTheme] = useState<'light' | 'dark'>('light');
+	const [theme, setTheme] = useState<'light' | 'dark'>(() => detectInitialTheme(hostBridge.isHosted));
 	const [selectedIds, setSelectedIds] = useState<string[]>([]);
 	const selectedId = selectedIds.length === 1 ? selectedIds[0] : '';
 	const setSelectedId = useCallback((id: string) => setSelectedIds(id ? [id] : []), []);
@@ -122,6 +131,8 @@ export function Studio() {
 					}
 					if (incoming.viewState?.theme === 'light' || incoming.viewState?.theme === 'dark') {
 						setTheme(incoming.viewState.theme);
+					} else if (incoming.viewState?.theme === 'workbench') {
+						setTheme(detectInitialTheme(true));
 					}
 					dispatch({ type: 'replace', architecture: projected.architecture });
 					if (incoming.viewState?.selectedId && projected.architecture.resources.some(r => r.id === incoming.viewState?.selectedId)) {

@@ -983,6 +983,30 @@ Implemented on `fxrazor/continue-project-handoff-review` in `E:\Orca\CloudForge-
 1. Wire an opt-in desktop command/setting in `extensions/cloudforge` (e.g., `cloudforge.canvasEngine`: `'classic' | 'studio'` or `CloudForge: Open Studio Canvas (Preview)`) bundling `extensions/cloudforge/studio` into the extension Webview with CSP-safe nonce/asset URIs so users can switch to the live React Flow Studio canvas inside Code OSS without breaking existing packaged-desktop flows.
 2. Wire live Stage 9B (`terraform plan -json` / `tofu plan -json`) once the Rust sidecar adds guarded plan capture, then package one combined Windows x64 installer (pass `-SignCertificateThumbprint <40-hex>` + `-RequireSignedService` for signed releases).
 
+### Opt-In Desktop Studio Webview Host (`cloudforge.canvasEngine` & `cloudforge.openStudioCanvas`) + Live Code OSS Verification (2026-11-25)
+
+Implemented on `fxrazor/continue-project-handoff-review` in `E:\Orca\CloudForge-Code\dace` (fast-forward merged to `Z:\CloudForge-Code` `main` and pushed to `origin/main`). **No unnecessary Windows installer build was triggered** (`%LOCALAPPDATA%\Programs\CloudForge Proof` remains verified at `407d56014c1` + Rust Stage 9A `ef4be9d`; `Z:\CloudForge` untouched).
+
+- **Opt-In Engine Setting, Command & Seamless Switching ([canvasEngine.ts](extensions/cloudforge/src/canvas/canvasEngine.ts), [canvasPanel.ts](extensions/cloudforge/src/canvas/canvasPanel.ts), [extension.ts](extensions/cloudforge/src/extension.ts), [package.json](extensions/cloudforge/package.json), [package.nls.json](extensions/cloudforge/package.nls.json), [canvasEngine.test.ts](extensions/cloudforge/test/canvasEngine.test.ts)):**
+  - Added setting `cloudforge.canvasEngine` (`classic` default, `studio` opt-in) and Command Palette / Graph view overflow command `cloudforge.openStudioCanvas` (`CloudForge: Open Studio Canvas (Preview)`).
+  - `CloudForgeCanvasPanel` probes `media/studio/studio.{js,css}` asynchronously (`workspace.fs.stat` — compliant with `local/code-no-sync-fs`), falls back gracefully to Classic Canvas with a warning if Studio assets are not staged, and switches cleanly between `classic` and `studio` in the same editor tab without losing the loaded `graph` or host callbacks.
+  - Hardened Studio Webview HTML via `buildStudioWebviewHtml`: `<base href="${studioBaseUri}/">`, `<div id="root"></div>`, strict CSP (`default-src 'none'`, `base-uri`, `img-src ... data: blob:`, `font-src ... data:`, `style-src ... 'unsafe-inline'`, `script-src ... 'nonce-...'`, `connect-src ... data: blob:`, `worker-src ... blob:`, zero `'unsafe-eval'`, zero `'unsafe-inline'` scripts).
+- **Slimmed Webview Media Staging & Code OSS Webview Polish ([build.ts](extensions/cloudforge/studio/build.ts), [package.json](extensions/cloudforge/studio/package.json), [.gitignore](extensions/cloudforge/.gitignore), [CodeEditor.tsx](extensions/cloudforge/studio/src/CodeEditor.tsx), [App.tsx](extensions/cloudforge/studio/src/App.tsx), [VisualTopbar.tsx](extensions/cloudforge/studio/src/VisualTopbar.tsx), [editor-refinement.css](extensions/cloudforge/studio/src/editor-refinement.css)):**
+  - Added `corepack pnpm run build:webview` (`node build.ts --stage-media`) outputting minified `studio.js`, `studio.css`, fonts, icons, catalogues, and slimmed HCL-only Monaco (`loader.js`, `base/`, `editor/`, `basic-languages/hcl/`) into ignored `extensions/cloudforge/media/studio/` (**653 files, 11.20 MB total** — cutting ~10 MB of unused Monaco languages/locales/sourcemaps).
+  - Auto-detects Code OSS `vscode-dark` / `vscode-high-contrast` theme on launch & when `viewState.theme === 'workbench'`, resets VS Code Webview's default 20px body padding (`html, body, #root { margin: 0; padding: 0; }`), explicitly resolves `loader.js` via `document.baseURI`, wraps long status messages cleanly, and shows truthful `Sample preview` pill when no workspace architecture is loaded yet.
+
+| Check (no full desktop/installer rebuild) | Verified result |
+| --- | --- |
+| Studio `check`, `test`, `build`, `build:webview` (`extensions/cloudforge/studio`) | Passed (**70/70 studio tests**, staged `media/studio/` = `11.20 MB`). |
+| Extension `esbuild.mts`, `esbuild.webview.mts`, TS6 & TS7, `oxlint`, `hygiene` | Passed (`0` errors, `0` warnings). |
+| `CLOUDFORGE_REPO=Z:\CloudForge node --test extensions/cloudforge/test/*.test.ts` | **62/62 root extension tests passed** (`0` skipped; includes [canvasEngine.test.ts](extensions/cloudforge/test/canvasEngine.test.ts)). |
+| Live isolated Code OSS desktop verification (via `.agents/skills/launch/scripts/launch.ps1` + `@playwright/cli` over CDP) | **Passed** (`0` CloudForge/Webview console or CSP errors; 4 live Code OSS screenshots inspected — confirmed `bodyPadding: 0px`, `vscode-dark` auto-theme, **147/147** provider icons loaded, `1,110 types` offline Azure 5.14.0 catalogue loaded, live **Monaco HCL editor** rendering 26 highlighted lines under strict CSP, and seamless tab switching back to Classic Canvas; cleaned up isolated profile via `cleanup.ps1`). |
+
+**Next actions:**
+1. Optionally wire `build/lib/extensions.ts` / `build/cloudforge/package-win32-x64.ps1` to run `studio` `build:webview` automatically before packaging when ready to ship Studio Preview in the Windows installer (keeping `cloudforge.canvasEngine` default `classic` until full parity is verified).
+2. Wire live Stage 9B (`terraform plan -json` / `tofu plan -json`) once the Rust sidecar adds guarded plan capture, then package one combined Windows x64 installer covering Stage 9B + Studio Preview.
+
+
 
 
 
