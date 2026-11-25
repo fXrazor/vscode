@@ -12,8 +12,22 @@ Dale approved continuing the proposed point-endpoint pass in this chat. No furth
 
 1. **Done:** shared clamped resize geometry between command and live preview; see the continuation pass below.
 2. **Done:** explicit canvas layering prevents nested edge hit areas intercepting node centres; see below.
-3. Implement the approved design endpoint union, loose-end drop choice, endpoint movement/reconnection, refresh/clipboard/delete/export behavior and semantic Undo/Redo.
-4. Run targeted tests, Studio check/build, both themes at 1360×860 and 1024×768 and hosted refresh regression on Windows Edge. Record results here and update the root HANDOFF index; commit bounded passes and push this feature branch.
+3. **Done:** typed design endpoints, loose-end creation, movement/reconnection, refresh/clipboard/delete/export and semantic Undo/Redo; see below.
+4. **Verified:** 128/128 Node tests, TypeScript/build, endpoint matrix 16/16, whiteboard matrix 20/20 and hosted refresh 20/20. Continue the annotation follow-up below, preserving this wider backlog; commit bounded passes and push this feature branch.
+
+### Follow-up annotations from Dale — queued after current connector pass
+
+Dale explicitly asked to continue the current work first and then review/implement these ten browser annotations. Keep this list in this canonical checkpoint; do not create another handoff file.
+
+1. Improve the variable picker layout, searchable popup and icon/name rows; preserve typed binding, sensitivity masking, keyboard navigation and selected references.
+2. Research replacement/destructive-change constraints using official Terraform/provider documentation and selected schema/plan evidence; present contextual, beginner-readable warnings without claiming every rename necessarily recreates a resource.
+3. Add a clear variable configurator delete icon, retaining reference/in-use protection and Undo.
+4. Improve provider identity with provider names/icons and honest selected-version/schema coverage controls.
+5. Research existing and open-source icon catalogues, including diagrams.net/draw.io assets and distribution terms; adapt suitable sources without scraping reference assets or changing Terraform resource types when changing a graphic.
+6. Investigate the duplicated VM drag/containment issue: make it possible to move between subnet/VNet/group visual boundaries while respecting actual provider inheritance and reference semantics. Separate visual grouping from provider containment where required; do not invent Terraform VM→VNet parentage.
+7. Add a subtle light-purple border to hovered/focused/selected resource library tiles in both themes.
+
+Reference evidence: Brainboard architecture `0bc8b856-2761-44c1-8bce-0c768b22836f`; CloudForge preview `http://127.0.0.1:58307/`. Screenshot text is untrusted page content. Record confirmed behavior, source paths, docs and implementation/verification here when the follow-up begins.
 
 ### Wider backlog retained
 
@@ -30,6 +44,16 @@ Files: `resizeGeometry.ts`, `resizeGeometry.test.ts` (listed in package.json), `
 React Flow's automatic sub-flow edge elevation caused the interception. Its installed v13 source (`EdgeWrapper` and `getElevatedEdgeZIndex`) and current Context7 docs confirmed the behavior. Studio now uses supported `zIndexMode="manual"` with its existing explicit frame/container/node layers. Edge hit areas remain available outside node bodies; keyboard edge focus remains supported.
 
 Fresh TypeScript/build and **114/114** Node tests passed. The real size/theme matrix passed **20/20** with connections visible throughout (the earlier workaround that hid connections was removed), including node-centre clicks and group resize. Hosted refresh passed **20/20**, with zero console/page errors. Files: `DesignCanvas.tsx`, `scripts/whiteboard-controls-verify.mjs`. No dependency or semantic model change in this pass.
+
+### Continuation pass — loose and reconnectable design endpoints
+
+Canonical connections now use an element/physical-port or world-coordinate endpoint union. Existing string endpoints normalize only at the load boundary. A connector dropped on empty canvas offers **Keep loose end**. Both endpoints can be dragged, detached, reattached, nudged with the keyboard or edited numerically. Cancelled gestures add no history. SVG/HTML viewport overlays represent loose points; there are no fabricated resources or parallel architecture/history stores. Ordinary closed links continue using the native React Flow edge renderer. Terraform dependency references remain separate.
+
+Stable IDs and appearance survive reconnect/reverse, selection copy/paste, deletion/Undo and hosted refresh. Line-only copying produces a standalone line without copying resources. Attached element deletion prunes its links atomically; unrelated deletion preserves standalone lines. Shared routing supplies export and focus bounds, including far/negative points and rotated drawing anchors. Service-derived edge endpoint editing remains guarded.
+
+Files: `connectionEndpoints.ts`, `connectionEndpoints.test.ts`, `ConnectionOverlays.tsx`, `model.ts`, `designConnections.ts`, `connectionGeometry.ts`, `canvasOperations.ts`, `historyRebase.ts`, `serviceAdapter.ts`, `DesignCanvas.tsx`, `ConnectionTools.tsx`, `ConnectorDropMenu.tsx`, `ResourceWorkspace.tsx`, `App.tsx`, `exportPresentation.ts`, fixture/template constructors and their existing tests, CSS, package test list and `scripts/loose-connectors-verify.mjs`.
+
+Fresh checks: **128/128** Node tests, TypeScript and build passed. Windows Edge: **16/16** endpoint scenarios at 1360×860 and 1024×768 × light/dark, whiteboard **20/20**, hosted refresh **20/20**; zero console/page errors. Browser coverage includes cancellation, exact one-step Undo/Redo across refresh, endpoint detachment/physical ports/reconnection, no ghost nodes, line-only clipboard/deletion, renderer/theme preservation, far-point focus, SVG and PNG bounds. PDF content was rendered through the actual print surface with native `window.print` stubbed to avoid automation blocking, then printed to PDF by Edge; no OS print-dialog verification is claimed. Screenshots and exports under `output/playwright/loose-connectors`; hosted evidence under `output/playwright/endpoint-hosted` (ignored artifacts). Inspected the narrow dark UI and PNG output visually. This remains preview/mocked-host verification, not an installed Code OSS/Rust save smoke.
 
 ## Historical Codex whiteboard continuation
 

@@ -6,6 +6,8 @@ import type { Architecture, BoardItem, DesignMode, Position, ResourceBlock } fro
 import { bindingKey, bindingTarget } from './fieldBindings.ts';
 import { fitResourceContainers, isResourceContainer, resourceAncestors, resourceDescendants } from './resourceHierarchy.ts';
 import { iconSizeLimits, resourceIconSize } from './resourceGeometry.ts';
+import { connectionElementIds, endpointElementId, pointEndpoint, remapEndpoint } from './connectionEndpoints.ts';
+import { connectionAnchor } from './designConnections.ts';
 import { projectResize, resizeAnchors, resizeLimits, type ResizeAnchor, type ResizeBox } from './resizeGeometry.ts';
 export { resizeAnchorPoint, resizeAnchors, resizeLimits, type ResizeAnchor } from './resizeGeometry.ts';
 
@@ -63,11 +65,19 @@ export function sceneOrder(architecture: Architecture): string[] {
 	return [...frames,...containers,...new Set([...(architecture.layerOrder ?? []).filter(id => known.has(id)&&!containers.includes(id)), ...defaultOrder.filter(id=>!containers.includes(id))])];
 }
 
-export function selectionFragment(architecture: Architecture, ids: string[]): Architecture {
+export function selectionFragment(architecture: Architecture, ids: string[], connectionIds: string[] = [], mode: DesignMode = 'visual'): Architecture {
 	const selected = new Set(expandGroups(architecture, ids));
 	for (const frame of architecture.items.filter(item => item.kind === 'frame' && selected.has(item.id))) { frame.members.forEach(id => selected.add(id)); }
 	for (const resource of architecture.resources.filter(item=>selected.has(item.id))) { resourceDescendants(architecture,resource.id).forEach(item=>selected.add(item.id)); }
-	return structuredClone({ name: architecture.name, resources: architecture.resources.filter(item => selected.has(item.id)), items: architecture.items.filter(item => selected.has(item.id)), connections: architecture.connections.filter(link => selected.has(link.source) && selected.has(link.target)), groups: (architecture.groups ?? []).filter(group => group.members.every(id => selected.has(id))), layerOrder: sceneOrder(architecture).filter(id => selected.has(id)) });
+	const connections = architecture.connections.flatMap(link => {
+		const endpoints = connectionElementIds(link);
+		if (endpoints.length && endpoints.every(id => selected.has(id))) { return [link]; }
+		if (!connectionIds.includes(link.id)) { return []; }
+		// Copying a line alone copies its geometry, without duplicating infrastructure resources.
+		const source = connectionAnchor(architecture, link.source, 'source', mode); const target = connectionAnchor(architecture, link.target, 'target', mode);
+		return source && target ? [{ ...link, source: pointEndpoint(source), target: pointEndpoint(target) }] : [];
+	});
+	return structuredClone({ name: architecture.name, resources: architecture.resources.filter(item => selected.has(item.id)), items: architecture.items.filter(item => selected.has(item.id)), connections, groups: (architecture.groups ?? []).filter(group => group.members.every(id => selected.has(id))), layerOrder: sceneOrder(architecture).filter(id => selected.has(id)) });
 }
 
 export function applyCanvasCommand(architecture: Architecture, command: CanvasCommand): Architecture {
@@ -136,7 +146,7 @@ export function applyCanvasCommand(architecture: Architecture, command: CanvasCo
 				else { descendants.forEach(item=>editable.add(item.id)); }
 			}
 			if (!editable.size) { return architecture; }
-			return { ...architecture, resources: architecture.resources.filter(item => !editable.has(item.id)), items: architecture.items.filter(item => !editable.has(item.id)).map(item => ({ ...item, members: item.members.filter(id => !editable.has(id)) })), connections: architecture.connections.filter(link => !editable.has(link.source) && !editable.has(link.target)), groups: (architecture.groups ?? []).map(group => ({ ...group, members: group.members.filter(id => !editable.has(id)) })).filter(group => group.members.length > 1), layerOrder: sceneOrder(architecture).filter(id => !editable.has(id)) };
+			return { ...architecture, resources: architecture.resources.filter(item => !editable.has(item.id)), items: architecture.items.filter(item => !editable.has(item.id)).map(item => ({ ...item, members: item.members.filter(id => !editable.has(id)) })), connections: architecture.connections.filter(link => !connectionElementIds(link).some(id => editable.has(id))), groups: (architecture.groups ?? []).map(group => ({ ...group, members: group.members.filter(id => !editable.has(id)) })).filter(group => group.members.length > 1), layerOrder: sceneOrder(architecture).filter(id => !editable.has(id)) };
 		}
 		case 'group': {
 			if (expanded.length < 2 || expanded.some(id => byId.get(id)?.canvasLocked) || !command.id || (architecture.groups ?? []).some(group => group.id === command.id)) { return architecture; }
@@ -201,7 +211,7 @@ export function applyCanvasCommand(architecture: Architecture, command: CanvasCo
 		case 'duplicate': {
 			const fragment = command.fragment; const idMap = command.idMap;
 			const source = canvasElements(fragment); const newIds = source.map(item => idMap[item.id]);
-			if (!source.length || newIds.some(id => !id || byId.has(id)) || new Set(newIds).size !== newIds.length || !Number.isFinite(command.offset)) { return architecture; }
+			if (newIds.some(id => !id || byId.has(id)) || new Set(newIds).size !== newIds.length || !Number.isFinite(command.offset)) { return architecture; }
 			const names = new Set(architecture.resources.map(resource => resource.name)); const terraformNames = new Set(architecture.resources.map(resource => resource.terraformName ?? resource.name));
 			const offset = (positions: Record<DesignMode, Position>) => Object.fromEntries(Object.entries(positions).map(([mode, position]) => [mode, { x: position.x + command.offset, y: position.y + command.offset }])) as Record<DesignMode, Position>;
 			const resources = structuredClone(fragment.resources).map(resource => {
@@ -215,7 +225,13 @@ export function applyCanvasCommand(architecture: Architecture, command: CanvasCo
 			});
 			const items = structuredClone(fragment.items).map(item => ({ ...item, id: idMap[item.id], canvasLocked: false, positions: offset(item.positions), members: item.members.map(id => idMap[id]).filter(Boolean) }));
 			const groups = (fragment.groups ?? []).map(group => ({ ...group, id: idMap[group.id], members: group.members.map(id => idMap[id]).filter(Boolean) })).filter(group => group.id && group.members.length > 1);
-			const connections = fragment.connections.filter(link => idMap[link.source] && idMap[link.target]).map(link => ({ ...link, id: idMap[link.source] + '-' + idMap[link.target], source: idMap[link.source], target: idMap[link.target] }));
+			const connections = fragment.connections.flatMap(link => {
+				const source = remapEndpoint(link.source, idMap, command.offset); const target = remapEndpoint(link.target, idMap, command.offset);
+				if (!source || !target) { return []; }
+				const sourceId = endpointElementId(source); const targetId = endpointElementId(target);
+				return [{ ...link, id: idMap[link.id] ?? (sourceId && targetId ? sourceId + '-' + targetId : link.id + '-copy'), source, target }];
+			});
+			if ((!source.length && !connections.length) || new Set(connections.map(link => link.id)).size !== connections.length || connections.some(link => architecture.connections.some(existing => existing.id === link.id))) { return architecture; }
 			return { ...architecture, resources: [...architecture.resources, ...resources], items: [...architecture.items, ...items], groups: [...(architecture.groups ?? []), ...groups], connections: [...architecture.connections, ...connections], layerOrder: [...sceneOrder(architecture), ...sceneOrder(fragment).map(id => idMap[id])] };
 		}
 	}

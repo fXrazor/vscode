@@ -2,6 +2,7 @@
  *  Semantic undo survives live refreshes of the same architecture.
  *--------------------------------------------------------------------------------------------*/
 
+import { elementEndpoint, endpointElementId } from './connectionEndpoints.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHistory, historyReducer, type History } from './model.ts';
@@ -86,7 +87,7 @@ test('a refresh keeps user drawing links, edge styling, groups and layer order',
 	h = historyReducer(h, { type: 'updateConnection', id: serviceEdge.id, patch: { stroke: '#ff0000' } });
 	h = historyReducer(h, { type: 'addItem', item: { id: 'note-1', kind: 'note', text: 'Ingress', positions: { visual: { x: 0, y: 0 }, technical: { x: 0, y: 0 } }, width: 120, height: 80, members: [] } });
 	h = historyReducer(h, { type: 'connect', source: 'note-1', target: 'rg-1' });
-	const userLink = h.present.connections.find(connection => connection.source === 'note-1');
+	const userLink = h.present.connections.find(connection => endpointElementId(connection.source) === 'note-1');
 	assert.ok(userLink, 'user drawing link created');
 	const groupedInput = { ...h.present, groups: [{ id: 'g-1', label: 'Group', members: ['note-1', 'rg-1'] }], layerOrder: ['note-1', 'rg-1', 'rg-2'] };
 	h = { ...h, present: groupedInput };
@@ -98,7 +99,7 @@ test('a refresh keeps user drawing links, edge styling, groups and layer order',
 	assert.deepEqual(h.present.layerOrder, ['note-1', 'rg-1', 'rg-2']);
 
 	h = refresh(h, { ...snapshot([rg2], 'c') });
-	assert.ok(!h.present.connections.some(connection => connection.target === 'rg-1'), 'links to a removed resource are pruned');
+	assert.ok(!h.present.connections.some(connection => endpointElementId(connection.target) === 'rg-1'), 'links to a removed resource are pruned');
 	assert.equal(h.present.groups, undefined, 'a group left with one member is dropped');
 	assert.deepEqual(h.present.layerOrder, ['note-1', 'rg-2']);
 });

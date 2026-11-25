@@ -2,6 +2,7 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
+import { endpointElementId, type DesignEndpoint } from './connectionEndpoints.ts';
 import { useEffect, useRef, useState, type CSSProperties, type Dispatch } from 'react';
 import * as Tabs from '@radix-ui/react-tabs';
 import { ArrowLeft, Code2, PanelRight, Variable, X, SlidersHorizontal, CircleCheck, TriangleAlert, Unplug, Layers, ChevronRight, CircleHelp, FileCode2 } from 'lucide-react';
@@ -40,8 +41,8 @@ export function ResourceWorkspace({ resource, architecture, dispatch, open, onCl
 		return () => { element?.close(); previous?.focus(); };
 	}, [open]);
 	const metadata = resourceDefinition(resource);
-	const incoming = architecture.connections.filter(link => link.target === resource.id);
-	const outgoing = architecture.connections.filter(link => link.source === resource.id);
+	const incoming = architecture.connections.filter(link => endpointElementId(link.target) === resource.id);
+	const outgoing = architecture.connections.filter(link => endpointElementId(link.source) === resource.id);
 	const issues = [
 		...(hostDiagnostics ?? []).filter(item => item.resourceId === resource.id),
 		...architectureDiagnostics(architecture, liveSchemas).filter(item => item.resourceId === resource.id),
@@ -52,7 +53,9 @@ export function ResourceWorkspace({ resource, architecture, dispatch, open, onCl
 	const explicitSources = [...new Set(explicitRefs.map(reference => reference.source.id))].map(id => ({ id, references: explicitRefs.filter(reference => reference.source.id === id) }));
 	const children = architecture.resources.filter(item => item.parentId === resource.id);
 	const boundIds = new Set(Object.values(resource.fieldBindings ?? {}).map(binding => binding.variableId));
-	function linkedElement(id: string) {
+	function linkedElement(endpoint: DesignEndpoint | string) {
+		const id = endpointElementId(endpoint);
+		if (!id) { return <span className="field-help">Loose canvas endpoint</span>; }
 		const linked = architecture.resources.find(item => item.id === id);
 		const drawing = architecture.items.find(item => item.id === id);
 		return linked ? <button className="workspace-link" onClick={() => onNavigate(id)}><img src={'./assets/' + resourceDefinition(linked).icon} alt="" /><span><strong>{linked.label || linked.name}</strong><small>{resourceDefinition(linked).label}</small></span><ChevronRight size={14} /></button> : <div className="workspace-link"><span>{drawing?.text || 'Drawing'}<small>Visual annotation</small></span></div>;
