@@ -33,7 +33,7 @@ type CloudForgeServiceMethod =
 	| 'previewDraftSave' | 'applyDraftSave'
 	| 'inspectDependencies' | 'readModule' | 'auditExportReadiness' | 'runEngineValidate';
 type CloudForgeCatalogueMethod = 'inspectCatalogueSchemaFile' | 'importCatalogueSnapshot' | 'listCatalogueSnapshots' | 'listCatalogueTypes' | 'getResourceFormSchema' | 'renderResourceDraft' | 'listCloudRegions' | 'diffCatalogueSnapshots' | 'detectEngines';
-type CloudForgeProjectMethod = 'createProject' | 'openProject' | 'grantProject' | 'forgetProjectAccess' | 'createWorkspaceFile' | 'inspectRepository' | 'importRepository' | 'removeRepository' | 'createArchitecture' | 'installGit';
+type CloudForgeProjectMethod = 'createProject' | 'openProject' | 'grantProject' | 'forgetProjectAccess' | 'createWorkspaceFile' | 'inspectRepository' | 'importRepository' | 'removeRepository' | 'createArchitecture' | 'summarizeArchitectures' | 'installGit';
 
 const catalogueMethods: ReadonlySet<string> = new Set<CloudForgeCatalogueMethod>([
 	'inspectCatalogueSchemaFile', 'importCatalogueSnapshot', 'listCatalogueSnapshots', 'listCatalogueTypes', 'getResourceFormSchema', 'renderResourceDraft', 'listCloudRegions', 'diffCatalogueSnapshots', 'detectEngines'
@@ -46,9 +46,9 @@ const catalogueMethods: ReadonlySet<string> = new Set<CloudForgeCatalogueMethod>
  */
 const projectMethods: ReadonlySet<string> = new Set<CloudForgeProjectMethod>([
 	'createProject', 'openProject', 'grantProject', 'forgetProjectAccess', 'createWorkspaceFile',
-	'inspectRepository', 'importRepository', 'removeRepository', 'createArchitecture', 'installGit'
+	'inspectRepository', 'importRepository', 'removeRepository', 'createArchitecture', 'summarizeArchitectures', 'installGit'
 ]);
-const scopedProjectMethods: ReadonlySet<string> = new Set<CloudForgeProjectMethod>(['createWorkspaceFile', 'inspectRepository', 'importRepository', 'removeRepository', 'createArchitecture']);
+const scopedProjectMethods: ReadonlySet<string> = new Set<CloudForgeProjectMethod>(['createWorkspaceFile', 'inspectRepository', 'importRepository', 'removeRepository', 'createArchitecture', 'summarizeArchitectures']);
 
 interface WorkspaceChoice {
 	readonly workspaceId: string;

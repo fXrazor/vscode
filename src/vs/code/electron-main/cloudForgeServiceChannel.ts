@@ -33,7 +33,7 @@ export type CloudForgeCallResult = CloudForgeCallSuccess | CloudForgeCallFailure
 const cloudForgeMethods: ReadonlySet<string> = new Set<CloudForgeServiceMethod>([
 	'openWorkspace', 'chooseTerraformRoot', 'selectArchitecture', 'readArchitecture',
 	'createProject', 'openProject', 'grantProject', 'forgetProjectAccess', 'createWorkspaceFile',
-	'inspectRepository', 'importRepository', 'removeRepository', 'createArchitecture', 'installGit',
+	'inspectRepository', 'importRepository', 'removeRepository', 'createArchitecture', 'summarizeArchitectures', 'installGit',
 	'inspectCatalogueSchemaFile', 'importCatalogueSnapshot',
 	'listCatalogueSnapshots', 'listCatalogueTypes', 'getResourceFormSchema', 'renderResourceDraft',
 	'startValidationRun', 'pollValidationRun', 'cancelValidationRun',
@@ -300,6 +300,9 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 				return undefined;
 			}
 			return { workspaceId: value.workspaceId, repositoryId: value.repositoryId };
+		}
+		case 'summarizeArchitectures': {
+			return hasOnlyKeys(value, ['workspaceId']) && isOpaqueId(value.workspaceId) ? { workspaceId: value.workspaceId } : undefined;
 		}
 		case 'createArchitecture': {
 			if (!hasOnlyKeys(value, ['workspaceId', 'name', 'files']) || !isOpaqueId(value.workspaceId) || !isPathComponent(value.name)) {

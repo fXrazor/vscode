@@ -128,6 +128,12 @@
 				"title": "%command.openTemplateLibrary%",
 				"category": "%displayName%",
 				"icon": "$(library)"
+			},
+			{
+				"command": "cloudforge.openProjectGallery",
+				"title": "%command.openProjectGallery%",
+				"category": "%displayName%",
+				"icon": "$(layout)"
 			}
 		],
 		"keybindings": [
@@ -188,6 +194,10 @@
 					"when": "cloudforge.projectOpen"
 				},
 				{
+					"command": "cloudforge.openProjectGallery",
+					"when": "cloudforge.projectOpen"
+				},
+				{
 					"command": "cloudforge.forgetProjectAccess",
 					"when": "cloudforge.projectOpen"
 				}
@@ -195,6 +205,11 @@
 			"view/title": [
 				{
 					"command": "cloudforge.createArchitecture",
+					"when": "view == cloudforge.projects && cloudforge.projectOpen",
+					"group": "navigation@0"
+				},
+				{
+					"command": "cloudforge.openProjectGallery",
 					"when": "view == cloudforge.projects && cloudforge.projectOpen",
 					"group": "navigation@0"
 				},

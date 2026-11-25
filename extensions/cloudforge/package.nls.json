@@ -21,6 +21,7 @@
 	"command.cancelValidation": "Cancel Validation Run",
 	"command.exportCanvas": "Export Architecture Diagram / Report…",
 	"command.importProviderSchema": "Import Provider Schema Snapshot…",
+	"command.openProjectGallery": "Browse Project Architectures",
 	"command.openTemplateLibrary": "Browse Template Library…",
 	"view.projects": "CloudForge Project",
 	"view.projects.welcome": "Clone a repository into a CloudForge project:\n[GitHub](command:cloudforge.cloneRepository?%5B%22github%22%5D)\n[GitLab](command:cloudforge.cloneRepository?%5B%22gitlab%22%5D)\n[Bitbucket](command:cloudforge.cloneRepository?%5B%22bitbucket%22%5D)\n[Any Git URL](command:cloudforge.cloneRepository?%5B%22url%22%5D)\nOr [create a project](command:cloudforge.createProject).",

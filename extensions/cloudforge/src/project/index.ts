@@ -7,6 +7,7 @@ import { commands, window, workspace, type ExtensionContext } from 'vscode';
 import { ProjectController, type GraphHost } from './controller';
 import { ensureGit } from './git';
 import type { CloneProvider } from './model';
+import { ProjectGalleryPanel } from './galleryPanel';
 import { ProjectsViewProvider } from './projectsView';
 
 const providers: ReadonlySet<string> = new Set<CloneProvider>(['github', 'gitlab', 'bitbucket', 'url']);
@@ -15,13 +16,15 @@ const providers: ReadonlySet<string> = new Set<CloneProvider>(['github', 'gitlab
 export function activateProjects(context: ExtensionContext, graph: GraphHost): ProjectController {
 	const controller = new ProjectController(context, graph);
 	const view = new ProjectsViewProvider(controller);
-	context.subscriptions.push(controller, view, window.registerTreeDataProvider('cloudforge.projects', view));
+	const gallery = new ProjectGalleryPanel(controller);
+	context.subscriptions.push(controller, view, gallery, window.registerTreeDataProvider('cloudforge.projects', view));
 
 	context.subscriptions.push(
 		commands.registerCommand('cloudforge.cloneRepository', (provider?: unknown) =>
 			controller.cloneRepository(typeof provider === 'string' && providers.has(provider) ? provider as CloneProvider : undefined)),
 		commands.registerCommand('cloudforge.createProject', () => controller.createProject()),
 		commands.registerCommand('cloudforge.createArchitecture', () => controller.createArchitecture()),
+		commands.registerCommand('cloudforge.openProjectGallery', () => gallery.show()),
 		commands.registerCommand('cloudforge.refreshProject', () => controller.connect(true)),
 		commands.registerCommand('cloudforge.forgetProjectAccess', () => controller.forgetAccess()),
 		commands.registerCommand('cloudforge.installGit', () => ensureGit()),

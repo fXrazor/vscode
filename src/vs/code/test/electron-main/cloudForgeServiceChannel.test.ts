@@ -205,6 +205,12 @@ suite('CloudForgeServiceChannel', () => {
 		assert.deepStrictEqual(rejected.map(params => validateCloudForgeServiceParams('createArchitecture', params)), rejected.map(() => undefined));
 	});
 
+	test('accepts summarizeArchitectures with only the workspace id', () => {
+		assert.deepStrictEqual(validateCloudForgeServiceParams('summarizeArchitectures', { workspaceId }), { workspaceId });
+		assert.strictEqual(validateCloudForgeServiceParams('summarizeArchitectures', {}), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('summarizeArchitectures', { workspaceId, architectureId: `${workspaceId}-architecture-1` }), undefined);
+	});
+
 	test('resolves the project scope from the window, never from the request', async () => {
 		const contosoFolders = contosoWindow.resolved!.folders.map(folder => folder.uri.fsPath);
 		const single = URI.file('C:\\Projects\\Single');
