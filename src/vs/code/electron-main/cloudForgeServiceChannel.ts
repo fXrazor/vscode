@@ -35,7 +35,7 @@ const cloudForgeMethods: ReadonlySet<string> = new Set<CloudForgeServiceMethod>(
 	'createProject', 'openProject', 'grantProject', 'forgetProjectAccess', 'createWorkspaceFile',
 	'inspectRepository', 'importRepository', 'removeRepository', 'createArchitecture', 'summarizeArchitectures', 'installGit',
 	'inspectCatalogueSchemaFile', 'importCatalogueSnapshot',
-	'listCatalogueSnapshots', 'listCatalogueTypes', 'getResourceFormSchema', 'renderResourceDraft',
+	'listCatalogueSnapshots', 'listCatalogueTypes', 'getResourceFormSchema', 'getCatalogueCoverage', 'renderResourceDraft',
 	'startValidationRun', 'pollValidationRun', 'cancelValidationRun',
 	'previewDraftSave', 'applyDraftSave',
 	'inspectDependencies', 'listCloudRegions', 'readModule',
@@ -367,6 +367,19 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 			}
 			const key = validateSnapshotKey(value.key);
 			return key ? { key, kind: value.kind, typeName: value.typeName } : undefined;
+		}
+		case 'getCatalogueCoverage': {
+			if (!hasOnlyKeys(value, ['key', 'kind', 'typeName']) || (value.kind === undefined) !== (value.typeName === undefined)) {
+				return undefined;
+			}
+			const key = validateSnapshotKey(value.key);
+			if (!key) {
+				return undefined;
+			}
+			if (value.kind === undefined) {
+				return { key };
+			}
+			return isSchemaKind(value.kind) && isTypeName(value.typeName) ? { key, kind: value.kind, typeName: value.typeName } : undefined;
 		}
 		case 'renderResourceDraft': {
 			if (!hasOnlyKeys(value, ['key', 'draft']) || !isRecord(value.draft)) {

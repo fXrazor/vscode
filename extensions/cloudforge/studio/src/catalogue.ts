@@ -36,3 +36,47 @@ export function groupServices(entries: CatalogueEntry[]) {
  }
  return [...groups.values()].sort((a,b)=>a.label.localeCompare(b.label));
 }
+
+/** Resource types listed by an imported provider schema snapshot (`listCatalogueTypes` via the host). */
+export interface ServiceCatalogueTypes { provider: Provider; version: string; resources: readonly string[]; }
+
+const genericIcons: Record<Provider, string> = {
+ azure: 'catalog-icons/azure/azure-key-vaults.svg',
+ aws: 'catalog-icons/aws/aws-management-console.svg',
+ gcp: 'catalog-icons/gcp/gcp-cloud-generic.svg',
+};
+const typePrefixes: Record<string, string> = { azure: 'azurerm_', aws: 'aws_', gcp: 'google_' };
+const serviceTypes = new Map<Provider, ServiceCatalogueTypes>();
+const listeners = new Set<() => void>();
+let serviceTypesVersion = 0;
+
+function labelFor(type: string, prefix: string) {
+ return type.slice(type.startsWith(prefix) ? prefix.length : 0).split('_').filter(Boolean).map(word => word[0].toUpperCase() + word.slice(1)).join(' ') || type;
+}
+
+/** Records the newest imported snapshot's types for a provider; the palette re-renders through `subscribeServiceTypes`. */
+export function registerServiceTypes(value: ServiceCatalogueTypes) {
+ const prefix = typePrefixes[value.provider];
+ if (!prefix) { return; }
+ serviceTypes.set(value.provider, { ...value, resources: value.resources.filter(type => /^[a-z0-9_]{1,128}$/.test(type) && type.startsWith(prefix)).slice(0, 5000) });
+ serviceTypesVersion++;
+ for (const listener of listeners) { listener(); }
+}
+export function subscribeServiceTypes(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; }
+export function serviceTypesSnapshot() { return serviceTypesVersion; }
+
+/**
+ * Entries for resource types the imported snapshot has but the bundled catalogue lacks (for example
+ * after importing a newer provider release). They use a generic icon; the inspector loads their live
+ * form from the same snapshot, so no field list is bundled here.
+ */
+export function serviceOnlyEntries(provider: Provider, bundled: readonly CatalogueEntry[]): CatalogueEntry[] {
+ const listed = serviceTypes.get(provider);
+ if (!listed) { return []; }
+ const known = new Set(bundled.map(entry => entry.type));
+ const prefix = typePrefixes[provider];
+ return listed.resources.filter(type => !known.has(type)).map(type => ({
+  type, label: labelFor(type, prefix), service: 'Imported schema ' + listed.version, category: 'Other',
+  icon: genericIcons[provider], fields: [], curated: false, iconMatch: 'generic',
+ }));
+}

@@ -272,6 +272,7 @@ export type HostInboundMessage =
 	| { readonly type: 'draftSaveApplied'; readonly result: { readonly ok: true; readonly applied: HostDraftSaveApplied } | { readonly ok: false; readonly error: HostDraftSaveError } }
 	| { readonly type: 'catalogueSnapshots'; readonly snapshots: readonly HostCatalogueSnapshot[] }
 	| { readonly type: 'liveSchema'; readonly typeName: string; readonly schema: HostFormSchema | null }
+	| { readonly type: 'catalogueTypes'; readonly types: { readonly provider: 'azure' | 'aws' | 'gcp'; readonly version: string; readonly resources: readonly string[] } }
 	| { readonly type: 'cloudRegions'; readonly data: HostCloudRegionsPayload }
 	| { readonly type: 'dependencyReport'; readonly report: HostDependencyReport | null }
 	| { readonly type: 'exportAuditReport'; readonly report: HostExportAuditReport | null }

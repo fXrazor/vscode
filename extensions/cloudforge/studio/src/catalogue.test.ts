@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
-import { groupServices } from './catalogue.ts';
+import { groupServices, registerServiceTypes, serviceOnlyEntries, subscribeServiceTypes } from './catalogue.ts';
 import type { CatalogueEntry } from './model.ts';
 import type { Provider, Resource } from './model.ts';
 import { editableFields, additionalBlocks } from './formDefinition.ts';
@@ -41,4 +41,17 @@ test('service grouping merges parenthetical names and favours the curated repres
  assert.equal(groups[0].section,'Network');
  assert.equal(groups[0].icon,'vpc.svg');
  assert.deepEqual(groups[0].entries.map(entry=>entry.type),['vpc','long_attachment']);
+});
+
+test('imported schema types the bundled catalogue lacks join the palette with a generic icon', () => {
+	const bundled = [{ type: 'azurerm_resource_group', label: 'Resource Group', service: 'Resource Groups', category: 'Management', icon: 'x.svg', fields: [] }];
+	assert.deepEqual(serviceOnlyEntries('azure', bundled), []);
+	let notified = 0;
+	const stop = subscribeServiceTypes(() => { notified++; });
+	registerServiceTypes({ provider: 'azure', version: '5.15.0', resources: ['azurerm_resource_group', 'azurerm_new_thing', 'aws_wrong_provider', 'BAD'] });
+	stop();
+	assert.equal(notified, 1);
+	const extra = serviceOnlyEntries('azure', bundled);
+	assert.deepEqual(extra.map(entry => [entry.type, entry.label, entry.service]), [['azurerm_new_thing', 'New Thing', 'Imported schema 5.15.0']]);
+	assert.equal(extra[0].iconMatch, 'generic');
 });

@@ -43,6 +43,14 @@ export interface SchemaOutput {
 	readonly knownAtApply: boolean;
 }
 
+/** Visual form coverage for one type, from the service's `getCatalogueCoverage`. */
+export interface FormCoverage {
+	readonly complete: boolean;
+	readonly paths: number;
+	readonly readOnly: number;
+	readonly gaps: readonly { readonly path: string; readonly reason: string }[];
+}
+
 export interface FormSchema {
 	readonly kind: SchemaKind;
 	readonly typeName: string;
@@ -54,6 +62,7 @@ export interface FormSchema {
 	readonly attributes: readonly FormAttribute[];
 	readonly blocks: readonly FormBlockType[];
 	readonly outputs: readonly SchemaOutput[];
+	readonly coverage?: FormCoverage;
 }
 
 export type DraftValue =

@@ -381,6 +381,11 @@ suite('CloudForgeServiceChannel', () => {
 		assert.strictEqual(validateCloudForgeServiceParams('listCatalogueTypes', { key: { ...key, address: '../escape/azurerm' } }), undefined);
 		assert.ok(validateCloudForgeServiceParams('getResourceFormSchema', { key, kind: 'resource', typeName: 'azurerm_resource_group' }));
 		assert.strictEqual(validateCloudForgeServiceParams('getResourceFormSchema', { key, kind: 'provider', typeName: 'azurerm_resource_group' }), undefined);
+		assert.ok(validateCloudForgeServiceParams('getCatalogueCoverage', { key }));
+		assert.ok(validateCloudForgeServiceParams('getCatalogueCoverage', { key, kind: 'resource', typeName: 'azurerm_resource_group' }));
+		assert.strictEqual(validateCloudForgeServiceParams('getCatalogueCoverage', { key, kind: 'resource' }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('getCatalogueCoverage', { key, typeName: 'azurerm_resource_group' }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('getCatalogueCoverage', { key, path: 'C:\\x' }), undefined);
 		assert.ok(validateCloudForgeServiceParams('renderResourceDraft', {
 			key,
 			draft: { kind: 'dataSource', typeName: 'azurerm_resource_group', label: 'hub', body: { attributes: { name: { kind: 'literal', value: 'rg-hub' } }, blocks: [] } }

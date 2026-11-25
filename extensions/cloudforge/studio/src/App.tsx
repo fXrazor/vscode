@@ -20,7 +20,7 @@ import { ResourceCatalogue } from './ResourceCatalogue.tsx';
 import { DesignCanvas } from './DesignCanvas.tsx';
 import { CodePanel } from './CodePanel.tsx';
 import { ModuleImport, type ModuleReference } from './ModuleImport.tsx';
-import { loadCatalogue } from './catalogue.ts';
+import { loadCatalogue, registerServiceTypes } from './catalogue.ts';
 import { ArchitectureOverview } from './ArchitectureOverview.tsx';
 import { VisualTopbar } from './VisualTopbar.tsx';
 import { ArrowLeft, Scan, PanelsTopLeft, PanelRightClose, Code2, ListTree, Boxes, Variable, AlertCircle, FileCode2 } from 'lucide-react';
@@ -175,6 +175,9 @@ export function Studio() {
 					break;
 				case 'empty':
 					setMessage(incoming.message);
+					break;
+				case 'catalogueTypes':
+					registerServiceTypes(incoming.types);
 					break;
 				case 'liveSchema':
 					if (incoming.schema) {

@@ -81,6 +81,13 @@ export interface CanvasCatalogueSnapshot {
 	readonly dataSourceCount: number;
 }
 
+/** Resource types of the newest imported snapshot for one provider, for the Studio palette. */
+export interface CanvasCatalogueTypes {
+	readonly provider: 'azure' | 'aws' | 'gcp';
+	readonly version: string;
+	readonly resources: readonly string[];
+}
+
 export interface DraftSaveFinding {
 	readonly code: string;
 	readonly file: string;
@@ -352,6 +359,10 @@ export type ExtensionToWebviewMessage =
 		readonly result:
 		| { readonly ok: true; readonly applied: DraftSaveApplyResult }
 		| { readonly ok: false; readonly error: DraftSaveError };
+	}
+	| {
+		readonly type: 'catalogueTypes';
+		readonly types: CanvasCatalogueTypes;
 	}
 	| {
 		readonly type: 'catalogueSnapshots';

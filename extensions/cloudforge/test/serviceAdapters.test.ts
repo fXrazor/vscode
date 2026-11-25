@@ -22,7 +22,10 @@ import {
 	parseSchemaDiffReport,
 	parseValidationPoll,
 	parseValidationStart,
-	selectBestSnapshotForType
+	selectBestSnapshotForType,
+	newestPaletteSnapshots,
+	parseCatalogueTypes,
+	parseFormCoverage,
 } from '../src/canvas/serviceAdapters.ts';
 
 function sampleGraph(): CanvasGraphSnapshot {
@@ -419,4 +422,19 @@ test('Stage 9A local engine discovery and CLI validate adapters sanitize payload
 	assert.equal(report.errorCount, 1);
 	assert.equal(report.diagnostics[0].filename, 'main.tf');
 	assert.equal(report.diagnostics[0].line, 3);
+});
+
+test('palette uses the newest imported snapshot per provider and validates its types and coverage', () => {
+	const snap = (address: string, version: string) => ({ address, version, formatVersion: '1.0', sha256: 'c'.repeat(64), resourceCount: 1, dataSourceCount: 0 });
+	const newest = newestPaletteSnapshots([
+		snap('registry.terraform.io/hashicorp/azurerm', '5.14.0'),
+		snap('registry.terraform.io/hashicorp/azurerm', '5.15.0'),
+		snap('registry.terraform.io/hashicorp/aws', '6.73.0'),
+		snap('registry.terraform.io/hashicorp/random', '3.6.0'),
+	]);
+	assert.deepEqual(newest.map(item => [item.provider, item.snapshot.version]).sort(), [['aws', '6.73.0'], ['azure', '5.15.0']]);
+	assert.deepEqual(parseCatalogueTypes({ resources: ['azurerm_new_thing', 'Bad Type', 7] }, 'azure', '5.15.0'), { provider: 'azure', version: '5.15.0', resources: ['azurerm_new_thing'] });
+	assert.equal(parseCatalogueTypes({}, 'azure', '5.15.0'), undefined);
+	assert.deepEqual(parseFormCoverage({ complete: false, paths: 12, readOnly: 2, gaps: [{ path: 'a.b', reason: 'dynamic' }, { path: 3 }] }), { complete: false, paths: 12, readOnly: 2, gaps: [{ path: 'a.b', reason: 'dynamic' }] });
+	assert.equal(parseFormCoverage({ complete: 'yes', paths: 1, readOnly: 0, gaps: [] }), undefined);
 });

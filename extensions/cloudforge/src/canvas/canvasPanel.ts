@@ -11,6 +11,7 @@ import {
 	parseWebviewMessage,
 	sanitizeViewState,
 	type CanvasCatalogueSnapshot,
+	type CanvasCatalogueTypes,
 	type CanvasCloudRegionsPayload,
 	type CanvasDependencyReport,
 	type CanvasDetectedEngine,
@@ -62,6 +63,8 @@ export interface CanvasPanelHost {
 		previewToken: string
 	): Promise<{ readonly ok: true; readonly applied: DraftSaveApplyResult } | { readonly ok: false; readonly error: DraftSaveError }>;
 	onLoadCatalogueSnapshots?(): Promise<readonly CanvasCatalogueSnapshot[]>;
+	/** Resource types of the newest imported snapshot per palette provider. */
+	onLoadCatalogueTypes?(): Promise<readonly CanvasCatalogueTypes[]>;
 	onLoadResourceSchema?(kind: 'resource' | 'dataSource', typeName: string): Promise<FormSchema | null>;
 	onLoadCloudRegions?(provider: 'azure' | 'aws' | 'google'): Promise<CanvasCloudRegionsPayload | undefined>;
 	onInspectDependencies?(workspaceId: string, architectureId: string, sourceRevision: string): Promise<CanvasDependencyReport | undefined>;
@@ -157,6 +160,20 @@ export class CloudForgeCanvasPanel implements Disposable {
 	}
 
 	/** Updates the open canvas without forcing it open if the user closed the tab. */
+	/** Re-sends imported-schema palette types, for example after a provider schema import. */
+	refreshCatalogueTypes(): void {
+		if (!this.panel || !this.ready || !this.host.onLoadCatalogueTypes) {
+			return;
+		}
+		void this.host.onLoadCatalogueTypes().then(list => {
+			for (const types of list) {
+				if (this.ready) {
+					this.post({ type: 'catalogueTypes', types });
+				}
+			}
+		});
+	}
+
 	updateIfOpen(graph: CanvasGraphSnapshot | undefined): void {
 		this.graph = graph;
 		this.notice = null;
@@ -301,6 +318,15 @@ export class CloudForgeCanvasPanel implements Disposable {
 					void this.host.onLoadCatalogueSnapshots().then(snapshots => {
 						if (this.ready && snapshots.length > 0) {
 							this.post({ type: 'catalogueSnapshots', snapshots });
+						}
+					});
+				}
+				if (this.host.onLoadCatalogueTypes) {
+					void this.host.onLoadCatalogueTypes().then(list => {
+						for (const types of list) {
+							if (this.ready && types.resources.length > 0) {
+								this.post({ type: 'catalogueTypes', types });
+							}
 						}
 					});
 				}

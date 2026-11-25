@@ -47,6 +47,14 @@ export interface HostSchemaOutput {
 	readonly knownAtApply: boolean;
 }
 
+/** Visual form coverage for one type, from the service's `getCatalogueCoverage`. */
+export interface HostFormCoverage {
+	readonly complete: boolean;
+	readonly paths: number;
+	readonly readOnly: number;
+	readonly gaps: readonly { readonly path: string; readonly reason: string }[];
+}
+
 export interface HostFormSchema {
 	readonly kind: HostSchemaKind;
 	readonly typeName: string;
@@ -58,6 +66,7 @@ export interface HostFormSchema {
 	readonly attributes: readonly HostFormAttribute[];
 	readonly blocks: readonly HostFormBlockType[];
 	readonly outputs: readonly HostSchemaOutput[];
+	readonly coverage?: HostFormCoverage;
 }
 
 export type LiveSchemaMap = Readonly<Record<string, HostFormSchema>>;

@@ -15,6 +15,7 @@ import type {
 	CanvasDependencyReport,
 	CanvasDetectedEngine,
 	CanvasDiagnosticSummary,
+	CanvasCatalogueTypes,
 	CanvasEdgeSummary,
 	CanvasEngineValidateDiagnostic,
 	CanvasEngineValidateReport,
@@ -37,6 +38,7 @@ import type {
 	FieldValueType,
 	FormAttribute,
 	FormBlockType,
+	FormCoverage,
 	FormSchema,
 	SchemaKind,
 	SchemaOutput
@@ -1407,4 +1409,51 @@ export function parseEngineValidateReport(value: unknown): CanvasEngineValidateR
 		diagnostics,
 		truncated: value.truncated,
 	};
+}
+
+const paletteProviders: Readonly<Record<string, CanvasCatalogueTypes['provider']>> = { azurerm: 'azure', aws: 'aws', google: 'gcp' };
+
+/** The newest snapshot for each palette provider (azurerm, aws, google), keyed by Studio provider. */
+export function newestPaletteSnapshots(snapshots: readonly CanvasCatalogueSnapshot[]): { readonly provider: CanvasCatalogueTypes['provider']; readonly snapshot: CanvasCatalogueSnapshot }[] {
+	const best = new Map<CanvasCatalogueTypes['provider'], CanvasCatalogueSnapshot>();
+	for (const snapshot of snapshots) {
+		const segments = snapshot.address.toLowerCase().split('/');
+		const provider = segments.length === 3 ? paletteProviders[segments[2]] : undefined;
+		if (!provider) {
+			continue;
+		}
+		const current = best.get(provider);
+		if (!current || compareSemverDescending(snapshot.version, current.version) < 0) {
+			best.set(provider, snapshot);
+		}
+	}
+	return [...best].map(([provider, snapshot]) => ({ provider, snapshot }));
+}
+
+/** Validates a `listCatalogueTypes` result into palette types (resources only, bounded). */
+export function parseCatalogueTypes(value: unknown, provider: CanvasCatalogueTypes['provider'], version: string): CanvasCatalogueTypes | undefined {
+	if (typeof value !== 'object' || value === null || !Array.isArray((value as { resources?: unknown }).resources)) {
+		return undefined;
+	}
+	const resources = ((value as { resources: unknown[] }).resources)
+		.filter((type): type is string => typeof type === 'string' && /^[a-z0-9_]{1,128}$/.test(type))
+		.slice(0, 5000);
+	return { provider, version, resources };
+}
+
+/** Validates one type's `getCatalogueCoverage` result; at most 20 gaps are kept for display. */
+export function parseFormCoverage(value: unknown): FormCoverage | undefined {
+	if (typeof value !== 'object' || value === null) {
+		return undefined;
+	}
+	const raw = value as { complete?: unknown; paths?: unknown; readOnly?: unknown; gaps?: unknown };
+	const count = (n: unknown) => typeof n === 'number' && Number.isInteger(n) && n >= 0;
+	if (typeof raw.complete !== 'boolean' || !count(raw.paths) || !count(raw.readOnly) || !Array.isArray(raw.gaps)) {
+		return undefined;
+	}
+	const gaps = raw.gaps
+		.filter((gap): gap is { path: string; reason: string } => typeof gap === 'object' && gap !== null && typeof (gap as { path?: unknown }).path === 'string' && typeof (gap as { reason?: unknown }).reason === 'string')
+		.slice(0, 20)
+		.map(gap => ({ path: gap.path.slice(0, 256), reason: gap.reason.slice(0, 512) }));
+	return { complete: raw.complete, paths: raw.paths as number, readOnly: raw.readOnly as number, gaps };
 }

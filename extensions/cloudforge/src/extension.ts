@@ -27,7 +27,7 @@ import {
 import { activateProjects } from './project/index';
 import { CloudForgeCanvasPanel } from './canvas/canvasPanel';
 import { orientServiceEdgesForCanvas } from './canvas/layout';
-import { isValidTfFileName, type CanvasCatalogueSnapshot, type CanvasCloudRegionsPayload, type CanvasEngineValidateReport, type CanvasGraphSnapshot } from './canvas/protocol';
+import { isValidTfFileName, type CanvasCatalogueSnapshot, type CanvasCatalogueTypes, type CanvasCloudRegionsPayload, type CanvasEngineValidateReport, type CanvasGraphSnapshot } from './canvas/protocol';
 import { lookupBundledSchema, type FormSchema } from './canvas/schemaForm';
 import { findTemplateById } from './canvas/templateLibrary';
 import {
@@ -46,6 +46,9 @@ import {
 	parseSchemaDiffReport,
 	parseValidationPoll,
 	parseValidationStart,
+	newestPaletteSnapshots,
+	parseCatalogueTypes,
+	parseFormCoverage,
 	selectBestSnapshotForType,
 	type ServicePollEvent
 } from './canvas/serviceAdapters';
@@ -786,6 +789,25 @@ export function activate(context: ExtensionContext): void {
 		return cachedCatalogueSnapshots;
 	}
 
+	let cachedCatalogueTypes: readonly CanvasCatalogueTypes[] | undefined;
+	async function loadCatalogueTypes(): Promise<readonly CanvasCatalogueTypes[]> {
+		if (cachedCatalogueTypes !== undefined) {
+			return cachedCatalogueTypes;
+		}
+		const out: CanvasCatalogueTypes[] = [];
+		for (const { provider, snapshot } of newestPaletteSnapshots(await loadCatalogueSnapshots())) {
+			const result = await callService<unknown>('listCatalogueTypes', {
+				key: { address: snapshot.address, version: snapshot.version, formatVersion: snapshot.formatVersion, sha256: snapshot.sha256 },
+			});
+			const types = result.ok ? parseCatalogueTypes(result.value, provider, snapshot.version) : undefined;
+			if (types) {
+				out.push(types);
+			}
+		}
+		cachedCatalogueTypes = out;
+		return out;
+	}
+
 	async function loadResourceSchema(kind: 'resource' | 'dataSource', typeName: string): Promise<FormSchema | null> {
 		const cacheKey = `${kind}:${typeName}`;
 		const cached = cachedLiveSchemas.get(cacheKey);
@@ -813,7 +835,18 @@ export function activate(context: ExtensionContext): void {
 			return null;
 		}
 		const bundled = lookupBundledSchema({ kind: kind === 'dataSource' ? 'data' : 'resource', resourceType: typeName });
-		const adapted = mapRustFormSchemaToCanvasFormSchema(result.value, bundled) ?? null;
+		let adapted = mapRustFormSchemaToCanvasFormSchema(result.value, bundled) ?? null;
+		if (adapted) {
+			const coverage = await callService<unknown>('getCatalogueCoverage', {
+				key: { address: snap.address, version: snap.version, formatVersion: snap.formatVersion, sha256: snap.sha256 },
+				kind,
+				typeName,
+			});
+			const parsed = coverage.ok ? parseFormCoverage(coverage.value) : undefined;
+			if (parsed) {
+				adapted = { ...adapted, coverage: parsed };
+			}
+		}
 		cachedLiveSchemas.set(cacheKey, adapted);
 		return adapted;
 	}
@@ -1009,6 +1042,7 @@ export function activate(context: ExtensionContext): void {
 			return { ok: true, applied };
 		},
 		onLoadCatalogueSnapshots: loadCatalogueSnapshots,
+		onLoadCatalogueTypes: loadCatalogueTypes,
 		onLoadResourceSchema: loadResourceSchema,
 		onLoadCloudRegions: loadCloudRegions,
 		onInspectDependencies: inspectArchitectureDependencies,
@@ -1239,7 +1273,9 @@ export function activate(context: ExtensionContext): void {
 			return;
 		}
 		cachedCatalogueSnapshots = undefined;
+		cachedCatalogueTypes = undefined;
 		cachedLiveSchemas.clear();
+		canvas.refreshCatalogueTypes();
 		const graph = provider.getGraph();
 		if (graph) {
 			canvas.updateIfOpen(toCanvasSnapshot(graph, currentArchitectureName));
