@@ -28,6 +28,8 @@ Eleventh slice: **CloudForge side panel** (Dale's request). New activity-bar con
 
 Twelfth slice: **cloud sign-in check**. `cloudforge.checkCloudSignIn` (inline check icon on linked rows in Cloud Connections, a "Check sign-in" button in the Project Status tab, and an offer right after linking) calls Rust `checkCloudSignIn { workspaceId, provider }` (Rust Stage 11C), which runs the provider CLI's fixed read-only identity command under supervision and returns a status and masked account. `SidePanelData` keeps the last result per provider in memory, clears it when the link, key or project changes, and shows it in all three views; a failed check offers "Type Command in Terminal" (types `az login` / `aws sso login --profile <p>` / `aws configure --profile <p>` / `gcloud auth login` without running it, trusted workspaces only). Broker allowlist and `{workspaceId, provider}` validation + test, bridge workspace scoping. Extension tsc + 75/75.
 
+Merged with `main` on 2026-11-25 (merge 4ffa253b, Dale asked to push to main): main's Stage 9B plan, Stage 10 mirror, Terraform language, branding and whiteboard work kept alongside slices 8-12. Extension tsc + 96/96, Studio tsc + 139/139 after the merge; the full Code OSS compile runs in the Windows build.
+
 Manual and Windows test list for all slices: [extensions/cloudforge/TEST-CHECKLIST-ksv8z9.md](extensions/cloudforge/TEST-CHECKLIST-ksv8z9.md).
 
 ## Studio continuation — read first — 25 November 2026
