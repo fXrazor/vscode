@@ -5,6 +5,7 @@
 import type { Architecture, BoardItem, DesignMode, Position, ResourceBlock } from './model.ts';
 import { bindingKey, bindingTarget } from './fieldBindings.ts';
 import { fitResourceContainers, isResourceContainer, resourceAncestors, resourceDescendants } from './resourceHierarchy.ts';
+import { iconSizeLimits, resourceIconSize } from './resourceGeometry.ts';
 
 export type TextAppearance = Pick<BoardItem, 'fontSize' | 'bold' | 'italic' | 'underline' | 'textColor' | 'fontFamily' | 'textAlign' | 'verticalAlign' | 'fill' | 'opacity' | 'strokeColor' | 'strokeWidth' | 'strokeStyle'>;
 export type CanvasCommand =
@@ -15,7 +16,11 @@ export type CanvasCommand =
 	| { kind: 'group'; ids: string[]; id: string }
 	| { kind: 'ungroup'; ids: string[] }
 	| { kind: 'arrange'; ids: string[]; direction: 'front' | 'forward' | 'backward' | 'back' }
-	| { kind: 'duplicate'; fragment: Architecture; idMap: Record<string, string>; offset: number };
+	| { kind: 'duplicate'; fragment: Architecture; idMap: Record<string, string>; offset: number }
+	/** Multi-object resize in one undo step: scale about the selection's top-left, or match the largest element. */
+	| { kind: 'resize'; ids: string[]; mode: DesignMode; scale?: number; match?: 'width' | 'height' | 'size' };
+
+export const resizeLimits = { minScale: 0.25, maxScale: 4, minItem: 24, maxItem: 4000 };
 
 export function canvasElements(architecture: Architecture) { return [...architecture.resources, ...architecture.items]; }
 
@@ -114,6 +119,43 @@ export function applyCanvasCommand(architecture: Architecture, command: CanvasCo
 			else if (command.direction === 'forward') { for (let index = next.length - 2; index >= 0; index--) { if (selected.has(next[index]) && !selected.has(next[index + 1])) { [next[index], next[index + 1]] = [next[index + 1], next[index]]; } } }
 			else { for (let index = 1; index < next.length; index++) { if (selected.has(next[index]) && !selected.has(next[index - 1]) && !frames.has(next[index - 1])) { [next[index], next[index - 1]] = [next[index - 1], next[index]]; } } }
 			return before === next.join('|') ? architecture : { ...architecture, layerOrder: next };
+		}
+		case 'resize': {
+			const scale = command.scale;
+			if (!command.match && (scale === undefined || !Number.isFinite(scale) || scale < resizeLimits.minScale || scale > resizeLimits.maxScale || scale === 1)) { return architecture; }
+			// Containers fit their children and technical-view cards have fixed widths, so only drawings and visual icons resize.
+			const items = architecture.items.filter(item => editable.has(item.id));
+			const icons = command.mode === 'visual' ? architecture.resources.filter(resource => editable.has(resource.id) && !isResourceContainer(resource)) : [];
+			if (items.length + icons.length < (command.match ? 2 : 1)) { return architecture; }
+			const clampItem = (value: number) => Math.round(Math.max(resizeLimits.minItem, Math.min(resizeLimits.maxItem, value)));
+			const clampIcon = (value: number) => Math.round(Math.max(iconSizeLimits.min, Math.min(iconSizeLimits.max, value)));
+			const itemPatch = new Map<string, Partial<BoardItem>>(); const iconPatch = new Map<string, { iconSize: number; position?: Position }>();
+			if (command.match) {
+				const width = Math.max(...items.map(item => item.width), ...icons.map(resourceIconSize));
+				const height = Math.max(...items.map(item => item.height), ...icons.map(resourceIconSize));
+				for (const item of items) { itemPatch.set(item.id, { ...(command.match !== 'height' ? { width: clampItem(width) } : {}), ...(command.match !== 'width' ? { height: clampItem(height) } : {}) }); }
+				const side = command.match === 'height' ? height : command.match === 'width' ? width : Math.max(width, height);
+				for (const icon of icons) { iconPatch.set(icon.id, { iconSize: clampIcon(side) }); }
+			} else {
+				const origin = { x: Math.min(...items.map(item => item.positions[command.mode].x), ...icons.map(icon => icon.positions.visual.x)), y: Math.min(...items.map(item => item.positions[command.mode].y), ...icons.map(icon => icon.positions.visual.y)) };
+				const place = (position: Position): Position => ({ x: Math.round(origin.x + (position.x - origin.x) * scale!), y: Math.round(origin.y + (position.y - origin.y) * scale!) });
+				for (const item of items) { const position = place(item.positions[command.mode]); itemPatch.set(item.id, { width: clampItem(item.width * scale!), height: clampItem(item.height * scale!), positions: { visual: position, technical: position } }); }
+				for (const icon of icons) { iconPatch.set(icon.id, { iconSize: clampIcon(resourceIconSize(icon) * scale!), position: place(icon.positions.visual) }); }
+			}
+			let changed = false;
+			const nextItems = architecture.items.map(item => {
+				const patch = itemPatch.get(item.id); if (!patch) { return item; }
+				const next = { ...item, ...patch };
+				if (next.width === item.width && next.height === item.height && next.positions[command.mode].x === item.positions[command.mode].x && next.positions[command.mode].y === item.positions[command.mode].y) { return item; }
+				changed = true; return next;
+			});
+			const nextResources = architecture.resources.map(resource => {
+				const patch = iconPatch.get(resource.id); if (!patch) { return resource; }
+				const position = patch.position ?? resource.positions.visual;
+				if (patch.iconSize === resourceIconSize(resource) && position.x === resource.positions.visual.x && position.y === resource.positions.visual.y) { return resource; }
+				changed = true; return { ...resource, iconSize: patch.iconSize, positions: { visual: position, technical: position } };
+			});
+			return changed ? fitResourceContainers({ ...architecture, items: nextItems, resources: nextResources }) : architecture;
 		}
 		case 'duplicate': {
 			const fragment = command.fragment; const idMap = command.idMap;

@@ -1,5 +1,13 @@
 # CloudForge Code OSS handoff
 
+## Studio continuation — read first — 25 November 2026
+
+Resuming Codex: **do not continue on `codex/infrastructure-studio-preview`**. Its last commit, `f82e0c12`, is merged into `main`, and `main` has 52 later Studio/desktop commits. On 25 November the Codex worktree `C:/Users/dalep/.codex/worktrees/infrastructure-studio/CloudForge-Code` had no unpushed Studio changes. Every step in the "Exact resume action" list of [CONFIGURATOR-REFINEMENT-2026-11-25.md](extensions/cloudforge/studio/CONFIGURATOR-REFINEMENT-2026-11-25.md) was completed on `main`.
+
+Latest work is on branch `claude/project-thread-dnlp5o` ([PR #1](https://github.com/fXrazor/vscode/pull/1)), based on `main` `156a0fdc`. It adds undo/redo that survives live refreshes, keeps drawing links, groups and layer order through a refresh, and adds menu-driven multi-object resize (scale/match sizes). Studio check/build passed and 81/81 tests passed. The hosted Code OSS refresh path is not yet verified on Windows. Scope: `extensions/cloudforge/studio` and this file only.
+
+Full status, branch commands, verification, known issues and the exact ordered next actions: [STUDIO-CONTINUATION-2026-11-25.md](extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md).
+
 ## Configurator refinement — paused for handoff 25 November 2026
 
 User requested an immediate checkpoint and push. Same worktree and branch `codex/infrastructure-studio-preview`, starting at `e90aec47a5f50ca7dbca01799979012cfbf4068c`; integration owner Codex. Refined the variable configurator's spacing, typed controls, examples, default/override explanation, sensitivity and effective-value preview; improved resource workspace hierarchy and context; added the requested top-right X and guarded backdrop dismissal while retaining Back/Escape and mounted drafts. Scope stays within `extensions/cloudforge/studio` plus this handoff.
@@ -1049,5 +1057,7 @@ Branch `claude/project-thread-dnlp5o` from `main` (`156a0fdc`). Scope: `extensio
 | --- | --- |
 | Studio `check`, `build` | Passed (`0` errors). |
 | Studio `test` | **76/76 passed** (adds [historyRebase.test.ts](extensions/cloudforge/studio/src/historyRebase.test.ts): echo refresh keeps undo/redo, external addition survives undo/redo, external removal prunes history, different architecture resets). |
+
+Follow-up on the same branch (see [STUDIO-CONTINUATION-2026-11-25.md](extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md)): drawing links, edge styling, groups and layer order now carry through refresh; menu-driven multi-object resize added; 81/81 tests.
 
 Not verified: hosted browser/Code OSS run of the refresh path (`studio-host-bridge-verify.mjs` lives on the Windows checkout). Known projection limits found while tracing, unchanged here: `projectGraphSnapshotToArchitecture` always takes the architecture name from the snapshot, and rebuilds connections from service edges, so user drawing links and `groups`/`layerOrder` are not carried through a refresh. Next: carry those through the projection, then the whiteboard gaps (multi-object resize, rotation, freehand, free connector endpoints).

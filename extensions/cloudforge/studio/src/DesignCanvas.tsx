@@ -188,6 +188,9 @@ export const DesignCanvas = memo(function DesignCanvas({
 		} else if (action.startsWith('align-')) {
 			const sizes = Object.fromEntries((flow?.getNodes() ?? []).map(node => [node.id, { width: node.measured?.width ?? 112, height: node.measured?.height ?? 92 }]));
 			dispatch({ type: 'canvas', command: { kind: 'move', mode, positions: layoutSelection(architecture, ids, mode, action.slice(6) as Alignment, sizes) } });
+		} else if (action.startsWith('size-')) {
+			const value = action.slice(5);
+			dispatch({ type: 'canvas', command: value === 'width' || value === 'height' || value === 'size' ? { kind: 'resize', ids, mode, match: value } : { kind: 'resize', ids, mode, scale: Number(value) } });
 		}
 	}
 

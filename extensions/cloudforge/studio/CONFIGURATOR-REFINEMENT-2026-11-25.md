@@ -37,3 +37,7 @@ That first rendered check exposed the Save footer below the fold. The final sour
 5. Continue the original checkpoint's remaining work without removing or reordering it: the old per-renderer zoom check, typed resource-attribute pickers, complete provider schemas and all other outstanding items remain open. This addendum makes no claim that those items were completed.
 
 Original checkpoint preservation verified: the first 13974 bytes are unchanged (SHA-256 `1a4581e7160dc0f3988f0fc0f24a9734a32a64816362d36d90499199ca567e8f`).
+
+## Superseded — 25 November 2026 continuation
+
+Every step in the resume list above was completed on `main` after `f82e0c12` merged. Do not resume from this file. Continue from [STUDIO-CONTINUATION-2026-11-25.md](STUDIO-CONTINUATION-2026-11-25.md), which gives the current branch, what changed, verification and the ordered next actions. The content above this section is unchanged.

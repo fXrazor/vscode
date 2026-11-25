@@ -21,6 +21,7 @@ function refresh(history: History, graph: HostGraphSnapshot): History {
 
 const rg = node('rg-1', 'azurerm_resource_group', 'rg_one');
 const vnet = node('vnet-1', 'azurerm_virtual_network', 'vnet_one');
+const rg2 = node('rg-2', 'azurerm_resource_group', 'rg_two');
 
 test('a refresh that echoes the current state keeps undo and redo intact', () => {
 	const first = snapshot([rg], 'a');
@@ -75,4 +76,29 @@ test('switching to a different architecture still starts a fresh history', () =>
 	h = historyReducer(h, { type: 'replace', architecture: other });
 	assert.equal(h.past.length, 0);
 	assert.equal(h.future.length, 0);
+});
+
+test('a refresh keeps user drawing links, edge styling, groups and layer order', () => {
+	const withEdge = { ...snapshot([rg, rg2], 'a'), edges: [{ fromId: 'rg-2', toId: 'rg-1', kind: 'depends_on' }] } as unknown as HostGraphSnapshot;
+	let h = createHistory(projectGraphSnapshotToArchitecture(withEdge).architecture);
+	const serviceEdge = h.present.connections[0];
+	assert.ok(serviceEdge, 'service edge projected as a design connection');
+	h = historyReducer(h, { type: 'updateConnection', id: serviceEdge.id, patch: { stroke: '#ff0000' } });
+	h = historyReducer(h, { type: 'addItem', item: { id: 'note-1', kind: 'note', text: 'Ingress', positions: { visual: { x: 0, y: 0 }, technical: { x: 0, y: 0 } }, width: 120, height: 80, members: [] } });
+	h = historyReducer(h, { type: 'connect', source: 'note-1', target: 'rg-1' });
+	const userLink = h.present.connections.find(connection => connection.source === 'note-1');
+	assert.ok(userLink, 'user drawing link created');
+	const groupedInput = { ...h.present, groups: [{ id: 'g-1', label: 'Group', members: ['note-1', 'rg-1'] }], layerOrder: ['note-1', 'rg-1', 'rg-2'] };
+	h = { ...h, present: groupedInput };
+
+	h = refresh(h, { ...withEdge, sourceRevision: 'b'.repeat(64) });
+	assert.ok(h.present.connections.some(connection => connection.id === userLink.id), 'drawing link survives');
+	assert.equal(h.present.connections.find(connection => connection.id === serviceEdge.id)?.stroke, '#ff0000', 'edge styling survives');
+	assert.deepEqual(h.present.groups?.map(group => group.id), ['g-1']);
+	assert.deepEqual(h.present.layerOrder, ['note-1', 'rg-1', 'rg-2']);
+
+	h = refresh(h, { ...snapshot([rg2], 'c') });
+	assert.ok(!h.present.connections.some(connection => connection.target === 'rg-1'), 'links to a removed resource are pruned');
+	assert.equal(h.present.groups, undefined, 'a group left with one member is dropped');
+	assert.deepEqual(h.present.layerOrder, ['note-1', 'rg-2']);
 });
