@@ -1052,6 +1052,10 @@ export function activate(context: ExtensionContext): void {
 		onLoadCatalogueSnapshots: loadCatalogueSnapshots,
 		onLoadCatalogueTypes: loadCatalogueTypes,
 		onLoadResourceSchema: loadResourceSchema,
+		async onReadResourceValues(workspaceId, architectureId, sourceRevision) {
+			const result = await callService<unknown>('readResourceValues', { workspaceId, architectureId, expectedSourceRevision: sourceRevision });
+			return result.ok ? result.value : undefined;
+		},
 		async onRenderResourceDraft(resourceId, draft) {
 			const typeName = typeof draft.typeName === 'string' ? draft.typeName : '';
 			const snap = selectBestSnapshotForType(await loadCatalogueSnapshots(), typeName);

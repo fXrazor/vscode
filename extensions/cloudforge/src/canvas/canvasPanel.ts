@@ -70,6 +70,8 @@ export interface CanvasPanelHost {
 	/** Resource types of the newest imported snapshot per palette provider. */
 	onLoadCatalogueTypes?(): Promise<readonly CanvasCatalogueTypes[]>;
 	onLoadResourceSchema?(kind: 'resource' | 'dataSource', typeName: string): Promise<FormSchema | null>;
+	/** Attribute values written in the architecture's files (Rust `readResourceValues`). */
+	onReadResourceValues?(workspaceId: string, architectureId: string, sourceRevision: string): Promise<unknown>;
 	/** Renders and checks one canvas resource against its pinned provider schema in Rust. */
 	onRenderResourceDraft?(resourceId: string, draft: Readonly<Record<string, unknown>>): Promise<CanvasSchemaPreview | null>;
 	onLoadCloudRegions?(provider: 'azure' | 'aws' | 'google'): Promise<CanvasCloudRegionsPayload | undefined>;
@@ -652,6 +654,14 @@ export class CloudForgeCanvasPanel implements Disposable {
 			viewState,
 			notice: this.notice,
 		});
+		if (this.host.onReadResourceValues) {
+			const snapshot = this.graph;
+			void this.host.onReadResourceValues(snapshot.workspaceId, snapshot.architectureId, snapshot.sourceRevision).then(values => {
+				if (values !== undefined && this.ready && this.graph?.architectureId === snapshot.architectureId && this.graph?.sourceRevision === snapshot.sourceRevision) {
+					this.post({ type: 'resourceValues', sourceRevision: snapshot.sourceRevision, values });
+				}
+			});
+		}
 		if (this.host.onInspectDependencies) {
 			const snapshot = this.graph;
 			void this.host.onInspectDependencies(snapshot.workspaceId, snapshot.architectureId, snapshot.sourceRevision).then(report => {

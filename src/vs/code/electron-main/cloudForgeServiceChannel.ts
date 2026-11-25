@@ -38,7 +38,7 @@ const cloudForgeMethods: ReadonlySet<string> = new Set<CloudForgeServiceMethod>(
 	'listCatalogueSnapshots', 'listCatalogueTypes', 'getResourceFormSchema', 'getCatalogueCoverage', 'renderResourceDraft',
 	'startValidationRun', 'pollValidationRun', 'cancelValidationRun',
 	'previewDraftSave', 'applyDraftSave', 'previewFocusedSave', 'applyFocusedSave',
-	'inspectDependencies', 'listCloudRegions', 'readModule',
+	'inspectDependencies', 'readResourceValues', 'listCloudRegions', 'readModule',
 	'diffCatalogueSnapshots', 'auditExportReadiness',
 	'detectEngines', 'runEngineValidate'
 ]);
@@ -524,6 +524,19 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 				expectedSourceRevision: value.expectedSourceRevision,
 				fileName: value.fileName,
 				previewToken: value.previewToken
+			};
+		}
+		case 'readResourceValues': {
+			if (!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'expectedSourceRevision']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId)) {
+				return undefined;
+			}
+			if (value.expectedSourceRevision !== undefined && (typeof value.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(value.expectedSourceRevision))) {
+				return undefined;
+			}
+			return {
+				workspaceId: value.workspaceId,
+				architectureId: value.architectureId,
+				...(value.expectedSourceRevision === undefined ? {} : { expectedSourceRevision: value.expectedSourceRevision })
 			};
 		}
 		case 'inspectDependencies': {

@@ -32,6 +32,7 @@ import { workflowTemplate } from './workflowTemplate.ts';
 import { createHostBridge, type HostCloudRegionsPayload, type HostDependencyReport, type HostDetectedEngine, type HostDraftSaveError, type HostDraftSavePreview, type HostEngineValidateReport, type HostExportAuditReport, type HostGraphSnapshot, type HostModuleInspection, type HostNotice, type HostValidationRun } from './webviewBridge.ts';
 import type { LiveSchemaMap } from './liveSchema.ts';
 import { parseSchemaPreview, type SchemaPreview } from './resourceDraft.ts';
+import { hydrateResourceValues, parseResourceValues } from './resourceValues.ts';
 import { buildDraftSavePayload, buildHostViewState, defaultTargetTfFile, projectGraphSnapshotToArchitecture, projectHostDiagnostics, sanitizeDraftTfFileName } from './serviceAdapter.ts';
 import { projectResourceFiles } from './terraformProjection.ts';
 import { DraftSaveDialog } from './DraftSaveDialog.tsx';
@@ -75,6 +76,8 @@ export function Studio() {
 	const [hostSnapshot, setHostSnapshot] = useState<HostGraphSnapshot | null>(null);
 	/** The architecture last loaded from the service; the draft is modified when the present differs from it. */
 	const [hostBaseline, setHostBaseline] = useState<Architecture | null>(null);
+	const hostBaselineRef = useRef<Architecture | null>(null);
+	const hostGraphRef = useRef<HostGraphSnapshot | null>(null);
 	const [hasSourceById, setHasSourceById] = useState<Readonly<Record<string, boolean>>>({});
 	const [hostNotice, setHostNotice] = useState<HostNotice | null>(null);
 	const [liveSchemas, setLiveSchemas] = useState<LiveSchemaMap>({});
@@ -135,6 +138,7 @@ export function Studio() {
 						viewState: incoming.viewState,
 					});
 					setHostSnapshot(incoming.graph);
+					hostGraphRef.current = incoming.graph;
 					setHasSourceById(projected.hasSourceById);
 					setHostNotice(incoming.notice ?? null);
 					setSaveFileName(defaultTargetTfFile(projected.architecture, incoming.viewState?.selectedId ?? undefined));
@@ -154,6 +158,7 @@ export function Studio() {
 					}
 					dispatch({ type: sameArch ? 'rebase' : 'replace', architecture: projected.architecture });
 					setHostBaseline(projected.architecture);
+					hostBaselineRef.current = projected.architecture;
 					if (incoming.viewState?.selectedId && projected.architecture.resources.some(r => r.id === incoming.viewState?.selectedId)) {
 						setSelectedId(incoming.viewState.selectedId);
 					}
@@ -181,6 +186,22 @@ export function Studio() {
 				case 'catalogueTypes':
 					registerServiceTypes(incoming.types);
 					break;
+				case 'resourceValues': {
+					// Show what the files say. Only before the user edits, so no canvas edit is replaced.
+					const graph = hostGraphRef.current;
+					const parsed = parseResourceValues(incoming.values);
+					const current = architectureRef.current;
+					if (!graph || !parsed || parsed.sourceRevision !== graph.sourceRevision || incoming.sourceRevision !== graph.sourceRevision || current !== hostBaselineRef.current) {
+						break;
+					}
+					const hydrated = hydrateResourceValues(current, graph, parsed.resources);
+					if (hydrated !== current) {
+						dispatch({ type: 'rebase', architecture: hydrated });
+						setHostBaseline(hydrated);
+						hostBaselineRef.current = hydrated;
+					}
+					break;
+				}
 				case 'resourceDraftRendered':
 					setSchemaPreviews(prev => ({ ...prev, [incoming.resourceId]: parseSchemaPreview(incoming.preview) ?? null }));
 					break;

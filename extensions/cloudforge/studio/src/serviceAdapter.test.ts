@@ -12,6 +12,7 @@ import { sourceChanges, buildDraftSavePayload, buildHostViewState, defaultTarget
 import { projectResourceFiles } from './terraformProjection.ts';
 import { describeMerge } from './draftSaveMerge.ts';
 import { buildResourceDraft, parseSchemaPreview } from './resourceDraft.ts';
+import { hydrateResourceValues, parseResourceValues } from './resourceValues.ts';
 import { sampleArchitecture as schemaSample } from './fixture.ts';
 import { explicitResourceReferences, inheritedDependencies } from './resourceHierarchy.ts';
 import { terraformCode } from './terraformProjection.ts';
@@ -406,4 +407,30 @@ test('save payloads carry the load-time canvas text so the service applies only 
 	assert.equal(typeof payload.baseContents, 'string');
 	assert.notEqual(payload.baseContents, payload.contents);
 	assert.equal(buildDraftSavePayload(baseline, 'main.tf', 'network', null, baseline).baseContents, undefined);
+});
+
+test('the canvas takes literal values from the files and keeps its own for expressions and secrets', () => {
+	const architecture = schemaSample();
+	const network = architecture.resources.find(resource => resource.id === 'network')!;
+	const name = network.terraformName ?? network.name;
+	const snapshot = {
+		workspaceId: 'w', architectureId: 'a', architectureName: 'a', sourceRevision: 'f'.repeat(64), status: 'complete' as const, edges: [], diagnostics: [],
+		nodes: [{ id: 'network', kind: 'resource', resourceType: 'azurerm_virtual_network', name, label: name, hasSource: true, sourceFile: 'main.tf' }],
+	};
+	const parsed = parseResourceValues({
+		sourceRevision: 'f'.repeat(64),
+		resources: [{
+			address: 'azurerm_virtual_network.' + name, file: 'main.tf',
+			attributes: { name: { kind: 'literal', value: 'vnet-from-file' }, location: { kind: 'literal', value: 'westeurope' }, address_space: { kind: 'expression', text: 'var.space' }, secret: { kind: 'redacted' } },
+			blocks: [],
+		}, { bad: true }],
+	});
+	assert.equal(parsed?.resources.length, 1);
+	const hydrated = hydrateResourceValues(architecture, snapshot, parsed!.resources);
+	const next = hydrated.resources.find(resource => resource.id === 'network')!;
+	assert.equal(next.name, 'vnet-from-file');
+	assert.equal(next.region, 'West Europe');
+	assert.deepEqual(next.settings, network.settings);
+	assert.equal(hydrateResourceValues(architecture, snapshot, []), architecture);
+	assert.equal(parseResourceValues({ resources: [] }), undefined);
 });

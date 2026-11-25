@@ -416,6 +416,8 @@ suite('CloudForgeServiceChannel', () => {
 		assert.ok(validateCloudForgeServiceParams('applyFocusedSave', focusedApply));
 		assert.strictEqual(validateCloudForgeServiceParams('applyFocusedSave', { ...focusedApply, contents: 'x' }), undefined);
 
+		assert.ok(validateCloudForgeServiceParams('readResourceValues', { workspaceId, architectureId: `${workspaceId}-architecture-1`, expectedSourceRevision: sha256 }));
+		assert.strictEqual(validateCloudForgeServiceParams('readResourceValues', { workspaceId, architectureId: `${workspaceId}-architecture-1`, rootPath: 'C:\\Windows' }), undefined);
 		assert.ok(validateCloudForgeServiceParams('inspectDependencies', { workspaceId, architectureId: `${workspaceId}-architecture-1`, expectedSourceRevision: sha256, engine: 'opentofu' }));
 		assert.strictEqual(validateCloudForgeServiceParams('inspectDependencies', { workspaceId, architectureId: `${workspaceId}-architecture-1`, engine: 'pulumi' }), undefined);
 		assert.strictEqual(validateCloudForgeServiceParams('inspectDependencies', { workspaceId, architectureId: `${workspaceId}-architecture-1`, rootPath: 'C:\\Windows' }), undefined);

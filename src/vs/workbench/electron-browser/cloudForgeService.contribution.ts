@@ -30,7 +30,7 @@ type CloudForgeCallResult = CloudForgeCallSuccess | CloudForgeCallFailure;
 type CloudForgeServiceMethod =
 	| 'chooseTerraformRoot' | 'selectArchitecture' | 'readArchitecture'
 	| 'startValidationRun' | 'pollValidationRun' | 'cancelValidationRun'
-	| 'previewDraftSave' | 'applyDraftSave' | 'previewFocusedSave' | 'applyFocusedSave'
+	| 'previewDraftSave' | 'applyDraftSave' | 'previewFocusedSave' | 'applyFocusedSave' | 'readResourceValues'
 	| 'inspectDependencies' | 'readModule' | 'auditExportReadiness' | 'runEngineValidate';
 type CloudForgeCatalogueMethod = 'inspectCatalogueSchemaFile' | 'importCatalogueSnapshot' | 'listCatalogueSnapshots' | 'listCatalogueTypes' | 'getResourceFormSchema' | 'getCatalogueCoverage' | 'renderResourceDraft' | 'listCloudRegions' | 'diffCatalogueSnapshots' | 'detectEngines';
 type CloudForgeProjectMethod = 'createProject' | 'openProject' | 'grantProject' | 'forgetProjectAccess' | 'createWorkspaceFile' | 'inspectRepository' | 'importRepository' | 'removeRepository' | 'createArchitecture' | 'summarizeArchitectures' | 'installGit';
@@ -284,7 +284,7 @@ CommandsRegistry.registerCommand('_cloudforge.callService', async (accessor, met
 		method !== 'chooseTerraformRoot' && method !== 'selectArchitecture' && method !== 'readArchitecture' &&
 		method !== 'startValidationRun' && method !== 'pollValidationRun' && method !== 'cancelValidationRun' &&
 		method !== 'previewDraftSave' && method !== 'applyDraftSave' && method !== 'previewFocusedSave' && method !== 'applyFocusedSave' &&
-		method !== 'inspectDependencies' &&
+		method !== 'inspectDependencies' && method !== 'readResourceValues' &&
 		method !== 'readModule' && method !== 'auditExportReadiness' && method !== 'runEngineValidate'
 	) {
 		return failure('INVALID_PARAMS', 'The CloudForge request is invalid.');
@@ -307,6 +307,7 @@ CommandsRegistry.registerCommand('_cloudforge.callService', async (accessor, met
 		case 'readArchitecture':
 		case 'startValidationRun':
 		case 'inspectDependencies':
+		case 'readResourceValues':
 		case 'readModule':
 		case 'auditExportReadiness':
 		case 'runEngineValidate':

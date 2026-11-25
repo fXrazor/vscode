@@ -386,6 +386,12 @@ export type ExtensionToWebviewMessage =
 		readonly types: CanvasCatalogueTypes;
 	}
 	| {
+		/** Rust `readResourceValues` result for the current graph revision (passed through; Studio validates). */
+		readonly type: 'resourceValues';
+		readonly sourceRevision: string;
+		readonly values: unknown;
+	}
+	| {
 		/** Rust `renderResourceDraft` result for one canvas resource (null when unavailable). */
 		readonly type: 'resourceDraftRendered';
 		readonly resourceId: string;

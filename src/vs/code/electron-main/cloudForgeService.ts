@@ -54,7 +54,7 @@ export type CloudForgeServiceMethod =
 	| 'inspectCatalogueSchemaFile' | 'importCatalogueSnapshot'
 	| 'listCatalogueSnapshots' | 'listCatalogueTypes' | 'getResourceFormSchema' | 'getCatalogueCoverage' | 'renderResourceDraft'
 	| 'startValidationRun' | 'pollValidationRun' | 'cancelValidationRun'
-	| 'previewDraftSave' | 'applyDraftSave' | 'previewFocusedSave' | 'applyFocusedSave'
+	| 'previewDraftSave' | 'applyDraftSave' | 'previewFocusedSave' | 'applyFocusedSave' | 'readResourceValues'
 	| 'inspectDependencies' | 'listCloudRegions' | 'readModule'
 	| 'diffCatalogueSnapshots' | 'auditExportReadiness'
 	| 'detectEngines' | 'runEngineValidate';
