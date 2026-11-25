@@ -6,6 +6,15 @@ import type { Position } from './model.ts';
 
 /** Freehand strokes are drawings only: they never reach Terraform. */
 export const inkDefaults = { strokeColor: '#5b4bb7', strokeWidth: 3, minSize: 16 };
+export type InkStyle = { strokeColor: string; strokeWidth: number };
+
+/** Presentation-only pen preferences obey the same 1–8 weight limit as drawing styles. */
+export function normaliseInkStyle(style: Partial<InkStyle>): InkStyle {
+	return {
+		strokeColor: /^#[0-9a-f]{6}$/i.test(style.strokeColor ?? '') ? style.strokeColor! : inkDefaults.strokeColor,
+		strokeWidth: Number.isFinite(style.strokeWidth) ? Math.max(1, Math.min(8, Math.round(style.strokeWidth!))) : inkDefaults.strokeWidth
+	};
+}
 
 /** Drop points closer than `spacing` to the last kept point, always keeping the final point. */
 export function thinStroke(points: Position[], spacing: number): Position[] {

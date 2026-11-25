@@ -13,6 +13,8 @@ import { layoutSelection, type Alignment } from './selectionGeometry.ts';
 import { CanvasActionMenu, SelectionControls, resizable, type SelectionAction } from './SelectionControls.tsx';
 import { SelectionResizeHandle } from './SelectionResizeHandle.tsx';
 import { InkCapture } from './InkCapture.tsx';
+import { PenOptions } from './PenOptions.tsx';
+import { normaliseInkStyle } from './ink.ts';
 import { ConnectorDropMenu } from './ConnectorDropMenu.tsx';
 import { droppedItem } from './connectorDrop.ts';
 import { resourceIconSize } from './resourceGeometry.ts';
@@ -78,6 +80,7 @@ export const DesignCanvas = memo(function DesignCanvas({
 	const [guideLines, setGuideLines] = useState<GuideLine[]>([]);
 	const [hand, setHand] = useState(false);
 	const [pen, setPen] = useState(false);
+	const [ink, setInk] = useState(() => normaliseInkStyle({}));
 	const [connectorDrop, setConnectorDrop] = useState<{ source: string; point: Position; left: number; top: number }>();
 	const [additiveSelection, setAdditiveSelection] = useState(false);
 	const [minimap, setMinimap] = useState(false);
@@ -329,7 +332,7 @@ export const DesignCanvas = memo(function DesignCanvas({
 				<button aria-label="Extend selection" title="Select multiple elements (Ctrl / Cmd + click)" aria-pressed={additiveSelection} onClick={() => { setHand(false); setAdditiveSelection(value => !value); }}><SquareDashedMousePointer /></button>
 				<span className="tool-divider" />
 				<button aria-label="Add text" title="Add text" onClick={() => createItem('text')}><Type /></button>
-				<button aria-label="Draw freehand" title="Pen (P) · draw freehand, Escape to stop" aria-pressed={pen} onClick={() => { setHand(false); setPen(value => !value); }}><PenLine /></button>
+				<div className="pen-tool"><button aria-label="Draw freehand" title="Pen (P) · draw freehand, Escape to stop" aria-pressed={pen} onClick={() => { setHand(false); setPen(value => !value); }}><PenLine /></button>{pen && <PenOptions ink={ink} onChange={setInk} container={bounds.current}/>}</div>
 				<button aria-label="Add sticky note" title="Add sticky note" onClick={() => createItem('note')}><StickyNote /></button>
 				<button aria-label="Add shape" title="Add shape" onClick={onOpenShapes}><Shapes /></button>
 				<button aria-label="Add frame" title="Add frame" onClick={() => createItem('frame')}><Frame /></button>
@@ -385,7 +388,7 @@ export const DesignCanvas = memo(function DesignCanvas({
 				const id = crypto.randomUUID(); dispatch({ type: 'addConnectedItem', source: connectorDrop.source, item: droppedItem(choice, id, connectorDrop.point) });
 				setConnectorDrop(undefined); onSelectionChange([id]); bounds.current?.focus();
 			}}/>}
-			{pen && flow && <InkCapture flow={flow} zoom={zoom} onStroke={(position, size, path, ink) => { const id = crypto.randomUUID(); dispatch({ type: 'addItem', item: { id, kind: 'ink', text: '', path, strokeColor: ink.strokeColor, strokeWidth: ink.strokeWidth, positions: { visual: position, technical: position }, width: size.width, height: size.height, members: [] } }); }}/>}
+			{pen && flow && <InkCapture flow={flow} zoom={zoom} ink={ink} onStroke={(position, size, path, ink) => { const id = crypto.randomUUID(); dispatch({ type: 'addItem', item: { id, kind: 'ink', text: '', path, strokeColor: ink.strokeColor, strokeWidth: ink.strokeWidth, positions: { visual: position, technical: position }, width: size.width, height: size.height, members: [] } }); }}/>}
 			{creatingConnection ? <ConnectionCreate architecture={architecture} selectedId={connectionSourceId} dispatch={dispatch} onClose={() => { setCreatingConnection(false); bounds.current?.querySelector<HTMLButtonElement>('[aria-label="Connect elements"]')?.focus(); }}/> : null}
 			<details className="canvas-options"><summary>View</summary><div className="view-options-content">
 				<label>Theme<select aria-label="Canvas theme" value={theme} onChange={event => onThemeChange(event.target.value as 'light' | 'dark')}><option value="light">Light</option><option value="dark">Dark</option></select></label>

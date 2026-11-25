@@ -60,6 +60,42 @@ try {
 			assert.deepEqual(errors, [], 'no browser errors');
 			console.log(`PASS rotation ${viewport.width}×${viewport.height} ${theme} (0 browser errors)`);
 			checks++;
+
+			await page.reload();
+			await page.getByLabel('Close resource library', { exact: true }).click();
+			if (theme === 'dark') { await page.getByLabel('Toggle light or dark theme').click(); }
+			await page.getByLabel('Draw freehand', { exact: true }).click();
+			await page.getByLabel('Pen options', { exact: true }).click();
+			await page.getByLabel('New stroke colour').fill('#1274ab');
+			await page.getByLabel('New stroke weight').selectOption('8');
+			assert.equal(await page.getByLabel('Undo', { exact: true }).isEnabled(), false, 'pen presets do not enter semantic history');
+			await page.screenshot({ path: path.join(output, `pen-${viewport.width}-${theme}.png`) });
+			await page.getByLabel('Close pen options', { exact: true }).click();
+			await page.getByLabel('Select tool', { exact: true }).click();
+			await page.getByRole('button', { name: 'Configuration', exact: true }).click();
+			await page.getByLabel('Draw freehand', { exact: true }).click();
+			await page.getByLabel('Pen options', { exact: true }).click();
+			assert.equal(await page.getByLabel('New stroke weight').inputValue(), '8', 'pen preset survives tool/renderer changes');
+			assert.equal(await page.getByLabel('New stroke colour').inputValue(), '#1274ab');
+			await page.getByLabel('Close pen options', { exact: true }).click();
+			const canvas = await page.locator('main.canvas').boundingBox();
+			await page.mouse.move(canvas.x + canvas.width / 2, canvas.y + canvas.height / 2);
+			await page.mouse.down();
+			await page.mouse.move(canvas.x + canvas.width / 2 + 100, canvas.y + canvas.height / 2 + 40, { steps: 8 });
+			await page.mouse.up();
+			await page.keyboard.press('Escape');
+			const stroke = page.locator('.board-ink-geometry path');
+			await stroke.waitFor();
+			assert.equal(await stroke.getAttribute('stroke'), '#1274ab');
+			assert.equal(await stroke.getAttribute('stroke-width'), '8');
+			await page.getByLabel('Undo', { exact: true }).click();
+			assert.equal(await stroke.count(), 0, 'one Undo removes the stroke');
+			assert.equal(await page.getByLabel('Undo', { exact: true }).isEnabled(), false, 'no preset change in history');
+			await page.getByLabel('Redo', { exact: true }).click();
+			assert.equal(await stroke.getAttribute('stroke-width'), '8');
+			assert.deepEqual(errors, [], 'no browser errors');
+			console.log(`PASS pen ${viewport.width}×${viewport.height} ${theme} (0 browser errors)`);
+			checks++;
 			await page.close();
 		}
 	}
