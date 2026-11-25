@@ -936,6 +936,28 @@ Implemented on `fxrazor/continue-project-handoff-review` in `E:\Orca\CloudForge-
 1. Wire live Stage 9B (`terraform plan -json` / `tofu plan -json`) once the Rust sidecar adds guarded plan capture, then package one combined installer covering Stage 9B + this authoring polish slice.
 2. When ready for signed releases, pass `-SignCertificateThumbprint <40-hex>` + `-RequireSignedService` to `build/cloudforge/package-win32-x64.ps1`.
 
+### Infrastructure Studio Preview Merge, Configurator/Workspace Browser Verification & Typed Resource-Attribute Reference Selection (2026-11-25)
+
+Merged `origin/codex/infrastructure-studio-preview` (`f82e0c1200f`) cleanly into `fxrazor/continue-project-handoff-review` (`f23a43d72db`), completed Codex's paused browser verification checklist from [CONFIGURATOR-REFINEMENT-2026-11-25.md](extensions/cloudforge/studio/CONFIGURATOR-REFINEMENT-2026-11-25.md), and delivered the next stage from [NESTING-AND-FEEDBACK-PASS.md](extensions/cloudforge/studio/NESTING-AND-FEEDBACK-PASS.md) (typed resource-attribute reference selection). **No unnecessary Windows installer build was triggered** (`%LOCALAPPDATA%\Programs\CloudForge Proof` remains verified at `407d56014c1` + Rust Stage 9A `ef4be9d`).
+
+- **Completed paused Studio browser verification (`studio-configurator-verify.mjs`, 0 console/page errors, 5 screenshots inspected):**
+  - Verified the final **Variable Configurator** at desktop (`1360×860`) and narrow (`760×820`) widths: pinned header & Save/Cancel footer above the fold, body-owned scrolling, effective-value precedence, `bool`/`number`/`list`/`string` + `null`/`0`/empty preservation, invalid Save error focus, sensitivity masking, and return focus on Save/Cancel.
+  - Verified **VM (Dark)** and **Resource Group (Light)** focused workspaces, all 4 close paths (**top-right X**, **backdrop click**, **Back**, **Escape**) retaining unapplied variable drafts on reopen, **pointer-down inside -> pointer-up outside** non-dismissal, and independent per-renderer zoom restoration.
+- **Typed Resource-Attribute Reference Selection ([ResourceReferencePicker.tsx](extensions/cloudforge/studio/src/ResourceReferencePicker.tsx), [SchemaField.tsx](extensions/cloudforge/studio/src/SchemaField.tsx), [fieldBindings.ts](extensions/cloudforge/studio/src/fieldBindings.ts), [model.ts](extensions/cloudforge/studio/src/model.ts), [resourceHierarchy.ts](extensions/cloudforge/studio/src/resourceHierarchy.ts), [terraformProjection.ts](extensions/cloudforge/studio/src/terraformProjection.ts), [ResourceFields.tsx](extensions/cloudforge/studio/src/ResourceFields.tsx), [ResourceWorkspace.tsx](extensions/cloudforge/studio/src/ResourceWorkspace.tsx), [formDefinition.ts](extensions/cloudforge/studio/src/formDefinition.ts), [diagnostics.ts](extensions/cloudforge/studio/src/diagnostics.ts), [canvasOperations.ts](extensions/cloudforge/studio/src/canvasOperations.ts), [editor-refinement.css](extensions/cloudforge/studio/src/editor-refinement.css)):**
+  - Added a `Reference` mode right alongside `Value` and `Variable` (and `Inherited`) in `SchemaField` for any field declaring `refTypes`, constrained by `refTypes`, `refAttr` (default `id`), same-provider exported attributes, sensitivity rules, and cycle detection.
+  - Supports both list references (`vm-application.network_interface_ids = [azurerm_network_interface.nic-application.id]`) and scalar/nested-block references (`ip_configuration.subnet_id`), projects derived Technical-view dependency edges distinctly from drawing links, surfaces a **Referenced resources** section in Resource Workspace `Connections`, remaps copied references in `duplicate`, preserves references across sibling HCL edits in `applyTerraformDraft`, and reports truthful missing-resource diagnostics if a target is deleted.
+
+| Check (no full desktop/installer rebuild) | Verified result |
+| --- | --- |
+| `corepack pnpm run check` & `corepack pnpm run build` (in `extensions/cloudforge/studio`) | Passed (`0` errors). |
+| `corepack pnpm run test` (in `extensions/cloudforge/studio`) | **66/66 studio tests passed** (`0` skipped; includes [resourceRefs.test.ts](extensions/cloudforge/studio/src/resourceRefs.test.ts)). |
+| Headless Edge Playwright verification (`studio-configurator-verify.mjs`) | Passed (`0` console/page errors; Variable Configurator desktop/narrow, VM Dark & RG Light workspaces, all 4 close paths + drag-out non-dismissal + draft retention, per-renderer zoom, and live VM -> NIC typed reference verified with 5 screenshots inspected). |
+| `CLOUDFORGE_REPO=Z:\CloudForge node --test extensions/cloudforge/test/*.test.ts` | **60/60 root extension tests passed** (`0` skipped). |
+
+**Next actions:**
+1. Wire live Stage 9B (`terraform plan -json` / `tofu plan -json`) once the Rust sidecar adds guarded plan capture, and bridge the verified Studio canvas components (`extensions/cloudforge/studio`) with the Rust service/extension-host Webview boundary (`extensions/cloudforge/src/canvas/protocol.ts`).
+2. Package one combined Windows x64 installer once Stage 9B or the Studio Webview integration is ready (pass `-SignCertificateThumbprint <40-hex>` + `-RequireSignedService` for signed releases).
+
 
 
 

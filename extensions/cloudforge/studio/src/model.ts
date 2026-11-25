@@ -5,7 +5,7 @@
 import { variableError, variableUses, type VariableDefinition } from './variables.ts';
 import { canConnect } from './designConnections.ts';
 import { applyCanvasCommand, type CanvasCommand } from './canvasOperations.ts';
-import { bindingKey, acceptsVariable, canBindField, fieldDefinition, fieldTargetPath, findResourceBlock, pruneBlockBindings, type FieldTarget, type VariableBinding } from './fieldBindings.ts';
+import { bindingKey, acceptsResourceRefs, acceptsVariable, canBindField, fieldDefinition, fieldTargetPath, findResourceBlock, pruneBlockBindings, pruneBlockResourceRefs, type FieldTarget, type ResourceRefBinding, type ResourceRefEntry, type VariableBinding } from './fieldBindings.ts';
 import { fitResourceContainers, isResourceContainer, reparentResource, resourcePlacement, terraformIdentifier } from './resourceHierarchy.ts';
 import type { ShapeId } from './shapes.ts';
 export type DesignMode = 'visual' | 'technical';
@@ -28,6 +28,7 @@ export interface Resource {
 	canvasLocked?: boolean;
 	iconSize?: number;
 	fieldBindings?: Record<string, VariableBinding>;
+	resourceRefs?: Record<string, ResourceRefBinding>;
 	id: string;
 	kind: ResourceKind;
 	catalogue?: CatalogueEntry;
@@ -111,6 +112,7 @@ export type Edit =
 	| { type: 'canvas'; command: CanvasCommand }
 	| { type: 'resizeResource'; id: string; position: Position; iconSize: number }
 	| { type: 'bindVariable'; id: string; target: FieldTarget; variableId?: string }
+	| { type: 'bindResourceRef'; id: string; target: FieldTarget; refs?: ResourceRefEntry[] }
 	| { type: 'updateConnection'; id: string; patch: Partial<Omit<DesignConnection, 'id' | 'source' | 'target'>> }
 	| { type: 'reverseConnection'; id: string }
 	| { type: 'deleteConnection'; id: string }
@@ -155,10 +157,11 @@ function editArchitecture(architecture: Architecture, action: Edit): Architectur
 		case 'useInheritance': {
 			const resource = architecture.resources.find(item=>item.id===action.id); if (!resource) { return architecture; }
 			const path = fieldTargetPath(resource,action.target).join('.'); const key = bindingKey(action.target);
-			const fieldBindings = {...resource.fieldBindings}; if (action.enabled) { delete fieldBindings[key]; }
+			const fieldBindings = {...resource.fieldBindings}; const resourceRefs = {...resource.resourceRefs};
+			if (action.enabled) { delete fieldBindings[key]; delete resourceRefs[key]; }
 			const inheritanceOverrides = action.enabled ? (resource.inheritanceOverrides??[]).filter(item=>item!==path) : [...new Set([...(resource.inheritanceOverrides??[]),path])];
-			if (inheritanceOverrides.join('|')===(resource.inheritanceOverrides??[]).join('|') && fieldBindings[key]===resource.fieldBindings?.[key]) { return architecture; }
-			return {...architecture,resources:architecture.resources.map(item=>item.id===action.id?{...item,fieldBindings,inheritanceOverrides}:item)};
+			if (inheritanceOverrides.join('|')===(resource.inheritanceOverrides??[]).join('|') && fieldBindings[key]===resource.fieldBindings?.[key] && resourceRefs[key]===resource.resourceRefs?.[key]) { return architecture; }
+			return {...architecture,resources:architecture.resources.map(item=>item.id===action.id?{...item,fieldBindings,resourceRefs,inheritanceOverrides}:item)};
 		}
 		case 'canvas': return applyCanvasCommand(architecture, action.command);
 		case 'bindVariable': {
@@ -168,15 +171,36 @@ function editArchitecture(architecture: Architecture, action: Edit): Architectur
 			if (target.kind === 'block' && !findResourceBlock(resource.blocks, target.blockId)) { return architecture; }
 			const variable = architecture.variables?.find(item => item.id === action.variableId);
 			if (action.variableId && (!variable || !acceptsVariable(variable, fieldDefinition(resource, target)))) { return architecture; }
-			const key = bindingKey(target); const fieldBindings = { ...resource.fieldBindings };
-			if (fieldBindings[key]?.variableId === action.variableId) { return architecture; }
-			if (action.variableId) { fieldBindings[key] = { variableId: action.variableId }; } else { delete fieldBindings[key]; }
+			const key = bindingKey(target); const fieldBindings = { ...resource.fieldBindings }; const resourceRefs = { ...resource.resourceRefs };
+			if (fieldBindings[key]?.variableId === action.variableId && (!action.variableId || !resourceRefs[key])) { return architecture; }
+			if (action.variableId) { fieldBindings[key] = { variableId: action.variableId }; delete resourceRefs[key]; } else { delete fieldBindings[key]; }
 			const blocks = structuredClone(resource.blocks);
 			const settings = { ...resource.settings };
 			if (target.kind === 'setting' && action.variableId) { settings[target.name] ??= ''; }
 			if (target.kind === 'block' && action.variableId) { const block = findResourceBlock(blocks, target.blockId)!; block.values[target.name] ??= ''; }
 			const inheritanceOverrides = action.variableId ? [...new Set([...(resource.inheritanceOverrides??[]),fieldTargetPath(resource,target).join('.')])] : resource.inheritanceOverrides;
-			return { ...architecture, resources: architecture.resources.map(item => item.id === action.id ? { ...item, fieldBindings, blocks, settings, inheritanceOverrides } : item) };
+			return { ...architecture, resources: architecture.resources.map(item => item.id === action.id ? { ...item, fieldBindings, resourceRefs, blocks, settings, inheritanceOverrides } : item) };
+		}
+		case 'bindResourceRef': {
+			const resource = architecture.resources.find(item => item.id === action.id);
+			if (!resource || !canBindField(resource, action.target)) { return architecture; }
+			const target = action.target;
+			if (target.kind === 'block' && !findResourceBlock(resource.blocks, target.blockId)) { return architecture; }
+			const refs = action.refs?.length ? action.refs : undefined;
+			const definition = fieldDefinition(resource, target);
+			if (refs && !acceptsResourceRefs(architecture, resource, refs, definition)) { return architecture; }
+			const key = bindingKey(target);
+			const resourceRefs = { ...resource.resourceRefs };
+			const fieldBindings = { ...resource.fieldBindings };
+			if (JSON.stringify(resourceRefs[key]?.refs ?? null) === JSON.stringify(refs ?? null) && (!refs || !fieldBindings[key])) { return architecture; }
+			if (refs) { resourceRefs[key] = { refs: refs.map(entry => ({ resourceId: entry.resourceId, attribute: entry.attribute })) }; delete fieldBindings[key]; }
+			else { delete resourceRefs[key]; }
+			const blocks = structuredClone(resource.blocks);
+			const settings = { ...resource.settings };
+			if (target.kind === 'setting' && refs) { settings[target.name] ??= ''; }
+			if (target.kind === 'block' && refs) { const block = findResourceBlock(blocks, target.blockId)!; block.values[target.name] ??= ''; }
+			const inheritanceOverrides = refs ? [...new Set([...(resource.inheritanceOverrides ?? []), fieldTargetPath(resource, target).join('.')])] : resource.inheritanceOverrides;
+			return { ...architecture, resources: architecture.resources.map(item => item.id === action.id ? { ...item, fieldBindings, resourceRefs, blocks, settings, inheritanceOverrides } : item) };
 		}
 		case 'resizeResource': {
 			const resource = architecture.resources.find(item => item.id === action.id);
@@ -244,7 +268,7 @@ function editArchitecture(architecture: Architecture, action: Edit): Architectur
 			if (!architecture.resources.some(resource => resource.id === action.id && Object.entries(action.patch).some(([key, value]) => resource[key as keyof Resource] !== value))) { return architecture; }
 			return {
 				...architecture,
-				resources: architecture.resources.map(resource => resource.id === action.id ? { ...resource, ...(action.patch.name!==undefined?{terraformName:terraformIdentifier(resource)}:{}), ...action.patch, ...(action.patch.blocks ? {fieldBindings:pruneBlockBindings(resource,action.patch.blocks)} : {}) } : resource)
+				resources: architecture.resources.map(resource => resource.id === action.id ? { ...resource, ...(action.patch.name!==undefined?{terraformName:terraformIdentifier(resource)}:{}), ...action.patch, ...(action.patch.blocks ? {fieldBindings:pruneBlockBindings(resource,action.patch.blocks),resourceRefs:pruneBlockResourceRefs(resource,action.patch.blocks)} : {}) } : resource)
 			};
 		case 'move': return applyCanvasCommand(architecture,{kind:'move',mode:action.mode,positions:{[action.id]:action.position}});
 		case 'insert':

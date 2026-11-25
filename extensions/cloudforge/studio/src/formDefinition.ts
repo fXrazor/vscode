@@ -5,7 +5,7 @@
 import type { Architecture, Resource, ResourceBlock } from './model.ts';
 import { getDef, type AttrDef } from './cloudlab-core/catalog/index.ts';
 import { resourceDefinition } from './fixture.ts';
-import { bindingKey, bindingTarget, fieldDefinition, fieldTargetPath, variableBindingIssue } from './fieldBindings.ts';
+import { bindingKey, bindingTarget, fieldDefinition, fieldTargetPath, resourceRefBindingIssue, variableBindingIssue } from './fieldBindings.ts';
 import { inheritedReference } from './resourceHierarchy.ts';
 
 export interface BlockDefinition {
@@ -56,11 +56,13 @@ export function fieldIssue(value: string, attribute?: AttrDef): string | undefin
 export function resourceFormIssues(resource: Resource, variables?: import('./variables.ts').VariableDefinition[], architecture?: Architecture): string[] {
 	const issues: string[] = [];
 	for (const [key, binding] of Object.entries(resource.fieldBindings ?? {})) { const target = bindingTarget(key); const issue = variableBindingIssue(binding, variables ?? [], target ? fieldDefinition(resource,target) : undefined); if (issue) { issues.push((target?.kind === 'setting' || target?.kind === 'block' ? target.name : target?.kind ?? 'Field') + ': ' + issue); } }
+	for (const [key, binding] of Object.entries(resource.resourceRefs ?? {})) { const target = bindingTarget(key); const issue = resourceRefBindingIssue(binding, architecture, resource, target ? fieldDefinition(resource, target) : undefined); if (issue) { issues.push((target?.kind === 'setting' || target?.kind === 'block' ? target.name : target?.kind ?? 'Field') + ': ' + issue); } }
 	if (resource.catalogue) {
 		for (const field of editableFields(resource)) {
 			if (['name', 'location', 'region'].includes(field.name)) { continue; }
 			if(architecture&&inheritedReference(architecture,resource,[field.name])){continue;}
-			const issue = resource.fieldBindings?.[bindingKey({kind:'setting',name:field.name})] ? undefined : fieldIssue(resource.settings[field.name] ?? '', field);
+			const key = bindingKey({kind:'setting',name:field.name});
+			const issue = resource.fieldBindings?.[key] || resource.resourceRefs?.[key]?.refs.length ? undefined : fieldIssue(resource.settings[field.name] ?? '', field);
 			if (issue) { issues.push(field.name + ': ' + issue); }
 		}
 	}
@@ -73,7 +75,8 @@ export function resourceFormIssues(resource: Resource, variables?: import('./var
 				const prefix = path + definition.type + '[' + (index + 1) + '].';
 				for (const field of definition.attributes ?? []) {
 					if(architecture&&inheritedReference(architecture,resource,fieldTargetPath(resource,{kind:'block',blockId:block.id,name:field.name}))){continue;}
-					const issue = resource.fieldBindings?.[bindingKey({kind:'block',blockId:block.id,name:field.name})] ? undefined : fieldIssue(block.values[field.name] ?? '', field);
+					const key = bindingKey({kind:'block',blockId:block.id,name:field.name});
+					const issue = resource.fieldBindings?.[key] || resource.resourceRefs?.[key]?.refs.length ? undefined : fieldIssue(block.values[field.name] ?? '', field);
 					if (issue) { issues.push(prefix + field.name + ': ' + issue); }
 				}
 				visit(block.blocks, definition.children, prefix);

@@ -6,6 +6,7 @@ import type { Architecture, DesignMode, Resource } from './model.ts';
 import { resourceDefinition } from './fixture.ts';
 import { getDef } from './cloudlab-core/catalog/index.ts';
 import { resourceIconSize } from './resourceGeometry.ts';
+import { bindingTarget, fieldTargetPath } from './fieldBindings.ts';
 
 export const isResourceContainer = (resource: Resource) => !!getDef(resourceDefinition(resource).type)?.container;
 export const terraformIdentifier = (resource: Resource) => resource.terraformName ?? resource.name.replace(/[^A-Za-z0-9_-]/g, '_').replace(/^(?=[^A-Za-z_])/, '_');
@@ -49,10 +50,26 @@ export function inheritedReferences(architecture: Architecture, resource: Resour
 export function inheritedReference(architecture: Architecture, resource: Resource, path: string[]): InheritedReference | undefined {
 	return inheritedReferences(architecture,resource).find(reference=>reference.path.join('.')===path.filter(part=>!/^\d+$/.test(part)).join('.'));
 }
+export function explicitResourceReferences(architecture: Architecture, resource: Resource): InheritedReference[] {
+	const out: InheritedReference[] = [];
+	for (const [key, binding] of Object.entries(resource.resourceRefs ?? {})) {
+		const target = bindingTarget(key);
+		if (!target) { continue; }
+		const path = fieldTargetPath(resource, target);
+		for (const entry of binding.refs) {
+			const source = architecture.resources.find(item => item.id === entry.resourceId);
+			if (source) {
+				out.push({ path, source, attribute: entry.attribute, expression: resourceAddress(source) + '.' + entry.attribute });
+			}
+		}
+	}
+	return out;
+}
 export function inheritedDependencies(architecture:Architecture) {
 	return architecture.resources.flatMap(resource=>{
-		const references=inheritedReferences(architecture,resource); const sources=[...new Set(references.map(reference=>reference.source.id))];
-		return sources.map(source=>({id:'dependency:'+source+':'+resource.id,source,target:resource.id,fields:references.filter(reference=>reference.source.id===source).map(reference=>reference.path.join('.'))}));
+		const references=[...inheritedReferences(architecture,resource),...explicitResourceReferences(architecture,resource)];
+		const sources=[...new Set(references.map(reference=>reference.source.id))];
+		return sources.map(source=>({id:'dependency:'+source+':'+resource.id,source,target:resource.id,fields:[...new Set(references.filter(reference=>reference.source.id===source).map(reference=>reference.path.join('.')))]}));
 	});
 }
 

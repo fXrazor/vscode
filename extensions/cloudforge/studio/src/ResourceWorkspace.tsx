@@ -11,7 +11,7 @@ import { ResourceFields } from './ResourceFields.tsx';
 import { CodePanel } from './CodePanel.tsx';
 import { VariablePanel } from './VariablePanel.tsx';
 import { architectureDiagnostics } from './diagnostics.ts';
-import { inheritedReferences } from './resourceHierarchy.ts';
+import { explicitResourceReferences, inheritedReferences } from './resourceHierarchy.ts';
 import { focusResourceField } from './IssuesPanel.tsx';
 import { PaneResizeHandle } from './PaneResizeHandle.tsx';
 
@@ -42,6 +42,8 @@ export function ResourceWorkspace({ resource, architecture, dispatch, open, onCl
 	const issues = architectureDiagnostics(architecture).filter(item => item.resourceId === resource.id);
 	const inherited = inheritedReferences(architecture, resource);
 	const inheritedSources = [...new Set(inherited.map(reference => reference.source.id))].map(id => ({ id, references: inherited.filter(reference => reference.source.id === id) }));
+	const explicitRefs = explicitResourceReferences(architecture, resource);
+	const explicitSources = [...new Set(explicitRefs.map(reference => reference.source.id))].map(id => ({ id, references: explicitRefs.filter(reference => reference.source.id === id) }));
 	const children = architecture.resources.filter(item => item.parentId === resource.id);
 	const boundIds = new Set(Object.values(resource.fieldBindings ?? {}).map(binding => binding.variableId));
 	function linkedElement(id: string) {
@@ -83,9 +85,10 @@ export function ResourceWorkspace({ resource, architecture, dispatch, open, onCl
 				<Tabs.Content value="links">
 					{children.length > 0 && <section className="workspace-context-section"><h3><Layers size={14} />Contained resources <span>{children.length}</span></h3><p className="field-help">Open a resource to see its parameters and inherited values.</p>{children.map(child => <div key={child.id}>{linkedElement(child.id)}</div>)}</section>}
 					{inheritedSources.length > 0 && <section className="workspace-context-section"><h3>Inherited from containers</h3>{inheritedSources.map(source => <div key={source.id} className="workspace-inherited-link">{linkedElement(source.id)}{source.references.map(reference => <code key={reference.path.join('.')}>{reference.path.join('.')} ← {reference.attribute}</code>)}</div>)}</section>}
-					{incoming.length + outgoing.length > 0 && <section className="workspace-context-section"><h3>Design links <span>{incoming.length + outgoing.length}</span></h3>{incoming.map(link => <div key={link.id} className="workspace-direction"><small>Incoming</small>{linkedElement(link.source)}</div>)}{outgoing.map(link => <div key={link.id} className="workspace-direction"><small>Outgoing</small>{linkedElement(link.target)}</div>)}<p className="field-help">Design links describe the diagram. Inherited references create Terraform dependencies.</p></section>}
+					{explicitSources.length > 0 && <section className="workspace-context-section"><h3>Referenced resources</h3>{explicitSources.map(source => <div key={source.id} className="workspace-inherited-link">{linkedElement(source.id)}{source.references.map(reference => <code key={reference.path.join('.') + ':' + reference.attribute}>{reference.path.join('.')} ← {reference.attribute}</code>)}</div>)}</section>}
+					{incoming.length + outgoing.length > 0 && <section className="workspace-context-section"><h3>Design links <span>{incoming.length + outgoing.length}</span></h3>{incoming.map(link => <div key={link.id} className="workspace-direction"><small>Incoming</small>{linkedElement(link.source)}</div>)}{outgoing.map(link => <div key={link.id} className="workspace-direction"><small>Outgoing</small>{linkedElement(link.target)}</div>)}<p className="field-help">Design links describe the diagram. Inherited and resource references create Terraform dependencies.</p></section>}
 					{!!boundIds.size && <section className="workspace-context-section"><h3>Bound inputs</h3>{architecture.variables?.filter(variable => boundIds.has(variable.id)).map(variable => <button className="bound-input" key={variable.id} onClick={() => showContext('variables')}><Variable size={14} /><span>{variable.name}</span><small>{variable.type}</small><ChevronRight size={13} /></button>)}</section>}
-					{!children.length && !inheritedSources.length && !incoming.length && !outgoing.length && !boundIds.size && <div className="workspace-context-empty"><Unplug size={23} /><h3>No connections yet</h3><p>This resource is on its own. Add a compatible parent in Metadata to inherit values, or bind a variable beside a parameter.</p></div>}
+					{!children.length && !inheritedSources.length && !explicitSources.length && !incoming.length && !outgoing.length && !boundIds.size && <div className="workspace-context-empty"><Unplug size={23} /><h3>No connections yet</h3><p>This resource is on its own. Add a compatible parent in Metadata to inherit values, reference another resource, or bind a variable beside a parameter.</p></div>}
 					<details className="workspace-context-guide"><summary><CircleHelp size={14} />Understand connections</summary><p>A container can supply values such as location to its children. A variable supplies a reusable input. Design links help explain your diagram.</p></details>
 				</Tabs.Content>
 				<Tabs.Content value="variables" forceMount hidden={contextTab !== 'variables'}><VariablePanel architecture={architecture} dispatch={dispatch} code={false} /></Tabs.Content>

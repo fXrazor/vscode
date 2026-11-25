@@ -33,7 +33,7 @@ export function architectureDiagnostics(architecture:Architecture):Diagnostic[] 
 			if(field.name==='name'){continue;}
 			const setting=Object.keys(resource.settings).find(name=>fieldTargetPath(resource,{kind:'setting',name}).join('.')===field.name);
 			const target=field.name==='location'||field.name==='region'?{kind:'region' as const}:{kind:'setting' as const,name:setting??field.name};
-			if(inheritedReference(architecture,resource,[field.name])||resource.fieldBindings?.[bindingKey(target)]){continue;}
+			if(inheritedReference(architecture,resource,[field.name])||resource.fieldBindings?.[bindingKey(target)]||resource.resourceRefs?.[bindingKey(target)]?.refs.length){continue;}
 			let value=target.kind==='region'?resource.region:resource.settings[setting??field.name]??'';
 			if(!resource.catalogue&&field.type==='list'&&value&&!value.startsWith('[')){value=JSON.stringify([value]);}
 			if(field.type==='bool'&&['Enabled','Disabled'].includes(value)){value=value==='Enabled'?'true':'false';}

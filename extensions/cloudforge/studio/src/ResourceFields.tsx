@@ -8,13 +8,16 @@ import { providerRegions, resourceTypes, resourceDefinition } from './fixture.ts
 import type { ResourceKind } from './model.ts';
 import { additionalBlocks, editableFields, fieldIssue, type BlockDefinition } from './formDefinition.ts';
 import { SchemaField } from './SchemaField.tsx';
-import { bindingKey, canBindField, fieldDefinition, fieldTargetPath, regionAttribute, variableBindingIssue, type FieldTarget } from './fieldBindings.ts';
+import { bindingKey, canBindField, eligibleReferenceTargets, fieldDefinition, fieldTargetPath, regionAttribute, resourceRefBindingIssue, variableBindingIssue, type FieldTarget } from './fieldBindings.ts';
 import { inheritedReference, inheritedReferences, isResourceContainer, resourcePlacement } from './resourceHierarchy.ts';
 
 function fieldState(resource:Resource,architecture:Architecture|undefined,target:FieldTarget,dispatch:Dispatch<Action>,onManageVariables?:()=>void,onRevealResource?:(id:string)=>void) {
 	const path = fieldTargetPath(resource,target);
 	const available = architecture&&inheritedReference(architecture,{...resource,inheritanceOverrides:[]},path);
-	return {path:path.join('.'),...(architecture&&canBindField(resource,target)?{variables:architecture.variables??[],onManageVariables,binding:resource.fieldBindings?.[bindingKey(target)],onBind:(variableId?:string)=>dispatch({type:'bindVariable',id:resource.id,target,variableId})}:{}),
+	const definition = fieldDefinition(resource, target);
+	const key = bindingKey(target);
+	const canBind = !!architecture && canBindField(resource, target);
+	return {path:path.join('.'),...(canBind?{variables:architecture.variables??[],onManageVariables,binding:resource.fieldBindings?.[key],onBind:(variableId?:string)=>dispatch({type:'bindVariable',id:resource.id,target,variableId}),resourceReference:definition?.refTypes?.length?{binding:resource.resourceRefs?.[key],candidates:eligibleReferenceTargets(architecture,resource,definition),architecture,resource,onSelect:(refs?:{resourceId:string;attribute:string}[])=>dispatch({type:'bindResourceRef',id:resource.id,target,refs}),onReveal:onRevealResource}:undefined}:{}),
 		inheritance:available?{available,reference:architecture&&inheritedReference(architecture,resource,path),onInherit:(enabled:boolean)=>dispatch({type:'useInheritance',id:resource.id,target,enabled}),onReveal:onRevealResource}:undefined};
 }
 
@@ -96,7 +99,7 @@ function NestedBlocks({ blocks, definitions, scope, onChange, resource, architec
 			const definition = definitions.find(item => item.type === block.type);
 				const label = definition?.label ?? block.type.replaceAll('_', ' ');
 				const fields = [...new Set([...(definition?.attributes ?? []).map(field => field.name), ...Object.keys(block.values)])];
-				const missing = fields.filter(name => { if(architecture&&inheritedReference(architecture,resource,fieldTargetPath(resource,{kind:'block',blockId:block.id,name}))){return false;} const binding = resource.fieldBindings?.[bindingKey({kind:'block',blockId:block.id,name})]; const attribute = definition?.attributes?.find(field => field.name === name); return binding ? variableBindingIssue(binding,architecture?.variables??[],attribute) : fieldIssue(block.values[name] ?? '', attribute); }).length;
+				const missing = fields.filter(name => { if(architecture&&inheritedReference(architecture,resource,fieldTargetPath(resource,{kind:'block',blockId:block.id,name}))){return false;} const key = bindingKey({kind:'block',blockId:block.id,name}); const attribute = definition?.attributes?.find(field => field.name === name); const refBind = resource.resourceRefs?.[key]; if (refBind?.refs.length) { return !!resourceRefBindingIssue(refBind, architecture, resource, attribute); } const binding = resource.fieldBindings?.[key]; return binding ? variableBindingIssue(binding,architecture?.variables??[],attribute) : fieldIssue(block.values[name] ?? '', attribute); }).length;
 				function update(next: ResourceBlock) {
 					onChange(blocks.map(item => item.id === block.id ? next : item));
 				}

@@ -3,13 +3,16 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 import type { Architecture, Resource, ResourceBlock } from './model.ts';
-import type { VariableDefinition } from './variables.ts';
+import { isSensitiveProperty, type VariableDefinition } from './variables.ts';
 import { getDef, type AttrDef } from './cloudlab-core/catalog/index.ts';
 import { resourceDefinition } from './fixture.ts';
-import { inheritedReference } from './resourceHierarchy.ts';
+import { inheritedReference, inheritedReferences, resourceAddress } from './resourceHierarchy.ts';
 
 export type FieldTarget = { kind: 'name' } | { kind: 'region' } | { kind: 'setting'; name: string } | { kind: 'block'; blockId: string; name: string };
 export type VariableBinding = { variableId: string };
+export type ResourceRefEntry = { resourceId: string; attribute: string };
+export type ResourceRefBinding = { refs: ResourceRefEntry[] };
+export type ResourceRefCandidate = { resource: Resource; attribute: string; expression: string };
 export const fieldAliases: Record<string, string> = {
 	'Address space': 'address_space', 'Address prefix': 'address_prefixes', SKU: 'sku.name', Capacity: 'sku.capacity',
 	'Node count': 'default_node_pool.node_count', 'VM size': 'default_node_pool.vm_size', 'Private cluster': 'private_cluster_enabled',
@@ -36,6 +39,10 @@ export function bindingTarget(key: string): FieldTarget | undefined {
 
 export function pruneBlockBindings(resource: Resource, blocks: ResourceBlock[]) {
 	return resource.fieldBindings && Object.fromEntries(Object.entries(resource.fieldBindings).filter(([key]) => { const target = bindingTarget(key); return target?.kind !== 'block' || !!findResourceBlock(blocks, target.blockId); }));
+}
+
+export function pruneBlockResourceRefs(resource: Resource, blocks: ResourceBlock[]) {
+	return resource.resourceRefs && Object.fromEntries(Object.entries(resource.resourceRefs).filter(([key]) => { const target = bindingTarget(key); return target?.kind !== 'block' || !!findResourceBlock(blocks, target.blockId); }));
 }
 
 export function findResourceBlock(blocks: ResourceBlock[], id: string): ResourceBlock | undefined {
@@ -87,10 +94,105 @@ export function boundVariable(architecture: Architecture, resource: Resource, ta
 export function fieldExpression(resource: Resource, target: FieldTarget, variables?: VariableDefinition[], architecture?: Architecture): string | undefined {
 	const inherited = architecture && inheritedReference(architecture,resource,fieldTargetPath(resource,target));
 	if (inherited) { return inherited.expression; }
-	const binding = resource.fieldBindings?.[bindingKey(target)];
+	const key = bindingKey(target);
+	const refBinding = resource.resourceRefs?.[key];
+	if (refBinding?.refs.length) {
+		const parts = refBinding.refs.map(entry => {
+			const source = architecture?.resources.find(item => item.id === entry.resourceId);
+			return source ? resourceAddress(source) + '.' + entry.attribute : 'Missing resource';
+		});
+		const def = fieldDefinition(resource, target);
+		return def?.type === 'list' ? '[' + parts.join(', ') + ']' : parts[0];
+	}
+	const binding = resource.fieldBindings?.[key];
 	if (!binding) { return undefined; }
 	const variable = variables?.find(item=>item.id===binding.variableId);
 	return variable ? 'var.'+variable.name : 'Missing variable';
+}
+
+export function wouldCreateReferenceCycle(architecture: Architecture, consumerId: string, providerId: string): boolean {
+	if (consumerId === providerId) { return true; }
+	const upstreamOf = new Map<string, string[]>();
+	const addDep = (consumer: string, upstream: string) => {
+		const list = upstreamOf.get(consumer) ?? [];
+		if (!list.includes(upstream)) { list.push(upstream); upstreamOf.set(consumer, list); }
+	};
+	for (const res of architecture.resources) {
+		for (const inh of inheritedReferences(architecture, res)) { addDep(res.id, inh.source.id); }
+		for (const refBind of Object.values(res.resourceRefs ?? {})) {
+			for (const entry of refBind.refs) { addDep(res.id, entry.resourceId); }
+		}
+	}
+	// Adding edge consumerId -> providerId creates a cycle iff consumerId is reachable upstream from providerId.
+	const visited = new Set<string>([providerId]);
+	const stack = [providerId];
+	while (stack.length > 0) {
+		const cur = stack.pop()!;
+		for (const next of upstreamOf.get(cur) ?? []) {
+			if (next === consumerId) { return true; }
+			if (!visited.has(next)) { visited.add(next); stack.push(next); }
+		}
+	}
+	return false;
+}
+
+export function eligibleReferenceTargets(architecture: Architecture, resource: Resource, definition?: AttrDef): ResourceRefCandidate[] {
+	if (!definition?.refTypes?.length || isSensitiveProperty(definition.name, definition.sensitive)) { return []; }
+	const attribute = definition.refAttr ?? 'id';
+	return architecture.resources
+		.filter(candidate => {
+			if (candidate.id === resource.id || candidate.kind === 'module' || candidate.provider !== resource.provider) { return false; }
+			const candidateType = resourceDefinition(candidate).type;
+			if (!definition.refTypes!.includes(candidateType)) { return false; }
+			const candidateDef = getDef(candidateType);
+			const exported = candidateDef?.exported ?? ['id'];
+			if (!exported.includes(attribute)) { return false; }
+			return !wouldCreateReferenceCycle(architecture, resource.id, candidate.id);
+		})
+		.map(candidate => ({
+			resource: candidate,
+			attribute,
+			expression: resourceAddress(candidate) + '.' + attribute,
+		}));
+}
+
+export function acceptsResourceRefs(architecture: Architecture, resource: Resource, refs: readonly ResourceRefEntry[], definition?: AttrDef): boolean {
+	if (!definition?.refTypes?.length || isSensitiveProperty(definition.name, definition.sensitive)) { return false; }
+	if (definition.type !== 'list' && refs.length > 1) { return false; }
+	const eligible = eligibleReferenceTargets(architecture, resource, definition);
+	const seen = new Set<string>();
+	for (const entry of refs) {
+		const idKey = entry.resourceId + ':' + entry.attribute;
+		if (seen.has(idKey)) { return false; }
+		seen.add(idKey);
+		if (!eligible.some(candidate => candidate.resource.id === entry.resourceId && candidate.attribute === entry.attribute)) { return false; }
+	}
+	return true;
+}
+
+export function resourceRefBindingIssue(binding: ResourceRefBinding | undefined, architecture: Architecture | undefined, resource: Resource, definition?: AttrDef): string | undefined {
+	if (!binding || !binding.refs.length) { return undefined; }
+	if (!definition?.refTypes?.length || isSensitiveProperty(definition.name, definition.sensitive)) {
+		return 'This field does not support typed resource references.';
+	}
+	if (definition.type !== 'list' && binding.refs.length > 1) {
+		return 'Choose a single referenced resource for this field.';
+	}
+	if (!architecture) { return undefined; }
+	for (const entry of binding.refs) {
+		const target = architecture.resources.find(item => item.id === entry.resourceId);
+		if (!target) { return 'The referenced resource is missing. Choose another resource or switch to a fixed value.'; }
+		if (target.id === resource.id) { return 'A resource cannot reference itself.'; }
+		const targetType = resourceDefinition(target).type;
+		if (!definition.refTypes.includes(targetType) || target.provider !== resource.provider) {
+			return 'The referenced resource type does not match this field.';
+		}
+		const exported = getDef(targetType)?.exported ?? ['id'];
+		if (!exported.includes(entry.attribute)) {
+			return 'The referenced attribute is not exported by this resource.';
+		}
+	}
+	return undefined;
 }
 
 export function variablePreview(variable: VariableDefinition, sensitiveField = false): string {

@@ -41,7 +41,16 @@ export function projectTerraform(architecture: Architecture): Projected {
 	const bindings = new Map<string, Binding[]>();
 	for (const resource of architecture.resources) {
 		const metadata = resourceDefinition(resource); const def = getDef(metadata.type); const list: Binding[] = [];
-		const resolve = (target: FieldTarget, fallback: Value): Value => resource.fieldBindings?.[bindingKey(target)] ? { $expr: 'var.' + (boundVariable(architecture, resource, target)?.name ?? 'unresolved_input') } : fallback;
+		const resolve = (target: FieldTarget, fallback: Value, attr?: Pick<AttrDef, 'type'>): Value => {
+			const key = bindingKey(target);
+			const refBind = resource.resourceRefs?.[key];
+			if (refBind?.refs.length) {
+				return attr?.type === 'list'
+					? refBind.refs.map(entry => ({ $ref: entry.resourceId, attr: entry.attribute }))
+					: { $ref: refBind.refs[0].resourceId, attr: refBind.refs[0].attribute };
+			}
+			return resource.fieldBindings?.[key] ? { $expr: 'var.' + (boundVariable(architecture, resource, target)?.name ?? 'unresolved_input') } : fallback;
+		};
 		const node: ArchNode = { id: resource.id, kind: resource.kind === 'module' ? 'module' : 'resource', type: metadata.type,
 			parentId:resource.parentId,
 			name: resource.terraformName ?? identifier(resource.name), label: resource.name, x: resource.positions.visual.x, y: resource.positions.visual.y,
@@ -54,7 +63,7 @@ export function projectTerraform(architecture: Architecture): Projected {
 			for (const [key, text] of Object.entries(resource.settings)) {
 				const path = (resource.catalogue ? key : aliases[key] ?? key.toLowerCase().replace(/\s+/g, '_')).split('.');
 				const attr = attribute(def?.attributes, path) ?? resource.catalogue?.fields.find(field => field.name === key);
-				set(node.config, path, resolve({ kind: 'setting', name: key }, isSensitiveProperty(key, attr?.sensitive) ? { $expr: 'var.' + node.name + '_' + path.join('_') } : valueFor(text, attr && { type: attr.type })));
+				set(node.config, path, resolve({ kind: 'setting', name: key }, isSensitiveProperty(key, attr?.sensitive) ? { $expr: 'var.' + node.name + '_' + path.join('_') } : valueFor(text, attr && { type: attr.type }), attr && { type: attr.type }));
 				list.push({ path, target: 'setting', key, original: text });
 			}
 			const blocks = (items: ResourceBlock[], config: Record<string, Value>, prefix: string[]) => {
@@ -62,7 +71,7 @@ export function projectTerraform(architecture: Architecture): Projected {
 					const entries = items.filter(block => block.type === type); const repeat = attribute(def?.attributes, [...prefix, type])?.repeat ?? entries.length > 1;
 					const values = entries.map((block, index) => {
 						const path = [...prefix, type, ...(repeat ? [String(index)] : [])]; const value: Record<string, Value> = {};
-						for (const [key, text] of Object.entries(block.values)) { const field = aliases[key] ?? key.toLowerCase().replace(/\s+/g, '_'); value[field] = resolve({ kind: 'block', blockId: block.id, name: key }, isSensitiveProperty(key, attribute(def?.attributes, [...path, field])?.sensitive) ? { $expr: 'var.' + node.name + '_' + [...path, field].join('_') } : valueFor(text, attribute(def?.attributes, [...path, field]))); list.push({ path: [...path, field], target: 'block', blockId: block.id, key, original: text }); }
+						for (const [key, text] of Object.entries(block.values)) { const field = aliases[key] ?? key.toLowerCase().replace(/\s+/g, '_'); const attr = attribute(def?.attributes, [...path, field]); value[field] = resolve({ kind: 'block', blockId: block.id, name: key }, isSensitiveProperty(key, attr?.sensitive) ? { $expr: 'var.' + node.name + '_' + [...path, field].join('_') } : valueFor(text, attr), attr); list.push({ path: [...path, field], target: 'block', blockId: block.id, key, original: text }); }
 						blocks(block.blocks, value, path); return value;
 					}); config[type] = repeat ? values : values[0];
 				}
