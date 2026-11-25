@@ -17,7 +17,7 @@ export function activateProjects(context: ExtensionContext, graph: GraphHost): P
 	const controller = new ProjectController(context, graph);
 	const view = new ProjectsViewProvider(controller);
 	const gallery = new ProjectGalleryPanel(controller);
-	context.subscriptions.push(controller, view, gallery, window.registerTreeDataProvider('cloudforge.projects', view));
+	context.subscriptions.push(controller, view, gallery, window.registerTreeDataProvider('cloudforge.projects', view), window.registerTreeDataProvider('cloudforge.panel.projects', view));
 
 	context.subscriptions.push(
 		commands.registerCommand('cloudforge.cloneRepository', (provider?: unknown) =>

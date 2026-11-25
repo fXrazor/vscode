@@ -185,6 +185,16 @@
 			}
 		],
 		"views": {
+			"explorer": [
+				{
+					"id": "cloudforge.projects",
+					"name": "%view.projects%"
+				},
+				{
+					"id": "cloudforge.resources",
+					"name": "%view.resources%"
+				}
+			],
 			"cloudforge": [
 				{
 					"id": "cloudforge.status",
@@ -192,11 +202,11 @@
 					"icon": "$(dashboard)"
 				},
 				{
-					"id": "cloudforge.projects",
+					"id": "cloudforge.panel.projects",
 					"name": "%view.projects%"
 				},
 				{
-					"id": "cloudforge.resources",
+					"id": "cloudforge.panel.resources",
 					"name": "%view.resources%"
 				},
 				{
@@ -216,12 +226,26 @@
 				"contents": "%view.resources.welcome%"
 			},
 			{
+				"view": "cloudforge.panel.resources",
+				"contents": "%view.resources.welcome%"
+			},
+			{
 				"view": "cloudforge.projects",
 				"contents": "%view.projects.welcome%",
 				"when": "!cloudforge.projectOpen"
 			},
 			{
+				"view": "cloudforge.panel.projects",
+				"contents": "%view.projects.welcome%",
+				"when": "!cloudforge.projectOpen"
+			},
+			{
 				"view": "cloudforge.projects",
+				"contents": "%view.projects.emptyProject%",
+				"when": "cloudforge.projectOpen"
+			},
+			{
+				"view": "cloudforge.panel.projects",
 				"contents": "%view.projects.emptyProject%",
 				"when": "cloudforge.projectOpen"
 			}
@@ -268,42 +292,42 @@
 			"view/title": [
 				{
 					"command": "cloudforge.createArchitecture",
-					"when": "view == cloudforge.projects && cloudforge.projectOpen",
+					"when": "view =~ /^cloudforge\\.(panel\\.)?projects$/ && cloudforge.projectOpen",
 					"group": "navigation@0"
 				},
 				{
 					"command": "cloudforge.openProjectGallery",
-					"when": "view == cloudforge.projects && cloudforge.projectOpen",
+					"when": "view =~ /^cloudforge\\.(panel\\.)?projects$/ && cloudforge.projectOpen",
 					"group": "navigation@0"
 				},
 				{
 					"command": "cloudforge.openTemplateLibrary",
-					"when": "view == cloudforge.projects",
+					"when": "view =~ /^cloudforge\\.(panel\\.)?projects$/",
 					"group": "navigation@1"
 				},
 				{
 					"command": "cloudforge.cloneRepository",
-					"when": "view == cloudforge.projects",
+					"when": "view =~ /^cloudforge\\.(panel\\.)?projects$/",
 					"group": "navigation@2"
 				},
 				{
 					"command": "cloudforge.refreshProject",
-					"when": "view == cloudforge.projects",
+					"when": "view =~ /^cloudforge\\.(panel\\.)?projects$/",
 					"group": "navigation@3"
 				},
 				{
 					"command": "cloudforge.forgetProjectAccess",
-					"when": "view == cloudforge.projects && cloudforge.projectOpen",
+					"when": "view =~ /^cloudforge\\.(panel\\.)?projects$/ && cloudforge.projectOpen",
 					"group": "project@1"
 				},
 				{
 					"command": "cloudforge.openCanvas",
-					"when": "view == cloudforge.resources",
+					"when": "view =~ /^cloudforge\\.(panel\\.)?resources$/",
 					"group": "navigation@1"
 				},
 				{
 					"command": "cloudforge.validateArchitecture",
-					"when": "view == cloudforge.resources",
+					"when": "view =~ /^cloudforge\\.(panel\\.)?resources$/",
 					"group": "navigation@2"
 				},
 				{
@@ -325,17 +349,17 @@
 			"view/item/context": [
 				{
 					"command": "cloudforge.cloneRepositoryAgain",
-					"when": "view == cloudforge.projects && viewItem =~ /^cloudforge\\.repository\\.missing\\.remote$/",
+					"when": "view =~ /^cloudforge\\.(panel\\.)?projects$/ && viewItem =~ /^cloudforge\\.repository\\.missing\\.remote$/",
 					"group": "inline@1"
 				},
 				{
 					"command": "cloudforge.removeRepository",
-					"when": "view == cloudforge.projects && viewItem =~ /^cloudforge\\.repository\\./",
+					"when": "view =~ /^cloudforge\\.(panel\\.)?projects$/ && viewItem =~ /^cloudforge\\.repository\\./",
 					"group": "inline@2"
 				},
 				{
 					"command": "cloudforge.importRepository",
-					"when": "view == cloudforge.projects && viewItem == cloudforge.unimportedFolder",
+					"when": "view =~ /^cloudforge\\.(panel\\.)?projects$/ && viewItem == cloudforge.unimportedFolder",
 					"group": "inline@1"
 				},
 				{

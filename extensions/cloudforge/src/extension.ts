@@ -498,14 +498,15 @@ async function showGraph(provider: CloudForgeGraphProvider, treeView: TreeView<G
 		return undefined;
 	}
 	provider.setGraph(graph);
-	if (graph.status === 'partial') {
-		treeView.message = l10n.t('This graph is partial. See Diagnostics for details.');
-	} else if (graph.nodes.length === 0) {
-		treeView.message = l10n.t('No resources were found in this architecture.');
-	} else {
-		treeView.message = undefined;
-	}
+	treeView.message = graphMessage(graph);
 	return graph;
+}
+
+function graphMessage(graph: ArchitectureGraph | undefined): string | undefined {
+	if (graph?.status === 'partial') {
+		return l10n.t('This graph is partial. See Diagnostics for details.');
+	}
+	return graph && graph.nodes.length === 0 ? l10n.t('No resources were found in this architecture.') : undefined;
 }
 
 function toCanvasSnapshot(graph: ArchitectureGraph, architectureName: string): CanvasGraphSnapshot {
@@ -524,6 +525,9 @@ function toCanvasSnapshot(graph: ArchitectureGraph, architectureName: string): C
 export function activate(context: ExtensionContext): void {
 	const provider = new CloudForgeGraphProvider();
 	const treeView = window.createTreeView('cloudforge.resources', { treeDataProvider: provider });
+	// The same graph also shows in the CloudForge side panel; Explorer keeps its copy.
+	const panelTreeView = window.createTreeView('cloudforge.panel.resources', { treeDataProvider: provider });
+	context.subscriptions.push(panelTreeView, provider.onDidChangeTreeData(() => { panelTreeView.message = graphMessage(provider.getGraph()); }));
 	const problems = languages.createDiagnosticCollection('cloudforge');
 	const statusBar = window.createStatusBarItem(StatusBarAlignment.Left, 100);
 	statusBar.command = 'cloudforge.openCanvas';
@@ -1393,7 +1397,7 @@ export function activate(context: ExtensionContext): void {
 				syncProblems(loaded);
 				canvas.show(toCanvasSnapshot(loaded, currentArchitectureName), true);
 			}
-			await commands.executeCommand('cloudforge.resources.focus');
+			await commands.executeCommand(panelTreeView.visible ? 'cloudforge.panel.resources.focus' : 'cloudforge.resources.focus');
 		}
 	});
 
