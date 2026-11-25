@@ -42,6 +42,9 @@ function CanvasBackground({ grid }: { grid: 'dots' | 'lines' | 'none' }) {
 const zoomPresets = [0.1, 0.25, 0.5, 0.7, 1, 2, 4, 12, 20];
 
 /** Keep pointer/viewport state here so dragging never rerenders the parameter editor. */
+
+/** Fit inside the floating chrome: tool rail (left), View options (top) and zoom controls (bottom). */
+const canvasFitPadding = { top: '64px', right: '28px', bottom: '84px', left: '84px' } as const;
 export const DesignCanvas = memo(function DesignCanvas({
 	architecture, mode, theme, onThemeChange, selectedId, selectedIds, onSelectionChange, dispatch, onSelect, onOpen, onOpenDetails, onInit, viewports, onAddItem, onAddResource, onAddCatalogue, onOpenShapes
 }: {
@@ -296,10 +299,10 @@ export const DesignCanvas = memo(function DesignCanvas({
 				<button aria-label="Connect elements" title="Connect elements" aria-expanded={creatingConnection} onClick={() => { setSelectedConnectionId(''); if (!creatingConnection) { setConnectionSourceId(selectedId); onSelect(''); } setCreatingConnection(value => !value); }}><Cable /></button>
 			</div>
 			<ReactFlow<CanvasNode, DesignEdgeType>
-				key={mode} defaultViewport={viewports.current[mode]} fitView={!viewports.current[mode]} fitViewOptions={{padding:0.14,maxZoom:1}}
+				key={mode} defaultViewport={viewports.current[mode]} fitView={!viewports.current[mode]} fitViewOptions={{padding:canvasFitPadding,maxZoom:1}}
 				forceColorMode={theme}
 				nodes={(nodes[0]?.data.mode===mode ? nodes : displayNodes).map(node=>({...node,className:dropFeedback?.target===node.id?'container-drop-'+(dropFeedback.ok?'valid':'invalid'):undefined}))} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange}
-				onInit={instance => { setFlow(instance); setZoom(instance.getZoom()); onInit(instance); if(!viewports.current[mode]){requestAnimationFrame(()=>{void instance.fitView({padding:0.14,maxZoom:1}).then(()=>{viewports.current[mode]=instance.getViewport();setZoom(instance.getZoom());});});} }}
+				onInit={instance => { setFlow(instance); setZoom(instance.getZoom()); onInit(instance); if(!viewports.current[mode]){requestAnimationFrame(()=>{void instance.fitView({padding:canvasFitPadding,maxZoom:1}).then(()=>{viewports.current[mode]=instance.getViewport();setZoom(instance.getZoom());});});} }}
 				onConnect={connection => dispatch({ type: 'connect', source: connection.source, target: connection.target })}
 				isValidConnection={connection => canConnect(architecture, connection.source, connection.target)}
 				minZoom={0.1} maxZoom={20}
@@ -354,7 +357,7 @@ export const DesignCanvas = memo(function DesignCanvas({
 					{zoomPresets.map(value => <option key={value} value={value.toFixed(3)}>{Math.round(value * 100)}%</option>)}
 				</select>
 				<button aria-label="Zoom in" title="Zoom in" onClick={() => { void flow?.zoomIn(); }}><Plus /></button>
-				<button aria-label="Fit architecture to view" title="Fit architecture to view" onClick={() => { void flow?.fitView({ padding: 0.12 }); }}><Scan /></button>
+				<button aria-label="Fit architecture to view" title="Fit architecture to view" onClick={() => { void flow?.fitView({ padding: canvasFitPadding }); }}><Scan /></button>
 			</div>
 		</main>
 		</CanvasActionMenu>

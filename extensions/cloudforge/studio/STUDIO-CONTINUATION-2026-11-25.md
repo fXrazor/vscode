@@ -39,6 +39,24 @@ After that, `main` added the following. Each item has its own HANDOFF.md entry d
 | **Multi-object resize.** New canvas command `{ kind: 'resize', ids, mode, scale? , match? }`, applied as one undo step. Scale (50–200% in the UI, 0.25–4 accepted) works about the selection's top-left. Match widths/heights/sizes uses the largest element. Drawings resize in both views; resource icons resize only in the visual view and are clamped to 24–160 px. Containers auto-fit and locked elements are skipped. The selection toolbar gains a **Size** menu when more than one element is selected. | `canvasOperations.ts`, `SelectionControls.tsx`, `DesignCanvas.tsx` |
 | Tests | `historyRebase.test.ts` (5), `canvasResize.test.ts` (4), `package.json` test list |
 
+## Impeccable polish pass (same branch, 25 November, afternoon)
+
+We used the Impeccable skill from `C:/Users/dalep/.agents/skills/impeccable` (v4.9.2) in **Operate** mode with `polish` and `craft-floor`. The `impeccable context` launcher could not run (no linux-x64 engine binary), so per the skill the existing context was read directly. There is no PRODUCT.md/DESIGN.md, and [board-design-direction.md](investigation-2026-11-18/board-design-direction.md) served as the brief. This was a refinement: incumbent identity, tokens and copy were preserved.
+
+The rendered matrix (Playwright, sample mode) covered Architecture/Configuration × light/dark, one resource selected, an 11-element multi-selection, and 1360/1024/390 px widths. It found and fixed:
+
+| Finding (priority) | Fix | File |
+| --- | --- | --- |
+| Selection toolbar covered the canvas **View** options button (1360 and 1024 px; also on `main`) | Collision correction: the toolbar stops left of View when it fits, or drops below View's row when it doesn't | `SelectionAnchor.tsx` |
+| Status toast sat on the zoom/navigation control | Toast raised to sit above the bottom controls (`bottom: 78px`) | `styles.css` |
+| At phone width (≤760 px) the resource library opened over the whole canvas | Library starts closed at ≤760 px (canvas-first). It still opens from the menu | `App.tsx` |
+| Initial fit and "Fit architecture" put the graph under the tool rail, View button and zoom control | Fit padding in px that clears the floating chrome (`canvasFitPadding`) | `DesignCanvas.tsx` |
+| Inspector empty state ("Select an element") had no inset below 1101 px | Base `.empty-inspector { margin: 16px }` | `styles.css` |
+
+After the fixes, the same matrix was clean: 0 console/page errors, and screenshots were inspected at each width. Studio check/build passed and 81/81 tests passed.
+
+Not addressed (next polish batch): at 1024 px the first fit happens before the inspector opens, so part of the graph sits under the inspector. The library tile labels truncate ("Azure VMware...") without tooltips. A keyboard-only walk of the Size/Align menus and reduced-motion checks have not been run.
+
 ## Verification (this pass, Linux cloud container)
 
 - Studio `check`, `build`: passed. Studio `test`: **81/81 passed**.
@@ -47,14 +65,13 @@ After that, `main` added the following. Each item has its own HANDOFF.md entry d
 
 ## Known issues found (not fixed)
 
-- The selection toolbar overlaps the canvas **View** options button (`.canvas-options`) at 1360 and 1024 px. This already happens on `main`. The new Size menu makes the toolbar wider and wraps it to two rows at 1024 px. Next step: move canvas options or give the toolbar a right inset that accounts for it.
 - `projectGraphSnapshotToArchitecture` always takes the architecture name from the snapshot, so a local rename is overwritten by the next refresh.
 - Rebased history holds whole snapshots (capped at 100), not inverse operations. That is fine for the current graph sizes but is not tuned for large graphs.
 
 ## Exact next actions (in order)
 
 1. On Windows: run `studio-host-bridge-verify.mjs` and a live Code OSS session. Edit, save, wait for the refresh, then press Ctrl+Z: the edit should undo and the badge should read clean after the save. Check that drawing links and groups survive the refresh.
-2. Fix the selection-toolbar / View-button overlap noted above.
+2. ~~Fix the selection-toolbar / View-button overlap~~ (done in the polish pass). Next polish batch: refit after panels settle at 1024 px, tooltips for truncated library tiles, keyboard-only and reduced-motion walk.
 3. Remaining whiteboard gaps, one bounded pass each: drag handles for multi-object resize (this pass added only menu-driven resize), rotation, freehand, free connector endpoints, equal-spacing guides.
 4. Then the wider backlog: making Studio the default engine after a parity check against Classic; Stage 9B plan capture once Rust adds it; arbitrary HCL round-trip; authoritative validation and pricing; collaboration.
 

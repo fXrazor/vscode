@@ -57,7 +57,8 @@ export function Studio() {
 	const [workspaceResourceId, setWorkspaceResourceId] = useState('');
 	const [overview, setOverview] = useState(true);
 	const [moduleImportOpen, setModuleImportOpen] = useState(false);
-	const [libraryOpen, setLibraryOpen] = useState(true);
+	// Canvas first: on phone-width screens the library starts closed instead of covering the canvas.
+	const [libraryOpen, setLibraryOpen] = useState(() => typeof window === 'undefined' || !window.matchMedia?.('(max-width: 760px)').matches);
  const [shapesOpen, setShapesOpen] = useState(false);
  function openShapes() { setDetailTab('form'); setOverview(true); setLibraryOpen(true); setShapesOpen(true); }
 	const [inspectorOpen, setInspectorOpen] = useState(false);

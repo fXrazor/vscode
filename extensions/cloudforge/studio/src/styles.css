@@ -380,6 +380,7 @@ h1 { font-size: 19px; font-weight: 650; letter-spacing: -0.4px; display: flex; a
 .inspector-section p { margin: 10px 0 6px; font-size: 12px; }
 .delete-button { margin-top: 24px; border: 0; background: transparent; color: var(--muted); padding: 4px 0; font-size: 11px; }
 .delete-button:hover { color: #d45067; }
+.empty-inspector { margin: 16px; }
 .empty-inspector p { margin-top: 12px; line-height: 1.7; color: var(--muted); }
 .status-bar { height: 28px; flex-shrink: 0; padding: 0 16px; display: flex; align-items: center; justify-content: space-between; gap: 16px; background: #28233c; color: #dcd1f7; font-size: 10px; }
 .status-bar span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -819,4 +820,4 @@ dialog::backdrop { background: #12152488; backdrop-filter: blur(3px); }
 @media (max-width: 1120px) { .cloudlab-topbar .shell-diagnostics { display: none; } }
 @media (prefers-reduced-motion: reduce) { .infrastructure-dependency .react-flow__edge-path { animation: none !important; } }
 .shape-workflow-template { width: 100%; margin-top: 24px; padding: 10px; border: 1px solid var(--accent); color: var(--accent); background: var(--selection); font-size: 12px; }
-.studio-action-status { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 30; max-width: calc(100vw - 50px); padding: 8px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 2px 10px #24283d10; color: var(--muted); font-size: 11px; pointer-events: none; }
+.studio-action-status { position: fixed; bottom: 78px; left: 50%; transform: translateX(-50%); z-index: 30; max-width: calc(100vw - 50px); padding: 8px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 2px 10px #24283d10; color: var(--muted); font-size: 11px; pointer-events: none; }
