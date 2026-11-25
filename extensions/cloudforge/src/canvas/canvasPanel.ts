@@ -55,7 +55,8 @@ export interface CanvasPanelHost {
 		fileName: string,
 		contents: string,
 		removeAddresses?: readonly string[],
-		renames?: readonly { readonly from: string; readonly to: string }[]
+		renames?: readonly { readonly from: string; readonly to: string }[],
+		baseContents?: string
 	): Promise<{ readonly ok: true; readonly preview: DraftSavePreviewResult } | { readonly ok: false; readonly error: DraftSaveError }>;
 	onApplyDraftSave?(
 		workspaceId: string,
@@ -435,7 +436,8 @@ export class CloudForgeCanvasPanel implements Disposable {
 					message.fileName,
 					message.contents,
 					message.removeAddresses,
-					message.renames
+					message.renames,
+					message.baseContents
 				);
 				if (!result.ok && result.error.code === 'STALE_SOURCE') {
 					this.setNotice({

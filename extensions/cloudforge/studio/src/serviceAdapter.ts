@@ -732,12 +732,17 @@ export function sourceChanges(architecture: Architecture, snapshot: HostGraphSna
 	return { removeAddresses: removeAddresses.slice(0, 256), renames: renames.slice(0, 256) };
 }
 
+function baselineContents(baseline: Architecture, fileName: string): string {
+	return projectResourceFiles(baseline).includes(fileName) ? terraformCode(baseline, undefined, fileName) : terraformCode(baseline);
+}
+
 export function buildDraftSavePayload(
 	architecture: Architecture,
 	fileName?: string,
 	selectedResourceId?: string,
-	snapshot?: HostGraphSnapshot | null
-): { readonly fileName: string; readonly contents: string } & SourceChanges {
+	snapshot?: HostGraphSnapshot | null,
+	baseline?: Architecture | null
+): { readonly fileName: string; readonly contents: string; readonly baseContents?: string } & SourceChanges {
 	const safeName = fileName && /^[A-Za-z0-9._-]+\.tf$/i.test(fileName) && !fileName.startsWith('.')
 		? fileName
 		: defaultTargetTfFile(architecture, selectedResourceId);
@@ -749,6 +754,9 @@ export function buildDraftSavePayload(
 		fileName: safeName,
 		contents,
 		...sourceChanges(architecture, snapshot, safeName),
+		// What the canvas generated for this file when it loaded it: the service then applies only
+		// what changed since, so canvas defaults never overwrite values in the file.
+		...(baseline && baseline !== architecture ? { baseContents: baselineContents(baseline, safeName) } : {}),
 	};
 }
 

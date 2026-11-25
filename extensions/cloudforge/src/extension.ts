@@ -997,7 +997,7 @@ export function activate(context: ExtensionContext): void {
 			return { handled: true };
 		},
 		onCancelValidation: cancelServiceValidation,
-		async onPreviewDraftSave(workspaceId, architectureId, expectedSourceRevision, fileName, contents, removeAddresses, renames) {
+		async onPreviewDraftSave(workspaceId, architectureId, expectedSourceRevision, fileName, contents, removeAddresses, renames, baseContents) {
 			// Focused save first: the service folds the canvas draft into the file on disk and keeps
 			// comments and fields the canvas does not show. If the file on disk does not parse, fall
 			// back to the whole-file preview so the user can still save.
@@ -1006,6 +1006,7 @@ export function activate(context: ExtensionContext): void {
 				...params,
 				...(removeAddresses?.length ? { removeAddresses: [...removeAddresses] } : {}),
 				...(renames?.length ? { renames: renames.map(({ from, to }) => ({ from, to })) } : {}),
+				...(baseContents !== undefined ? { baseContents } : {}),
 			});
 			if (!result.ok && (result.error.code === 'UNSUPPORTED_FORMAT' || result.error.code === 'INVALID_PARAMS')) {
 				result = await callService<unknown>('previewDraftSave', params);

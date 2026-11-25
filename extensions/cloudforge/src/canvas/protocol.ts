@@ -459,7 +459,7 @@ export type WebviewToExtensionMessage =
 	| { readonly type: 'viewState'; readonly state: CanvasViewState }
 	| { readonly type: 'requestValidation'; readonly scope: 'architecture' | 'resource'; readonly nodeId?: string }
 	| { readonly type: 'cancelValidation' }
-	| { readonly type: 'requestDraftSavePreview'; readonly fileName: string; readonly contents: string; readonly removeAddresses?: readonly string[]; readonly renames?: readonly { readonly from: string; readonly to: string }[] }
+	| { readonly type: 'requestDraftSavePreview'; readonly fileName: string; readonly contents: string; readonly removeAddresses?: readonly string[]; readonly renames?: readonly { readonly from: string; readonly to: string }[]; readonly baseContents?: string }
 	| { readonly type: 'applyDraftSave'; readonly fileName: string; readonly contents: string; readonly previewToken: string }
 	| { readonly type: 'requestSchema'; readonly kind: 'resource' | 'dataSource'; readonly typeName: string }
 	| { readonly type: 'requestModule'; readonly modulePath: readonly string[] }
@@ -921,8 +921,13 @@ export function parseWebviewMessage(value: unknown): WebviewToExtensionMessage |
 					typeof item === 'object' && item !== null && Object.keys(item).length === 2 && isAddress((item as { from?: unknown }).from) && isAddress((item as { to?: unknown }).to)))) {
 					return undefined;
 				}
+				const base = value.baseContents;
+				if (base !== undefined && (typeof base !== 'string' || base.length > MAX_DRAFT_SAVE_CHARS)) {
+					return undefined;
+				}
 				return {
 					type: 'requestDraftSavePreview', fileName: value.fileName, contents: value.contents,
+					...(typeof base === 'string' ? { baseContents: base } : {}),
 					...(Array.isArray(remove) && remove.length ? { removeAddresses: [...remove as string[]] } : {}),
 					...(Array.isArray(renames) && renames.length ? { renames: (renames as { from: string; to: string }[]).map(({ from, to }) => ({ from, to })) } : {}),
 				};

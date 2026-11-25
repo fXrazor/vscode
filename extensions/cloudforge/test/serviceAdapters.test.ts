@@ -472,4 +472,6 @@ test('draft save previews carry bounded canvas deletions', () => {
 	assert.equal(parseWebviewMessage({ type: 'requestDraftSavePreview', fileName: 'main.tf', contents: '', removeAddresses: 'aws_vpc.old' }), undefined);
 	assert.deepEqual(parseWebviewMessage({ type: 'requestDraftSavePreview', fileName: 'main.tf', contents: '', renames: [{ from: 'a.b', to: 'a.c' }] }), { type: 'requestDraftSavePreview', fileName: 'main.tf', contents: '', renames: [{ from: 'a.b', to: 'a.c' }] });
 	assert.equal(parseWebviewMessage({ type: 'requestDraftSavePreview', fileName: 'main.tf', contents: '', renames: [{ from: 'a.b', to: 'a.c', extra: 1 }] }), undefined);
+	assert.deepEqual(parseWebviewMessage({ type: 'requestDraftSavePreview', fileName: 'main.tf', contents: 'a', baseContents: 'b' }), { type: 'requestDraftSavePreview', fileName: 'main.tf', contents: 'a', baseContents: 'b' });
+	assert.equal(parseWebviewMessage({ type: 'requestDraftSavePreview', fileName: 'main.tf', contents: 'a', baseContents: 1 }), undefined);
 });

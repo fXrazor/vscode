@@ -398,3 +398,12 @@ test('focused saves remove only blocks deleted or renamed on the canvas', () => 
 	assert.deepEqual(sourceChanges(renamed, snapshot, 'main.tf').renames, [{ from: 'azurerm_virtual_network.' + (keep.terraformName ?? keep.name), to: 'azurerm_virtual_network.hub' }]);
 	assert.deepEqual(sourceChanges(architecture, null, 'main.tf'), { removeAddresses: [], renames: [] });
 });
+
+test('save payloads carry the load-time canvas text so the service applies only canvas edits', () => {
+	const baseline = schemaSample();
+	const edited = { ...baseline, resources: baseline.resources.map(resource => resource.id === 'network' ? { ...resource, name: resource.name + '-x' } : resource) };
+	const payload = buildDraftSavePayload(edited, 'main.tf', 'network', null, baseline);
+	assert.equal(typeof payload.baseContents, 'string');
+	assert.notEqual(payload.baseContents, payload.contents);
+	assert.equal(buildDraftSavePayload(baseline, 'main.tf', 'network', null, baseline).baseContents, undefined);
+});

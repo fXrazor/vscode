@@ -375,40 +375,40 @@ export function Studio() {
 			return;
 		}
 		const targetFile = requestedFileName ?? defaultTargetTfFile(architecture, selectedId || undefined);
-		const payload = buildDraftSavePayload(architecture, targetFile, selectedId || undefined, hostSnapshot);
+		const payload = buildDraftSavePayload(architecture, targetFile, selectedId || undefined, hostSnapshot, hostBaseline);
 		setSaveFileName(payload.fileName);
 		setSaveContents(payload.contents);
 		setSavePreview(null);
 		setSaveError(null);
 		setSaveDialogOpen(true);
 		setSaving(true);
-		hostBridge.post({ type: 'requestDraftSavePreview', fileName: payload.fileName, contents: payload.contents, removeAddresses: payload.removeAddresses, renames: payload.renames });
-	}, [hostBridge, architecture, selectedId, hostSnapshot]);
+		hostBridge.post({ type: 'requestDraftSavePreview', fileName: payload.fileName, contents: payload.contents, removeAddresses: payload.removeAddresses, renames: payload.renames, baseContents: payload.baseContents });
+	}, [hostBridge, architecture, selectedId, hostSnapshot, hostBaseline]);
 
 	const selectDraftSaveProjectFile = useCallback((nextFileName: string) => {
 		if (!hostBridge.isHosted) {
 			return;
 		}
-		const payload = buildDraftSavePayload(architecture, nextFileName, selectedId || undefined, hostSnapshot);
+		const payload = buildDraftSavePayload(architecture, nextFileName, selectedId || undefined, hostSnapshot, hostBaseline);
 		setSaveFileName(payload.fileName);
 		setSaveContents(payload.contents);
 		setSavePreview(null);
 		setSaveError(null);
 		setSaving(true);
-		hostBridge.post({ type: 'requestDraftSavePreview', fileName: payload.fileName, contents: payload.contents, removeAddresses: payload.removeAddresses, renames: payload.renames });
-	}, [hostBridge, architecture, selectedId, hostSnapshot]);
+		hostBridge.post({ type: 'requestDraftSavePreview', fileName: payload.fileName, contents: payload.contents, removeAddresses: payload.removeAddresses, renames: payload.renames, baseContents: payload.baseContents });
+	}, [hostBridge, architecture, selectedId, hostSnapshot, hostBaseline]);
 
 	const refreshDraftSavePreview = useCallback(() => {
 		if (!hostBridge.isHosted) {
 			return;
 		}
-		const payload = buildDraftSavePayload(architecture, saveFileName, selectedId || undefined, hostSnapshot);
+		const payload = buildDraftSavePayload(architecture, saveFileName, selectedId || undefined, hostSnapshot, hostBaseline);
 		setSaveContents(payload.contents);
 		setSavePreview(null);
 		setSaveError(null);
 		setSaving(true);
-		hostBridge.post({ type: 'requestDraftSavePreview', fileName: payload.fileName, contents: payload.contents, removeAddresses: payload.removeAddresses, renames: payload.renames });
-	}, [hostBridge, architecture, saveFileName, selectedId, hostSnapshot]);
+		hostBridge.post({ type: 'requestDraftSavePreview', fileName: payload.fileName, contents: payload.contents, removeAddresses: payload.removeAddresses, renames: payload.renames, baseContents: payload.baseContents });
+	}, [hostBridge, architecture, saveFileName, selectedId, hostSnapshot, hostBaseline]);
 
 	const applyHostDraftSave = useCallback(() => {
 		if (!hostBridge.isHosted || !savePreview) {
