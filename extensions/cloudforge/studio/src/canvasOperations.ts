@@ -46,6 +46,15 @@ export function expandGroups(architecture: Architecture, ids: string[]): string[
 	return [...selected];
 }
 
+/** One eligibility policy for the command, Size menu and selection resize frame. */
+export function resizeTargets(architecture: Architecture, ids: string[], mode: DesignMode) {
+	const selected = new Set(expandGroups(architecture, ids));
+	return {
+		items: architecture.items.filter(item => selected.has(item.id) && !item.canvasLocked),
+		icons: mode === 'visual' ? architecture.resources.filter(resource => selected.has(resource.id) && !resource.canvasLocked && !isResourceContainer(resource)) : []
+	};
+}
+
 export function sceneOrder(architecture: Architecture): string[] {
 	const frames = architecture.items.filter(item => item.kind === 'frame').map(item => item.id);
 	const defaultOrder = [...architecture.resources.map(item => item.id), ...architecture.items.filter(item => item.kind !== 'frame').map(item => item.id)];
@@ -153,8 +162,7 @@ export function applyCanvasCommand(architecture: Architecture, command: CanvasCo
 			if (command.anchor !== undefined && !resizeAnchors.includes(command.anchor)) { return architecture; }
 			if (!command.match && (scale === undefined || !Number.isFinite(scale) || scale < resizeLimits.minScale || scale > resizeLimits.maxScale || scale === 1)) { return architecture; }
 			// Containers fit their children and technical-view cards have fixed widths, so only drawings and visual icons resize.
-			const items = architecture.items.filter(item => editable.has(item.id));
-			const icons = command.mode === 'visual' ? architecture.resources.filter(resource => editable.has(resource.id) && !isResourceContainer(resource)) : [];
+			const { items, icons } = resizeTargets(architecture, command.ids, command.mode);
 			if (items.length + icons.length < (command.match ? 2 : 1)) { return architecture; }
 			const clampItem = (value: number) => Math.round(Math.max(resizeLimits.minItem, Math.min(resizeLimits.maxItem, value)));
 			const clampIcon = (value: number) => Math.round(Math.max(iconSizeLimits.min, Math.min(iconSizeLimits.max, value)));

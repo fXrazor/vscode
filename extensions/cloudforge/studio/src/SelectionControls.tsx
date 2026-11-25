@@ -6,7 +6,7 @@ import { Group, LockKeyhole, Ungroup, X } from 'lucide-react';
 import * as ContextMenu from '@radix-ui/react-context-menu';
 import type { Dispatch, ReactNode } from 'react';
 import type { Action, Architecture } from './model.ts';
-import { canvasElements } from './canvasOperations.ts';
+import { canvasElements, resizeTargets } from './canvasOperations.ts';
 import { ElementAppearance } from './ElementAppearance.tsx';
 import { ContextPopover } from './ContextPopover.tsx';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
@@ -39,8 +39,8 @@ export function selectionActions(architecture: Architecture, ids: string[], hasC
 
 /** How many selected elements a multi-object resize changes: drawings, plus visual-view resource icons. */
 export function resizable(architecture: Architecture, ids: string[], mode: DesignMode): number {
- return architecture.items.filter(item => ids.includes(item.id) && !item.canvasLocked).length
-  + (mode === 'visual' ? architecture.resources.filter(resource => ids.includes(resource.id) && !resource.canvasLocked && !isResourceContainer(resource)).length : 0);
+	const { items, icons } = resizeTargets(architecture, ids, mode);
+	return items.length + icons.length;
 }
 
 export function CanvasActionMenu({ children, architecture, ids, hasClipboard, run, container }: { children: ReactNode; architecture: Architecture; ids: string[]; hasClipboard: boolean; run: (action: SelectionAction) => void; container: HTMLElement | null }) {

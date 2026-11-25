@@ -138,6 +138,43 @@ try {
 			assert.deepEqual(errors, [], 'no browser errors');
 			console.log(`PASS four corners ${viewport.width}×${viewport.height} ${theme} (0 browser errors)`);
 			checks++;
+
+			await page.reload();
+			await page.getByLabel('Close resource library', { exact: true }).click();
+			if (theme === 'dark') { await page.getByLabel('Toggle light or dark theme').click(); }
+			// Isolate resize eligibility from overlapping edge hit areas in the sample diagram.
+			await page.locator('.canvas-options > summary').click();
+			await page.getByLabel('Show connections', { exact: true }).uncheck();
+			await page.locator('.canvas-options > summary').click();
+			await page.locator('main.canvas').focus(); await page.keyboard.press('Control+a');
+			const checkFrame = async technical => {
+				await page.waitForTimeout(200);
+				const boxes = await page.locator('.react-flow__node.selected').evaluateAll((nodes, technical) => nodes.filter(node => !node.querySelector('.resource-container') && (!technical || node.querySelector('.board-item'))).map(node => {
+					const box = node.getBoundingClientRect(); return { x: box.x, y: box.y, width: box.width, height: box.height };
+				}), technical);
+				assert.ok(boxes.length > 0);
+				const x = Math.min(...boxes.map(box => box.x)); const y = Math.min(...boxes.map(box => box.y));
+				const expected = { x, y, width: Math.max(...boxes.map(box => box.x + box.width)) - x, height: Math.max(...boxes.map(box => box.y + box.height)) - y };
+				const actual = await page.locator('.selection-resize').boundingBox();
+				for (const key of ['x', 'y', 'width', 'height']) { assert.ok(Math.abs(actual[key] - expected[key]) < 1, `${key}: frame uses only eligible elements`); }
+			};
+			await checkFrame(false);
+			await page.screenshot({ path: path.join(output, `eligibility-${viewport.width}-${theme}.png`) });
+			await page.getByRole('button', { name: 'Configuration', exact: true }).click();
+			await checkFrame(true);
+			await page.getByRole('button', { name: 'Architecture', exact: true }).click();
+			await page.getByLabel('Fit architecture to view').click();
+			await page.locator('main.canvas').focus(); await page.keyboard.press('Escape');
+			await page.getByRole('group', { name: 'stplatformdata, Storage account', exact: true }).click();
+			await page.getByRole('group', { name: 'rg-production, Resource group', exact: true }).locator('.resource-container-heading').click({ modifiers: ['Control'] });
+			assert.equal(await page.locator('.react-flow__node.selected').count(), 2);
+			await checkFrame(false);
+			assert.equal(await page.locator('.selection-resize-handle').count(), 4, 'one eligible icon plus a container still has usable handles');
+			await page.getByRole('button', { name: 'Configuration', exact: true }).click();
+			assert.equal(await page.locator('.selection-resize').count(), 0, 'a selection with no eligible target has no resize frame');
+			assert.deepEqual(errors, [], 'no browser errors');
+			console.log(`PASS resize eligibility ${viewport.width}×${viewport.height} ${theme} (0 browser errors)`);
+			checks++;
 			await page.close();
 		}
 	}

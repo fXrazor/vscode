@@ -20,7 +20,7 @@ export function SelectionResizeHandle({ ids, onScale }: { ids: string[]; onScale
 	const boxes = nodes.map(node => [node.internals.positionAbsolute.x, node.internals.positionAbsolute.y, node.measured.width ?? 0, node.measured.height ?? 0]);
 	const [scale, setScale] = useState<number>();
 	const drag = useRef<{ x: number; y: number; bounds: Bounds; corner: ResizeAnchor; zoom: number }>(undefined);
-	if (boxes.length < 2) { return null; }
+	if (!boxes.length) { return null; }
 	const x = Math.min(...boxes.map(box => box[0])); const y = Math.min(...boxes.map(box => box[1]));
 	const bounds = { x, y, width: Math.max(...boxes.map(box => box[0] + box[2])) - x, height: Math.max(...boxes.map(box => box[1] + box[3])) - y };
 	if (bounds.width <= 0 || bounds.height <= 0) { return null; }
@@ -35,7 +35,7 @@ export function SelectionResizeHandle({ ids, onScale }: { ids: string[]; onScale
 	};
 	const move = (event: ReactPointerEvent<HTMLDivElement>) => {
 		const start = drag.current; if (!start) { return; }
-		setScale(dragScale(start.bounds, (event.clientX - start.x) / start.zoom, (event.clientY - start.y) / start.zoom, start.corner));
+		setScale(Math.round(dragScale(start.bounds, (event.clientX - start.x) / start.zoom, (event.clientY - start.y) / start.zoom, start.corner) * 100) / 100);
 	};
 	const up = (event: ReactPointerEvent<HTMLDivElement>) => {
 		const start = drag.current; drag.current = undefined; setScale(undefined);
