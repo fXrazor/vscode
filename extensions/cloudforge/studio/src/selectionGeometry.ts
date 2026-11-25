@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 import type { Architecture, DesignMode, Position } from './model.ts';
-import { canvasElements, expandGroups } from './canvasOperations.ts';
+import { canvasElements, expandGroups, resizeLimits } from './canvasOperations.ts';
 import { resourceDescendants } from './resourceHierarchy.ts';
 
 export type Alignment = 'left' | 'center' | 'right' | 'top' | 'middle' | 'bottom' | 'horizontal' | 'vertical';
@@ -47,3 +47,12 @@ export function layoutSelection(architecture: Architecture, ids: string[], mode:
 	}
 	return positions;
 }
+
+export type Bounds = { x: number; y: number; width: number; height: number };
+
+/** Proportional scale from a drag of the bottom-right corner, kept within the resize command's limits. */
+export function dragScale(bounds: Bounds, dx: number, dy: number): number {
+	const scale = Math.max((bounds.width + dx) / bounds.width, (bounds.height + dy) / bounds.height);
+	return Math.min(resizeLimits.maxScale, Math.max(resizeLimits.minScale, Number.isFinite(scale) ? scale : 1));
+}
+

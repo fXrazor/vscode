@@ -410,6 +410,11 @@ function layoutNewResources(resources: Resource[], preservedIds: ReadonlySet<str
 	}
 }
 
+/** Connections projected from service graph edges use `source->target`; user drawing links never do. */
+function isServiceEdgeId(id: string): boolean {
+	return id.includes('->');
+}
+
 /**
  * Project a live sanitized `CanvasGraphSnapshot` from the Rust service into CloudForge Studio's
  * single `Architecture` model, inferring containment and typed resource references automatically.
@@ -419,6 +424,7 @@ export function projectGraphSnapshotToArchitecture(
 	options: ProjectGraphOptions = {}
 ): ProjectedGraphResult {
 	const previousById = new Map((options.previousArchitecture?.resources ?? []).map(resource => [resource.id, resource]));
+	const previousConnectionsById = new Map((options.previousArchitecture?.connections ?? []).map(connection => [connection.id, connection]));
 	const viewPositions = options.viewState?.nodePositions?.visual ?? options.viewState?.nodePositions?.technical ?? {};
 	const hasSourceById: Record<string, boolean> = {};
 	const preservedIds = new Set<string>();
@@ -516,20 +522,43 @@ export function projectGraphSnapshotToArchitecture(
 		const edgeId = `${from.id}->${to.id}`;
 		if (!seenConnections.has(edgeId)) {
 			seenConnections.add(edgeId);
+			// Keep the user's styling (label, stroke, routing, arrows) on a service edge seen before.
+			const styled = previousConnectionsById.get(edgeId);
 			connections.push({
+				...(edge.kind && edge.kind !== 'reference' ? { label: edge.kind } : {}),
+				...(styled ? structuredClone(styled) : {}),
 				id: edgeId,
 				source: from.id,
 				target: to.id,
-				...(edge.kind && edge.kind !== 'reference' ? { label: edge.kind } : {}),
 			});
 		}
 	}
+
+	// Studio-only presentation state is not in the service graph: carry the user's drawing links,
+	// groups and layer order through the refresh, pruned to elements that still exist.
+	const elementIds = new Set([...resources.map(resource => resource.id), ...baseArch.items.map(item => item.id)]);
+	const serviceEndpoints = new Set(connections.map(connection => connection.source + '\u0000' + connection.target));
+	for (const previous of options.previousArchitecture?.connections ?? []) {
+		if (isServiceEdgeId(previous.id) || !elementIds.has(previous.source) || !elementIds.has(previous.target)) {
+			continue;
+		}
+		if (serviceEndpoints.has(previous.source + '\u0000' + previous.target) || connections.some(connection => connection.id === previous.id)) {
+			continue;
+		}
+		connections.push(structuredClone(previous));
+	}
+	const groups = (options.previousArchitecture?.groups ?? [])
+		.map(group => ({ ...group, members: group.members.filter(id => elementIds.has(id)) }))
+		.filter(group => group.members.length > 1);
+	const layerOrder = options.previousArchitecture?.layerOrder?.filter(id => elementIds.has(id));
 
 	layoutNewResources(resources, preservedIds);
 
 	const architecture = fitResourceContainers({
 		...baseArch,
 		connections,
+		...(groups.length ? { groups } : {}),
+		...(layerOrder ? { layerOrder } : {}),
 	});
 
 	return {

@@ -59,7 +59,7 @@ export const ResourceCatalogue = memo(function ResourceCatalogue({ architecture,
   </div>;
  }
  function row(entry:CatalogueEntry) {
-  return <div className="res-row" key={entry.type}><button className="res-pick" aria-label={'Add '+entry.label} draggable
+  return <div className="res-row" key={entry.type}><button className="res-pick" aria-label={'Add '+entry.label} title={entry.label+' · '+entry.type} draggable
    onDragStart={event=>event.dataTransfer.setData('application/x-cloudforge-catalogue',JSON.stringify({provider,type:entry.type}))} onClick={()=>add(entry)}>
    <img src={'./assets/'+entry.icon} alt="" draggable={false}/><span className="res-text"><span className="res-name">{entry.label}</span><span className="res-type">{entry.type}</span></span>
   </button></div>;
@@ -91,7 +91,7 @@ export const ResourceCatalogue = memo(function ResourceCatalogue({ architecture,
       <button className="res-pick" onClick={()=>onAdd('group',provider)}><img src={'./assets/'+resourceDefinition({kind:'group',provider}).icon} alt=""/><span className="res-text"><span className="res-name">{provider === 'gcp' ? 'Project' : 'Resource group'}</span><span className="res-type">{resourceDefinition({kind:'group',provider}).type}</span></span></button>
       <button className="res-pick" onClick={()=>onDesignAdd('frame')}><Square size={24}/><span className="res-text"><span className="res-name">Group</span><span className="res-type">Drawing frame, no settings</span></span></button>
      </div>)}
-     {technologySections.map(name => { const list=services.filter(service=>service.section===name); if(!list.length) {return null;} const Icon=icons[name];return section(name,<><Icon size={14}/>{name}</>,<div className="resource-grid">{list.map(service=><div className="resource-tile" key={service.key}><button className="tile-pick" aria-label={'Open '+service.label+' ('+service.entries.length+')'} onClick={()=>setServiceKey(service.key)}><img src={'./assets/'+service.icon} alt="" draggable={false}/><span className="t-name">{service.label}</span></button></div>)}</div>,list.length);})}
+     {technologySections.map(name => { const list=services.filter(service=>service.section===name); if(!list.length) {return null;} const Icon=icons[name];return section(name,<><Icon size={14}/>{name}</>,<div className="resource-grid">{list.map(service=><div className="resource-tile" key={service.key}><button className="tile-pick" aria-label={'Open '+service.label+' ('+service.entries.length+')'} title={service.label+' · '+service.entries.length+(service.entries.length===1?' resource type':' resource types')} onClick={()=>setServiceKey(service.key)}><img src={'./assets/'+service.icon} alt="" draggable={false}/><span className="t-name">{service.label}</span></button></div>)}</div>,list.length);})}
     </>}
   </div><p className="library-hint">Drag to place · click to add · ☆ to favourite</p>
  </aside></Tabs.Root>;

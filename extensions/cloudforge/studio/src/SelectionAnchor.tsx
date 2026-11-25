@@ -15,13 +15,21 @@ export function SelectionAnchor({ ids, canvas, children }: { ids: string[]; canv
 		const measure = () => {
 			const area = surface.getBoundingClientRect(); const box = parent.getBoundingClientRect();
 			element.style.setProperty('--selection-max-width', Math.max(120, area.width - 76) + 'px');
-			const x = Math.max(area.left + 64 - box.left, Math.min(0, area.right - 12 - box.right));
 			let y = 0;
 			if (box.top < area.top + 12) {
 				const bottoms = ids.map(id => surface.querySelector<HTMLElement>('[data-id="' + CSS.escape(id) + '"].react-flow__node')?.getBoundingClientRect().bottom ?? area.top);
 				const below = Math.max(...bottoms) + 14;
 				y = (below + box.height < area.bottom - 12 ? below : area.top + 12) - box.top;
 			} else if (box.bottom > area.bottom - 12) { y = area.bottom - 12 - box.bottom; }
+			// Keep clear of the floating View options when the toolbar shares its row.
+			const options = surface.querySelector<HTMLElement>('.canvas-options')?.getBoundingClientRect();
+			const sharesRow = !!options && options.width > 0 && box.top + y < options.bottom + 8 && box.bottom + y > options.top - 8;
+			let right = area.right - 12;
+			if (sharesRow) {
+				if (box.width <= options!.left - 8 - (area.left + 64)) { right = options!.left - 8; }
+				else { y = options!.bottom + 8 - box.top; }
+			}
+			const x = Math.max(area.left + 64 - box.left, Math.min(0, right - box.right));
 			element.style.translate = x + 'px ' + y + 'px';
 		};
 		const schedule = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(measure); };

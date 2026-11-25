@@ -1,5 +1,17 @@
 # CloudForge Code OSS handoff
 
+## Studio continuation — read first — 25 November 2026
+
+**15:00 update:** branch `claude/project-thread-dnlp5o` (PR #1) now also has equal-spacing guides, a drag handle to resize a multi-selection, and a freehand pen (`ink` drawings). **15:40:** rotation for drawings and a quick-create menu when a connector is dropped on empty canvas (99/99 tests). Details and file list: "Whiteboard pass" and "Rotation and connector-drop pass" in [STUDIO-CONTINUATION-2026-11-25.md](extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md). 91/91 tests.
+
+Resuming Codex: **do not continue on `codex/infrastructure-studio-preview`**. Its last commit, `f82e0c12`, is merged into `main`, and `main` has 52 later Studio/desktop commits. On 25 November the Codex worktree `C:/Users/dalep/.codex/worktrees/infrastructure-studio/CloudForge-Code` had no unpushed Studio changes. Every step in the "Exact resume action" list of [CONFIGURATOR-REFINEMENT-2026-11-25.md](extensions/cloudforge/studio/CONFIGURATOR-REFINEMENT-2026-11-25.md) was completed on `main`.
+
+Latest work is on branch `claude/project-thread-dnlp5o` ([PR #1](https://github.com/fXrazor/vscode/pull/1)), based on `main` `156a0fdc`. It adds undo/redo that survives live refreshes, keeps drawing links, groups and layer order through a refresh, and adds menu-driven multi-object resize (scale/match sizes). It also includes two Impeccable (Operate/polish) batches. The first fixed the toolbar/View overlap, the toast covering zoom, the phone-width library covering the canvas, the fit landing under the chrome, and the inspector inset. The second added a refit when panels settle, tooltips on library labels, and Alt+F10/Escape between the canvas and the selection toolbar. A keyboard follow-up made Alt+F10 visible in help, explained Ctrl+M for leaving the code editor, moved focus into the connection tools when they're opened by keyboard, and stopped a Monaco console error on close. Studio check/build passed and 81/81 tests passed. The hosted Code OSS refresh path is not yet verified on Windows. Scope: `extensions/cloudforge/studio` and this file only.
+
+Since then, `main` moved to `d7c58cc2`: the classic canvas was removed, Studio is now the only Architecture Canvas, and Canvas Focus Mode plus multi-file `.tf` linking were added (Antigravity; installer `CloudForgeProofSetup-x64-d7c58cc29fe.exe`). That installer does **not** include PR #1. PR #1 has `main` merged in (one CodePanel/App conflict resolved, keeping both sides), and Studio check/build passed with 82/82 tests. Next: after Antigravity's packaged smoke finishes, test PR #1 on Windows (hosted refresh → undo, Modified badge, drawing links/groups through refresh).
+
+Full status, branch commands, verification, known issues and the exact ordered next actions: [STUDIO-CONTINUATION-2026-11-25.md](extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md).
+
 ## Configurator refinement — paused for handoff 25 November 2026
 
 User requested an immediate checkpoint and push. Same worktree and branch `codex/infrastructure-studio-preview`, starting at `e90aec47a5f50ca7dbca01799979012cfbf4068c`; integration owner Codex. Refined the variable configurator's spacing, typed controls, examples, default/override explanation, sensitivity and effective-value preview; improved resource workspace hierarchy and context; added the requested top-right X and guarded backdrop dismissal while retaining Back/Escape and mounted drafts. Scope stays within `extensions/cloudforge/studio` plus this handoff.
@@ -1097,3 +1109,19 @@ Built and live-smoked the updated Windows x64 installer from `Z:\CloudForge-Code
 
 
 
+
+### Studio Semantic Undo Survives Live Refreshes (2026-11-25)
+
+Branch `claude/project-thread-dnlp5o` from `main` (`156a0fdc`). Scope: `extensions/cloudforge/studio` plus this entry. No Rust, protocol, installer or classic-canvas changes.
+
+- A live `graph` refresh of the **same** architecture now dispatches `rebase` instead of `replace` ([historyRebase.ts](extensions/cloudforge/studio/src/historyRebase.ts), [model.ts](extensions/cloudforge/studio/src/model.ts), [App.tsx](extensions/cloudforge/studio/src/App.tsx)). Every past/future snapshot is three-way merged against the state the refresh replaced: what the refresh added, changed or removed (resources, board items, connections, variables, groups, layer order, name) is taken from the service in every step; everything else keeps the user's own step. Steps that become no-ops are dropped; dangling parents, connections and group members are pruned. Switching to a different architecture still uses `replace` and starts a fresh history.
+- The hosted `Modified` badge now compares the present against the last loaded architecture instead of `past.length > 0`, so a save-echo refresh with retained undo steps reads clean.
+
+| Check | Result |
+| --- | --- |
+| Studio `check`, `build` | Passed (`0` errors). |
+| Studio `test` | **76/76 passed** (adds [historyRebase.test.ts](extensions/cloudforge/studio/src/historyRebase.test.ts): echo refresh keeps undo/redo, external addition survives undo/redo, external removal prunes history, different architecture resets). |
+
+Follow-up on the same branch (see [STUDIO-CONTINUATION-2026-11-25.md](extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md)): drawing links, edge styling, groups and layer order now carry through refresh; menu-driven multi-object resize added; 81/81 tests.
+
+Not verified: hosted browser/Code OSS run of the refresh path (`studio-host-bridge-verify.mjs` lives on the Windows checkout). Known projection limits found while tracing, unchanged here: `projectGraphSnapshotToArchitecture` always takes the architecture name from the snapshot, and rebuilds connections from service edges, so user drawing links and `groups`/`layerOrder` are not carried through a refresh. Next: carry those through the projection, then the whiteboard gaps (multi-object resize, rotation, freehand, free connector endpoints).

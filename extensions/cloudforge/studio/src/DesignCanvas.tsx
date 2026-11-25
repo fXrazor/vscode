@@ -10,7 +10,11 @@ import { canConnect } from './designConnections.ts';
 import { memo, useEffect, useMemo, useRef, useState, type Dispatch, type RefObject, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { canvasElements, expandGroups, sceneOrder, selectionFragment } from './canvasOperations.ts';
 import { layoutSelection, type Alignment } from './selectionGeometry.ts';
-import { CanvasActionMenu, SelectionControls, type SelectionAction } from './SelectionControls.tsx';
+import { CanvasActionMenu, SelectionControls, resizable, type SelectionAction } from './SelectionControls.tsx';
+import { SelectionResizeHandle } from './SelectionResizeHandle.tsx';
+import { InkCapture } from './InkCapture.tsx';
+import { ConnectorDropMenu } from './ConnectorDropMenu.tsx';
+import { droppedItem } from './connectorDrop.ts';
 import { resourceIconSize } from './resourceGeometry.ts';
 import { inheritedDependencies, isResourceContainer, resourceAncestors, resourceDescendants, resourceDimensions, resourcePlacement } from './resourceHierarchy.ts';
 import { architectureDiagnostics } from './diagnostics.ts';
@@ -24,7 +28,7 @@ import {
 import { BoardNode, ResourceNode, type CanvasNode } from './ResourceNode.tsx';
 import type { Action, Architecture, BoardItem, DesignMode, Provider, ResourceKind, Position } from './model.ts';
 import { resourceDefinition, resourceTypes, providerNames } from './fixture.ts';
-import { MousePointer2, SquareDashedMousePointer, Hand, Type, StickyNote, Shapes, Frame, Minus, Plus, Scan, Cable } from 'lucide-react';
+import { MousePointer2, SquareDashedMousePointer, Hand, Type, StickyNote, Shapes, Frame, Minus, Plus, Scan, Cable, PenLine } from 'lucide-react';
 
 const nodeTypes = { resource: ResourceNode, board: BoardNode };
 const edgeTypes = { design: DesignEdge };
@@ -42,6 +46,9 @@ function CanvasBackground({ grid }: { grid: 'dots' | 'lines' | 'none' }) {
 const zoomPresets = [0.1, 0.25, 0.5, 0.7, 1, 2, 4, 12, 20];
 
 /** Keep pointer/viewport state here so dragging never rerenders the parameter editor. */
+
+/** Fit inside the floating chrome: tool rail (left), View options (top) and zoom controls (bottom). */
+const canvasFitPadding = { top: '64px', right: '28px', bottom: '84px', left: '84px' } as const;
 export const DesignCanvas = memo(function DesignCanvas({
 	architecture, mode, theme, onThemeChange, selectedId, selectedIds, onSelectionChange, dispatch, onSelect, onOpen, onOpenDetails, onInit, viewports, onAddItem, onAddResource, onAddCatalogue, onOpenShapes
 }: {
@@ -70,6 +77,8 @@ export const DesignCanvas = memo(function DesignCanvas({
 	const [guides, setGuides] = useState(true);
 	const [guideLines, setGuideLines] = useState<GuideLine[]>([]);
 	const [hand, setHand] = useState(false);
+	const [pen, setPen] = useState(false);
+	const [connectorDrop, setConnectorDrop] = useState<{ source: string; point: Position; left: number; top: number }>();
 	const [additiveSelection, setAdditiveSelection] = useState(false);
 	const [minimap, setMinimap] = useState(false);
 	const [zoom, setZoom] = useState(1);
@@ -86,6 +95,19 @@ export const DesignCanvas = memo(function DesignCanvas({
 	const [editRequest, setEditRequest] = useState({ id: '', token: 0 });
 	const selectedConnection = architecture.connections.find(connection => connection.id === selectedConnectionId);
 	const bounds = useRef<HTMLDivElement>(null);
+	// An automatic first fit is redone when panels settle (e.g. the inspector opens on load), until the user moves the view.
+	const autoFit = useRef<{ mode?: DesignMode; at: number }>({ at: 0 });
+	useEffect(() => {
+		const element = bounds.current; if (!element || !flow) { return; }
+		let frame = 0;
+		const observer = new ResizeObserver(() => {
+			if (autoFit.current.mode !== mode || performance.now() - autoFit.current.at > 2500) { return; }
+			cancelAnimationFrame(frame);
+			frame = requestAnimationFrame(() => { void flow.fitView({ padding: canvasFitPadding, maxZoom: 1 }).then(() => { viewports.current[mode] = flow.getViewport(); setZoom(flow.getZoom()); }); });
+		});
+		observer.observe(element);
+		return () => { cancelAnimationFrame(frame); observer.disconnect(); };
+	}, [flow, mode, viewports]);
 	useEffect(() => { if (selectedIds.length) { setSelectedConnectionId(''); } }, [selectedIds]);
 	const order = useMemo(() => sceneOrder(architecture), [architecture]);
 	const diagnostics = useMemo(() => architectureDiagnostics(architecture), [architecture]);
@@ -111,7 +133,7 @@ export const DesignCanvas = memo(function DesignCanvas({
 			height: item.height
 		},
 		zIndex: item.kind === 'frame' ? -1 : 1,
-		ariaLabel: item.kind + ', ' + item.text
+		ariaLabel: item.kind === 'ink' ? 'Freehand drawing' : item.kind + ', ' + item.text
 	})), [architecture.items, mode, dispatch, editRequest]);
 
 	const displayNodes = useMemo(() => [...boardNodes, ...resourceNodes].map(node => ({
@@ -188,6 +210,9 @@ export const DesignCanvas = memo(function DesignCanvas({
 		} else if (action.startsWith('align-')) {
 			const sizes = Object.fromEntries((flow?.getNodes() ?? []).map(node => [node.id, { width: node.measured?.width ?? 112, height: node.measured?.height ?? 92 }]));
 			dispatch({ type: 'canvas', command: { kind: 'move', mode, positions: layoutSelection(architecture, ids, mode, action.slice(6) as Alignment, sizes) } });
+		} else if (action.startsWith('size-')) {
+			const value = action.slice(5);
+			dispatch({ type: 'canvas', command: value === 'width' || value === 'height' || value === 'size' ? { kind: 'resize', ids, mode, match: value } : { kind: 'resize', ids, mode, scale: Number(value) } });
 		}
 	}
 
@@ -228,15 +253,27 @@ export const DesignCanvas = memo(function DesignCanvas({
 	function handleKeys(event: ReactKeyboardEvent<HTMLElement>) {
 		const target = event.target as HTMLElement;
 		const mod = event.ctrlKey || event.metaKey; const key = event.key.toLowerCase(); let action: SelectionAction | undefined;
-		if (target.closest('input, textarea, select, [contenteditable="true"], [role="menu"], [role="dialog"]') || (!mod && target.closest('button, summary'))) { return; }
+		if (target.closest('input, textarea, select, [contenteditable="true"], [role="menu"], [role="dialog"]')) { return; }
+		// Escape leaves pen mode even while focus is still on the Pen button.
+		if (pen && key === 'escape') { event.preventDefault(); event.stopPropagation(); setPen(false); return; }
+		if (!mod && target.closest('button, summary')) { return; }
 		const edgeId = target.closest<SVGElement>('.react-flow__edge')?.dataset.id;
 		const dependency = dependencies.find(item=>item.id===edgeId);
 		if(dependency){if(key==='enter'||key===' '){event.preventDefault();onOpen(dependency.target);}else if(key==='delete'||key==='backspace'){event.preventDefault();}return;}
 		if (edgeId && (key === 'enter' || key === ' ')) {
-			event.preventDefault(); event.stopPropagation(); setCreatingConnection(false); onSelectionChange([]); setSelectedConnectionId(edgeId); return;
+			event.preventDefault(); event.stopPropagation(); setCreatingConnection(false); onSelectionChange([]); setSelectedConnectionId(edgeId);
+			// Opened from the keyboard: move focus into the connection tools so Tab continues there.
+			requestAnimationFrame(() => requestAnimationFrame(() => bounds.current?.querySelector<HTMLElement>('.connection-tools input, .connection-tools select, .connection-tools button')?.focus()));
+			return;
 		}
 		if ((edgeId || selectedConnectionId) && (key === 'delete' || key === 'backspace')) {
 			event.preventDefault(); event.stopPropagation(); dispatch({ type: 'deleteConnection', id: edgeId ?? selectedConnectionId }); setSelectedConnectionId(''); return;
+		}
+		if (event.altKey && key === 'f10') {
+			// Standard toolbar shortcut: move focus into the selection toolbar.
+			const first = bounds.current?.querySelector<HTMLElement>('.selection-controls button, .selection-controls select');
+			if (first) { event.preventDefault(); event.stopPropagation(); first.focus(); }
+			return;
 		}
 		if (mod) {
 			if (key === 'a') { action = 'selectAll'; } else if (key === 'c') { action = 'copy'; } else if (key === 'v') { action = 'paste'; }
@@ -250,7 +287,12 @@ export const DesignCanvas = memo(function DesignCanvas({
 			const ids = expandGroups(architecture, selectedIds);
 			const positions = Object.fromEntries(canvasElements(architecture).filter(item => ids.includes(item.id)).map(item => [item.id, { x: item.positions[mode].x + dx, y: item.positions[mode].y + dy }]));
 			event.preventDefault(); event.stopPropagation(); dispatch({ type: 'canvas', command: { kind: 'move', mode, positions } }); return;
-		} else if (key === 'v') { setHand(false); } else if (key === 'h') { setHand(true); }
+		} else if (key === 'v') { setHand(false); setPen(false); } else if (key === 'h') { setPen(false); setHand(true); } else if (key === 'p') { setHand(false); setPen(value => !value); }
+		else if ((event.key === '[' || event.key === ']') && selectedIds.length) {
+			// Turn selected drawings by 15° (Shift: 1°). Resources and frames stay upright.
+			const step = (event.shiftKey ? 1 : 15) * (event.key === ']' ? 1 : -1);
+			event.preventDefault(); event.stopPropagation(); dispatch({ type: 'canvas', command: { kind: 'rotate', ids: selectedIds, by: step } }); return;
+		}
 		else if (key === 't') { createItem('text'); } else if (key === 'n') { createItem('note'); }
 		if (action) { event.preventDefault(); event.stopPropagation(); run(action); }
 	}
@@ -282,22 +324,30 @@ export const DesignCanvas = memo(function DesignCanvas({
 				} catch { /* Ignore foreign drag payloads. */ }
 			}}>
 			<div className="canvas-tools" role="toolbar" aria-label="Canvas creation tools">
-				<button aria-label="Select tool" title="Select tool" aria-pressed={!hand} onClick={() => setHand(false)}><MousePointer2 /></button>
-				<button aria-label="Pan tool" title="Pan tool (hold Space)" aria-pressed={hand} onClick={() => setHand(true)}><Hand /></button>
+				<button aria-label="Select tool" title="Select tool" aria-pressed={!hand && !pen} onClick={() => { setHand(false); setPen(false); }}><MousePointer2 /></button>
+				<button aria-label="Pan tool" title="Pan tool (hold Space)" aria-pressed={hand} onClick={() => { setPen(false); setHand(true); }}><Hand /></button>
 				<button aria-label="Extend selection" title="Select multiple elements (Ctrl / Cmd + click)" aria-pressed={additiveSelection} onClick={() => { setHand(false); setAdditiveSelection(value => !value); }}><SquareDashedMousePointer /></button>
 				<span className="tool-divider" />
 				<button aria-label="Add text" title="Add text" onClick={() => createItem('text')}><Type /></button>
+				<button aria-label="Draw freehand" title="Pen (P) · draw freehand, Escape to stop" aria-pressed={pen} onClick={() => { setHand(false); setPen(value => !value); }}><PenLine /></button>
 				<button aria-label="Add sticky note" title="Add sticky note" onClick={() => createItem('note')}><StickyNote /></button>
 				<button aria-label="Add shape" title="Add shape" onClick={onOpenShapes}><Shapes /></button>
 				<button aria-label="Add frame" title="Add frame" onClick={() => createItem('frame')}><Frame /></button>
 				<button aria-label="Connect elements" title="Connect elements" aria-expanded={creatingConnection} onClick={() => { setSelectedConnectionId(''); if (!creatingConnection) { setConnectionSourceId(selectedId); onSelect(''); } setCreatingConnection(value => !value); }}><Cable /></button>
 			</div>
 			<ReactFlow<CanvasNode, DesignEdgeType>
-				key={mode} defaultViewport={viewports.current[mode]} fitView={!viewports.current[mode]} fitViewOptions={{padding:0.14,maxZoom:1}}
+				key={mode} defaultViewport={viewports.current[mode]} fitView={!viewports.current[mode]} fitViewOptions={{padding:canvasFitPadding,maxZoom:1}}
 				forceColorMode={theme}
 				nodes={(nodes[0]?.data.mode===mode ? nodes : displayNodes).map(node=>({...node,className:dropFeedback?.target===node.id?'container-drop-'+(dropFeedback.ok?'valid':'invalid'):undefined}))} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange}
-				onInit={instance => { setFlow(instance); setZoom(instance.getZoom()); onInit(instance); if(!viewports.current[mode]){requestAnimationFrame(()=>{void instance.fitView({padding:0.14,maxZoom:1}).then(()=>{viewports.current[mode]=instance.getViewport();setZoom(instance.getZoom());});});} }}
+				onInit={instance => { setFlow(instance); setZoom(instance.getZoom()); onInit(instance); if(!viewports.current[mode]){autoFit.current={mode,at:performance.now()};requestAnimationFrame(()=>{void instance.fitView({padding:canvasFitPadding,maxZoom:1}).then(()=>{viewports.current[mode]=instance.getViewport();setZoom(instance.getZoom());});});} }}
+				onMoveStart={event => { if (event) { autoFit.current = { at: 0 }; } }}
 				onConnect={connection => dispatch({ type: 'connect', source: connection.source, target: connection.target })}
+				onConnectEnd={(event, state) => {
+					// A connector released on empty canvas offers to create the element it points at.
+					const client = 'changedTouches' in event ? event.changedTouches[0] : event; const area = bounds.current?.getBoundingClientRect();
+					if (state.isValid || state.toNode || !state.fromNode || state.fromHandle?.type !== 'source' || !flow || !area || !(client && (event.target as Element | null)?.closest?.('.react-flow__pane'))) { return; }
+					setConnectorDrop({ source: state.fromNode.id, point: flow.screenToFlowPosition({ x: client.clientX, y: client.clientY }), left: Math.min(client.clientX - area.left + 8, area.width - 196), top: Math.min(client.clientY - area.top - 12, area.height - 236) });
+				}}
 				isValidConnection={connection => canConnect(architecture, connection.source, connection.target)}
 				minZoom={0.1} maxZoom={20}
 				onSelectionEnd={() => requestAnimationFrame(() => onSelectionChange(expandGroups(architecture, (flow?.getNodes() ?? []).filter(node => node.selected).map(node => node.id))))}
@@ -327,31 +377,37 @@ export const DesignCanvas = memo(function DesignCanvas({
 			>
 				<CanvasBackground grid={grid} />
 				<AlignmentGuides lines={guideLines}/>
+				{!hand && !creatingConnection && selectedIds.length > 1 && !canvasElements(architecture).some(item => selectedIds.includes(item.id) && item.canvasLocked) && resizable(architecture, selectedIds, mode) > 0 && <SelectionResizeHandle ids={selectedIds} onScale={scale => run(('size-' + scale) as SelectionAction)}/>}
 				{minimap && <MiniMap<CanvasNode> pannable zoomable nodeColor={node => node.type === 'board' && node.data.item.kind === 'frame' ? 'transparent' : '#8e79d9'} />}
 				{!creatingConnection && (selectedConnection && showConnections ? <SelectionAnchor ids={[selectedConnection.source,selectedConnection.target]} canvas={bounds}><ConnectionTools connection={selectedConnection} dispatch={dispatch} onClose={() => { setSelectedConnectionId(''); bounds.current?.focus(); }}/></SelectionAnchor> : selectedIds.some(id=>canvasElements(architecture).some(item=>item.id===id)) && <SelectionAnchor ids={selectedIds.filter(id=>canvasElements(architecture).some(item=>item.id===id))} canvas={bounds}><SelectionControls architecture={architecture} ids={selectedIds} dispatch={dispatch} run={run} hasClipboard={hasClipboard} mode={mode} onInspect={onOpen} container={bounds.current}/></SelectionAnchor>)}
 			</ReactFlow>
+			{connectorDrop && <ConnectorDropMenu at={connectorDrop} onClose={() => { setConnectorDrop(undefined); bounds.current?.focus(); }} onPick={choice => {
+				const id = crypto.randomUUID(); dispatch({ type: 'addConnectedItem', source: connectorDrop.source, item: droppedItem(choice, id, connectorDrop.point) });
+				setConnectorDrop(undefined); onSelectionChange([id]); bounds.current?.focus();
+			}}/>}
+			{pen && flow && <InkCapture flow={flow} zoom={zoom} onStroke={(position, size, path, ink) => { const id = crypto.randomUUID(); dispatch({ type: 'addItem', item: { id, kind: 'ink', text: '', path, strokeColor: ink.strokeColor, strokeWidth: ink.strokeWidth, positions: { visual: position, technical: position }, width: size.width, height: size.height, members: [] } }); }}/>}
 			{creatingConnection ? <ConnectionCreate architecture={architecture} selectedId={connectionSourceId} dispatch={dispatch} onClose={() => { setCreatingConnection(false); bounds.current?.querySelector<HTMLButtonElement>('[aria-label="Connect elements"]')?.focus(); }}/> : null}
 			<details className="canvas-options"><summary>View</summary><div className="view-options-content">
 				<label>Theme<select aria-label="Canvas theme" value={theme} onChange={event => onThemeChange(event.target.value as 'light' | 'dark')}><option value="light">Light</option><option value="dark">Dark</option></select></label>
 				<label>Grid<select aria-label="Canvas grid" value={grid} onChange={event => setGrid(event.target.value as typeof grid)}><option value="dots">Dots</option><option value="lines">Lines</option><option value="none">None</option></select></label>
 				<label><input type="checkbox" checked={snap} onChange={event => setSnap(event.target.checked)} />Snap</label>
-				<label title="Align edges and centres within 6 screen pixels. Grid snapping takes precedence."><input type="checkbox" checked={guides} onChange={event => {setGuides(event.target.checked);setGuideLines([]);}} />Alignment guides</label>
+				<label title="Snap to aligned edges and centres, or to equal spacing between neighbours, within 6 screen pixels. Grid snapping takes precedence."><input type="checkbox" checked={guides} onChange={event => {setGuides(event.target.checked);setGuideLines([]);}} />Alignment guides</label>
 				<label><input type="checkbox" checked={showConnections} onChange={event => setShowConnections(event.target.checked)} />Show connections</label>
 				{mode==='technical'&&<label><input type="checkbox" checked={technicalDesignLinks} onChange={event=>setTechnicalDesignLinks(event.target.checked)}/>Include design links</label>}
 				<label><input type="checkbox" checked={allDependencies} onChange={event=>setAllDependencies(event.target.checked)}/>All inherited dependencies</label>
 				<label><input type="checkbox" checked={showLabels} onChange={event => setShowLabels(event.target.checked)} />Always show connection labels</label>
 				<button aria-pressed={minimap} onClick={() => setMinimap(value => !value)}>Minimap</button>
-				<details className="canvas-shortcuts"><summary>Keyboard shortcuts</summary><p>Ctrl / Cmd + click: extend selection<br/>Shift + drag: select an area<br/>Arrows: move 1 px; Shift + arrows: 10 px<br/>Enter: edit; Escape: clear selection<br/>V: select; H: pan; T: text; N: note<br/>F: focus selection; Space + drag: pan<br/>Copy, duplicate, group and layer actions are in the selection menu.</p></details>
+				<details className="canvas-shortcuts"><summary>Keyboard shortcuts</summary><p>Ctrl / Cmd + click: extend selection<br/>Shift + drag: select an area<br/>Arrows: move 1 px; Shift + arrows: 10 px<br/>Enter: edit; Escape: clear selection<br/>V: select; H: pan; P: pen; T: text; N: note<br/>[ and ]: rotate drawings 15° (Shift: 1°)<br/>F: focus selection; Space + drag: pan<br/>Alt + F10: move to the selection toolbar; Escape: back to the canvas<br/>Copy, duplicate, group and layer actions are in the selection menu.</p></details>
 			</div></details>
 			{dropFeedback&&<div className={'container-drop-status '+(dropFeedback.ok?'valid':'invalid')} role="status">{dropFeedback.reason}</div>}
 			<div className="canvas-navigation" role="group" aria-label="Zoom and navigation">
-				<button aria-label="Zoom out" title="Zoom out" onClick={() => { void flow?.zoomOut(); }}><Minus /></button>
-				<select aria-label="Canvas zoom" value={zoom.toFixed(3)} onChange={event => { void flow?.zoomTo(Number(event.target.value)); }}>
+				<button aria-label="Zoom out" title="Zoom out" onClick={() => { autoFit.current = { at: 0 }; void flow?.zoomOut(); }}><Minus /></button>
+				<select aria-label="Canvas zoom" value={zoom.toFixed(3)} onChange={event => { autoFit.current = { at: 0 }; void flow?.zoomTo(Number(event.target.value)); }}>
 					{!zoomPresets.some(value => value.toFixed(3) === zoom.toFixed(3)) && <option value={zoom.toFixed(3)}>{Math.round(zoom * 100)}%</option>}
 					{zoomPresets.map(value => <option key={value} value={value.toFixed(3)}>{Math.round(value * 100)}%</option>)}
 				</select>
-				<button aria-label="Zoom in" title="Zoom in" onClick={() => { void flow?.zoomIn(); }}><Plus /></button>
-				<button aria-label="Fit architecture to view" title="Fit architecture to view" onClick={() => { void flow?.fitView({ padding: 0.12 }); }}><Scan /></button>
+				<button aria-label="Zoom in" title="Zoom in" onClick={() => { autoFit.current = { at: 0 }; void flow?.zoomIn(); }}><Plus /></button>
+				<button aria-label="Fit architecture to view" title="Fit architecture to view" onClick={() => { autoFit.current = { at: 0 }; void flow?.fitView({ padding: canvasFitPadding }); }}><Scan /></button>
 			</div>
 		</main>
 		</CanvasActionMenu>

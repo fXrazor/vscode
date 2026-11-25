@@ -1,6 +1,15 @@
 /* Adapted from user-owned CloudLab Forge 3.0 app/code-editor.tsx. */
 
 import { useEffect, useRef, useState } from "react"
+
+// Monaco rejects in-flight work with a "Canceled" error when an editor is disposed (closing the
+// focused workspace). It is expected cancellation, not a failure, so keep it out of the console.
+if (typeof window !== "undefined") {
+  window.addEventListener("unhandledrejection", (event) => {
+    const reason = event.reason as { name?: string; message?: string } | undefined
+    if (reason?.name === "Canceled" || reason?.message === "Canceled") event.preventDefault()
+  })
+}
 type Settings = { editor?: Partial<EditorPreferences> }
 import { defaultEditor, editorPalettes, editorPreferences, type EditorPalette, type EditorPreferences, type EditorTheme } from "./editor-appearance.ts"
 
@@ -97,7 +106,7 @@ export function CodeEditor({ value, onChange, settings, label, language = "hcl",
     let subscription: Disposable | undefined
     void loadMonaco().then((monaco) => {
       if (cancelled || !element.current) return
-      editor = monaco.editor.create(element.current, { value: latest.current.value, language, readOnly: latest.current.readOnly, automaticLayout: true, minimap: { enabled: false }, scrollBeyondLastLine: false, fontFamily: "'JetBrains Mono', Consolas, monospace", tabSize: 2, ariaLabel: label, padding: { top: 10, bottom: 10 } })
+      editor = monaco.editor.create(element.current, { value: latest.current.value, language, readOnly: latest.current.readOnly, automaticLayout: true, minimap: { enabled: false }, scrollBeyondLastLine: false, fontFamily: "'JetBrains Mono', Consolas, monospace", tabSize: 2, ariaLabel: label + ". Tab indents; press Ctrl+M to make Tab move focus out of the editor.", padding: { top: 10, bottom: 10 } })
       instance.current = editor
       subscription = editor.onDidChangeModelContent(() => { if (!syncing.current) latest.current.onChange(editor!.getValue()) })
       editor.addAction({ id: "forge.applyCode", label: "Apply code to diagram", keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter], precondition: "!editorReadonly", run: () => { if (!latest.current.readOnly) latest.current.onApply?.() } })
