@@ -4,6 +4,7 @@ esbuild.mts
 esbuild.webview.mts
 tsconfig.json
 *.tsbuildinfo
+**/*.tsbuildinfo
 
 # Studio source and dependencies are bundled into media/studio/.
 studio/**

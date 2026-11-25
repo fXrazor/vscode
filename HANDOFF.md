@@ -1032,6 +1032,26 @@ Implemented on `fxrazor/continue-project-handoff-review` in `E:\Orca\CloudForge-
 1. Wire live Rust Stage 9B (`terraform plan -json` / `tofu plan -json`) once the Rust sidecar (`Z:\CloudForge`) adds guarded plan capture.
 2. When ready to ship a new combined Windows x64 installer (including Multi-Cloud Authoring Polish + Opt-In Studio Preview + Stage 9A/9B), run `build/cloudforge/package-win32-x64.ps1` (pass `-SignCertificateThumbprint <40-hex>` + `-RequireSignedService` for signed releases).
 
+### Studio-Only Architecture Canvas Cutover + Combined Windows x64 Installer & 5/5 Live Packaged-Desktop Smoke (2026-11-25)
+
+Per user direction ("there shouldn't be a classic canvas only the new one worked on by codex"), removed the legacy classic canvas completely (`extensions/cloudforge/canvas-src/`, `media/canvas.{js,css}`, `cloudforge.canvasEngine` setting, and duplicate `cloudforge.openStudioCanvas` command) on `46049aac53bc6e14bd38d8e95e5a9ee25c81eaf4` (`origin/main` & `Z:\CloudForge-Code` `main`), shipped **Codex's React Flow Studio Canvas** as the sole Architecture Canvas (`8,138` lines of legacy canvas code deleted), and built & live-smoked the combined Windows x64 installer paired with Rust Stage 9A (`ef4be9d09b0b`).
+
+- **Studio-Only Unification ([canvasPanel.ts](extensions/cloudforge/src/canvas/canvasPanel.ts), [canvasEngine.ts](extensions/cloudforge/src/canvas/canvasEngine.ts), [extension.ts](extensions/cloudforge/src/extension.ts), [package.json](extensions/cloudforge/package.json), [package.nls.json](extensions/cloudforge/package.nls.json), [esbuild.webview.mts](extensions/cloudforge/esbuild.webview.mts), [build/lib/extensions.ts](build/lib/extensions.ts), [package-win32-x64.ps1](build/cloudforge/package-win32-x64.ps1), [App.tsx](extensions/cloudforge/studio/src/App.tsx), [ResourceCatalogue.tsx](extensions/cloudforge/studio/src/ResourceCatalogue.tsx)):**
+  - `CloudForge: Open Architecture Canvas` (`cloudforge.openCanvas`) and opening any workspace/project architecture launch Studio directly; `Validate Architecture`, `Cancel Validation`, `Export Architecture Diagram / Report…`, and `Browse Template Library…` route directly into Studio's Checks & Validation, Export menu, and Templates tab.
+  - `build/lib/extensions.ts` typechecks `extensions/cloudforge/studio/tsconfig.json` via `tsgo` during `vscode-win32-x64-min`, `esbuild.webview.mts` stages only `media/studio/`, and `package-win32-x64.ps1` forbids legacy `media/canvas.js`, `media/canvas-style.css`, and `canvas-src`.
+
+| Artifact or check (run on `46049aac53b` + Rust Stage 9A `ef4be9d`) | Verified result |
+| --- | --- |
+| Studio `check`, `test`, `build`, TS7 (`studio/tsconfig.json`), Extension `esbuild.mts` & `esbuild.webview.mts`, TS6 & TS7, `oxlint`, `hygiene` | Passed (`0` errors, `0` warnings; **72/72 studio tests**, **62/62 root extension tests**). |
+| Studio-only Windows x64 installer | [CloudForgeProofSetup-x64-46049aac53b.exe](Z:/CFStage/CloudForgeProofSetup-x64-46049aac53b.exe), unsigned (`ServiceSigned: false`), `324,337,655` bytes, SHA-256 `cffe61a72e6363a4eaa73db2161307aab15e30f037f8cf2877c91fef51404552`; Desktop `46049aac53bc6e14bd38d8e95e5a9ee25c81eaf4`; Rust Stage 9A `ef4be9d09b0b2ddf504ea1bb31172c116c72da19` (`3,670,016` bytes, SHA-256 `2a9954d61776602d74471e1d638ed86c14b404c1ed5139b1424a4db22eef03db`); VSIX `7accf7857ea4f4717b6211a2b75f5b434faf477033203a8919b6d26b6abc1897`. |
+| Payload hygiene & `serviceArtifact.ts --verify` | Passed (`media/studio/{studio.js,studio.css,assets/catalogue/azure.json,assets/monaco/vs/loader.js}` present; `canvas-src/`, `studio/`, `media/canvas.{js,css}`, `tsconfig.typecheck.tsbuildinfo` absent; `serviceArtifact.ts --verify` passed). |
+| Live packaged-desktop smoke ([studio-packaged-smoke.mjs](Z:/CFStage/smoke/studio-packaged-smoke.mjs), [report.json](Z:/CFStage/smoke/run-studio-46049aac53b/report.json)) | **5/5 passed** (`01-packaged-studio-live-rust.png`, `02-packaged-studio-checks-and-readiness.png` visually inspected): opened a 5-resource Azure Terraform workspace via the live packaged Rust Stage 9A sidecar (`rev d2b77f24`, `5 in design`, zero classic canvas), loaded **139/139** icons (`0` broken) & `1,110 types` offline catalogue with `0px` body padding, rendered live **Monaco HCL** under strict CSP, ran live **Stage 4 Rust service validation (`complete coverage`)** + surfaced **Stage 8 Export Audit** & **Stage 9A detected `OpenTofu validate`**, and left **0** payload `cloudforge-service.exe` orphans after quit. |
+
+**Next actions:**
+1. User can run [CloudForgeProofSetup-x64-46049aac53b.exe](Z:/CFStage/CloudForgeProofSetup-x64-46049aac53b.exe) directly as an in-place upgrade over `%LOCALAPPDATA%\Programs\CloudForge Proof` (no uninstall needed; just close any running CloudForge Proof window first).
+2. Wire live Rust Stage 9B (`terraform plan -json` / `tofu plan -json`) once guarded plan capture lands in `Z:\CloudForge`.
+
+
 
 
 
