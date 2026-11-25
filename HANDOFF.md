@@ -2,7 +2,7 @@
 
 ## Studio continuation — read first — 25 November 2026
 
-**15:00 update:** branch `claude/project-thread-dnlp5o` (PR #1) now also has equal-spacing guides, a drag handle to resize a multi-selection, and a freehand pen (`ink` drawings). Details and file list: "Whiteboard pass" in [STUDIO-CONTINUATION-2026-11-25.md](extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md). 91/91 tests.
+**15:00 update:** branch `claude/project-thread-dnlp5o` (PR #1) now also has equal-spacing guides, a drag handle to resize a multi-selection, and a freehand pen (`ink` drawings). **15:40:** rotation for drawings and a quick-create menu when a connector is dropped on empty canvas (99/99 tests). Details and file list: "Whiteboard pass" and "Rotation and connector-drop pass" in [STUDIO-CONTINUATION-2026-11-25.md](extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md). 91/91 tests.
 
 Resuming Codex: **do not continue on `codex/infrastructure-studio-preview`**. Its last commit, `f82e0c12`, is merged into `main`, and `main` has 52 later Studio/desktop commits. On 25 November the Codex worktree `C:/Users/dalep/.codex/worktrees/infrastructure-studio/CloudForge-Code` had no unpushed Studio changes. Every step in the "Exact resume action" list of [CONFIGURATOR-REFINEMENT-2026-11-25.md](extensions/cloudforge/studio/CONFIGURATOR-REFINEMENT-2026-11-25.md) was completed on `main`.
 

@@ -5,7 +5,8 @@
 import { shapeDefinition, shapeStrokeDash } from './shapes.ts';
 import { inkDefaults } from './ink.ts';
 import { DrawingText } from './DrawingText.tsx';
-import { memo } from 'react';
+import { memo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { dragRotation } from './rotation.ts';
 import { LockKeyhole, TriangleAlert, Variable } from 'lucide-react';
 import { Handle, Position, NodeResizer, type Node, type NodeProps } from '@xyflow/react';
 import type { DesignMode, Resource, BoardItem, Action, Architecture } from './model.ts';
@@ -67,16 +68,39 @@ export const ResourceNode = memo(function ResourceNode({ data, selected }: NodeP
 
 export const BoardNode = memo(function BoardNode({ data, selected }: NodeProps<BoardNodeType>) {
 	const { item, dispatch } = data;
-	return (
-		<div className={'board-item ' + item.kind + (selected ? ' is-selected' : '')}
-   style={{ background: item.kind === 'shape' || item.kind === 'ink' ? undefined : item.fill, opacity: item.opacity ?? 1, ...(item.kind !== 'shape' && item.kind !== 'text' && item.kind !== 'ink' ? { borderColor: item.strokeColor, borderWidth: item.strokeWidth, borderStyle: item.strokeStyle } : {}) }}>
-   {item.kind !== 'frame' && <Handle className="drawing-port" type="target" position={Position.Left} id="input" aria-label="Drawing connection input"/>}
-			<NodeResizer isVisible={selected && !item.canvasLocked} minWidth={item.kind === 'ink' ? 16 : 140} minHeight={item.kind === 'ink' ? 16 : 80}
+	const [turning, setTurning] = useState<number>();
+	const rotation = turning ?? item.rotation ?? 0;
+	return (<>
+		<NodeResizer isVisible={selected && !item.canvasLocked} minWidth={item.kind === 'ink' ? 16 : 140} minHeight={item.kind === 'ink' ? 16 : 80}
 				onResizeEnd={(_, size) => dispatch({ type: 'resizeItem', id: item.id, mode: data.mode, position: { x: size.x, y: size.y }, width: size.width, height: size.height })} />
+		<div className={'board-item ' + item.kind + (selected ? ' is-selected' : '')}
+   style={{ rotate: rotation ? rotation + 'deg' : undefined, background: item.kind === 'shape' || item.kind === 'ink' ? undefined : item.fill, opacity: item.opacity ?? 1, ...(item.kind !== 'shape' && item.kind !== 'text' && item.kind !== 'ink' ? { borderColor: item.strokeColor, borderWidth: item.strokeWidth, borderStyle: item.strokeStyle } : {}) }}>
+   {item.kind !== 'frame' && <Handle className="drawing-port" type="target" position={Position.Left} id="input" aria-label="Drawing connection input"/>}
 			{item.kind === 'shape' && <svg className="board-shape-geometry" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path d={shapeDefinition(item.shape).path} fill={item.fill ?? '#eef2ff'} stroke={item.strokeColor ?? '#7565bd'} strokeWidth={item.strokeWidth ?? 1.5} strokeDasharray={shapeStrokeDash(item.strokeStyle, item.strokeWidth)} strokeLinecap="round" vectorEffect="non-scaling-stroke" /></svg>}
 {item.kind === 'ink' && <svg className="board-ink-geometry" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path d={item.path} fill="none" stroke={item.strokeColor ?? inkDefaults.strokeColor} strokeWidth={item.strokeWidth ?? inkDefaults.strokeWidth} strokeDasharray={shapeStrokeDash(item.strokeStyle, item.strokeWidth)} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" /></svg>}
 {item.kind !== 'ink' && <DrawingText item={item} dispatch={dispatch} editToken={data.editToken}/>}{item.canvasLocked && <span className="drawing-lock"><LockKeyhole size={12}/></span>}
    {item.kind !== 'frame' && <Handle className="drawing-port" type="source" position={Position.Right} id="output" aria-label="Drawing connection output"/>}
+   {selected && !item.canvasLocked && item.kind !== 'frame' && <RotateHandle angle={rotation} onTurn={setTurning} onCommit={angle => { setTurning(undefined); dispatch({ type: 'canvas', command: { kind: 'rotate', ids: [item.id], angle } }); }}/>}
 		</div>
-	);
+	</>);
 });
+
+/** Turn handle above a drawing: drag to rotate about the centre, Shift snaps to 15°, right angles are sticky. */
+function RotateHandle({ angle, onTurn, onCommit }: { angle: number; onTurn: (angle: number) => void; onCommit: (angle: number) => void }) {
+	const drag = useRef<{ centre: { x: number; y: number }; from: { x: number; y: number }; start: number }>(undefined); const last = useRef(angle);
+	const turn = (event: ReactPointerEvent<HTMLButtonElement>) => {
+		const state = drag.current; if (!state) { return; }
+		last.current = dragRotation(state.start, state.centre, state.from, { x: event.clientX, y: event.clientY }, event.shiftKey); onTurn(last.current);
+	};
+	return <button type="button" className="rotate-handle nodrag nopan" aria-label={'Rotate drawing, ' + Math.round(angle) + ' degrees'} title="Drag to rotate · Shift snaps to 15° · [ and ] turn by 15°"
+		onPointerDown={event => {
+			event.preventDefault(); event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId);
+			const box = event.currentTarget.parentElement!.getBoundingClientRect();
+			drag.current = { centre: { x: box.left + box.width / 2, y: box.top + box.height / 2 }, from: { x: event.clientX, y: event.clientY }, start: angle }; last.current = angle;
+		}}
+		onPointerMove={turn}
+		onPointerUp={() => { if (drag.current) { drag.current = undefined; onCommit(last.current); } }}
+		onPointerCancel={() => { const state = drag.current; drag.current = undefined; if (state) { onCommit(state.start); } }}>
+		{drag.current && <span className="rotate-readout" style={{ rotate: -angle + "deg" }}>{Math.round(angle)}°</span>}
+	</button>;
+}

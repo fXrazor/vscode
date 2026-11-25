@@ -18,7 +18,15 @@ export type CanvasCommand =
 	| { kind: 'arrange'; ids: string[]; direction: 'front' | 'forward' | 'backward' | 'back' }
 	| { kind: 'duplicate'; fragment: Architecture; idMap: Record<string, string>; offset: number }
 	/** Multi-object resize in one undo step: scale about the selection's top-left, or match the largest element. */
-	| { kind: 'resize'; ids: string[]; mode: DesignMode; scale?: number; match?: 'width' | 'height' | 'size' };
+	| { kind: 'resize'; ids: string[]; mode: DesignMode; scale?: number; match?: 'width' | 'height' | 'size' }
+	/** Rotate drawings about their centres: `angle` sets an absolute angle, `by` turns each one. Resources stay upright. */
+	| { kind: 'rotate'; ids: string[]; angle?: number; by?: number };
+
+/** Degrees in [0, 360), rounded to 0.1°; 0 is stored as undefined so unrotated drawings stay unchanged. */
+export function normaliseRotation(degrees: number): number | undefined {
+	const value = Math.round((((degrees % 360) + 360) % 360) * 10) / 10;
+	return value === 0 || value === 360 ? undefined : value;
+}
 
 export const resizeLimits = { minScale: 0.25, maxScale: 4, minItem: 24, maxItem: 4000 };
 
@@ -84,6 +92,18 @@ export function applyCanvasCommand(architecture: Architecture, command: CanvasCo
 			const items = architecture.items.map(item => {
 				if (!editable.has(item.id) || Object.entries(patch).every(([key, value]) => item[key as keyof BoardItem] === value)) { return item; }
 				changed = true; return { ...item, ...patch };
+			});
+			return changed ? { ...architecture, items } : architecture;
+		}
+		case 'rotate': {
+			if ([command.angle, command.by].every(value => value === undefined) || [command.angle, command.by].some(value => value !== undefined && !Number.isFinite(value))) { return architecture; }
+			const targets = new Set(expandGroups(architecture, command.ids));
+			let changed = false;
+			const items = architecture.items.map(item => {
+				if (!targets.has(item.id) || item.canvasLocked || item.kind === 'frame') { return item; }
+				const rotation = normaliseRotation(command.angle ?? (item.rotation ?? 0) + command.by!);
+				if (rotation === item.rotation) { return item; }
+				changed = true; const next = { ...item, rotation }; if (rotation === undefined) { delete next.rotation; } return next;
 			});
 			return changed ? { ...architecture, items } : architecture;
 		}

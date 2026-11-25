@@ -95,6 +95,20 @@ Verified: check, build, **91/91** tests. Playwright against the preview (1360×8
 
 Known limits: the resize box spans every selected element, including containers that do not scale, so its preview can overstate the change. Only the bottom-right corner is a handle. Pen colour/weight are set after drawing, not before.
 
+## Rotation and connector-drop pass (same branch, 25 November, 15:40)
+
+| Feature | How it works | Files |
+| --- | --- | --- |
+| **Rotate drawings** | A selected drawing (note, text, shape, ink) shows a round handle below it. Drag to rotate about the centre: the turn is relative to where you grabbed, right angles are sticky within 4°, and Shift snaps to 15°. A live readout shows degrees. **[** and **]** turn the selection by 15° (Shift: 1°). Appearance has a Rotation field. Each gesture is one `rotate` canvas command (one undo step). Frames and resources stay upright, locked elements are skipped, 0° clears the field. Export rotates about the centre and widens the page bounds | `rotation.ts`, `canvasOperations.ts` (`rotate`, `normaliseRotation`), `model.ts` (`BoardItem.rotation`), `ResourceNode.tsx` (`RotateHandle`), `ElementAppearance.tsx`, `exportPresentation.ts`, `DesignCanvas.tsx`, `styles.css` |
+| **Drop a connector on empty canvas** | Dragging from an element's output port and releasing on empty canvas opens a "Connect to a new…" menu: Sticky note, Rectangle, Ellipse, Decision, Text. The new element's input port lands on the drop point and the link is created with it, as one undo step (`addConnectedItem`). Arrow keys move through the menu, Escape or a click away cancels | `connectorDrop.ts`, `ConnectorDropMenu.tsx`, `model.ts`, `DesignCanvas.tsx`, `styles.css` |
+| Tests | `rotation.test.ts` (5), `connectorDrop.test.ts` (3) | `package.json` |
+
+Verified: check, build, **99/99** tests, hosted refresh E2E 20/20 on Linux. Playwright: handle drag rotated a note, ] added 15°, two undos cleared it; connector drop showed the menu with focus on the first item, Arrow+Enter created a Decision shape and its link, Ctrl+Z removed both, Escape closed the menu. 0 console/page errors.
+
+Design decision: true free-floating connector endpoints (a link whose end is a bare point) were not added. Connections are keyed by element ids in 21 places (history rebase, service adapter, Terraform-facing projections), so a point endpoint is a model change that needs its own pass. The drop menu covers the common whiteboard flow instead.
+
+Known limits: when a drawing is rotated, the resize frame stays axis-aligned (it resizes the unrotated box). Connection ports rotate with the drawing.
+
 ## Verification (this pass, Linux cloud container)
 
 - Studio `check`, `build`: passed. Studio `test`: **81/81 passed**.
@@ -110,7 +124,7 @@ Known limits: the resize box spans every selected element, including containers 
 
 1. On Windows: run `studio-host-bridge-verify.mjs` and a live Code OSS session. Edit, save, wait for the refresh, then press Ctrl+Z: the edit should undo and the badge should read clean after the save. Check that drawing links and groups survive the refresh.
 2. ~~Fix the selection-toolbar / View-button overlap, refit at 1024 px, library tooltips, keyboard route to the toolbar~~ (done in the polish passes). Keyboard polish is complete for the canvas, selection toolbar, workspace and connector tools.
-3. Remaining whiteboard gaps, one bounded pass each: rotation, free connector endpoints, all-corner resize handles, a pen colour picker before drawing. (Multi-object drag resize, freehand pen and equal-spacing guides are done.)
+3. Remaining whiteboard gaps, one bounded pass each: true point endpoints for connectors (model change), all-corner resize handles, rotation-aware resize frame, a pen colour picker before drawing. (Multi-object drag resize, freehand pen, equal-spacing guides, rotation and connector-drop quick create are done.)
 4. Then the wider backlog: making Studio the default engine after a parity check against Classic; Stage 9B plan capture once Rust adds it; arbitrary HCL round-trip; authoritative validation and pricing; collaboration.
 
 Keep the rules in the repository AGENTS.md: one architecture and one semantic undo history across renderers; theme and viewport stay in presentation state; canvas first; Rust owns authorization and guarded I/O.

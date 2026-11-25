@@ -154,8 +154,18 @@ h1 { font-size: 19px; font-weight: 650; letter-spacing: -0.4px; display: flex; a
 .board-item.shape { border: 2px solid #9a88cc; border-radius: 12px; background: var(--selection); text-align: center; display: grid; place-content: center; font-size: 16px; }
 .board-item.is-selected { outline: 2px solid var(--accent); outline-offset: 3px; }
 .board-item.shape { position: relative; border: 0; border-radius: 0; padding: 0; background: transparent; }
+.rotate-handle { position: absolute; left: 50%; top: calc(100% + 16px); width: 14px; height: 14px; margin-left: -7px; padding: 0; border-radius: 50%; border: 1.5px solid var(--accent-ink); background: var(--surface); cursor: grab; touch-action: none; z-index: 2; }
+.rotate-handle::before { content: ''; position: absolute; inset: -8px; border-radius: 50%; }
+.rotate-handle::after { content: ''; position: absolute; left: 50%; bottom: 100%; width: 1px; height: 16px; background: var(--accent-ink); }
+.rotate-handle:hover, .rotate-handle:active { background: var(--accent); cursor: grabbing; }
+.rotate-readout { position: absolute; top: 20px; left: 50%; translate: -50% 0; padding: 1px 6px; border-radius: 4px; background: var(--accent-ink); color: var(--surface); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; }
 .board-item.ink { position: relative; border: 0; padding: 0; background: transparent; }
 .board-ink-geometry { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+.connector-drop-menu { position: absolute; z-index: 8; display: grid; min-width: 180px; padding: 6px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); box-shadow: 0 8px 24px #0000001f; }
+.connector-drop-title { padding: 4px 8px 6px; color: var(--muted); font-size: 12px; }
+.connector-drop-menu button { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 0; border-radius: 5px; background: transparent; color: var(--text); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.connector-drop-menu button:hover, .connector-drop-menu button:focus-visible { background: var(--hover); outline: none; }
+.connector-drop-menu button:focus-visible { box-shadow: inset 0 0 0 2px var(--focus); }
 .ink-capture { position: absolute; inset: 0; z-index: 6; cursor: crosshair; touch-action: none; }
 .ink-capture svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
 .ink-capture path { fill: none; stroke-linecap: round; stroke-linejoin: round; }

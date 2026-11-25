@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 import { variableError, variableUses, type VariableDefinition } from './variables.ts';
 import { canConnect } from './designConnections.ts';
-import { applyCanvasCommand, type CanvasCommand } from './canvasOperations.ts';
+import { applyCanvasCommand, canvasElements, type CanvasCommand } from './canvasOperations.ts';
 import { bindingKey, acceptsResourceRefs, acceptsVariable, canBindField, fieldDefinition, fieldTargetPath, findResourceBlock, pruneBlockBindings, pruneBlockResourceRefs, type FieldTarget, type ResourceRefBinding, type ResourceRefEntry, type VariableBinding } from './fieldBindings.ts';
 import { fitResourceContainers, isResourceContainer, reparentResource, resourcePlacement, terraformIdentifier } from './resourceHierarchy.ts';
 import type { ShapeId } from './shapes.ts';
@@ -89,6 +89,8 @@ export interface BoardItem {
 	id: string;
 	kind: 'frame' | 'note' | 'text' | 'shape' | 'ink';
 	shape?: ShapeId;
+	/** Clockwise degrees about the element's centre; drawings only (frames and resources stay upright). */
+	rotation?: number;
 	/** Freehand stroke for `ink` drawings, in a 0–100 viewBox stretched to the element. */
 	path?: string;
 	strokeColor?: string;
@@ -128,6 +130,8 @@ export type Edit =
 	| { type: 'insert'; architecture: Architecture }
 	| { type: 'delete'; id: string }
 	| { type: 'addItem'; item: BoardItem }
+	/** Drop a connector on empty canvas: create the drawing there and link to it, as one undo step. */
+	| { type: 'addConnectedItem'; source: string; item: BoardItem }
 	| { type: 'updateItem'; id: string; patch: Partial<Pick<BoardItem, 'text' | 'width' | 'height' | 'fill' | 'fontSize' | 'bold' | 'shape' | 'strokeColor' | 'strokeWidth' | 'strokeStyle'>> }
 	| { type: 'moveItem'; id: string; mode: DesignMode; position: Position }
 	| { type: 'resizeItem'; id: string; mode: DesignMode; position: Position; width: number; height: number }
@@ -286,6 +290,10 @@ function editArchitecture(architecture: Architecture, action: Edit): Architectur
 			return applyCanvasCommand(architecture, { kind: 'delete', ids: [action.id] });
 		case 'addItem':
 			return { ...architecture, items: [...architecture.items, action.item] };
+		case 'addConnectedItem': {
+			if (architecture.items.some(item => item.id === action.item.id) || !canvasElements(architecture).some(element => element.id === action.source)) { return architecture; }
+			return editArchitecture({ ...architecture, items: [...architecture.items, action.item] }, { type: 'connect', source: action.source, target: action.item.id });
+		}
 		case 'updateItem':
 			if (architecture.items.find(item => item.id === action.id)?.canvasLocked) { return architecture; }
 			if (!architecture.items.some(item => item.id === action.id && Object.entries(action.patch).some(([key, value]) => item[key as keyof BoardItem] !== value))) { return architecture; }

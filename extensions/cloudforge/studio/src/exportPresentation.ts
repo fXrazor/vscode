@@ -1,5 +1,6 @@
 import { shapeDefinition, shapeTextColor, shapeStrokeDash } from './shapes.ts';
 import { inkDefaults } from './ink.ts';
+import { rotatedCorners } from './rotation.ts';
 import { connectionPath, connectionDash } from './connectionGeometry.ts';
 import { connectionAnchor } from './designConnections.ts';
 import type { Architecture, BoardItem } from './model.ts';
@@ -17,7 +18,7 @@ function drawingMarkup(item: BoardItem): string {
 		// Path data is built by ink.ts; only path commands and numbers are allowed through.
 		const path = /^[MLQl0-9 .\-]*$/.test(item.path ?? '') ? item.path ?? '' : '';
 		const width = item.strokeWidth ?? inkDefaults.strokeWidth; const inkDash = shapeStrokeDash(item.strokeStyle ?? 'solid', width);
-		return `<g data-element="${escape(item.id)}" aria-label="Freehand drawing" transform="translate(${x},${y})" opacity="${item.opacity ?? 1}"><svg width="${item.width}" height="${item.height}" viewBox="0 0 100 100" preserveAspectRatio="none" overflow="visible"><path d="${path}" fill="none" stroke="${escape(item.strokeColor ?? inkDefaults.strokeColor)}" stroke-width="${width}" ${inkDash ? `stroke-dasharray="${inkDash}"` : ''} stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg></g>`;
+		return `<g data-element="${escape(item.id)}" aria-label="Freehand drawing" transform="translate(${x},${y})${item.rotation ? ` rotate(${item.rotation} ${item.width / 2} ${item.height / 2})` : ''}" opacity="${item.opacity ?? 1}"><svg width="${item.width}" height="${item.height}" viewBox="0 0 100 100" preserveAspectRatio="none" overflow="visible"><path d="${path}" fill="none" stroke="${escape(item.strokeColor ?? inkDefaults.strokeColor)}" stroke-width="${width}" ${inkDash ? `stroke-dasharray="${inkDash}"` : ''} stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg></g>`;
 	}
 	const fill = item.fill ?? (item.kind === 'note' ? '#fff0b5' : item.kind === 'shape' ? '#eef2ff' : 'transparent');
 	const fontSize = item.fontSize ?? (item.kind === 'text' ? 20 : item.kind === 'frame' ? 12 : 16);
@@ -42,12 +43,12 @@ function drawingMarkup(item: BoardItem): string {
 	const strokeWidth = item.strokeWidth ?? (item.kind === 'shape' ? 1.5 : 1);
 	const dash = shapeStrokeDash(item.strokeStyle ?? (item.kind === 'frame' ? 'dashed' : 'solid'), strokeWidth);
 	const geometry = item.kind === 'shape' ? `<svg width="${item.width}" height="${item.height}" viewBox="0 0 100 100" preserveAspectRatio="none"><path d="${shapeDefinition(item.shape).path}" fill="${escape(fill)}" stroke="${border}" stroke-width="${strokeWidth}" ${dash ? `stroke-dasharray="${dash}"` : ''} stroke-linecap="round" vector-effect="non-scaling-stroke"/></svg>` : `<rect width="${item.width}" height="${item.height}" rx="${item.kind === 'frame' ? 8 : 0}" fill="${escape(fill)}" stroke="${item.kind === 'text' ? 'none' : border}" stroke-width="${strokeWidth}" ${dash ? `stroke-dasharray="${dash}"` : ''}/>`;
-	return `<g data-element="${escape(item.id)}" aria-label="${escape(item.text)}" transform="translate(${x},${y})" opacity="${item.opacity ?? 1}">${geometry}<text x="${textX}" y="${textY}" text-anchor="${alignment === 'center' ? 'middle' : alignment === 'right' ? 'end' : 'start'}" fill="${escape(colour)}" font-family="${family}" font-size="${fontSize}" font-weight="${item.bold ? 700 : 400}" font-style="${item.italic ? 'italic' : 'normal'}" text-decoration="${item.underline ? 'underline' : 'none'}">${lines.map((line, index) => `<tspan x="${textX}" dy="${index ? lineHeight : 0}">${escape(line)}</tspan>`).join('')}</text></g>`;
+	return `<g data-element="${escape(item.id)}" aria-label="${escape(item.text)}" transform="translate(${x},${y})${item.rotation ? ` rotate(${item.rotation} ${item.width / 2} ${item.height / 2})` : ''}" opacity="${item.opacity ?? 1}">${geometry}<text x="${textX}" y="${textY}" text-anchor="${alignment === 'center' ? 'middle' : alignment === 'right' ? 'end' : 'start'}" fill="${escape(colour)}" font-family="${family}" font-size="${fontSize}" font-weight="${item.bold ? 700 : 400}" font-style="${item.italic ? 'italic' : 'normal'}" text-decoration="${item.underline ? 'underline' : 'none'}">${lines.map((line, index) => `<tspan x="${textX}" dy="${index ? lineHeight : 0}">${escape(line)}</tspan>`).join('')}</text></g>`;
 }
 
 /** Export the presentation projection, independent of viewport, panels or active mode. */
 export async function presentationSvg(architecture: Architecture): Promise<string> {
- const points = [...architecture.resources.map(resource => isResourceContainer(resource)?{...resource.positions.visual,...resourceDimensions(architecture,resource,'visual')}:{ x:resource.positions.visual.x+resourceIconSize(resource)/2-70,y:resource.positions.visual.y,width:140,height:resourceIconSize(resource)+44 }), ...architecture.items.map(item => ({ ...item.positions.visual, width: item.width, height: item.height }))];
+ const points = [...architecture.resources.map(resource => isResourceContainer(resource)?{...resource.positions.visual,...resourceDimensions(architecture,resource,'visual')}:{ x:resource.positions.visual.x+resourceIconSize(resource)/2-70,y:resource.positions.visual.y,width:140,height:resourceIconSize(resource)+44 }), ...architecture.items.map(item => { if (!item.rotation) { return { ...item.positions.visual, width: item.width, height: item.height }; } const corners = rotatedCorners(item.positions.visual.x, item.positions.visual.y, item.width, item.height, item.rotation); const left = Math.min(...corners.map(c => c.x)); const top = Math.min(...corners.map(c => c.y)); return { x: left, y: top, width: Math.max(...corners.map(c => c.x)) - left, height: Math.max(...corners.map(c => c.y)) - top }; })];
  const x = Math.min(0, ...points.map(point => point.x)) - 40;
  const y = Math.min(0, ...points.map(point => point.y)) - 70;
  const width = Math.max(400, ...points.map(point => point.x + point.width)) - x + 40;
