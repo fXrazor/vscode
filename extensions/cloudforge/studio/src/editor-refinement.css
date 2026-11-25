@@ -258,3 +258,13 @@ html, body, #root { margin: 0; padding: 0; width: 100%; height: 100%; overflow: 
 .draft-save-project-files > div { display: flex; flex-wrap: wrap; gap: 6px; }
 .draft-save-project-files button { font-family: var(--font-code); font-size: 11px; min-height: 28px; padding: 3px 9px; }
 .draft-save-project-files button.is-selected { background: var(--accent-soft); color: var(--accent-ink, var(--accent)); border-color: var(--accent); }
+
+.schema-check { margin: 8px 0 0; padding: 8px 10px; font-size: 12px; line-height: 18px; border: 1px solid var(--line, #BFC4D0); border-radius: 6px; color: var(--muted, #50586D); }
+.schema-check strong { color: var(--text, inherit); font-weight: 600; }
+.schema-check.has-errors { border-color: var(--danger, #B42318); }
+.schema-check.has-warnings { border-color: var(--warning, #b45309); }
+.schema-check ul { margin: 6px 0 0; padding: 0; list-style: none; display: grid; gap: 4px; }
+.schema-check li.error { color: var(--danger, #B42318); }
+.schema-check li.warning { color: var(--warning, #b45309); }
+.schema-check details { margin-top: 6px; }
+.schema-check pre { margin: 6px 0 0; max-height: 240px; overflow: auto; font-size: 11px; }

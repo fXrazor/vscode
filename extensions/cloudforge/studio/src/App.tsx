@@ -31,6 +31,7 @@ import { resourcePlacement } from './resourceHierarchy.ts';
 import { workflowTemplate } from './workflowTemplate.ts';
 import { createHostBridge, type HostCloudRegionsPayload, type HostDependencyReport, type HostDetectedEngine, type HostDraftSaveError, type HostDraftSavePreview, type HostEngineValidateReport, type HostExportAuditReport, type HostGraphSnapshot, type HostModuleInspection, type HostNotice, type HostValidationRun } from './webviewBridge.ts';
 import type { LiveSchemaMap } from './liveSchema.ts';
+import { parseSchemaPreview, type SchemaPreview } from './resourceDraft.ts';
 import { buildDraftSavePayload, buildHostViewState, defaultTargetTfFile, projectGraphSnapshotToArchitecture, projectHostDiagnostics, sanitizeDraftTfFileName } from './serviceAdapter.ts';
 import { projectResourceFiles } from './terraformProjection.ts';
 import { DraftSaveDialog } from './DraftSaveDialog.tsx';
@@ -77,6 +78,7 @@ export function Studio() {
 	const [hasSourceById, setHasSourceById] = useState<Readonly<Record<string, boolean>>>({});
 	const [hostNotice, setHostNotice] = useState<HostNotice | null>(null);
 	const [liveSchemas, setLiveSchemas] = useState<LiveSchemaMap>({});
+	const [schemaPreviews, setSchemaPreviews] = useState<Record<string, SchemaPreview | null>>({});
 	const requestedSchemasRef = useRef<Set<string>>(new Set());
 	const [hostCloudRegions, setHostCloudRegions] = useState<Partial<Record<'azure' | 'aws' | 'google', HostCloudRegionsPayload>>>({});
 	const [dependencyReport, setDependencyReport] = useState<HostDependencyReport | null>(null);
@@ -178,6 +180,9 @@ export function Studio() {
 					break;
 				case 'catalogueTypes':
 					registerServiceTypes(incoming.types);
+					break;
+				case 'resourceDraftRendered':
+					setSchemaPreviews(prev => ({ ...prev, [incoming.resourceId]: parseSchemaPreview(incoming.preview) ?? null }));
 					break;
 				case 'liveSchema':
 					if (incoming.schema) {
@@ -370,40 +375,40 @@ export function Studio() {
 			return;
 		}
 		const targetFile = requestedFileName ?? defaultTargetTfFile(architecture, selectedId || undefined);
-		const payload = buildDraftSavePayload(architecture, targetFile, selectedId || undefined);
+		const payload = buildDraftSavePayload(architecture, targetFile, selectedId || undefined, hostSnapshot);
 		setSaveFileName(payload.fileName);
 		setSaveContents(payload.contents);
 		setSavePreview(null);
 		setSaveError(null);
 		setSaveDialogOpen(true);
 		setSaving(true);
-		hostBridge.post({ type: 'requestDraftSavePreview', fileName: payload.fileName, contents: payload.contents });
-	}, [hostBridge, architecture, selectedId]);
+		hostBridge.post({ type: 'requestDraftSavePreview', fileName: payload.fileName, contents: payload.contents, removeAddresses: payload.removeAddresses });
+	}, [hostBridge, architecture, selectedId, hostSnapshot]);
 
 	const selectDraftSaveProjectFile = useCallback((nextFileName: string) => {
 		if (!hostBridge.isHosted) {
 			return;
 		}
-		const payload = buildDraftSavePayload(architecture, nextFileName, selectedId || undefined);
+		const payload = buildDraftSavePayload(architecture, nextFileName, selectedId || undefined, hostSnapshot);
 		setSaveFileName(payload.fileName);
 		setSaveContents(payload.contents);
 		setSavePreview(null);
 		setSaveError(null);
 		setSaving(true);
-		hostBridge.post({ type: 'requestDraftSavePreview', fileName: payload.fileName, contents: payload.contents });
-	}, [hostBridge, architecture, selectedId]);
+		hostBridge.post({ type: 'requestDraftSavePreview', fileName: payload.fileName, contents: payload.contents, removeAddresses: payload.removeAddresses });
+	}, [hostBridge, architecture, selectedId, hostSnapshot]);
 
 	const refreshDraftSavePreview = useCallback(() => {
 		if (!hostBridge.isHosted) {
 			return;
 		}
-		const payload = buildDraftSavePayload(architecture, saveFileName, selectedId || undefined);
+		const payload = buildDraftSavePayload(architecture, saveFileName, selectedId || undefined, hostSnapshot);
 		setSaveContents(payload.contents);
 		setSavePreview(null);
 		setSaveError(null);
 		setSaving(true);
-		hostBridge.post({ type: 'requestDraftSavePreview', fileName: payload.fileName, contents: payload.contents });
-	}, [hostBridge, architecture, saveFileName, selectedId]);
+		hostBridge.post({ type: 'requestDraftSavePreview', fileName: payload.fileName, contents: payload.contents, removeAddresses: payload.removeAddresses });
+	}, [hostBridge, architecture, saveFileName, selectedId, hostSnapshot]);
 
 	const applyHostDraftSave = useCallback(() => {
 		if (!hostBridge.isHosted || !savePreview) {
@@ -664,7 +669,7 @@ export function Studio() {
 					) : <div className="empty-inspector"><h2>Select an element</h2><p>Choose a resource, note, text, shape or frame on the canvas.</p></div>}
      </>}
      <div className="variable-container" hidden={inspectorCategory !== 'variables' || detailTab === 'issues'}><VariablePanel architecture={architecture} dispatch={dispatch} code={detailTab === 'code'}/></div>
-     <CodePanel resource={selected} architecture={architecture} dispatch={dispatch} hidden={!inspectorOpen || detailTab !== 'code' || inspectorCategory !== 'resources'} hasSource={hostBridge.isHosted && !!selected && !!hasSourceById[selected.id]} onOpenSource={hostBridge.isHosted && selected ? () => hostBridge.post({ type: 'openSource', nodeId: selected.id }) : undefined} onSaveFile={hostBridge.isHosted && hostSnapshot ? file => openDraftSave(file) : undefined} />
+     <CodePanel resource={selected} architecture={architecture} dispatch={dispatch} liveSchema={selected ? liveSchemas[resourceDefinition(selected).type] : undefined} schemaPreview={selected ? schemaPreviews[selected.id] : undefined} onRequestSchemaPreview={hostBridge.isHosted ? (resourceId, draft) => hostBridge.post({ type: 'renderResourceDraft', resourceId, draft }) : undefined} hidden={!inspectorOpen || detailTab !== 'code' || inspectorCategory !== 'resources'} hasSource={hostBridge.isHosted && !!selected && !!hasSourceById[selected.id]} onOpenSource={hostBridge.isHosted && selected ? () => hostBridge.post({ type: 'openSource', nodeId: selected.id }) : undefined} onSaveFile={hostBridge.isHosted && hostSnapshot ? file => openDraftSave(file) : undefined} />
      </div>
 				</aside>
 			</div>

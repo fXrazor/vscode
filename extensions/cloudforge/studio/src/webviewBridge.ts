@@ -12,6 +12,7 @@
  * preview (`pnpm dev`), `acquireVsCodeApi` is absent and Studio stays in in-memory sample mode.
  */
 
+import type { ResourceDraft } from './resourceDraft.ts';
 import type { HostFormSchema } from './liveSchema.ts';
 
 export interface HostNodeSummary {
@@ -283,6 +284,7 @@ export type HostInboundMessage =
 	| { readonly type: 'draftSaveApplied'; readonly result: { readonly ok: true; readonly applied: HostDraftSaveApplied } | { readonly ok: false; readonly error: HostDraftSaveError } }
 	| { readonly type: 'catalogueSnapshots'; readonly snapshots: readonly HostCatalogueSnapshot[] }
 	| { readonly type: 'liveSchema'; readonly typeName: string; readonly schema: HostFormSchema | null }
+	| { readonly type: 'resourceDraftRendered'; readonly resourceId: string; readonly preview: unknown }
 	| { readonly type: 'catalogueTypes'; readonly types: { readonly provider: 'azure' | 'aws' | 'gcp'; readonly version: string; readonly resources: readonly string[] } }
 	| { readonly type: 'cloudRegions'; readonly data: HostCloudRegionsPayload }
 	| { readonly type: 'dependencyReport'; readonly report: HostDependencyReport | null }
@@ -301,13 +303,14 @@ export type HostOutboundMessage =
 	| { readonly type: 'ready' }
 	| { readonly type: 'selectNode'; readonly nodeId: string | null }
 	| { readonly type: 'openSource'; readonly nodeId: string }
+	| { readonly type: 'renderResourceDraft'; readonly resourceId: string; readonly draft: ResourceDraft }
 	| { readonly type: 'openSourceLocation'; readonly sourceRevision: string; readonly fileName: string; readonly line?: number; readonly column?: number }
 	| { readonly type: 'refresh' }
 	| { readonly type: 'toggleFocusMode'; readonly active?: boolean }
 	| { readonly type: 'viewState'; readonly state: HostViewState }
 	| { readonly type: 'requestValidation'; readonly scope: 'architecture' | 'resource'; readonly nodeId?: string }
 	| { readonly type: 'cancelValidation' }
-	| { readonly type: 'requestDraftSavePreview'; readonly fileName: string; readonly contents: string }
+	| { readonly type: 'requestDraftSavePreview'; readonly fileName: string; readonly contents: string; readonly removeAddresses?: readonly string[] }
 	| { readonly type: 'applyDraftSave'; readonly fileName: string; readonly contents: string; readonly previewToken: string }
 	| { readonly type: 'requestSchema'; readonly kind: 'resource' | 'dataSource'; readonly typeName: string }
 	| { readonly type: 'requestModule'; readonly modulePath: readonly string[] }

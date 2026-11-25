@@ -12,6 +12,7 @@ import {
 	sanitizeViewState,
 	type CanvasCatalogueSnapshot,
 	type CanvasCatalogueTypes,
+	type CanvasSchemaPreview,
 	type CanvasCloudRegionsPayload,
 	type CanvasDependencyReport,
 	type CanvasDetectedEngine,
@@ -52,7 +53,8 @@ export interface CanvasPanelHost {
 		architectureId: string,
 		expectedSourceRevision: string,
 		fileName: string,
-		contents: string
+		contents: string,
+		removeAddresses?: readonly string[]
 	): Promise<{ readonly ok: true; readonly preview: DraftSavePreviewResult } | { readonly ok: false; readonly error: DraftSaveError }>;
 	onApplyDraftSave?(
 		workspaceId: string,
@@ -66,6 +68,8 @@ export interface CanvasPanelHost {
 	/** Resource types of the newest imported snapshot per palette provider. */
 	onLoadCatalogueTypes?(): Promise<readonly CanvasCatalogueTypes[]>;
 	onLoadResourceSchema?(kind: 'resource' | 'dataSource', typeName: string): Promise<FormSchema | null>;
+	/** Renders and checks one canvas resource against its pinned provider schema in Rust. */
+	onRenderResourceDraft?(resourceId: string, draft: Readonly<Record<string, unknown>>): Promise<CanvasSchemaPreview | null>;
 	onLoadCloudRegions?(provider: 'azure' | 'aws' | 'google'): Promise<CanvasCloudRegionsPayload | undefined>;
 	onInspectDependencies?(workspaceId: string, architectureId: string, sourceRevision: string): Promise<CanvasDependencyReport | undefined>;
 	onReadModule?(
@@ -428,7 +432,8 @@ export class CloudForgeCanvasPanel implements Disposable {
 					graph.architectureId,
 					graph.sourceRevision,
 					message.fileName,
-					message.contents
+					message.contents,
+					message.removeAddresses
 				);
 				if (!result.ok && result.error.code === 'STALE_SOURCE') {
 					this.setNotice({
@@ -558,6 +563,13 @@ export class CloudForgeCanvasPanel implements Disposable {
 			}
 			case 'useTemplateAsArchitecture': {
 				await this.host.onUseTemplateAsArchitecture?.(message.templateId);
+				return;
+			}
+			case 'renderResourceDraft': {
+				const preview = this.host.onRenderResourceDraft ? await this.host.onRenderResourceDraft(message.resourceId, message.draft) : null;
+				if (this.panel && this.ready) {
+					this.post({ type: 'resourceDraftRendered', resourceId: message.resourceId, preview });
+				}
 				return;
 			}
 			case 'openSourceLocation': {

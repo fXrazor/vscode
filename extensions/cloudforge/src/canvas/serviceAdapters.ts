@@ -32,6 +32,7 @@ import type {
 	DraftSaveError,
 	DraftSaveFinding,
 	DraftSaveMergeSummary,
+	CanvasSchemaPreview,
 	DraftSavePreviewResult
 } from './protocol';
 import type {
@@ -1480,4 +1481,24 @@ export function parseFormCoverage(value: unknown): FormCoverage | undefined {
 		.slice(0, 20)
 		.map(gap => ({ path: gap.path.slice(0, 256), reason: gap.reason.slice(0, 512) }));
 	return { complete: raw.complete, paths: raw.paths as number, readOnly: raw.readOnly as number, gaps };
+}
+
+/** Validates a `renderResourceDraft` result; anything malformed returns undefined. */
+export function parseSchemaPreview(value: unknown, resourceId: string, providerVersion: string): CanvasSchemaPreview | undefined {
+	if (!isRecord(value) || typeof value.hcl !== 'string' || value.hcl.length > 256 * 1024 || !Array.isArray(value.diagnostics)) {
+		return undefined;
+	}
+	const diagnostics: { path: string; message: string; severity: 'error' | 'warning' }[] = [];
+	for (const item of value.diagnostics.slice(0, 200)) {
+		if (isRecord(item) && typeof item.path === 'string' && item.path.length <= 512 && isNonEmptyString(item.message, 1024) && (item.severity === 'error' || item.severity === 'warning')) {
+			diagnostics.push({ path: item.path, message: item.message, severity: item.severity });
+		}
+	}
+	return {
+		resourceId,
+		hcl: value.hcl,
+		diagnostics,
+		hasErrors: value.hasErrors === true || diagnostics.some(item => item.severity === 'error'),
+		providerVersion,
+	};
 }

@@ -49,6 +49,7 @@ import {
 	newestPaletteSnapshots,
 	parseCatalogueTypes,
 	parseFormCoverage,
+	parseSchemaPreview,
 	selectBestSnapshotForType,
 	type ServicePollEvent
 } from './canvas/serviceAdapters';
@@ -996,12 +997,12 @@ export function activate(context: ExtensionContext): void {
 			return { handled: true };
 		},
 		onCancelValidation: cancelServiceValidation,
-		async onPreviewDraftSave(workspaceId, architectureId, expectedSourceRevision, fileName, contents) {
+		async onPreviewDraftSave(workspaceId, architectureId, expectedSourceRevision, fileName, contents, removeAddresses) {
 			// Focused save first: the service folds the canvas draft into the file on disk and keeps
 			// comments and fields the canvas does not show. If the file on disk does not parse, fall
 			// back to the whole-file preview so the user can still save.
 			const params = { workspaceId, architectureId, expectedSourceRevision, fileName, contents };
-			let result = await callService<unknown>('previewFocusedSave', params);
+			let result = await callService<unknown>('previewFocusedSave', removeAddresses?.length ? { ...params, removeAddresses: [...removeAddresses] } : params);
 			if (!result.ok && (result.error.code === 'UNSUPPORTED_FORMAT' || result.error.code === 'INVALID_PARAMS')) {
 				result = await callService<unknown>('previewDraftSave', params);
 			}
@@ -1046,6 +1047,18 @@ export function activate(context: ExtensionContext): void {
 		onLoadCatalogueSnapshots: loadCatalogueSnapshots,
 		onLoadCatalogueTypes: loadCatalogueTypes,
 		onLoadResourceSchema: loadResourceSchema,
+		async onRenderResourceDraft(resourceId, draft) {
+			const typeName = typeof draft.typeName === 'string' ? draft.typeName : '';
+			const snap = selectBestSnapshotForType(await loadCatalogueSnapshots(), typeName);
+			if (!snap) {
+				return null;
+			}
+			const result = await callService<unknown>('renderResourceDraft', {
+				key: { address: snap.address, version: snap.version, formatVersion: snap.formatVersion, sha256: snap.sha256 },
+				draft,
+			});
+			return result.ok ? parseSchemaPreview(result.value, resourceId, snap.version) ?? null : null;
+		},
 		onLoadCloudRegions: loadCloudRegions,
 		onInspectDependencies: inspectArchitectureDependencies,
 		onReadModule: readArchitectureModule,

@@ -82,6 +82,14 @@ export interface CanvasCatalogueSnapshot {
 }
 
 /** Resource types of the newest imported snapshot for one provider, for the Studio palette. */
+export interface CanvasSchemaPreview {
+	readonly resourceId: string;
+	readonly hcl: string;
+	readonly diagnostics: readonly { readonly path: string; readonly message: string; readonly severity: 'error' | 'warning' }[];
+	readonly hasErrors: boolean;
+	readonly providerVersion: string;
+}
+
 export interface CanvasCatalogueTypes {
 	readonly provider: 'azure' | 'aws' | 'gcp';
 	readonly version: string;
@@ -377,6 +385,12 @@ export type ExtensionToWebviewMessage =
 		readonly types: CanvasCatalogueTypes;
 	}
 	| {
+		/** Rust `renderResourceDraft` result for one canvas resource (null when unavailable). */
+		readonly type: 'resourceDraftRendered';
+		readonly resourceId: string;
+		readonly preview: CanvasSchemaPreview | null;
+	}
+	| {
 		readonly type: 'catalogueSnapshots';
 		readonly snapshots: readonly CanvasCatalogueSnapshot[];
 	}
@@ -437,13 +451,14 @@ export type WebviewToExtensionMessage =
 	| { readonly type: 'ready' }
 	| { readonly type: 'selectNode'; readonly nodeId: string | null }
 	| { readonly type: 'openSource'; readonly nodeId: string }
+	| { readonly type: 'renderResourceDraft'; readonly resourceId: string; readonly draft: Readonly<Record<string, unknown>> }
 	| { readonly type: 'openSourceLocation'; readonly sourceRevision: string; readonly fileName: string; readonly line?: number; readonly column?: number }
 	| { readonly type: 'refresh' }
 	| { readonly type: 'toggleFocusMode'; readonly active?: boolean }
 	| { readonly type: 'viewState'; readonly state: CanvasViewState }
 	| { readonly type: 'requestValidation'; readonly scope: 'architecture' | 'resource'; readonly nodeId?: string }
 	| { readonly type: 'cancelValidation' }
-	| { readonly type: 'requestDraftSavePreview'; readonly fileName: string; readonly contents: string }
+	| { readonly type: 'requestDraftSavePreview'; readonly fileName: string; readonly contents: string; readonly removeAddresses?: readonly string[] }
 	| { readonly type: 'applyDraftSave'; readonly fileName: string; readonly contents: string; readonly previewToken: string }
 	| { readonly type: 'requestSchema'; readonly kind: 'resource' | 'dataSource'; readonly typeName: string }
 	| { readonly type: 'requestModule'; readonly modulePath: readonly string[] }
@@ -842,6 +857,20 @@ export function parseWebviewMessage(value: unknown): WebviewToExtensionMessage |
 			return isOpaqueId(value.nodeId) ? { type: 'selectNode', nodeId: value.nodeId } : undefined;
 		case 'openSource':
 			return isOpaqueId(value.nodeId) ? { type: 'openSource', nodeId: value.nodeId } : undefined;
+		case 'renderResourceDraft': {
+			// Shape only; the Electron-main broker validates the draft body field by field.
+			const draft = value.draft;
+			if (
+				typeof value.resourceId !== 'string' || value.resourceId.length === 0 || value.resourceId.length > 256
+				|| typeof draft !== 'object' || draft === null || Array.isArray(draft)
+				|| (draft as { kind?: unknown }).kind !== 'resource'
+				|| typeof (draft as { typeName?: unknown }).typeName !== 'string' || !/^[a-z][a-z0-9_]{0,127}$/.test((draft as { typeName: string }).typeName)
+				|| JSON.stringify(draft).length > 48 * 1024
+			) {
+				return undefined;
+			}
+			return { type: 'renderResourceDraft', resourceId: value.resourceId, draft: draft as Record<string, unknown> };
+		}
 		case 'openSourceLocation': {
 			const position = (raw: unknown) => raw === undefined || (typeof raw === 'number' && Number.isSafeInteger(raw) && raw >= 1);
 			if (
@@ -880,7 +909,16 @@ export function parseWebviewMessage(value: unknown): WebviewToExtensionMessage |
 			if (!isValidTfFileName(value.fileName) || typeof value.contents !== 'string' || value.contents.length > MAX_DRAFT_SAVE_CHARS) {
 				return undefined;
 			}
-			return { type: 'requestDraftSavePreview', fileName: value.fileName, contents: value.contents };
+			{
+				const remove = value.removeAddresses;
+				if (remove !== undefined && (!Array.isArray(remove) || remove.length > 256 || !remove.every(item => typeof item === 'string' && item.length > 0 && item.length <= 512))) {
+					return undefined;
+				}
+				return {
+					type: 'requestDraftSavePreview', fileName: value.fileName, contents: value.contents,
+					...(Array.isArray(remove) && remove.length ? { removeAddresses: [...remove as string[]] } : {}),
+				};
+			}
 		case 'applyDraftSave':
 			if (
 				!isValidTfFileName(value.fileName)

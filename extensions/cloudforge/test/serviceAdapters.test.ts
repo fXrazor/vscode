@@ -16,6 +16,7 @@ import {
 	parseDetectedEngines,
 	parseDraftSaveApply,
 	parseDraftSavePreview,
+	parseSchemaPreview,
 	parseEngineValidateReport,
 	parseExportAuditReport,
 	parseModuleInspection,
@@ -450,4 +451,23 @@ test('palette uses the newest imported snapshot per provider and validates its t
 	assert.equal(parseCatalogueTypes({}, 'azure', '5.15.0'), undefined);
 	assert.deepEqual(parseFormCoverage({ complete: false, paths: 12, readOnly: 2, gaps: [{ path: 'a.b', reason: 'dynamic' }, { path: 3 }] }), { complete: false, paths: 12, readOnly: 2, gaps: [{ path: 'a.b', reason: 'dynamic' }] });
 	assert.equal(parseFormCoverage({ complete: 'yes', paths: 1, readOnly: 0, gaps: [] }), undefined);
+});
+
+test('renderResourceDraft messages and results are validated before reaching the service or Studio', () => {
+	const draft = { kind: 'resource', typeName: 'azurerm_virtual_network', label: 'hub', body: { attributes: {}, blocks: [] } };
+	assert.deepEqual(parseWebviewMessage({ type: 'renderResourceDraft', resourceId: 'network', draft }), { type: 'renderResourceDraft', resourceId: 'network', draft });
+	assert.equal(parseWebviewMessage({ type: 'renderResourceDraft', resourceId: 'network', draft: { ...draft, kind: 'module' } }), undefined);
+	assert.equal(parseWebviewMessage({ type: 'renderResourceDraft', resourceId: '', draft }), undefined);
+	assert.equal(parseWebviewMessage({ type: 'renderResourceDraft', resourceId: 'network', draft: { ...draft, label: 'x'.repeat(50_000) } }), undefined);
+
+	const preview = parseSchemaPreview({ hcl: 'resource "a" "b" {}\n', diagnostics: [{ path: 'location', message: 'Required attribute', severity: 'error' }, { path: 'x', message: '', severity: 'error' }], hasErrors: true }, 'network', '4.0.0');
+	assert.deepEqual(preview, { resourceId: 'network', hcl: 'resource "a" "b" {}\n', diagnostics: [{ path: 'location', message: 'Required attribute', severity: 'error' }], hasErrors: true, providerVersion: '4.0.0' });
+	assert.equal(parseSchemaPreview({ hcl: 1, diagnostics: [] }, 'network', '4.0.0'), undefined);
+});
+
+test('draft save previews carry bounded canvas deletions', () => {
+	assert.deepEqual(parseWebviewMessage({ type: 'requestDraftSavePreview', fileName: 'main.tf', contents: '', removeAddresses: ['aws_vpc.old'] }), { type: 'requestDraftSavePreview', fileName: 'main.tf', contents: '', removeAddresses: ['aws_vpc.old'] });
+	assert.deepEqual(parseWebviewMessage({ type: 'requestDraftSavePreview', fileName: 'main.tf', contents: '', removeAddresses: [] }), { type: 'requestDraftSavePreview', fileName: 'main.tf', contents: '' });
+	assert.equal(parseWebviewMessage({ type: 'requestDraftSavePreview', fileName: 'main.tf', contents: '', removeAddresses: [''] }), undefined);
+	assert.equal(parseWebviewMessage({ type: 'requestDraftSavePreview', fileName: 'main.tf', contents: '', removeAddresses: 'aws_vpc.old' }), undefined);
 });

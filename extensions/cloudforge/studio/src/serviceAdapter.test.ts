@@ -8,9 +8,11 @@ import { createHistory, historyReducer } from './model.ts';
 import { liveSchemaAttributes, liveSchemaBlocks, liveSchemaOutputs, type HostFormSchema } from './liveSchema.ts';
 import { additionalBlocks, editableFields } from './formDefinition.ts';
 import { architectureDiagnostics, isStaleDiagnostic } from './diagnostics.ts';
-import { buildDraftSavePayload, buildHostViewState, defaultTargetTfFile, projectGraphSnapshotToArchitecture, projectHostDiagnostics, resolveProviderRegions } from './serviceAdapter.ts';
+import { removedSourceAddresses, buildDraftSavePayload, buildHostViewState, defaultTargetTfFile, projectGraphSnapshotToArchitecture, projectHostDiagnostics, resolveProviderRegions } from './serviceAdapter.ts';
 import { projectResourceFiles } from './terraformProjection.ts';
 import { describeMerge } from './draftSaveMerge.ts';
+import { buildResourceDraft, parseSchemaPreview } from './resourceDraft.ts';
+import { sampleArchitecture as schemaSample } from './fixture.ts';
 import { explicitResourceReferences, inheritedDependencies } from './resourceHierarchy.ts';
 import { terraformCode } from './terraformProjection.ts';
 import type { HostCloudRegionsPayload, HostEngineValidateReport, HostGraphSnapshot, HostValidationRun } from './webviewBridge.ts';
@@ -358,4 +360,40 @@ test('focused save summary says what changes and what is kept', () => {
 		'Comments and fields the canvas does not show are kept',
 		'Left alone because the address appears twice: a.b',
 	]);
+});
+
+test('resource drafts for the Rust schema check keep literals and turn references into expressions', () => {
+	const architecture = schemaSample();
+	const schema = { kind: 'resource' as const, typeName: 'azurerm_virtual_network', providerSource: 'registry.terraform.io/hashicorp/azurerm', providerVersion: '4.0.0', description: '', docsUrl: '', exampleHcl: '', attributes: [], blocks: [], outputs: [] };
+	const draft = buildResourceDraft(architecture, 'network', schema);
+	assert.equal(draft?.typeName, 'azurerm_virtual_network');
+	assert.deepEqual(draft?.body.attributes.address_space, { kind: 'literal', value: ['10.20.0.0/16'] });
+	assert.deepEqual(draft?.body.attributes.location, { kind: 'expression', text: 'azurerm_resource_group.rg-production.location' });
+	assert.equal(buildResourceDraft(architecture, 'network', { ...schema, typeName: 'azurerm_subnet' }), undefined);
+	assert.equal(buildResourceDraft(architecture, 'network', undefined), undefined);
+
+	const preview = parseSchemaPreview({ resourceId: 'network', hcl: 'resource "x" "y" {}\n', diagnostics: [{ path: 'location', message: 'Required', severity: 'error' }, { path: 1 }], hasErrors: false, providerVersion: '4.0.0' });
+	assert.equal(preview?.hasErrors, true);
+	assert.equal(preview?.diagnostics.length, 1);
+	assert.equal(parseSchemaPreview({ resourceId: 'network', hcl: 3, diagnostics: [] }), undefined);
+});
+
+test('focused saves remove only blocks deleted or renamed on the canvas', () => {
+	const architecture = schemaSample();
+	const keep = architecture.resources.find(resource => resource.id === 'network')!;
+	const node = (id: string, kind: string, resourceType: string | null, name: string, sourceFile = 'main.tf') => ({ id, kind, resourceType, name, label: name, hasSource: true, sourceFile });
+	const snapshot = {
+		workspaceId: 'w', architectureId: 'a', architectureName: 'a', sourceRevision: 'f'.repeat(64), status: 'complete' as const, edges: [], diagnostics: [],
+		nodes: [
+			node('network', 'resource', 'azurerm_virtual_network', keep.terraformName ?? keep.name),
+			node('gone', 'resource', 'azurerm_subnet', 'old'),
+			node('gone-data', 'data', 'azurerm_client_config', 'current'),
+			node('gone-module', 'module', null, 'net'),
+			node('other-file', 'resource', 'azurerm_subnet', 'x', 'other.tf'),
+		],
+	};
+	assert.deepEqual(removedSourceAddresses(architecture, snapshot, 'main.tf'), ['azurerm_subnet.old', 'data.azurerm_client_config.current', 'module.net']);
+	const renamed = { ...architecture, resources: architecture.resources.map(resource => resource.id === 'network' ? { ...resource, terraformName: 'hub' } : resource) };
+	assert.ok(removedSourceAddresses(renamed, snapshot, 'main.tf').includes('azurerm_virtual_network.' + (keep.terraformName ?? keep.name)));
+	assert.deepEqual(removedSourceAddresses(architecture, null, 'main.tf'), []);
 });
