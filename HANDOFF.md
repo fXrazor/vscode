@@ -1075,6 +1075,21 @@ Implemented on `fxrazor/continue-project-handoff-review` in `E:\Orca\CloudForge-
 1. Rebuild the Windows x64 installer with `pwsh -NoProfile -ExecutionPolicy Bypass -File build/cloudforge/package-win32-x64.ps1` whenever ready to package Canvas Focus Mode + Corresponding `.tf` File Linking into an updated `CloudForgeProofSetup-x64-*.exe` (pass `-SignCertificateThumbprint <40-hex>` + `-RequireSignedService` for signed releases).
 2. Wire live Rust Stage 9B (`terraform plan -json` / `tofu plan -json`) once guarded plan capture lands in `Z:\CloudForge`.
 
+### Combined Windows x64 Installer (`d7c58cc29fe`) + 5/5 Live Packaged-Desktop Smoke (2026-11-25)
+
+Built and live-smoked the updated Windows x64 installer from `Z:\CloudForge-Code` at `d7c58cc29fe4fec61e403f01ee8738a56223a5a0` (Studio-only Architecture Canvas + **Canvas Focus Mode** + **Bidirectional Corresponding Project `.tf` File Linking**), paired with Rust Stage 9A (`ef4be9d09b0b`).
+
+| Artifact or check (run on `d7c58cc29fe` + Rust Stage 9A `ef4be9d`) | Verified result |
+| --- | --- |
+| Windows x64 installer | [CloudForgeProofSetup-x64-d7c58cc29fe.exe](Z:/CFStage/CloudForgeProofSetup-x64-d7c58cc29fe.exe), unsigned (`ServiceSigned: false`), `324,353,778` bytes, SHA-256 `7726000ada5f5526f6058aa1931a60f4a91a3084fc64673b8c151fd66d7d1652`; Desktop `d7c58cc29fe4fec61e403f01ee8738a56223a5a0`; Rust Stage 9A `ef4be9d09b0b2ddf504ea1bb31172c116c72da19` (`3,670,016` bytes, SHA-256 `2a9954d61776602d74471e1d638ed86c14b404c1ed5139b1424a4db22eef03db`); VSIX `7accf7857ea4f4717b6211a2b75f5b434faf477033203a8919b6d26b6abc1897`. |
+| Payload hygiene & `serviceArtifact.ts --verify` | Passed (`media/studio/{studio.js,studio.css,assets/catalogue/azure.json,assets/monaco/vs/loader.js}` present; `canvas-src/`, `studio/`, `media/canvas.{js,css}`, `tsconfig.typecheck.tsbuildinfo` absent; `serviceArtifact.ts --verify` passed). |
+| Live packaged-desktop smoke ([studio-focus-multifile-smoke.mjs](Z:/CFStage/smoke/studio-focus-multifile-smoke.mjs), [report.json](Z:/CFStage/smoke/run-studio-d7c58cc29fe/report.json)) | **5/5 passed** (`01-packaged-focus-mode.png`, `02-packaged-multifile-guarded-save.png` visually inspected): opened a 3-file Azure Terraform workspace (`main.tf`, `network.tf`, `compute.tf`, `5 in design`, `rev 00da2e16`) via the live bundled Rust Stage 9A sidecar; entered **Canvas Focus Mode** edge-to-edge fullscreen (`3064×1689` inside `3072×1728`, `sidebarW=0`, `auxW=0`, `statusH=0`, `tabsH=0`) and restored cleanly via **Exit Focus**; verified `snet_app` linked to `network.tf:8`, previewed & applied a live Rust guarded save writing ONLY `network.tf` (`address_prefixes = ["10.20.2.0/24"]`, refreshing `rev 00da2e16 -> rev 2b9bcd7a`) while leaving `main.tf` and `compute.tf` untouched; jumped directly to `network.tf` in Code OSS via **Open network.tf**; and left **0** payload `cloudforge-service.exe` orphans after quit. |
+
+**Next actions:**
+1. User can run [CloudForgeProofSetup-x64-d7c58cc29fe.exe](Z:/CFStage/CloudForgeProofSetup-x64-d7c58cc29fe.exe) directly (fresh install or in-place upgrade over `%LOCALAPPDATA%\Programs\CloudForge Proof`; no uninstall needed).
+2. Wire live Rust Stage 9B (`terraform plan -json` / `tofu plan -json`) once guarded plan capture lands in `Z:\CloudForge`.
+
+
 
 
 
