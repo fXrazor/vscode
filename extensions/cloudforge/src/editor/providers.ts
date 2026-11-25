@@ -10,6 +10,8 @@
 
 import {
 	CodeLens,
+	CompletionItem,
+	CompletionItemKind,
 	DocumentSymbol,
 	EventEmitter,
 	Hover,
@@ -19,6 +21,7 @@ import {
 	MarkdownString,
 	Position,
 	Range,
+	SnippetString,
 	SymbolKind,
 	Uri,
 	workspace,
@@ -29,7 +32,15 @@ import {
 import { createDraftDocument } from '../canvas/draftDocument';
 import { estimateArchitectureCost, type ResourceCostLine } from '../canvas/planReview';
 import type { CanvasGraphSnapshot } from '../canvas/protocol';
-import { lookupBundledSchema, type FormSchema } from '../canvas/schemaForm';
+import { listBundledSchemaTypes, lookupBundledSchema, type FormSchema } from '../canvas/schemaForm';
+import {
+	buildTerraformCompletionItems,
+	collectWorkspaceTerraformSymbols,
+	detectTerraformCompletionContext,
+	mergeGraphNodesIntoSymbols,
+	type TerraformCompletionItemKind,
+	type WorkspaceTerraformSymbols
+} from './terraformCompletions';
 import {
 	buildTerraformNodeHoverMarkdown,
 	buildTerraformSchemaOnlyHoverMarkdown,
@@ -58,6 +69,7 @@ const MAX_DEFINITION_FILE_BYTES = 512 * 1024;
 export interface TerraformEditorHost {
 	getActiveSnapshot(): CanvasGraphSnapshot | undefined;
 	getCachedSchema(kind: 'resource' | 'dataSource', typeName: string): FormSchema | undefined;
+	listCachedSchemas(): readonly FormSchema[];
 }
 
 export interface TerraformEditorRegistration extends Disposable {
@@ -382,6 +394,137 @@ export function registerTerraformEditorProviders(host: TerraformEditorHost): Ter
 		parseCache.delete(doc.uri.toString());
 	});
 
+	let cachedWorkspaceSymbols: { readonly builtAtMs: number; readonly symbols: WorkspaceTerraformSymbols } | undefined;
+
+	function completionKindFor(kind: TerraformCompletionItemKind): CompletionItemKind {
+		switch (kind) {
+			case 'snippet': return CompletionItemKind.Snippet;
+			case 'class': return CompletionItemKind.Class;
+			case 'property': return CompletionItemKind.Property;
+			case 'field': return CompletionItemKind.Field;
+			case 'variable': return CompletionItemKind.Variable;
+			case 'module': return CompletionItemKind.Module;
+			case 'value': return CompletionItemKind.Value;
+			case 'reference': return CompletionItemKind.Reference;
+		}
+	}
+
+	function getAllAvailableSchemas(): FormSchema[] {
+		const byKey = new Map<string, FormSchema>();
+		for (const live of host.listCachedSchemas()) {
+			byKey.set(`${live.kind}:${live.typeName}`, live);
+		}
+		for (const typeName of listBundledSchemaTypes()) {
+			const key = `resource:${typeName}`;
+			if (!byKey.has(key)) {
+				const bundled = lookupBundledSchema({ kind: 'resource', resourceType: typeName });
+				if (bundled) {
+					byKey.set(key, bundled);
+				}
+			}
+		}
+		return Array.from(byKey.values());
+	}
+
+	async function loadWorkspaceSymbols(activeDoc: TextDocument): Promise<WorkspaceTerraformSymbols> {
+		const now = Date.now();
+		let base: WorkspaceTerraformSymbols;
+		if (cachedWorkspaceSymbols && now - cachedWorkspaceSymbols.builtAtMs < 5000) {
+			base = cachedWorkspaceSymbols.symbols;
+		} else {
+			const files: { fileName: string; text: string }[] = [];
+			const seenUris = new Set<string>();
+			for (const openDoc of workspace.textDocuments) {
+				if (isTfOrTofuDocument(openDoc)) {
+					seenUris.add(openDoc.uri.toString());
+					files.push({ fileName: fileBasename(openDoc.uri), text: openDoc.getText() });
+				}
+			}
+			const found = await workspace.findFiles('**/*.{tf,tofu}', '**/.terraform/**', MAX_DEFINITION_FILES);
+			for (const uri of found) {
+				if (seenUris.has(uri.toString())) {
+					continue;
+				}
+				try {
+					const stat = await workspace.fs.stat(uri);
+					if (stat.size > MAX_DEFINITION_FILE_BYTES) {
+						continue;
+					}
+					const raw = await workspace.fs.readFile(uri);
+					files.push({ fileName: fileBasename(uri), text: Buffer.from(raw).toString('utf8') });
+				} catch {
+					continue;
+				}
+			}
+			base = collectWorkspaceTerraformSymbols(files);
+			cachedWorkspaceSymbols = { builtAtMs: now, symbols: base };
+		}
+
+		// Always ensure the live active document buffer's own declarations are fresh.
+		const activeSymbols = collectWorkspaceTerraformSymbols([
+			{ fileName: fileBasename(activeDoc.uri), text: activeDoc.getText() },
+		]);
+		const dedup = <T>(items: readonly T[], keyOf: (item: T) => string): T[] => {
+			const out: T[] = [];
+			const seen = new Set<string>();
+			for (const item of items) {
+				const key = keyOf(item);
+				if (!seen.has(key)) {
+					seen.add(key);
+					out.push(item);
+				}
+			}
+			return out;
+		};
+		const combined: WorkspaceTerraformSymbols = {
+			variables: dedup([...activeSymbols.variables, ...base.variables], v => v.name),
+			locals: dedup([...activeSymbols.locals, ...base.locals], l => l.name),
+			modules: dedup([...activeSymbols.modules, ...base.modules], m => m.name),
+			resources: dedup([...activeSymbols.resources, ...base.resources], r => `${r.resourceType}.${r.name}`),
+			dataSources: dedup([...activeSymbols.dataSources, ...base.dataSources], d => `${d.resourceType}.${d.name}`),
+		};
+		return mergeGraphNodesIntoSymbols(combined, host.getActiveSnapshot());
+	}
+
+	const completionDisposable = languages.registerCompletionItemProvider(
+		TERRAFORM_SELECTOR,
+		{
+			async provideCompletionItems(document, position) {
+				const context = detectTerraformCompletionContext(document.getText(), position.line, position.character);
+				if (!context) {
+					return undefined;
+				}
+				const symbols = await loadWorkspaceSymbols(document);
+				const schemas = getAllAvailableSchemas();
+				const candidates = buildTerraformCompletionItems(context, {
+					schemas,
+					symbols,
+					lookupSchema: (kind, typeName) =>
+						host.getCachedSchema(kind, typeName)
+						?? lookupBundledSchema({ kind: kind === 'dataSource' ? 'data' : 'resource', resourceType: typeName }),
+				});
+				return candidates.map(candidate => {
+					const item = new CompletionItem(candidate.label, completionKindFor(candidate.kind));
+					item.detail = candidate.detail;
+					if (candidate.documentation) {
+						item.documentation = new MarkdownString(candidate.documentation);
+					}
+					item.insertText = candidate.isSnippet ? new SnippetString(candidate.insertText) : candidate.insertText;
+					item.sortText = candidate.sortText;
+					return item;
+				});
+			}
+		},
+		'.',
+		'"'
+	);
+
+	const saveDocDisposable = workspace.onDidSaveTextDocument(doc => {
+		if (isTfOrTofuDocument(doc)) {
+			cachedWorkspaceSymbols = undefined;
+		}
+	});
+
 	const configDisposable = workspace.onDidChangeConfiguration(event => {
 		if (event.affectsConfiguration('cloudforge.editor.codeLens')) {
 			codeLensEmitter.fire();
@@ -391,6 +534,7 @@ export function registerTerraformEditorProviders(host: TerraformEditorHost): Ter
 	return {
 		refresh() {
 			cachedCostRevision = undefined;
+			cachedWorkspaceSymbols = undefined;
 			codeLensEmitter.fire();
 		},
 		dispose() {
@@ -398,7 +542,9 @@ export function registerTerraformEditorProviders(host: TerraformEditorHost): Ter
 			codeLensDisposable.dispose();
 			hoverDisposable.dispose();
 			definitionDisposable.dispose();
+			completionDisposable.dispose();
 			closeDocDisposable.dispose();
+			saveDocDisposable.dispose();
 			configDisposable.dispose();
 			codeLensEmitter.dispose();
 			parseCache.clear();

@@ -1299,6 +1299,15 @@ export function activate(context: ExtensionContext): void {
 		getCachedSchema(kind, typeName) {
 			return cachedLiveSchemas.get(`${kind}:${typeName}`) ?? undefined;
 		},
+		listCachedSchemas() {
+			const out: FormSchema[] = [];
+			for (const schema of cachedLiveSchemas.values()) {
+				if (schema) {
+					out.push(schema);
+				}
+			}
+			return out;
+		},
 	});
 	terraformProvidersRef.current = terraformProviders;
 
