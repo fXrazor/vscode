@@ -830,4 +830,34 @@ Implemented on `fxrazor/auto-open-and-stage3-4` in `Z:\CloudForge-Code\.claude\w
 1. When ready for signed releases, install a Windows Authenticode certificate on the build host and pass `-SignCertificateThumbprint <40-hex>` + `-RequireSignedService` to `build/cloudforge/package-win32-x64.ps1`.
 2. Proceed to the next approved roadmap milestone (e.g., Stage 9 managed Terraform/OpenTofu engine execution & live `terraform plan -json` capture, or AI Builder / Projects & Template Library from `Z:\CloudForge\design.md`).
 
+### Offline Multi-Cloud Template Library, Multi-Target IaC Generators, Status Bar & Clickable Diagnostics + Combined Stage 9A Installer, Live Smoke & Installed Upgrade (2026-11-25)
+
+Implemented on `fxrazor/continue-project-handoff-review` in `E:\Orca\CloudForge-Code\dace` (`407d56014c1d964e2697a724d07a89f6c3e989dd`, rebased cleanly onto Stage 9A `0fb2a7fad750eece606a729af21213df02070ef5`, fast-forward merged to `Z:\CloudForge-Code` `main` and pushed to `origin/main`). Zero edits to `extensions/cloudforge/studio/**` or `Z:\CloudForge`.
+
+- **Offline Multi-Cloud Template Library ([templateLibrary.ts](extensions/cloudforge/src/canvas/templateLibrary.ts), [controller.ts](extensions/cloudforge/src/project/controller.ts), [canvasPanel.ts](extensions/cloudforge/src/canvas/canvasPanel.ts), [extension.ts](extensions/cloudforge/src/extension.ts), [package.json](extensions/cloudforge/package.json), [package.nls.json](extensions/cloudforge/package.nls.json), [canvas-src/index.ts](extensions/cloudforge/canvas-src/index.ts), [canvas-src/canvas.css](extensions/cloudforge/canvas-src/canvas.css)):**
+  - Added 6 offline multi-cloud starter templates (`Azure Hub Network`, `Azure Secure Workload Spoke`, `Azure Edge Perimeter`, `AWS Two-Tier VPC Foundation`, `Google Cloud Custom VPC & Firewall`, `Kubernetes App Namespace & Policy`) with CSP-safe SVG mini-topology thumbnails, search, provider filter, sort, HCL preview, **Create New Architecture…** (`architectures/<name>/main.tf` + marker), and **Insert into Current Draft** (atomic undoable edit).
+  - Accessible from Command Palette (`CloudForge: Browse Template Library…`), `CloudForge Project` view title (`$(library)`), Canvas `View -> Template Library…`, `Ctrl+Shift+T`, and the empty canvas welcome state.
+- **Multi-Target IaC Generators ([generators.ts](extensions/cloudforge/src/canvas/generators.ts), [protocol.ts](extensions/cloudforge/src/canvas/protocol.ts)):**
+  - Upgraded the `Export Architecture` modal with a **Generate IaC** tab supporting **Azure Bicep (`.bicep`)**, **Azure ARM JSON (`.json`)**, **AWS CloudFormation YAML (`.yaml`)**, and **Kubernetes YAML (`.yaml`)** with deterministic draft attribute overrides, explicit mapped/unmapped counts, provenance, honest loss notes, and `Save Export…` file dialog filters. Fixed modal tab vertical collapse across all modals via `.cf-modal-body > * { flex-shrink: 0; }`.
+- **Native Workbench Status Bar & Clickable Diagnostics ([extension.ts](extensions/cloudforge/src/extension.ts), [canvas-src/index.ts](extensions/cloudforge/canvas-src/index.ts)):**
+  - Added a native Workbench Status Bar item (`$(type-hierarchy) CloudForge: <name> · rev <8-hex>`) clicking through to `cloudforge.openCanvas` and kept in sync across open/refresh/save/clear.
+  - Upgraded Inspector Diagnostics with clickable `Reveal <name> on Canvas` buttons that automatically unhide hidden layers, expand collapsed groups, clear filters if needed, and select + pan/zoom to the matching node.
+
+| Artifact or check (run on `407d56014c1` + Rust Stage 9A `ef4be9d`) | Verified result |
+| --- | --- |
+| `CLOUDFORGE_REPO=Z:\CloudForge node --test extensions/cloudforge/test/*.test.ts` | **57/57 extension tests passed** (`0` skipped; includes [templateAndGenerators.test.ts](extensions/cloudforge/test/templateAndGenerators.test.ts) and Stage 9A `serviceAdapters.test.ts`). |
+| TS 6 (`tsc6.cmd`) & TS 7 (`tsc.cmd`) on `extensions/cloudforge/tsconfig.json` & `canvas-src/tsconfig.json` | Passed (`0` errors). |
+| `node extensions/cloudforge/esbuild.mts` & `node extensions/cloudforge/esbuild.webview.mts` | Passed (`dist/extension.js`, `media/canvas.js`, `media/canvas-style.css`). |
+| `node build/oxlint.ts` & `node --experimental-strip-types build/hygiene.ts` (all 9 changed/new files) | Passed (`0` errors, `0` warnings). |
+| Live Edge Playwright UI check (`templates-generators-verify.mjs`) | Passed with `0` console/page errors; 3 screenshots visually inspected (caught and fixed `.cf-modal-body > .cf-segmented` vertical squish). |
+| Combined Stage 9A + Templates/Generators Windows x64 installer | [CloudForgeProofSetup-x64-407d56014c1.exe](Z:/CFStage/CloudForgeProofSetup-x64-407d56014c1.exe), unsigned (`ServiceSigned: false`), `322,068,682` bytes, SHA-256 `871d6d38804ca40859c2d436857da8f4a7bbf965384752ec318737619e443c11`; Rust Stage 9A `ef4be9d09b0b2ddf504ea1bb31172c116c72da19` (`3,670,016` bytes, SHA-256 `2a9954d61776602d74471e1d638ed86c14b404c1ed5139b1424a4db22eef03db`), VSIX `7accf7857ea4f4717b6211a2b75f5b434faf477033203a8919b6d26b6abc1897`. |
+| Payload hygiene & `serviceArtifact.ts --verify` | 6/6 hygiene checks passed (`media/canvas.js`, `media/canvas-style.css`, `dist/extension.js` present; `studio/`, `canvas-src/`, `tsconfig.typecheck.tsbuildinfo` absent); `serviceArtifact.ts --verify` passed on built payload and installed app. |
+| Live packaged-desktop smoke ([stage9a-templates-smoke.mjs](Z:/CFStage/smoke/stage9a-templates-smoke.mjs), [report-stage9a-407d56014c1.json](Z:/CFStage/smoke/report-stage9a-407d56014c1.json)) | **5/5 passed** (`01-packaged-templates-gallery.png`, `02-packaged-export-iac-bicep.png` inspected): native Status Bar rendered `CloudForge: stage9a-tf · rev 39d3523f`; Stage 4 live validation + Stage 9A Runner Timeline surfaced `tofu 1.13.9` and `terraform 1.15.8` on `ef4be9d`; Command Palette opened the 6-template offline gallery and inserted `Azure Secure Workload Spoke` (`3 -> 8` nodes); Multi-Target IaC Generator rendered `Azure Bicep: 8 mapped, 0 unmapped` and valid ARM JSON; `0` payload `cloudforge-service.exe` orphans remained after quit. |
+| Silent per-user upgrade (`%LOCALAPPDATA%\Programs\CloudForge Proof`) | Exit code `0`; installed `serviceArtifact.ts --verify` passed (`407d56014c1` + Rust Stage 9A `ef4be9d`), `tsconfig.typecheck.tsbuildinfo` absent. |
+
+**Next actions:**
+1. Wire live Stage 9B (`terraform plan -json` / `tofu plan -json` execution) into the Plan Review modal once the Rust sidecar adds guarded plan capture.
+2. When ready for signed releases, pass `-SignCertificateThumbprint <40-hex>` + `-RequireSignedService` to `build/cloudforge/package-win32-x64.ps1`.
+
+
 
