@@ -9,17 +9,24 @@ import { Box, Cpu, Network, Database, HardDrive, Activity, PanelLeftClose, Squar
 
 const icons: Record<string, typeof Box> = { Compute: Cpu, Network, Storage:HardDrive, Database, Monitoring:Activity, 'Security & Identity':Shield, Integration:Zap, Management:Wrench, 'AI & ML':Brain, Analytics:BarChart3, Other:Box };
 
-export const ResourceCatalogue = memo(function ResourceCatalogue({ architecture, onAdd, search, onSearch, onImportModule, visible, onClose, onDesignAdd, resizeHandle, onAddCatalogue, onTemplate, shapesOpen, onShapesOpen, onShapesBack }: {
+export const ResourceCatalogue = memo(function ResourceCatalogue({ architecture, onAdd, search, onSearch, onImportModule, visible, onClose, onDesignAdd, resizeHandle, onAddCatalogue, onTemplate, shapesOpen, onShapesOpen, onShapesBack, tab: controlledTab, onTabChange }: {
  shapesOpen: boolean; onShapesOpen: () => void; onShapesBack: () => void;
  architecture: Architecture; onAdd: (kind: ResourceKind, provider: Provider) => void;
  search: string; onSearch: (value: string) => void; onImportModule: () => void; visible: boolean; onClose: () => void;
  onDesignAdd: (kind: BoardItem['kind'],caption?:string, shape?:ShapeId) => void; resizeHandle: ReactNode;
  onAddCatalogue: (entry: CatalogueEntry, provider: Provider) => void;
  onTemplate: (kind: 'network' | 'platform' | 'workflow') => void;
+ tab?: 'resources' | 'templates'; onTabChange?: (tab: 'resources' | 'templates') => void;
 }) {
  const shapesButton = useRef<HTMLButtonElement>(null);
  const [provider, setProvider] = useState<Provider>('azure');
- const [tab,setTab] = useState('resources');
+ const [localTab, setLocalTab] = useState<'resources' | 'templates'>('resources');
+ const tab = controlledTab ?? localTab;
+ const setTab = (next: string) => {
+  const value = next === 'templates' ? 'templates' : 'resources';
+  setLocalTab(value);
+  onTabChange?.(value);
+ };
  const [snapshot,setSnapshot] = useState<CatalogueSnapshot>();
  const [failure,setFailure] = useState('');
  const [serviceKey,setServiceKey] = useState('');

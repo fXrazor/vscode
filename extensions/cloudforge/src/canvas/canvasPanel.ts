@@ -5,7 +5,7 @@
 
 import { randomBytes } from 'node:crypto';
 import { l10n, Uri, ViewColumn, window, workspace, type Disposable, type ExtensionContext, type Webview, type WebviewPanel } from 'vscode';
-import { buildStudioWebviewHtml, resolveCanvasEngine, type CanvasEngine } from './canvasEngine';
+import { buildStudioUnavailableHtml, buildStudioWebviewHtml } from './canvasEngine';
 import {
 	defaultCanvasViewState,
 	parseWebviewMessage,
@@ -91,6 +91,8 @@ export interface CanvasPanelHost {
 		encoding: 'utf8' | 'base64'
 	): Promise<{ readonly ok: boolean; readonly message: string }>;
 	onUseTemplateAsArchitecture?(templateId: string): Promise<void>;
+	onToggleFocusMode?(active?: boolean): Promise<boolean>;
+	isFocusModeActive?(): boolean;
 }
 
 /**
@@ -101,7 +103,6 @@ export interface CanvasPanelHost {
 export class CloudForgeCanvasPanel implements Disposable {
 	private panel: WebviewPanel | undefined;
 	private ready = false;
-	private activeEngine: CanvasEngine = 'classic';
 	private showSequence = 0;
 	private graph: CanvasGraphSnapshot | undefined;
 	private notice: CanvasNotice | null = null;
@@ -119,10 +120,6 @@ export class CloudForgeCanvasPanel implements Disposable {
 		return this.panel !== undefined;
 	}
 
-	get engine(): CanvasEngine {
-		return this.activeEngine;
-	}
-
 	private async hasStudioAssets(): Promise<boolean> {
 		const studioRoot = Uri.joinPath(this.context.extensionUri, 'media', 'studio');
 		try {
@@ -136,34 +133,21 @@ export class CloudForgeCanvasPanel implements Disposable {
 		}
 	}
 
-	private async resolveEngine(override?: CanvasEngine): Promise<CanvasEngine> {
-		const configured = workspace.getConfiguration('cloudforge').get<unknown>('canvasEngine');
-		const studioAvailable = await this.hasStudioAssets();
-		const resolution = resolveCanvasEngine(configured, override, studioAvailable);
-		if (resolution.fellBackFromStudio) {
-			void window.showWarningMessage(l10n.t('CloudForge Studio assets are not staged in this build. Opening the classic Architecture Canvas instead.'));
-		}
-		return resolution.engine;
-	}
-
-	private panelTitle(graph: CanvasGraphSnapshot | undefined, engine: CanvasEngine): string {
-		if (engine === 'studio') {
-			return graph ? l10n.t('CloudForge Studio: {0}', graph.architectureName) : l10n.t('CloudForge Studio');
-		}
+	private panelTitle(graph: CanvasGraphSnapshot | undefined): string {
 		return graph ? l10n.t('CloudForge: {0}', graph.architectureName) : l10n.t('CloudForge Canvas');
 	}
 
 	/** Opens or reveals the Architecture Canvas editor tab and shows the current graph. */
-	show(graph: CanvasGraphSnapshot | undefined, preserveFocus: boolean, engineOverride?: CanvasEngine): void {
+	show(graph: CanvasGraphSnapshot | undefined, preserveFocus: boolean): void {
 		this.graph = graph;
 		this.notice = null;
 		const sequence = ++this.showSequence;
-		void this.resolveEngine(engineOverride).then(targetEngine => {
+		void this.hasStudioAssets().then(available => {
 			if (sequence !== this.showSequence) {
 				return;
 			}
-			const panel = this.ensurePanel(preserveFocus, targetEngine);
-			panel.title = this.panelTitle(this.graph, this.activeEngine);
+			const panel = this.ensurePanel(preserveFocus, available);
+			panel.title = this.panelTitle(this.graph);
 			if (this.ready) {
 				this.postCurrentState();
 			}
@@ -177,7 +161,7 @@ export class CloudForgeCanvasPanel implements Disposable {
 		if (!this.panel) {
 			return;
 		}
-		this.panel.title = this.panelTitle(graph, this.activeEngine);
+		this.panel.title = this.panelTitle(graph);
 		if (this.ready) {
 			this.postCurrentState();
 		}
@@ -198,6 +182,14 @@ export class CloudForgeCanvasPanel implements Disposable {
 			return;
 		}
 		this.post({ type: 'notice', notice });
+	}
+
+	/** Synchronizes Canvas Focus Mode state into the open canvas topbar. */
+	setFocusMode(active: boolean): void {
+		if (!this.panel || !this.ready) {
+			return;
+		}
+		this.post({ type: 'focusModeChanged', active });
 	}
 
 	/** Triggers a validation run inside the Architecture Canvas Webview. */
@@ -252,20 +244,15 @@ export class CloudForgeCanvasPanel implements Disposable {
 		this.post({ type: 'cancelValidation' });
 	}
 
-	private ensurePanel(preserveFocus: boolean, targetEngine: CanvasEngine): WebviewPanel {
+	private ensurePanel(preserveFocus: boolean, studioAvailable: boolean): WebviewPanel {
 		if (this.panel) {
 			this.panel.reveal(this.panel.viewColumn ?? ViewColumn.One, preserveFocus);
-			if (this.activeEngine !== targetEngine) {
-				this.activeEngine = targetEngine;
-				this.ready = false;
-				this.panel.webview.html = this.buildHtml(this.panel.webview, targetEngine);
-			}
 			return this.panel;
 		}
 		const mediaRoot = Uri.joinPath(this.context.extensionUri, 'media');
 		const panel = window.createWebviewPanel(
 			'cloudforge.architectureCanvas',
-			this.panelTitle(this.graph, targetEngine),
+			this.panelTitle(this.graph),
 			{ viewColumn: ViewColumn.One, preserveFocus },
 			{
 				enableScripts: true,
@@ -274,9 +261,8 @@ export class CloudForgeCanvasPanel implements Disposable {
 			}
 		);
 		this.panel = panel;
-		this.activeEngine = targetEngine;
 		this.ready = false;
-		panel.webview.html = this.buildHtml(panel.webview, targetEngine);
+		panel.webview.html = this.buildHtml(panel.webview, studioAvailable);
 
 		const messageListener = panel.webview.onDidReceiveMessage(raw => {
 			void this.handleMessage(raw);
@@ -291,6 +277,9 @@ export class CloudForgeCanvasPanel implements Disposable {
 				this.pendingOpenExport = false;
 				this.pendingOpenTemplates = false;
 				void this.host.onCancelValidation?.();
+				if (this.host.isFocusModeActive?.()) {
+					void this.host.onToggleFocusMode?.(false);
+				}
 			}
 		});
 		return panel;
@@ -305,6 +294,7 @@ export class CloudForgeCanvasPanel implements Disposable {
 			case 'ready':
 				this.ready = true;
 				this.postCurrentState();
+				this.post({ type: 'focusModeChanged', active: !!this.host.isFocusModeActive?.() });
 				if (this.host.onLoadCatalogueSnapshots) {
 					void this.host.onLoadCatalogueSnapshots().then(snapshots => {
 						if (this.ready && snapshots.length > 0) {
@@ -355,6 +345,15 @@ export class CloudForgeCanvasPanel implements Disposable {
 					await this.host.onRefresh(this.graph.workspaceId, this.graph.architectureId);
 				}
 				return;
+			case 'toggleFocusMode': {
+				if (this.host.onToggleFocusMode) {
+					const active = await this.host.onToggleFocusMode(message.active);
+					if (this.panel && this.ready) {
+						this.post({ type: 'focusModeChanged', active });
+					}
+				}
+				return;
+			}
 			case 'requestValidation': {
 				const graph = this.graph;
 				if (!graph) {
@@ -538,6 +537,12 @@ export class CloudForgeCanvasPanel implements Disposable {
 				if (!graph) {
 					return;
 				}
+				if (this.host.isFocusModeActive?.() && this.host.onToggleFocusMode) {
+					const active = await this.host.onToggleFocusMode(false);
+					if (this.panel && this.ready) {
+						this.post({ type: 'focusModeChanged', active });
+					}
+				}
 				const errorCode = await this.host.onOpenSource(graph.workspaceId, graph.architectureId, graph.sourceRevision, message.nodeId);
 				if (errorCode === 'STALE_SOURCE') {
 					this.setNotice({
@@ -619,42 +624,19 @@ export class CloudForgeCanvasPanel implements Disposable {
 		await this.context.workspaceState.update(VIEW_STATE_KEY, current);
 	}
 
-	private buildHtml(webview: Webview, engine: CanvasEngine): string {
-		const nonce = randomBytes(16).toString('base64');
-		if (engine === 'studio') {
-			const studioRoot = Uri.joinPath(this.context.extensionUri, 'media', 'studio');
-			return buildStudioWebviewHtml({
-				nonce,
-				cspSource: webview.cspSource,
-				studioBaseUri: webview.asWebviewUri(studioRoot).toString(),
-				scriptUri: webview.asWebviewUri(Uri.joinPath(studioRoot, 'studio.js')).toString(),
-				styleUri: webview.asWebviewUri(Uri.joinPath(studioRoot, 'studio.css')).toString(),
-			});
+	private buildHtml(webview: Webview, studioAvailable: boolean): string {
+		if (!studioAvailable) {
+			return buildStudioUnavailableHtml(l10n.t('CloudForge Studio assets are not built in this checkout. Run node extensions/cloudforge/esbuild.webview.mts and reload the window.'));
 		}
-		const scriptUri = webview.asWebviewUri(Uri.joinPath(this.context.extensionUri, 'media', 'canvas.js'));
-		const styleUri = webview.asWebviewUri(Uri.joinPath(this.context.extensionUri, 'media', 'canvas-style.css'));
-		const csp = [
-			`default-src 'none'`,
-			`style-src ${webview.cspSource}`,
-			`script-src 'nonce-${nonce}'`,
-			`img-src ${webview.cspSource} data:`,
-		].join('; ');
-		return [
-			'<!DOCTYPE html>',
-			'<html lang="en">',
-			'<head>',
-			'\t<meta charset="UTF-8">',
-			`\t<meta http-equiv="Content-Security-Policy" content="${csp}">`,
-			'\t<meta name="viewport" content="width=device-width, initial-scale=1.0">',
-			'\t<title>CloudForge Architecture Canvas</title>',
-			`\t<link rel="stylesheet" href="${styleUri}">`,
-			'</head>',
-			'<body>',
-			'\t<div id="app" class="cf-app" data-theme="workbench" data-mode="visual"></div>',
-			`\t<script type="module" nonce="${nonce}" src="${scriptUri}"></script>`,
-			'</body>',
-			'</html>',
-		].join('\n');
+		const nonce = randomBytes(16).toString('base64');
+		const studioRoot = Uri.joinPath(this.context.extensionUri, 'media', 'studio');
+		return buildStudioWebviewHtml({
+			nonce,
+			cspSource: webview.cspSource,
+			studioBaseUri: webview.asWebviewUri(studioRoot).toString(),
+			scriptUri: webview.asWebviewUri(Uri.joinPath(studioRoot, 'studio.js')).toString(),
+			styleUri: webview.asWebviewUri(Uri.joinPath(studioRoot, 'studio.css')).toString(),
+		});
 	}
 
 	dispose(): void {

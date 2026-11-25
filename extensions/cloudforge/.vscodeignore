@@ -1,10 +1,10 @@
 src/**
-canvas-src/**
 test/**
 esbuild.mts
 esbuild.webview.mts
 tsconfig.json
 *.tsbuildinfo
+**/*.tsbuildinfo
 
-# Standalone visual preview is packaged separately.
+# Studio source and dependencies are bundled into media/studio/.
 studio/**

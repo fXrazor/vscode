@@ -5,19 +5,8 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildStudioWebviewHtml, normalizeCanvasEngine, resolveCanvasEngine } from '../src/canvas/canvasEngine.ts';
-
-test('resolveCanvasEngine defaults to classic, honours studio when staged, and falls back gracefully when absent', () => {
-	assert.equal(normalizeCanvasEngine(undefined), 'classic');
-	assert.equal(normalizeCanvasEngine('studio'), 'studio');
-	assert.equal(normalizeCanvasEngine('unknown'), 'classic');
-
-	assert.deepEqual(resolveCanvasEngine('classic', undefined, true), { engine: 'classic', fellBackFromStudio: false });
-	assert.deepEqual(resolveCanvasEngine('studio', undefined, true), { engine: 'studio', fellBackFromStudio: false });
-	assert.deepEqual(resolveCanvasEngine('classic', 'studio', true), { engine: 'studio', fellBackFromStudio: false });
-	assert.deepEqual(resolveCanvasEngine('studio', undefined, false), { engine: 'classic', fellBackFromStudio: true });
-	assert.deepEqual(resolveCanvasEngine('classic', 'studio', false), { engine: 'classic', fellBackFromStudio: true });
-});
+import { buildStudioUnavailableHtml, buildStudioWebviewHtml } from '../src/canvas/canvasEngine.ts';
+import { parseWebviewMessage } from '../src/canvas/protocol.ts';
 
 test('buildStudioWebviewHtml sets strict CSP, base href, root container, and module nonce without unsafe script directives', () => {
 	const html = buildStudioWebviewHtml({
@@ -38,4 +27,18 @@ test('buildStudioWebviewHtml sets strict CSP, base href, root container, and mod
 	assert.match(html, /script-src https:\/\/file\+\.vscode-resource\.vscode-cdn\.net 'nonce-test-nonce-123'/);
 	assert.doesNotMatch(html, /unsafe-eval/);
 	assert.doesNotMatch(html, /script-src[^;]*unsafe-inline/);
+});
+
+test('buildStudioUnavailableHtml escapes message text and enforces scriptless CSP', () => {
+	const html = buildStudioUnavailableHtml('Missing <script>alert(1)</script> assets');
+	assert.match(html, /default-src 'none'/);
+	assert.doesNotMatch(html, /<script>/);
+	assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+});
+
+test('parseWebviewMessage validates toggleFocusMode intents and rejects invalid types', () => {
+	assert.deepEqual(parseWebviewMessage({ type: 'toggleFocusMode' }), { type: 'toggleFocusMode' });
+	assert.deepEqual(parseWebviewMessage({ type: 'toggleFocusMode', active: true }), { type: 'toggleFocusMode', active: true });
+	assert.deepEqual(parseWebviewMessage({ type: 'toggleFocusMode', active: false }), { type: 'toggleFocusMode', active: false });
+	assert.equal(parseWebviewMessage({ type: 'toggleFocusMode', active: 'yes' }), undefined);
 });

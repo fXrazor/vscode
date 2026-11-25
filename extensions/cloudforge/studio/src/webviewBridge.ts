@@ -21,6 +21,8 @@ export interface HostNodeSummary {
 	readonly name: string;
 	readonly label: string;
 	readonly hasSource: boolean;
+	readonly sourceFile?: string;
+	readonly sourceLine?: number;
 }
 
 export interface HostEdgeSummary {
@@ -276,13 +278,19 @@ export type HostInboundMessage =
 	| { readonly type: 'moduleInspection'; readonly modulePath: readonly string[]; readonly inspection: HostModuleInspection | null; readonly error?: string }
 	| { readonly type: 'detectedEngines'; readonly engines: readonly HostDetectedEngine[] }
 	| { readonly type: 'engineValidateReport'; readonly report: HostEngineValidateReport | null; readonly error?: string }
-	| { readonly type: 'exportResult'; readonly ok: boolean; readonly message: string };
+	| { readonly type: 'runValidation'; readonly scope: 'architecture' | 'resource'; readonly nodeId?: string; readonly localOnly?: boolean }
+	| { readonly type: 'cancelValidation' }
+	| { readonly type: 'openExport' }
+	| { readonly type: 'openTemplates' }
+	| { readonly type: 'exportResult'; readonly ok: boolean; readonly message: string }
+	| { readonly type: 'focusModeChanged'; readonly active: boolean };
 
 export type HostOutboundMessage =
 	| { readonly type: 'ready' }
 	| { readonly type: 'selectNode'; readonly nodeId: string | null }
 	| { readonly type: 'openSource'; readonly nodeId: string }
 	| { readonly type: 'refresh' }
+	| { readonly type: 'toggleFocusMode'; readonly active?: boolean }
 	| { readonly type: 'viewState'; readonly state: HostViewState }
 	| { readonly type: 'requestValidation'; readonly scope: 'architecture' | 'resource'; readonly nodeId?: string }
 	| { readonly type: 'cancelValidation' }

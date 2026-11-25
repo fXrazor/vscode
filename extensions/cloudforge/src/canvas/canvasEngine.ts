@@ -3,31 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-// Pure helpers for selecting the CloudForge Architecture Canvas engine (`classic` vs `studio`)
-// and building strict CSP-hardened Webview HTML documents without runtime `vscode` dependencies.
-
-export type CanvasEngine = 'classic' | 'studio';
-
-export interface CanvasEngineResolution {
-	readonly engine: CanvasEngine;
-	readonly fellBackFromStudio: boolean;
-}
-
-export function normalizeCanvasEngine(value: unknown): CanvasEngine {
-	return value === 'studio' ? 'studio' : 'classic';
-}
-
-export function resolveCanvasEngine(
-	configured: unknown,
-	override: CanvasEngine | undefined,
-	studioAssetsAvailable: boolean
-): CanvasEngineResolution {
-	const desired = override ?? normalizeCanvasEngine(configured);
-	if (desired === 'studio' && !studioAssetsAvailable) {
-		return { engine: 'classic', fellBackFromStudio: true };
-	}
-	return { engine: desired, fellBackFromStudio: false };
-}
+// Pure helpers for building strict CSP-hardened CloudForge Studio Webview HTML documents
+// without runtime `vscode` dependencies.
 
 export interface StudioWebviewHtmlParams {
 	readonly nonce: string;
@@ -58,12 +35,32 @@ export function buildStudioWebviewHtml(params: StudioWebviewHtmlParams): string 
 		`\t<base href="${baseHref}">`,
 		`\t<meta http-equiv="Content-Security-Policy" content="${csp}">`,
 		'\t<meta name="viewport" content="width=device-width, initial-scale=1.0">',
-		'\t<title>CloudForge Studio Canvas</title>',
+		'\t<title>CloudForge Architecture Canvas</title>',
 		`\t<link rel="stylesheet" href="${params.styleUri}">`,
 		'</head>',
 		'<body>',
 		'\t<div id="root"></div>',
 		`\t<script type="module" nonce="${params.nonce}" src="${params.scriptUri}"></script>`,
+		'</body>',
+		'</html>',
+	].join('\n');
+}
+
+export function buildStudioUnavailableHtml(message: string): string {
+	const escaped = message.replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', '\'': '&#39;' }[ch]!));
+	return [
+		'<!DOCTYPE html>',
+		'<html lang="en">',
+		'<head>',
+		'\t<meta charset="UTF-8">',
+		'\t<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'">',
+		'\t<meta name="viewport" content="width=device-width, initial-scale=1.0">',
+		'\t<title>CloudForge Architecture Canvas</title>',
+		'\t<style>body{font-family:var(--vscode-font-family,Segoe UI,sans-serif);color:var(--vscode-foreground,#ccc);background:var(--vscode-editor-background,#1e1e1e);margin:0;padding:32px;}h1{font-size:16px;margin:0 0 8px;}p{margin:0;opacity:0.85;line-height:1.5;}</style>',
+		'</head>',
+		'<body>',
+		'\t<h1>CloudForge Architecture Canvas</h1>',
+		`\t<p>${escaped}</p>`,
 		'</body>',
 		'</html>',
 	].join('\n');

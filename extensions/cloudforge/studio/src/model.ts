@@ -36,6 +36,8 @@ export interface Resource {
 	provider: Provider;
 	name: string;
 	terraformName?: string;
+	sourceFile?: string;
+	sourceLine?: number;
 	label?: string;
 	iconKind?: ResourceKind;
 	region: string;

@@ -10,11 +10,13 @@ import type { HostDraftSaveError, HostDraftSavePreview } from './webviewBridge.t
 export interface DraftSaveDialogProps {
 	readonly open: boolean;
 	readonly fileName: string;
+	readonly projectFiles?: readonly string[];
 	readonly contents: string;
 	readonly busy: boolean;
 	readonly preview: HostDraftSavePreview | null;
 	readonly error: HostDraftSaveError | null;
 	readonly onFileNameChange: (fileName: string) => void;
+	readonly onSelectProjectFile?: (fileName: string) => void;
 	readonly onRefreshPreview: () => void;
 	readonly onApply: () => void;
 	readonly onClose: () => void;
@@ -27,11 +29,13 @@ export interface DraftSaveDialogProps {
 export function DraftSaveDialog({
 	open,
 	fileName,
+	projectFiles,
 	contents,
 	busy,
 	preview,
 	error,
 	onFileNameChange,
+	onSelectProjectFile,
 	onRefreshPreview,
 	onApply,
 	onClose,
@@ -72,6 +76,24 @@ export function DraftSaveDialog({
 				</button>
 			</header>
 			<div className="draft-save-body">
+				{projectFiles && projectFiles.length > 0 && (
+					<div className="draft-save-project-files" role="group" aria-label="Corresponding project Terraform files">
+						<span>Project Terraform files</span>
+						<div>
+							{projectFiles.map(file => (
+								<button
+									key={file}
+									type="button"
+									className={'quiet-button' + (file === fileName ? ' is-selected' : '')}
+									disabled={busy}
+									onClick={() => onSelectProjectFile ? onSelectProjectFile(file) : onFileNameChange(file)}
+								>
+									{file}
+								</button>
+							))}
+						</div>
+					</div>
+				)}
 				<label className="draft-save-filename">
 					<span>Target Terraform file</span>
 					<div className="draft-save-filename-row">

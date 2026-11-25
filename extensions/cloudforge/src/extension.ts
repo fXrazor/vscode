@@ -5,6 +5,7 @@
 
 import {
 	commands,
+	ConfigurationTarget,
 	Diagnostic,
 	DiagnosticSeverity,
 	EventEmitter,
@@ -26,7 +27,7 @@ import {
 import { activateProjects } from './project/index';
 import { CloudForgeCanvasPanel } from './canvas/canvasPanel';
 import { orientServiceEdgesForCanvas } from './canvas/layout';
-import type { CanvasCatalogueSnapshot, CanvasCloudRegionsPayload, CanvasEngineValidateReport, CanvasGraphSnapshot } from './canvas/protocol';
+import { isValidTfFileName, type CanvasCatalogueSnapshot, type CanvasCloudRegionsPayload, type CanvasEngineValidateReport, type CanvasGraphSnapshot } from './canvas/protocol';
 import { lookupBundledSchema, type FormSchema } from './canvas/schemaForm';
 import { findTemplateById } from './canvas/templateLibrary';
 import {
@@ -75,6 +76,8 @@ interface GraphNode {
 	readonly name: string;
 	readonly label: string;
 	readonly hasSource: boolean;
+	readonly sourceFile?: string;
+	readonly sourceLine?: number;
 }
 
 interface GraphEdge {
@@ -285,7 +288,21 @@ function parseGraph(value: unknown, workspaceId: string, architectureId: string)
 			return undefined;
 		}
 		nodeIds.add(node.id);
-		nodes.push({ id: node.id, kind: node.kind, resourceType: node.resourceType, name: node.name, label: node.label, hasSource: isRecord(node.source) });
+		const sourceRecord = isRecord(node.source) ? node.source : undefined;
+		const sourceFile = sourceRecord && isValidTfFileName(sourceRecord.file) ? sourceRecord.file : undefined;
+		const sourceLine = sourceRecord && typeof sourceRecord.line === 'number' && Number.isSafeInteger(sourceRecord.line) && sourceRecord.line >= 1
+			? sourceRecord.line
+			: undefined;
+		nodes.push({
+			id: node.id,
+			kind: node.kind,
+			resourceType: node.resourceType,
+			name: node.name,
+			label: node.label,
+			hasSource: Boolean(sourceRecord),
+			...(sourceFile ? { sourceFile } : {}),
+			...(sourceLine ? { sourceLine } : {}),
+		});
 	}
 	const edges: GraphEdge[] = [];
 	for (const edge of value.edges) {
@@ -784,6 +801,54 @@ export function activate(context: ExtensionContext): void {
 		return adapted;
 	}
 
+	let focusModeActive = false;
+	let savedZenCenterLayout: { readonly hadWorkspace: boolean; readonly value: unknown } | undefined;
+	let savedZenShowTabs: { readonly hadWorkspace: boolean; readonly value: unknown } | undefined;
+
+	async function setCanvasFocusMode(desired?: boolean): Promise<boolean> {
+		const next = desired === undefined ? !focusModeActive : desired;
+		if (next === focusModeActive) {
+			return focusModeActive;
+		}
+		const zenConfig = workspace.getConfiguration('zenMode');
+		const hasWorkspace = (workspace.workspaceFolders?.length ?? 0) > 0;
+		const target = hasWorkspace ? ConfigurationTarget.Workspace : ConfigurationTarget.Global;
+		if (next) {
+			const centerInspect = zenConfig.inspect<boolean>('centerLayout');
+			const tabsInspect = zenConfig.inspect<string>('showTabs');
+			savedZenCenterLayout = { hadWorkspace: hasWorkspace, value: hasWorkspace ? centerInspect?.workspaceValue : centerInspect?.globalValue };
+			savedZenShowTabs = { hadWorkspace: hasWorkspace, value: hasWorkspace ? tabsInspect?.workspaceValue : tabsInspect?.globalValue };
+			try {
+				await zenConfig.update('centerLayout', false, target);
+				await zenConfig.update('showTabs', 'none', target);
+			} catch {
+				// Proceed with Zen Mode even if settings are read-only.
+			}
+			const graph = provider.getGraph();
+			canvas.show(graph ? toCanvasSnapshot(graph, currentArchitectureName) : undefined, false);
+			await commands.executeCommand('workbench.action.toggleZenMode');
+			focusModeActive = true;
+			canvas.setFocusMode(true);
+		} else {
+			focusModeActive = false;
+			try {
+				await commands.executeCommand('workbench.action.toggleZenMode');
+			} finally {
+				const restoreTarget = savedZenCenterLayout?.hadWorkspace ? ConfigurationTarget.Workspace : ConfigurationTarget.Global;
+				if (savedZenCenterLayout !== undefined) {
+					await zenConfig.update('centerLayout', savedZenCenterLayout.value, restoreTarget).then(undefined, () => undefined);
+					savedZenCenterLayout = undefined;
+				}
+				if (savedZenShowTabs !== undefined) {
+					await zenConfig.update('showTabs', savedZenShowTabs.value, restoreTarget).then(undefined, () => undefined);
+					savedZenShowTabs = undefined;
+				}
+			}
+			canvas.setFocusMode(false);
+		}
+		return focusModeActive;
+	}
+
 	const canvas = new CloudForgeCanvasPanel(context, {
 		onSelectNode() {
 			// Selection is preserved inside the canvas state; native tree selection stays non-destructive.
@@ -982,6 +1047,8 @@ export function activate(context: ExtensionContext): void {
 			}
 			await projectControllerRef.current?.createArchitectureFromTemplate(template.defaultArchName, template.starterMainTf);
 		},
+		onToggleFocusMode: setCanvasFocusMode,
+		isFocusModeActive: () => focusModeActive,
 	});
 
 	context.subscriptions.push(provider, treeView, problems, canvas, statusBar);
@@ -1001,10 +1068,53 @@ export function activate(context: ExtensionContext): void {
 		const graph = provider.getGraph();
 		canvas.show(graph ? toCanvasSnapshot(graph, currentArchitectureName) : undefined, false);
 	}));
-	context.subscriptions.push(commands.registerCommand('cloudforge.openStudioCanvas', () => {
-		const graph = provider.getGraph();
-		canvas.show(graph ? toCanvasSnapshot(graph, currentArchitectureName) : undefined, false, 'studio');
+	context.subscriptions.push(commands.registerCommand('cloudforge.toggleCanvasFocusMode', () => {
+		return setCanvasFocusMode();
 	}));
+	context.subscriptions.push({
+		dispose() {
+			if (focusModeActive) {
+				void setCanvasFocusMode(false);
+			}
+		}
+	});
+	// Live reverse sync: saving a Terraform source file in Code OSS refreshes the open CloudForge Canvas.
+	let tfSaveRefreshTimer: ReturnType<typeof setTimeout> | undefined;
+	context.subscriptions.push(workspace.onDidSaveTextDocument(doc => {
+		const lower = doc.uri.path.toLowerCase();
+		if (!lower.endsWith('.tf') && !lower.endsWith('.tf.json')) {
+			return;
+		}
+		const current = provider.getGraph();
+		if (!current) {
+			return;
+		}
+		if (tfSaveRefreshTimer) {
+			clearTimeout(tfSaveRefreshTimer);
+		}
+		tfSaveRefreshTimer = setTimeout(() => {
+			tfSaveRefreshTimer = undefined;
+			const active = provider.getGraph();
+			if (!active) {
+				return;
+			}
+			void showGraph(provider, treeView, active.workspaceId, active.architectureId).then(refreshed => {
+				if (refreshed) {
+					updateStatusBar(refreshed);
+					syncProblems(refreshed);
+					canvas.updateIfOpen(toCanvasSnapshot(refreshed, currentArchitectureName));
+				}
+			});
+		}, 250);
+	}));
+	context.subscriptions.push({
+		dispose() {
+			if (tfSaveRefreshTimer) {
+				clearTimeout(tfSaveRefreshTimer);
+				tfSaveRefreshTimer = undefined;
+			}
+		}
+	});
 	context.subscriptions.push(commands.registerCommand('cloudforge.validateArchitecture', () => {
 		const graph = provider.getGraph();
 		if (!graph) {

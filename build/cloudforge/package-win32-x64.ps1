@@ -113,8 +113,6 @@ try {
     $packedCloudForge = Join-Path $app 'extensions/cloudforge'
     foreach ($requiredRel in @(
         'dist/extension.js',
-        'media/canvas.js',
-        'media/canvas-style.css',
         'media/studio/studio.js',
         'media/studio/studio.css',
         'media/studio/assets/catalogue/azure.json',
@@ -124,9 +122,9 @@ try {
             throw "Missing required CloudForge packaged asset: $requiredRel"
         }
     }
-    foreach ($forbiddenRel in @('studio', 'canvas-src', 'src', 'test', 'tsconfig.typecheck.tsbuildinfo')) {
+    foreach ($forbiddenRel in @('studio', 'canvas-src', 'src', 'test', 'media/canvas.js', 'media/canvas-style.css', 'tsconfig.typecheck.tsbuildinfo')) {
         if (Test-Path -LiteralPath (Join-Path $packedCloudForge $forbiddenRel)) {
-            throw "Unexpected source or build artifact in packaged CloudForge extension: $forbiddenRel"
+            throw "Unexpected source or legacy classic canvas artifact in packaged CloudForge extension: $forbiddenRel"
         }
     }
 
