@@ -7,6 +7,7 @@ import { isSensitiveProperty, type VariableDefinition } from './variables.ts';
 import { getDef, type AttrDef } from './cloudlab-core/catalog/index.ts';
 import { resourceDefinition } from './fixture.ts';
 import { inheritedReference, inheritedReferences, resourceAddress } from './resourceHierarchy.ts';
+import { liveSchemaAttributes, liveSchemaBlocks, liveSchemaOutputs, type LiveSchemaMap } from './liveSchema.ts';
 
 export type FieldTarget = { kind: 'name' } | { kind: 'region' } | { kind: 'setting'; name: string } | { kind: 'block'; blockId: string; name: string };
 export type VariableBinding = { variableId: string };
@@ -62,8 +63,23 @@ export function canBindField(resource: Resource, target: FieldTarget): boolean {
 	return target.kind === 'setting' ? Object.hasOwn(resource.settings,target.name) || !!fieldDefinition(resource,target) : !!findResourceBlock(resource.blocks,target.blockId);
 }
 
-export function fieldDefinition(resource: Resource, target: FieldTarget): AttrDef | undefined {
-	const attrs = getDef(resourceDefinition(resource).type)?.attributes ?? [];
+export function fieldDefinition(resource: Resource, target: FieldTarget, liveSchemas?: LiveSchemaMap): AttrDef | undefined {
+	const typeName = resourceDefinition(resource).type;
+	const curatedAttrs = getDef(typeName)?.attributes ?? [];
+	const live = liveSchemas?.[typeName];
+	const attrs: AttrDef[] = live
+		? [
+			...liveSchemaAttributes(live, curatedAttrs),
+			...liveSchemaBlocks(live, curatedAttrs).map(block => ({
+				name: block.type,
+				type: 'block' as const,
+				description: block.description ?? '',
+				required: block.required,
+				repeat: block.max > 1,
+				children: block.attributes ?? [],
+			})),
+		]
+		: curatedAttrs;
 	const lookup = (attributes: AttrDef[], path: string[]): AttrDef | undefined => { const field = attributes.find(item => item.name === path[0]); return path.length > 1 ? lookup(field?.children ?? [], path.slice(1)) : field; };
 	if (target.kind === 'name' || target.kind === 'region') { return { name: target.kind, type: 'string', description: '' }; }
 	if (target.kind === 'setting') { const field = lookup(attrs, resource.catalogue ? [target.name] : fieldPath(target.name)); const descriptor = resource.catalogue?.fields.find(field => field.name === target.name); return field ?? (descriptor ? { ...descriptor, description: descriptor.description ?? '' } : undefined); }
@@ -136,7 +152,7 @@ export function wouldCreateReferenceCycle(architecture: Architecture, consumerId
 	return false;
 }
 
-export function eligibleReferenceTargets(architecture: Architecture, resource: Resource, definition?: AttrDef): ResourceRefCandidate[] {
+export function eligibleReferenceTargets(architecture: Architecture, resource: Resource, definition?: AttrDef, liveSchemas?: LiveSchemaMap): ResourceRefCandidate[] {
 	if (!definition?.refTypes?.length || isSensitiveProperty(definition.name, definition.sensitive)) { return []; }
 	const attribute = definition.refAttr ?? 'id';
 	return architecture.resources
@@ -145,7 +161,8 @@ export function eligibleReferenceTargets(architecture: Architecture, resource: R
 			const candidateType = resourceDefinition(candidate).type;
 			if (!definition.refTypes!.includes(candidateType)) { return false; }
 			const candidateDef = getDef(candidateType);
-			const exported = candidateDef?.exported ?? ['id'];
+			const liveOutputs = liveSchemaOutputs(liveSchemas?.[candidateType]);
+			const exported = liveOutputs.length ? [...new Set([...liveOutputs, ...(candidateDef?.exported ?? ['id'])])] : (candidateDef?.exported ?? ['id']);
 			if (!exported.includes(attribute)) { return false; }
 			return !wouldCreateReferenceCycle(architecture, resource.id, candidate.id);
 		})

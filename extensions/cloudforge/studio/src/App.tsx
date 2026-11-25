@@ -23,14 +23,20 @@ import { ModuleImport, type ModuleReference } from './ModuleImport.tsx';
 import { loadCatalogue } from './catalogue.ts';
 import { ArchitectureOverview } from './ArchitectureOverview.tsx';
 import { VisualTopbar } from './VisualTopbar.tsx';
-import { ArrowLeft, Scan, PanelsTopLeft, PanelRightClose, Code2, ListTree, Boxes, Variable, AlertCircle } from 'lucide-react';
+import { ArrowLeft, Scan, PanelsTopLeft, PanelRightClose, Code2, ListTree, Boxes, Variable, AlertCircle, FileCode2 } from 'lucide-react';
 import { PaneResizeHandle } from './PaneResizeHandle.tsx';
 import { architectureDiagnostics, type Diagnostic } from './diagnostics.ts';
 import { IssuesPanel, focusResourceField } from './IssuesPanel.tsx';
 import { resourcePlacement } from './resourceHierarchy.ts';
 import { workflowTemplate } from './workflowTemplate.ts';
+import { createHostBridge, type HostDetectedEngine, type HostDraftSaveError, type HostDraftSavePreview, type HostEngineValidateReport, type HostGraphSnapshot, type HostNotice, type HostValidationRun } from './webviewBridge.ts';
+import type { LiveSchemaMap } from './liveSchema.ts';
+import { buildDraftSavePayload, projectGraphSnapshotToArchitecture, projectHostDiagnostics, sanitizeDraftTfFileName } from './serviceAdapter.ts';
+import { DraftSaveDialog } from './DraftSaveDialog.tsx';
+import { presentationSvg } from './exportPresentation.ts';
 
 export function Studio() {
+	const hostBridge = useMemo(() => createHostBridge(), []);
 	const [history, dispatch] = useReducer(historyReducer, undefined, () => createHistory(sampleArchitecture()));
 	const [mode, setMode] = useState<DesignMode>('visual');
 	const [theme, setTheme] = useState<'light' | 'dark'>('light');
@@ -52,7 +58,25 @@ export function Studio() {
  const [inspectorCategory, setInspectorCategory] = useState<'resources' | 'variables'>('resources');
  const [detailsWidth, setDetailsWidth] = useState(440);
 	const [pendingField,setPendingField]=useState<Diagnostic>();
-	const [message, setMessage] = useState('Sample architecture loaded');
+	const [message, setMessage] = useState(hostBridge.isHosted ? 'Connecting to CloudForge workspace…' : 'Sample architecture loaded');
+	const [hostSnapshot, setHostSnapshot] = useState<HostGraphSnapshot | null>(null);
+	const [hasSourceById, setHasSourceById] = useState<Readonly<Record<string, boolean>>>({});
+	const [hostNotice, setHostNotice] = useState<HostNotice | null>(null);
+	const [liveSchemas, setLiveSchemas] = useState<LiveSchemaMap>({});
+	const requestedSchemasRef = useRef<Set<string>>(new Set());
+	const [validationRun, setValidationRun] = useState<HostValidationRun | null>(null);
+	const [detectedEngines, setDetectedEngines] = useState<readonly HostDetectedEngine[]>([]);
+	const [engineReport, setEngineReport] = useState<HostEngineValidateReport | null>(null);
+	const [validating, setValidating] = useState(false);
+	const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+	const [saveFileName, setSaveFileName] = useState('cloudforge-studio.tf');
+	const [saveContents, setSaveContents] = useState('');
+	const [savePreview, setSavePreview] = useState<HostDraftSavePreview | null>(null);
+	const [saveError, setSaveError] = useState<HostDraftSaveError | null>(null);
+	const [saving, setSaving] = useState(false);
+	const architectureRef = useRef(history.present);
+	architectureRef.current = history.present;
+	const hostArchitectureIdRef = useRef<string | null>(null);
 	useEffect(()=>{if(!message){return;}const timer=setTimeout(()=>setMessage(''),5000);return()=>clearTimeout(timer);},[message]);
 	const [flow, setFlow] = useState<ReactFlowInstance<CanvasNode, DesignEdgeType>>();
 	const viewport = useRef<Partial<Record<DesignMode, Viewport>>>({});
@@ -63,14 +87,255 @@ export function Studio() {
 	const openDetails = useCallback((id:string)=>{setSelectedId(id);setWorkspaceResourceId(id);setWorkspaceOpen(true);},[]);
 	const selectedItem = architecture.items.find(item => item.id === selectedId);
  const resourceEditing = inspectorOpen && (inspectorCategory === 'variables' || detailTab === 'code' || (!overview && !!selected));
-	const findings = useMemo(()=>architectureDiagnostics(architecture),[architecture]);
+	const hostFindings = useMemo(
+		() => hostBridge.isHosted ? projectHostDiagnostics(architecture, hostSnapshot, validationRun, engineReport) : [],
+		[hostBridge.isHosted, architecture, hostSnapshot, validationRun, engineReport]
+	);
+	const findings = useMemo(
+		() => [...hostFindings, ...architectureDiagnostics(architecture, liveSchemas)],
+		[hostFindings, architecture, liveSchemas]
+	);
+	const availableEngine = useMemo(
+		() => detectedEngines.find(item => item.status === 'available')?.engine,
+		[detectedEngines]
+	);
+
+	useEffect(() => {
+		if (!hostBridge.isHosted) {
+			return;
+		}
+		const unsubscribe = hostBridge.subscribe(incoming => {
+			switch (incoming.type) {
+				case 'graph': {
+					const sameArch = hostArchitectureIdRef.current === incoming.graph.architectureId;
+					hostArchitectureIdRef.current = incoming.graph.architectureId;
+					const projected = projectGraphSnapshotToArchitecture(incoming.graph, {
+						previousArchitecture: sameArch ? architectureRef.current : undefined,
+						viewState: incoming.viewState,
+					});
+					setHostSnapshot(incoming.graph);
+					setHasSourceById(projected.hasSourceById);
+					setHostNotice(incoming.notice ?? null);
+					setSaveFileName(sanitizeDraftTfFileName(incoming.graph.architectureName));
+					if (incoming.viewState?.mode) {
+						setMode(incoming.viewState.mode);
+					}
+					if (incoming.viewState?.theme === 'light' || incoming.viewState?.theme === 'dark') {
+						setTheme(incoming.viewState.theme);
+					}
+					dispatch({ type: 'replace', architecture: projected.architecture });
+					if (incoming.viewState?.selectedId && projected.architecture.resources.some(r => r.id === incoming.viewState?.selectedId)) {
+						setSelectedId(incoming.viewState.selectedId);
+					}
+					setMessage('Loaded ' + incoming.graph.architectureName + ' · rev ' + incoming.graph.sourceRevision.slice(0, 8));
+					break;
+				}
+				case 'selectNode':
+					setSelectedId(incoming.nodeId ?? '');
+					if (incoming.nodeId) {
+						setOverview(false);
+						setInspectorOpen(true);
+						setInspectorCategory('resources');
+						setDetailTab('form');
+					}
+					break;
+				case 'notice':
+					setHostNotice(incoming.notice);
+					if (incoming.notice?.message) {
+						setMessage(incoming.notice.message);
+					}
+					break;
+				case 'empty':
+					setMessage(incoming.message);
+					break;
+				case 'liveSchema':
+					if (incoming.schema) {
+						setLiveSchemas(prev => ({ ...prev, [incoming.typeName]: incoming.schema! }));
+					}
+					break;
+				case 'validationRunUpdate':
+					setValidationRun(incoming.run);
+					setValidating(incoming.run.outcome === 'running');
+					if (incoming.run.outcome !== 'running') {
+						setMessage('Validation ' + incoming.run.outcome.replaceAll('_', ' ') + ' (' + incoming.run.coverage + ' coverage)');
+					}
+					break;
+				case 'detectedEngines':
+					setDetectedEngines(incoming.engines);
+					break;
+				case 'engineValidateReport':
+					setValidating(false);
+					if (incoming.report) {
+						setEngineReport(incoming.report);
+						setMessage((incoming.report.engine === 'openTofu' ? 'OpenTofu' : 'Terraform') + ' validate: ' + (incoming.report.valid ? 'valid' : incoming.report.errorCount + ' error(s)'));
+					} else if (incoming.error) {
+						setMessage(incoming.error);
+					}
+					break;
+				case 'draftSavePreview':
+					setSaving(false);
+					if (incoming.result.ok) {
+						setSavePreview(incoming.result.preview);
+						setSaveError(null);
+					} else {
+						setSavePreview(null);
+						setSaveError(incoming.result.error);
+					}
+					break;
+				case 'draftSaveApplied':
+					setSaving(false);
+					if (incoming.result.ok) {
+						setSaveDialogOpen(false);
+						setSavePreview(null);
+						setSaveError(null);
+						setMessage('Saved ' + incoming.result.applied.fileName + ' · rev ' + incoming.result.applied.newSourceRevision.slice(0, 8));
+						hostBridge.post({ type: 'refresh' });
+					} else {
+						setSaveError(incoming.result.error);
+					}
+					break;
+				case 'exportResult':
+					setMessage(incoming.message);
+					break;
+			}
+		});
+		hostBridge.post({ type: 'ready' });
+		return unsubscribe;
+	}, [hostBridge, setSelectedId]);
+
+	// Request live version-matched Rust FormSchema when a resource is selected in hosted mode.
+	useEffect(() => {
+		if (!hostBridge.isHosted || !selected || selected.kind === 'module') {
+			return;
+		}
+		const typeName = resourceDefinition(selected).type;
+		if (!typeName || typeName === 'resource' || liveSchemas[typeName] || requestedSchemasRef.current.has(typeName)) {
+			return;
+		}
+		requestedSchemasRef.current.add(typeName);
+		hostBridge.post({ type: 'requestSchema', kind: 'resource', typeName });
+	}, [hostBridge, selected, liveSchemas]);
+
+	// Mirror selection back to the extension host's native CloudForge Graph tree.
+	useEffect(() => {
+		if (!hostBridge.isHosted) {
+			return;
+		}
+		hostBridge.post({ type: 'selectNode', nodeId: selectedId || null });
+	}, [hostBridge, selectedId]);
+
 	const openResource = useCallback((id: string) => {
 		setSelectedId(id);
 		setOverview(false); setInspectorOpen(true); setInspectorCategory('resources'); setDetailTab('form');
-	}, []);
+	}, [setSelectedId]);
 	useEffect(()=>{if(pendingField&&selectedId===pendingField.resourceId&&detailTab==='form'){focusResourceField(document.querySelector('#resource-inspector'),pendingField.path);setPendingField(undefined);}},[pendingField,selectedId,detailTab]);
 	function showIssues(){setInspectorOpen(true);setDetailTab('issues');}
 	function revealIssue(finding:Diagnostic){openResource(finding.resourceId);setPendingField(finding);}
+
+	const runHostValidation = useCallback(() => {
+		if (!hostBridge.isHosted) {
+			return;
+		}
+		setValidating(true);
+		hostBridge.post({ type: 'requestValidation', scope: 'architecture' });
+	}, [hostBridge]);
+
+	const runHostEngineValidate = useCallback(() => {
+		if (!hostBridge.isHosted) {
+			return;
+		}
+		setValidating(true);
+		hostBridge.post(availableEngine ? { type: 'requestEngineValidate', engine: availableEngine } : { type: 'requestEngineValidate' });
+	}, [hostBridge, availableEngine]);
+
+	const openDraftSave = useCallback(() => {
+		if (!hostBridge.isHosted) {
+			return;
+		}
+		const payload = buildDraftSavePayload(architecture, saveFileName);
+		setSaveFileName(payload.fileName);
+		setSaveContents(payload.contents);
+		setSavePreview(null);
+		setSaveError(null);
+		setSaveDialogOpen(true);
+		setSaving(true);
+		hostBridge.post({ type: 'requestDraftSavePreview', fileName: payload.fileName, contents: payload.contents });
+	}, [hostBridge, architecture, saveFileName]);
+
+	const refreshDraftSavePreview = useCallback(() => {
+		if (!hostBridge.isHosted) {
+			return;
+		}
+		const payload = buildDraftSavePayload(architecture, saveFileName);
+		setSaveContents(payload.contents);
+		setSavePreview(null);
+		setSaveError(null);
+		setSaving(true);
+		hostBridge.post({ type: 'requestDraftSavePreview', fileName: payload.fileName, contents: payload.contents });
+	}, [hostBridge, architecture, saveFileName]);
+
+	const applyHostDraftSave = useCallback(() => {
+		if (!hostBridge.isHosted || !savePreview) {
+			return;
+		}
+		setSaving(true);
+		hostBridge.post({
+			type: 'applyDraftSave',
+			fileName: savePreview.fileName,
+			contents: saveContents,
+			previewToken: savePreview.previewToken,
+		});
+	}, [hostBridge, savePreview, saveContents]);
+
+	const exportHostArtifact = useCallback((format: 'svg' | 'png') => {
+		if (!hostBridge.isHosted) {
+			return;
+		}
+		void (async () => {
+			try {
+				const svg = await presentationSvg(architecture);
+				if (format === 'svg') {
+					hostBridge.post({
+						type: 'exportArtifact',
+						format: 'svg',
+						suggestedFileName: sanitizeDraftTfFileName(architecture.name).replace(/\.tf$/, '.svg'),
+						content: svg,
+						encoding: 'utf8',
+					});
+					return;
+				}
+				const blob = new Blob([svg], { type: 'image/svg+xml' });
+				const url = URL.createObjectURL(blob);
+				try {
+					const image = new Image();
+					image.src = url;
+					await image.decode();
+					const canvas = document.createElement('canvas');
+					const scale = Math.min(2, 8192 / Math.max(image.width, image.height));
+					canvas.width = Math.ceil(image.width * scale);
+					canvas.height = Math.ceil(image.height * scale);
+					const ctx = canvas.getContext('2d');
+					if (!ctx) {
+						throw new Error('PNG canvas unavailable');
+					}
+					ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+					const dataUrl = canvas.toDataURL('image/png');
+					const base64 = dataUrl.split(',')[1] ?? '';
+					hostBridge.post({
+						type: 'exportArtifact',
+						format: 'png',
+						suggestedFileName: sanitizeDraftTfFileName(architecture.name).replace(/\.tf$/, '.png'),
+						content: base64,
+						encoding: 'base64',
+					});
+				} finally {
+					URL.revokeObjectURL(url);
+				}
+			} catch (err) {
+				setMessage(err instanceof Error ? err.message : 'Export failed');
+			}
+		})();
+	}, [hostBridge, architecture]);
 
 	useEffect(() => {
 		function handleKey(event: KeyboardEvent) {
@@ -187,7 +452,20 @@ export function Studio() {
      theme={theme} onTheme={() => setTheme(value => value === 'light' ? 'dark' : 'light')}
 				onRename={name => dispatch({ type: 'renameArchitecture', name })}
 				onTechnical={() => switchMode('technical')} onExport={exportSample}
-				onToggleLibrary={() => setLibraryOpen(value => !value)} onToggleInspector={() => setInspectorOpen(value => !value)} />
+				onToggleLibrary={() => setLibraryOpen(value => !value)} onToggleInspector={() => setInspectorOpen(value => !value)}
+				host={hostBridge.isHosted ? {
+					isHosted: true,
+					sourceRevision: hostSnapshot?.sourceRevision,
+					status: hostSnapshot?.status,
+					notice: hostNotice,
+					isDirty: history.past.length > 0,
+					validating,
+					saving,
+					onRefresh: () => hostBridge.post({ type: 'refresh' }),
+					onValidate: runHostValidation,
+					onSaveDraft: openDraftSave,
+					onExportArtifact: exportHostArtifact,
+				} : undefined} />
 			<div className="studio-body">
 				<ResourceCatalogue architecture={architecture} onAdd={addResource} onAddCatalogue={addCatalogueResource} onTemplate={addTemplate} search={search} onSearch={setSearch} onImportModule={() => setModuleImportOpen(true)}
 					shapesOpen={shapesOpen} onShapesOpen={openShapes} onShapesBack={() => setShapesOpen(false)}
@@ -223,17 +501,17 @@ export function Studio() {
 							<button className="inspector-back" aria-label="Back to architecture overview" onClick={() => { setOverview(true); setDetailTab('form'); }}><ArrowLeft /></button>
 							<img src={'./assets/' + resourceDefinition(selected).icon} alt="" /><div><h2>{selected.label || selected.name}</h2><span>{resourceDefinition(selected).label}</span></div>
 						</div>
-						<div className="form-action-row"><span className="form-action-spacer" /><button aria-label="Open focused resource workspace" title="Open focused resource workspace" onClick={() => openDetails(selected.id)}><PanelsTopLeft /></button><button aria-label="Focus selected resource" title="Focus selected resource" onClick={() => { void flow?.fitView({ nodes: [{ id: selected.id }], padding: 0.5, maxZoom: 1.5 }); }}><Scan /></button></div>
+						<div className="form-action-row"><span className="form-action-spacer" />{hostBridge.isHosted && hasSourceById[selected.id] && <button aria-label="Open Terraform source" title="Open Terraform source in editor" onClick={() => hostBridge.post({ type: 'openSource', nodeId: selected.id })}><FileCode2 /></button>}<button aria-label="Open focused resource workspace" title="Open focused resource workspace" onClick={() => openDetails(selected.id)}><PanelsTopLeft /></button><button aria-label="Focus selected resource" title="Focus selected resource" onClick={() => { void flow?.fitView({ nodes: [{ id: selected.id }], padding: 0.5, maxZoom: 1.5 }); }}><Scan /></button></div>
      </>}
      <div className={'inspector-content'+(detailTab==='code'&&inspectorCategory==='resources'?' inspector-content-code':'')}>
-     {detailTab === 'issues' ? <IssuesPanel architecture={architecture} findings={findings} onReveal={revealIssue}/> : inspectorCategory === 'variables' ? null : <>
+     {detailTab === 'issues' ? <IssuesPanel architecture={architecture} findings={findings} onReveal={revealIssue} host={hostBridge.isHosted ? { isHosted: true, sourceRevision: hostSnapshot?.sourceRevision, validationRun, engineReport, availableEngine, validating, onRunValidation: runHostValidation, onRunEngineValidate: runHostEngineValidate } : undefined}/> : inspectorCategory === 'variables' ? null : <>
 
 					{detailTab === 'code' && !selected ? null : overview ? (
 						<ArchitectureOverview architecture={architecture} onSelect={id => { setSelectedId(id); setOverview(false); setDetailTab('form'); }} />
       ) : selected ? (
 						<>
        {detailTab === 'form' && <div>
-							<ResourceFields resource={selected} dispatch={dispatch} architecture={architecture} onRevealResource={openResource} onManageVariables={()=>{setInspectorCategory('variables');setDetailTab('form');requestAnimationFrame(()=>variablesButton.current?.focus());}} />
+							<ResourceFields resource={selected} dispatch={dispatch} architecture={architecture} liveSchemas={liveSchemas} onRevealResource={openResource} onManageVariables={()=>{setInspectorCategory('variables');setDetailTab('form');requestAnimationFrame(()=>variablesButton.current?.focus());}} />
 							<div className="inspector-section"><h3>Connections</h3>
 								<p>{architecture.connections.filter(connection => connection.target === selected.id).length} incoming · {architecture.connections.filter(connection => connection.source === selected.id).length} outgoing</p>
 								<span className="muted">Design relationships</span>
@@ -255,8 +533,9 @@ export function Studio() {
      </div>
 				</aside>
 			</div>
-			{message&&<div className="studio-action-status" role="status">{message}</div>}<footer className="sr-only"><span>{history.past.length ? 'Modified draft' : 'Original sample'} · In-memory preview</span></footer>
-			{workspaceResource && <ResourceWorkspace open={workspaceOpen} resource={workspaceResource} architecture={architecture} dispatch={dispatch} onNavigate={id=>{setWorkspaceResourceId(id);setSelectedId(id);}} onClose={() => setWorkspaceOpen(false)} />}
+			{message&&<div className="studio-action-status" role="status">{message}</div>}<footer className="sr-only"><span>{hostBridge.isHosted ? (hostSnapshot ? 'Connected · rev ' + hostSnapshot.sourceRevision.slice(0, 8) : 'Connecting') : (history.past.length ? 'Modified draft' : 'Original sample') + ' · In-memory preview'}</span></footer>
+			{workspaceResource && <ResourceWorkspace open={workspaceOpen} resource={workspaceResource} architecture={architecture} dispatch={dispatch} liveSchemas={liveSchemas} hostDiagnostics={hostFindings} hasSource={hostBridge.isHosted && !!hasSourceById[workspaceResource.id]} onOpenSource={hostBridge.isHosted ? () => hostBridge.post({ type: 'openSource', nodeId: workspaceResource.id }) : undefined} onNavigate={id=>{setWorkspaceResourceId(id);setSelectedId(id);}} onClose={() => setWorkspaceOpen(false)} />}
+			{hostBridge.isHosted && <DraftSaveDialog open={saveDialogOpen} fileName={saveFileName} contents={saveContents} busy={saving} preview={savePreview} error={saveError} onFileNameChange={setSaveFileName} onRefreshPreview={refreshDraftSavePreview} onApply={applyHostDraftSave} onClose={() => setSaveDialogOpen(false)} />}
 			{moduleImportOpen && <ModuleImport onClose={() => setModuleImportOpen(false)} onImport={importModule} />}
 		</div>
 	);

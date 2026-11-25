@@ -7,6 +7,7 @@ import { getDef, type AttrDef } from './cloudlab-core/catalog/index.ts';
 import { resourceDefinition } from './fixture.ts';
 import { bindingKey, bindingTarget, fieldDefinition, fieldTargetPath, resourceRefBindingIssue, variableBindingIssue } from './fieldBindings.ts';
 import { inheritedReference } from './resourceHierarchy.ts';
+import { liveSchemaAttributes, liveSchemaBlocks, type LiveSchemaMap } from './liveSchema.ts';
 
 export interface BlockDefinition {
 	type: string;
@@ -29,10 +30,13 @@ export function blockDefinitions(attributes: AttrDef[]): BlockDefinition[] {
 	}));
 }
 
-/** Merge richer curated metadata with every imported resource's primitive descriptors. */
-export function editableFields(resource: Resource): AttrDef[] {
-	const curated = getDef(resourceDefinition(resource).type)?.attributes.filter(field => field.type !== 'block') ?? [];
-	const fields = new Map(curated.map(field => [field.name, field]));
+/** Merge live version-matched Rust FormSchema, curated metadata, and imported primitive descriptors. */
+export function editableFields(resource: Resource, liveSchemas?: LiveSchemaMap): AttrDef[] {
+	const typeName = resourceDefinition(resource).type;
+	const curated = getDef(typeName)?.attributes.filter(field => field.type !== 'block') ?? [];
+	const live = liveSchemas?.[typeName];
+	const base = live ? liveSchemaAttributes(live, curated) : curated;
+	const fields = new Map(base.map(field => [field.name, field]));
 	for (const field of resource.catalogue?.fields ?? []) {
 		if (!fields.has(field.name)) { fields.set(field.name, { ...field, description: field.description ?? '' }); }
 	}
@@ -53,12 +57,12 @@ export function fieldIssue(value: string, attribute?: AttrDef): string | undefin
 	return undefined;
 }
 
-export function resourceFormIssues(resource: Resource, variables?: import('./variables.ts').VariableDefinition[], architecture?: Architecture): string[] {
+export function resourceFormIssues(resource: Resource, variables?: import('./variables.ts').VariableDefinition[], architecture?: Architecture, liveSchemas?: LiveSchemaMap): string[] {
 	const issues: string[] = [];
-	for (const [key, binding] of Object.entries(resource.fieldBindings ?? {})) { const target = bindingTarget(key); const issue = variableBindingIssue(binding, variables ?? [], target ? fieldDefinition(resource,target) : undefined); if (issue) { issues.push((target?.kind === 'setting' || target?.kind === 'block' ? target.name : target?.kind ?? 'Field') + ': ' + issue); } }
-	for (const [key, binding] of Object.entries(resource.resourceRefs ?? {})) { const target = bindingTarget(key); const issue = resourceRefBindingIssue(binding, architecture, resource, target ? fieldDefinition(resource, target) : undefined); if (issue) { issues.push((target?.kind === 'setting' || target?.kind === 'block' ? target.name : target?.kind ?? 'Field') + ': ' + issue); } }
-	if (resource.catalogue) {
-		for (const field of editableFields(resource)) {
+	for (const [key, binding] of Object.entries(resource.fieldBindings ?? {})) { const target = bindingTarget(key); const issue = variableBindingIssue(binding, variables ?? [], target ? fieldDefinition(resource, target, liveSchemas) : undefined); if (issue) { issues.push((target?.kind === 'setting' || target?.kind === 'block' ? target.name : target?.kind ?? 'Field') + ': ' + issue); } }
+	for (const [key, binding] of Object.entries(resource.resourceRefs ?? {})) { const target = bindingTarget(key); const issue = resourceRefBindingIssue(binding, architecture, resource, target ? fieldDefinition(resource, target, liveSchemas) : undefined); if (issue) { issues.push((target?.kind === 'setting' || target?.kind === 'block' ? target.name : target?.kind ?? 'Field') + ': ' + issue); } }
+	if (resource.catalogue || liveSchemas?.[resourceDefinition(resource).type]) {
+		for (const field of editableFields(resource, liveSchemas)) {
 			if (['name', 'location', 'region'].includes(field.name)) { continue; }
 			if(architecture&&inheritedReference(architecture,resource,[field.name])){continue;}
 			const key = bindingKey({kind:'setting',name:field.name});
@@ -83,13 +87,18 @@ export function resourceFormIssues(resource: Resource, variables?: import('./var
 			});
 		}
 	};
-	visit(resource.blocks, additionalBlocks(resource), '');
+	visit(resource.blocks, additionalBlocks(resource, liveSchemas), '');
 	return issues;
 }
 
-/** Small explicit preview definitions. Production forms consume Rust FormSchema. */
-export function additionalBlocks(resource: Resource): BlockDefinition[] {
-	const schema = getDef(resourceDefinition(resource).type);
+/** Prefer live version-matched Rust FormSchema when connected; fall back to curated bundled definitions. */
+export function additionalBlocks(resource: Resource, liveSchemas?: LiveSchemaMap): BlockDefinition[] {
+	const typeName = resourceDefinition(resource).type;
+	const schema = getDef(typeName);
+	const live = liveSchemas?.[typeName];
+	if (live) {
+		return liveSchemaBlocks(live, schema?.attributes ?? []).filter(block => !(block.type === 'default_node_pool' && Object.hasOwn(resource.settings, 'Node count')));
+	}
 	if (schema) {
 		// The sample cluster already represents its default pool through shared settings.
 		return blockDefinitions(schema.attributes).filter(block => !(block.type === 'default_node_pool' && Object.hasOwn(resource.settings, 'Node count')));

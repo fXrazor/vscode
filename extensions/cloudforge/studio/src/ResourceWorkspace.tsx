@@ -4,21 +4,23 @@
  *--------------------------------------------------------------------------------------------*/
 import { useEffect, useRef, useState, type CSSProperties, type Dispatch } from 'react';
 import * as Tabs from '@radix-ui/react-tabs';
-import { ArrowLeft, Code2, PanelRight, Variable, X, SlidersHorizontal, CircleCheck, TriangleAlert, Unplug, Layers, ChevronRight, CircleHelp } from 'lucide-react';
+import { ArrowLeft, Code2, PanelRight, Variable, X, SlidersHorizontal, CircleCheck, TriangleAlert, Unplug, Layers, ChevronRight, CircleHelp, FileCode2 } from 'lucide-react';
 import type { Action, Architecture, Resource } from './model.ts';
 import { providerNames, resourceDefinition } from './fixture.ts';
 import { ResourceFields } from './ResourceFields.tsx';
 import { CodePanel } from './CodePanel.tsx';
 import { VariablePanel } from './VariablePanel.tsx';
-import { architectureDiagnostics } from './diagnostics.ts';
+import { architectureDiagnostics, type Diagnostic } from './diagnostics.ts';
 import { explicitResourceReferences, inheritedReferences } from './resourceHierarchy.ts';
 import { focusResourceField } from './IssuesPanel.tsx';
 import { PaneResizeHandle } from './PaneResizeHandle.tsx';
+import type { LiveSchemaMap } from './liveSchema.ts';
 
 /** One resource, one form and one architecture; code and context are computed projections. */
-export function ResourceWorkspace({ resource, architecture, dispatch, open, onClose, onNavigate }: {
+export function ResourceWorkspace({ resource, architecture, dispatch, open, onClose, onNavigate, liveSchemas, hostDiagnostics, hasSource, onOpenSource }: {
 	resource: Resource; architecture: Architecture; dispatch: Dispatch<Action>; open: boolean;
 	onClose: () => void; onNavigate: (id: string) => void;
+	liveSchemas?: LiveSchemaMap; hostDiagnostics?: readonly Diagnostic[]; hasSource?: boolean; onOpenSource?: () => void;
 }) {
 	const dialog = useRef<HTMLDialogElement>(null);
 	const backdropPress = useRef(false);
@@ -39,7 +41,10 @@ export function ResourceWorkspace({ resource, architecture, dispatch, open, onCl
 	const metadata = resourceDefinition(resource);
 	const incoming = architecture.connections.filter(link => link.target === resource.id);
 	const outgoing = architecture.connections.filter(link => link.source === resource.id);
-	const issues = architectureDiagnostics(architecture).filter(item => item.resourceId === resource.id);
+	const issues = [
+		...(hostDiagnostics ?? []).filter(item => item.resourceId === resource.id),
+		...architectureDiagnostics(architecture, liveSchemas).filter(item => item.resourceId === resource.id),
+	];
 	const inherited = inheritedReferences(architecture, resource);
 	const inheritedSources = [...new Set(inherited.map(reference => reference.source.id))].map(id => ({ id, references: inherited.filter(reference => reference.source.id === id) }));
 	const explicitRefs = explicitResourceReferences(architecture, resource);
@@ -67,6 +72,7 @@ export function ResourceWorkspace({ resource, architecture, dispatch, open, onCl
 			<div className="workspace-identity"><img src={'./assets/' + metadata.icon} alt="" /><div><h2 id="resource-workspace-title">{resource.label || resource.name}</h2><span>{providerNames[resource.provider]} · {metadata.label}</span></div></div>
 			<button className={'workspace-check-summary' + (issues.length ? ' has-findings' : '')} onClick={() => showContext('checks')} aria-label="Review local resource checks">{issues.length ? <TriangleAlert size={14} /> : <CircleCheck size={14} />}<span>{issues.length ? issues.length + ' to review' : 'Local checks clear'}</span></button>
 			<div className="workspace-layout-actions">
+				{hasSource && onOpenSource && <button type="button" title="Open Terraform source in editor" aria-label="Open Terraform source" onClick={onOpenSource}><FileCode2 size={16} /></button>}
 				<button type="button" title={codeOpen ? 'Hide Terraform pane' : 'Show Terraform pane'} aria-label="Toggle Terraform pane" aria-pressed={codeOpen} onClick={() => setCodeOpen(value => !value)}><Code2 size={16} /></button>
 				<button type="button" title={contextOpen ? 'Hide resource context' : 'Show resource context'} aria-label="Toggle node context" aria-pressed={contextOpen} onClick={() => setContextOpen(value => !value)}><PanelRight size={16} /></button>
 			</div>
@@ -78,7 +84,7 @@ export function ResourceWorkspace({ resource, architecture, dispatch, open, onCl
 			<section className="workspace-code" aria-label="Node Terraform pane"><CodePanel resource={resource} architecture={architecture} dispatch={dispatch} compact hidden={!open || !codeOpen} /><PaneResizeHandle side="workspace-code" width={codeWidth} minimum={280} onCommit={setCodeWidth} /></section>
 			<section className="workspace-parameters" aria-label="Node parameters">
 				<div className="workspace-pane-heading"><SlidersHorizontal size={17} /><div><h3>Parameters</h3><p>Changes update this resource and its Terraform draft.</p></div></div>
-				<ResourceFields resource={resource} architecture={architecture} dispatch={dispatch} onRevealResource={onNavigate} onManageVariables={() => { showContext('variables'); requestAnimationFrame(() => variablesTab.current?.focus()); }} />
+				<ResourceFields resource={resource} architecture={architecture} dispatch={dispatch} liveSchemas={liveSchemas} onRevealResource={onNavigate} onManageVariables={() => { showContext('variables'); requestAnimationFrame(() => variablesTab.current?.focus()); }} />
 			</section>
 			<aside className="workspace-context" aria-label="Node context"><Tabs.Root className="workspace-context-root" value={contextTab} onValueChange={setContextTab}>
 				<Tabs.List className="workspace-context-tabs" aria-label="Node context tabs"><Tabs.Trigger value="links">Connections</Tabs.Trigger><Tabs.Trigger value="variables" ref={variablesTab}>Variables</Tabs.Trigger><Tabs.Trigger value="checks">Checks{issues.length ? <span className="workspace-tab-count">{issues.length}</span> : null}</Tabs.Trigger></Tabs.List>

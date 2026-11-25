@@ -134,7 +134,7 @@ export type Edit =
 	| { type: 'renameArchitecture'; name: string }
 	| { type: 'connect'; source: string; target: string };
 
-export type Action = Edit | { type: 'undo' } | { type: 'redo' };
+export type Action = Edit | { type: 'undo' } | { type: 'redo' } | { type: 'replace'; architecture: Architecture };
 
 export function createHistory(architecture: Architecture): History {
 	return { past: [], present: architecture, future: [] };
@@ -308,6 +308,9 @@ function editArchitecture(architecture: Architecture, action: Edit): Architectur
 }
 
 export function historyReducer(history: History, action: Action): History {
+	if (action.type === 'replace') {
+		return createHistory(action.architecture);
+	}
 	if (action.type === 'undo') {
 		const previous = history.past.at(-1);
 		return previous ? {

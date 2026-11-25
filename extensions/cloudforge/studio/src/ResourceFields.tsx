@@ -10,25 +10,28 @@ import { additionalBlocks, editableFields, fieldIssue, type BlockDefinition } fr
 import { SchemaField } from './SchemaField.tsx';
 import { bindingKey, canBindField, eligibleReferenceTargets, fieldDefinition, fieldTargetPath, regionAttribute, resourceRefBindingIssue, variableBindingIssue, type FieldTarget } from './fieldBindings.ts';
 import { inheritedReference, inheritedReferences, isResourceContainer, resourcePlacement } from './resourceHierarchy.ts';
+import type { LiveSchemaMap } from './liveSchema.ts';
 
-function fieldState(resource:Resource,architecture:Architecture|undefined,target:FieldTarget,dispatch:Dispatch<Action>,onManageVariables?:()=>void,onRevealResource?:(id:string)=>void) {
+function fieldState(resource:Resource,architecture:Architecture|undefined,target:FieldTarget,dispatch:Dispatch<Action>,onManageVariables?:()=>void,onRevealResource?:(id:string)=>void,liveSchemas?:LiveSchemaMap) {
 	const path = fieldTargetPath(resource,target);
 	const available = architecture&&inheritedReference(architecture,{...resource,inheritanceOverrides:[]},path);
-	const definition = fieldDefinition(resource, target);
+	const definition = fieldDefinition(resource, target, liveSchemas);
 	const key = bindingKey(target);
 	const canBind = !!architecture && canBindField(resource, target);
-	return {path:path.join('.'),...(canBind?{variables:architecture.variables??[],onManageVariables,binding:resource.fieldBindings?.[key],onBind:(variableId?:string)=>dispatch({type:'bindVariable',id:resource.id,target,variableId}),resourceReference:definition?.refTypes?.length?{binding:resource.resourceRefs?.[key],candidates:eligibleReferenceTargets(architecture,resource,definition),architecture,resource,onSelect:(refs?:{resourceId:string;attribute:string}[])=>dispatch({type:'bindResourceRef',id:resource.id,target,refs}),onReveal:onRevealResource}:undefined}:{}),
+	return {path:path.join('.'),...(canBind?{variables:architecture.variables??[],onManageVariables,binding:resource.fieldBindings?.[key],onBind:(variableId?:string)=>dispatch({type:'bindVariable',id:resource.id,target,variableId}),resourceReference:definition?.refTypes?.length?{binding:resource.resourceRefs?.[key],candidates:eligibleReferenceTargets(architecture,resource,definition,liveSchemas),architecture,resource,onSelect:(refs?:{resourceId:string;attribute:string}[])=>dispatch({type:'bindResourceRef',id:resource.id,target,refs}),onReveal:onRevealResource}:undefined}:{}),
 		inheritance:available?{available,reference:architecture&&inheritedReference(architecture,resource,path),onInherit:(enabled:boolean)=>dispatch({type:'useInheritance',id:resource.id,target,enabled}),onReveal:onRevealResource}:undefined};
 }
 
-export function ResourceFields({ resource, dispatch, architecture, compactMetadata = false, onManageVariables, onRevealResource }: { resource: Resource; dispatch: Dispatch<Action>; architecture?: Architecture; compactMetadata?: boolean; onManageVariables?: () => void; onRevealResource?:(id:string)=>void }) {
-	const properties = editableFields(resource);
+export function ResourceFields({ resource, dispatch, architecture, compactMetadata = false, onManageVariables, onRevealResource, liveSchemas }: { resource: Resource; dispatch: Dispatch<Action>; architecture?: Architecture; compactMetadata?: boolean; onManageVariables?: () => void; onRevealResource?:(id:string)=>void; liveSchemas?: LiveSchemaMap }) {
+	const typeName = resourceDefinition(resource).type;
+	const liveSchema = liveSchemas?.[typeName];
+	const properties = editableFields(resource, liveSchemas);
 	function binding(target: FieldTarget) {
-		return fieldState(resource,architecture,target,dispatch,onManageVariables,onRevealResource);
+		return fieldState(resource,architecture,target,dispatch,onManageVariables,onRevealResource,liveSchemas);
 	}
 
  function field(name:string,value:string) {
-  const definition=fieldDefinition(resource,{kind:'setting',name});
+  const definition=fieldDefinition(resource,{kind:'setting',name},liveSchemas);
   const update=(value:string)=>dispatch({type:'update',id:resource.id,patch:{settings:{...resource.settings,[name]:value}}});
   let display = value;
   if (!resource.catalogue && definition?.type === 'list') { try { JSON.parse(value); } catch { display = JSON.stringify([value]); } }
@@ -73,15 +76,15 @@ export function ResourceFields({ resource, dispatch, architecture, compactMetada
 					</details>}
 				</div>
 			</details>
-			<NestedBlocks blocks={resource.blocks} definitions={additionalBlocks(resource)} scope="resource" resource={resource} architecture={architecture} dispatch={dispatch} onManageVariables={onManageVariables} onRevealResource={onRevealResource}
+			<NestedBlocks blocks={resource.blocks} definitions={additionalBlocks(resource, liveSchemas)} scope="resource" resource={resource} architecture={architecture} dispatch={dispatch} onManageVariables={onManageVariables} onRevealResource={onRevealResource} liveSchemas={liveSchemas}
 				onChange={blocks => dispatch({ type: 'update', id: resource.id, patch: { blocks } })} />
-			{resource.catalogue && <details className="form-section advanced-properties"><summary>Advanced properties<span className="schema-type">Optional additions</span></summary><div className="form-section-body"><p className="field-help">Add optional arguments from the bundled catalogue. Required arguments stay in Main Parameters.</p><label className="add-provider-property">Add property<select aria-label="Add provider property" value="" onChange={event=>{const field=properties.find(field=>field.name===event.target.value);if(field) {dispatch({type:'update',id:resource.id,patch:{settings:{...resource.settings,[field.name]:field.default===undefined?'':typeof field.default==='string'?field.default:JSON.stringify(field.default)}}});}}}><option value="">Choose an optional property…</option>{properties.filter(field=>!field.required&&!['name','location','region'].includes(field.name)&&!Object.hasOwn(resource.settings,field.name)).map(field=><option key={field.name} value={field.name}>{field.name} · {field.type}</option>)}</select></label></div></details>}
-   <p className="form-coverage">Local catalogue form · nested fields use bundled definitions where available. Live provider validation is not connected.</p>
+			{(resource.catalogue || liveSchema) && <details className="form-section advanced-properties"><summary>Advanced properties<span className="schema-type">{liveSchema ? liveSchema.providerSource + ' ' + liveSchema.providerVersion : 'Optional additions'}</span></summary><div className="form-section-body"><p className="field-help">{liveSchema ? 'Add optional arguments from the version-matched Rust provider schema. Required arguments stay in Main Parameters.' : 'Add optional arguments from the bundled catalogue. Required arguments stay in Main Parameters.'}</p><label className="add-provider-property">Add property<select aria-label="Add provider property" value="" onChange={event=>{const field=properties.find(field=>field.name===event.target.value);if(field) {dispatch({type:'update',id:resource.id,patch:{settings:{...resource.settings,[field.name]:field.default===undefined?'':typeof field.default==='string'?field.default:JSON.stringify(field.default)}}});}}}><option value="">Choose an optional property…</option>{properties.filter(field=>!field.required&&!['name','location','region'].includes(field.name)&&!Object.hasOwn(resource.settings,field.name)).map(field=><option key={field.name} value={field.name}>{field.name} · {field.type}</option>)}</select></label></div></details>}
+   <p className="form-coverage">{liveSchema ? 'Live Rust schema · ' + liveSchema.providerSource + ' ' + liveSchema.providerVersion + ' (' + liveSchema.attributes.length + ' attributes, ' + liveSchema.blocks.length + ' blocks).' : 'Local catalogue form · nested fields use bundled definitions where available. Live provider validation is not connected.'}</p>
 		</div>
 	);
 }
 
-function NestedBlocks({ blocks, definitions, scope, onChange, resource, architecture, dispatch, onManageVariables, onRevealResource }: {
+function NestedBlocks({ blocks, definitions, scope, onChange, resource, architecture, dispatch, onManageVariables, onRevealResource, liveSchemas }: {
 	blocks: ResourceBlock[];
 	definitions: BlockDefinition[];
 	scope: string;
@@ -91,6 +94,7 @@ function NestedBlocks({ blocks, definitions, scope, onChange, resource, architec
 	dispatch: Dispatch<Action>;
 	onManageVariables?: () => void;
 	onRevealResource?: (id:string)=>void;
+	liveSchemas?: LiveSchemaMap;
 }) {
 	const available = definitions.filter(definition => blocks.filter(block => block.type === definition.type).length < definition.max);
 	return (
@@ -108,9 +112,9 @@ function NestedBlocks({ blocks, definitions, scope, onChange, resource, architec
 					<div className="nested-block-body">
 						{definition?.description && <p className="field-help">{definition.description}</p>}
 						{!definition && <p className="field-help">Schema unavailable. Existing values are preserved; review against your provider version.</p>}
-						{fields.map(name => <SchemaField key={name} name={name} value={block.values[name] ?? ''} definition={definition?.attributes?.find(field => field.name === name)} onChange={value => update({ ...block, values: { ...block.values, [name]: value } })} {...fieldState(resource,architecture,{kind:'block',blockId:block.id,name},dispatch,onManageVariables,onRevealResource)}/>)}
+						{fields.map(name => <SchemaField key={name} name={name} value={block.values[name] ?? ''} definition={definition?.attributes?.find(field => field.name === name)} onChange={value => update({ ...block, values: { ...block.values, [name]: value } })} {...fieldState(resource,architecture,{kind:'block',blockId:block.id,name},dispatch,onManageVariables,onRevealResource,liveSchemas)}/>)}
 						<NestedBlocks blocks={block.blocks} definitions={definition?.children ?? []} scope={label}
-								resource={resource} architecture={architecture} dispatch={dispatch} onManageVariables={onManageVariables} onRevealResource={onRevealResource} onChange={children => update({ ...block, blocks: children })} />
+								resource={resource} architecture={architecture} dispatch={dispatch} onManageVariables={onManageVariables} onRevealResource={onRevealResource} liveSchemas={liveSchemas} onChange={children => update({ ...block, blocks: children })} />
 						<button className="remove-block" onClick={() => onChange(blocks.filter(item => item.id !== block.id))}>Remove {label}</button>
 					</div>
 				</details>;

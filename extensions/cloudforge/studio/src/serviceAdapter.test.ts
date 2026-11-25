@@ -1,0 +1,245 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createHistory, historyReducer } from './model.ts';
+import { liveSchemaAttributes, liveSchemaBlocks, liveSchemaOutputs, type HostFormSchema } from './liveSchema.ts';
+import { additionalBlocks, editableFields } from './formDefinition.ts';
+import { architectureDiagnostics } from './diagnostics.ts';
+import { buildDraftSavePayload, projectGraphSnapshotToArchitecture, projectHostDiagnostics } from './serviceAdapter.ts';
+import { explicitResourceReferences, inheritedDependencies } from './resourceHierarchy.ts';
+import { terraformCode } from './terraformProjection.ts';
+import type { HostEngineValidateReport, HostGraphSnapshot, HostValidationRun } from './webviewBridge.ts';
+
+const SAMPLE_LIVE_SCHEMA: HostFormSchema = {
+	kind: 'resource',
+	typeName: 'azurerm_custom_firewall',
+	providerSource: 'hashicorp/azurerm',
+	providerVersion: '5.14.0',
+	description: 'Manages an Azure Firewall with live Rust schema coverage.',
+	docsUrl: 'https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/firewall',
+	exampleHcl: 'resource "azurerm_custom_firewall" "fw" {}',
+	attributes: [
+		{ name: 'name', path: 'name', access: 'required', valueType: 'string', description: 'Firewall name.' },
+		{ name: 'sku_tier', path: 'sku_tier', access: 'required', valueType: 'string', description: 'SKU tier.', options: ['Standard', 'Premium'] },
+		{ name: 'threat_intel_mode', path: 'threat_intel_mode', access: 'optional', valueType: 'string', description: 'Threat intel mode.' },
+		{ name: 'dns_servers', path: 'dns_servers', access: 'optional', valueType: 'listString', description: 'DNS servers.' },
+		{ name: 'id', path: 'id', access: 'computedOnly', valueType: 'string', description: 'Resource ID.' },
+	],
+	blocks: [
+		{
+			name: 'ip_configuration',
+			path: 'ip_configuration',
+			minItems: 1,
+			maxItems: 4,
+			description: 'IP configuration for firewall.',
+			attributes: [
+				{ name: 'name', path: 'ip_configuration.name', access: 'required', valueType: 'string', description: 'Config name.' },
+				{ name: 'subnet_id', path: 'ip_configuration.subnet_id', access: 'optional', valueType: 'string', description: 'Subnet ID.' },
+			],
+		},
+	],
+	outputs: [
+		{ name: 'id', valueType: 'string', description: 'Firewall ID.', knownAtApply: true },
+		{ name: 'private_ip_address', valueType: 'string', description: 'Private IP.', knownAtApply: true },
+	],
+};
+
+test('live Rust FormSchema converts attributes, nested blocks, outputs, and replaces primitive-only warning', () => {
+	const attrs = liveSchemaAttributes(SAMPLE_LIVE_SCHEMA);
+	assert.equal(attrs.some(a => a.name === 'id'), false, 'computedOnly attributes must not be editable');
+	assert.equal(attrs.find(a => a.name === 'sku_tier')?.required, true);
+	assert.deepEqual(attrs.find(a => a.name === 'sku_tier')?.options, ['Standard', 'Premium']);
+	assert.equal(attrs.find(a => a.name === 'dns_servers')?.type, 'list');
+
+	const blocks = liveSchemaBlocks(SAMPLE_LIVE_SCHEMA);
+	assert.equal(blocks.length, 1);
+	assert.equal(blocks[0].type, 'ip_configuration');
+	assert.equal(blocks[0].required, true);
+	assert.equal(blocks[0].max, 4);
+	assert.deepEqual(liveSchemaOutputs(SAMPLE_LIVE_SCHEMA).sort(), ['id', 'private_ip_address']);
+
+	const snapshot: HostGraphSnapshot = {
+		workspaceId: 'ws-1',
+		architectureId: 'arch-1',
+		architectureName: 'Hub Firewall',
+		sourceRevision: 'a'.repeat(64),
+		status: 'complete',
+		nodes: [{ id: 'n-fw', kind: 'resource', resourceType: 'azurerm_custom_firewall', name: 'fw_hub', label: 'fw_hub', hasSource: true }],
+		edges: [],
+		diagnostics: [],
+	};
+	const { architecture } = projectGraphSnapshotToArchitecture(snapshot);
+	const fw = architecture.resources[0];
+
+	// Without live schema: primitive-only warning is emitted.
+	const withoutLive = architectureDiagnostics(architecture);
+	assert.equal(withoutLive.some(d => d.message.includes('complete nested schema is unavailable')), true);
+
+	// With live Rust schema: warning is cleared, live required fields & required nested block are enforced!
+	const liveSchemas = { azurerm_custom_firewall: SAMPLE_LIVE_SCHEMA };
+	assert.equal(editableFields(fw, liveSchemas).some(f => f.name === 'sku_tier'), true);
+	assert.equal(additionalBlocks(fw, liveSchemas).some(b => b.type === 'ip_configuration' && b.required), true);
+
+	const withLive = architectureDiagnostics(architecture, liveSchemas);
+	assert.equal(withLive.some(d => d.message.includes('complete nested schema is unavailable')), false);
+	assert.equal(withLive.some(d => d.path === 'sku_tier' && d.severity === 'error'), true);
+	assert.equal(withLive.some(d => d.path === 'ip_configuration' && d.severity === 'error'), true);
+});
+
+test('projectGraphSnapshotToArchitecture infers container nesting, derives VM->NIC refs, and preserves positions on refresh', () => {
+	const snapshot: HostGraphSnapshot = {
+		workspaceId: 'ws-1',
+		architectureId: 'arch-azure',
+		architectureName: 'Azure Landing Zone',
+		sourceRevision: '1'.repeat(64),
+		status: 'complete',
+		nodes: [
+			{ id: 'rg-1', kind: 'resource', resourceType: 'azurerm_resource_group', name: 'rg_hub', label: 'rg_hub', hasSource: true },
+			{ id: 'vnet-1', kind: 'resource', resourceType: 'azurerm_virtual_network', name: 'vnet_hub', label: 'vnet_hub', hasSource: true },
+			{ id: 'snet-1', kind: 'resource', resourceType: 'azurerm_subnet', name: 'snet_app', label: 'snet_app', hasSource: true },
+			{ id: 'nic-1', kind: 'resource', resourceType: 'azurerm_network_interface', name: 'nic_app', label: 'nic_app', hasSource: true },
+			{ id: 'vm-1', kind: 'resource', resourceType: 'azurerm_linux_virtual_machine', name: 'vm_app', label: 'vm_app', hasSource: true },
+			{ id: 'fw-1', kind: 'resource', resourceType: 'azurerm_custom_firewall', name: 'fw_hub', label: 'fw_hub', hasSource: true },
+			{ id: 'mod-1', kind: 'module', resourceType: null, name: 'monitoring', label: './modules/monitoring', hasSource: true },
+		],
+		edges: [
+			{ fromId: 'vnet-1', toId: 'rg-1', kind: 'reference' },
+			{ fromId: 'snet-1', toId: 'vnet-1', kind: 'reference' },
+			{ fromId: 'nic-1', toId: 'snet-1', kind: 'reference' },
+			{ fromId: 'nic-1', toId: 'rg-1', kind: 'reference' },
+			{ fromId: 'vm-1', toId: 'snet-1', kind: 'reference' },
+			{ fromId: 'vm-1', toId: 'nic-1', kind: 'reference' },
+			{ fromId: 'fw-1', toId: 'rg-1', kind: 'reference' },
+		],
+		diagnostics: [],
+	};
+
+	const first = projectGraphSnapshotToArchitecture(snapshot);
+	const byId = new Map(first.architecture.resources.map(r => [r.id, r]));
+
+	assert.equal(first.hasSourceById['vm-1'], true);
+	assert.equal(byId.get('rg-1')?.parentId, undefined);
+	assert.equal(byId.get('vnet-1')?.parentId, 'rg-1');
+	assert.equal(byId.get('snet-1')?.parentId, 'vnet-1');
+	// Most specific container (Subnet) wins over broader container (Resource Group)!
+	assert.equal(byId.get('nic-1')?.parentId, 'snet-1');
+	assert.equal(byId.get('vm-1')?.parentId, 'snet-1');
+	assert.equal(byId.get('fw-1')?.parentId, 'rg-1');
+	assert.equal(byId.get('mod-1')?.kind, 'module');
+
+	// Sibling firewall must not overlap the expanded VNet container!
+	const vnet = byId.get('vnet-1')!;
+	const fw = byId.get('fw-1')!;
+	const vnetRight = vnet.positions.visual.x + (vnet.containerSize?.width ?? 0);
+	const vnetBottom = vnet.positions.visual.y + (vnet.containerSize?.height ?? 0);
+	assert.equal(fw.positions.visual.x >= vnetRight || fw.positions.visual.y >= vnetBottom, true, 'Sibling firewall must not overlap expanded VNet container');
+
+	// Explicit VM -> NIC resourceRef is derived automatically and projected into HCL + Technical View edges!
+	const vm = byId.get('vm-1')!;
+	const refs = explicitResourceReferences(first.architecture, vm);
+	assert.equal(refs.some(r => r.source.id === 'nic-1' && r.attribute === 'id' && r.path.join('.') === 'network_interface_ids'), true);
+	const deps = inheritedDependencies(first.architecture);
+	assert.equal(deps.some(d => d.source === 'nic-1' && d.target === 'vm-1'), true);
+	const vmHcl = terraformCode(first.architecture, 'vm-1');
+	assert.match(vmHcl, /network_interface_ids\s*=\s*\[\s*azurerm_network_interface\.nic_app\.id\s*\]/);
+
+	// User moves vm-1; refreshing at a new sourceRevision preserves its custom position!
+	const moved = {
+		...first.architecture,
+		resources: first.architecture.resources.map(r => r.id === 'vm-1' ? { ...r, positions: { visual: { x: 999, y: 777 }, technical: { x: 999, y: 777 } } } : r),
+	};
+	const refreshed = projectGraphSnapshotToArchitecture(
+		{ ...snapshot, sourceRevision: '2'.repeat(64) },
+		{ previousArchitecture: moved }
+	);
+	const refreshedVm = refreshed.architecture.resources.find(r => r.id === 'vm-1')!;
+	assert.deepEqual(refreshedVm.positions.visual, { x: 999, y: 777 });
+
+	// Guarded draft save payload produces valid `.tf` filename + generated HCL.
+	const payload = buildDraftSavePayload(refreshed.architecture);
+	assert.equal(payload.fileName, 'azure-landing-zone.tf');
+	assert.match(payload.contents, /resource "azurerm_linux_virtual_machine" "vm_app"/);
+});
+
+test('projectHostDiagnostics unifies graph, Rust validation, and CLI validate -json findings with address resolution', () => {
+	const snapshot: HostGraphSnapshot = {
+		workspaceId: 'ws-1',
+		architectureId: 'arch-1',
+		architectureName: 'Net',
+		sourceRevision: '3'.repeat(64),
+		status: 'partial',
+		nodes: [
+			{ id: 'vnet-1', kind: 'resource', resourceType: 'azurerm_virtual_network', name: 'hub', label: 'hub', hasSource: true },
+		],
+		edges: [],
+		diagnostics: [{ code: 'CF_PARTIAL', severity: 'warning', message: 'Dynamic block skipped' }],
+	};
+	const { architecture } = projectGraphSnapshotToArchitecture(snapshot);
+
+	const run: HostValidationRun = {
+		runId: 'run-1',
+		scope: 'architecture',
+		targetNodeId: null,
+		capturedRevision: '3'.repeat(64),
+		stale: false,
+		outcome: 'completed_with_warnings',
+		coverage: 'partial',
+		coverageNotes: [],
+		nodeResults: {
+			'vnet-1': {
+				nodeId: 'vnet-1',
+				status: 'warning',
+				blockedBy: [],
+				schemaCovered: true,
+				findings: [{ id: 'f-1', nodeId: 'vnet-1', code: 'CF_CIDR', severity: 'warning', message: 'CIDR range is broad', remediation: 'Use a /16 or smaller block' }],
+			},
+		},
+	};
+
+	const cliReport: HostEngineValidateReport = {
+		sourceRevision: '3'.repeat(64),
+		engine: 'openTofu',
+		engineVersion: '1.9.1',
+		engineInferred: false,
+		valid: false,
+		errorCount: 1,
+		warningCount: 0,
+		durationMs: 142,
+		diagnostics: [{ severity: 'error', summary: 'Missing required argument', detail: 'address_space is required', address: 'azurerm_virtual_network.hub', filename: 'main.tf', line: 12 }],
+		truncated: false,
+	};
+
+	const diags = projectHostDiagnostics(architecture, snapshot, run, cliReport);
+	assert.equal(diags.length, 3);
+	assert.equal(diags.find(d => d.source === 'graph')?.code, 'CF_PARTIAL');
+	assert.equal(diags.find(d => d.source === 'validation')?.remediation, 'Use a /16 or smaller block');
+	const cli = diags.find(d => d.source === 'cli');
+	assert.equal(cli?.resourceId, 'vnet-1');
+	assert.equal(cli?.severity, 'error');
+	assert.match(cli?.message ?? '', /Missing required argument/);
+});
+
+test('historyReducer replace resets undo/redo history cleanly for live workspace loads', () => {
+	const snapshot: HostGraphSnapshot = {
+		workspaceId: 'ws-1',
+		architectureId: 'arch-1',
+		architectureName: 'Initial',
+		sourceRevision: '4'.repeat(64),
+		status: 'complete',
+		nodes: [{ id: 'rg-1', kind: 'resource', resourceType: 'azurerm_resource_group', name: 'rg_one', label: 'rg_one', hasSource: true }],
+		edges: [],
+		diagnostics: [],
+	};
+	const { architecture } = projectGraphSnapshotToArchitecture(snapshot);
+	let h = createHistory(architecture);
+	h = historyReducer(h, { type: 'renameArchitecture', name: 'Edited' });
+	assert.equal(h.past.length, 1);
+
+	h = historyReducer(h, { type: 'replace', architecture });
+	assert.equal(h.past.length, 0);
+	assert.equal(h.future.length, 0);
+	assert.equal(h.present.name, 'Initial');
+});

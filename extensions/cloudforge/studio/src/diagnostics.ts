@@ -9,8 +9,9 @@ import { editableFields, fieldIssue, resourceFormIssues } from './formDefinition
 import { bindingKey, fieldTargetPath } from './fieldBindings.ts';
 import { getDef } from './cloudlab-core/catalog/index.ts';
 import { inheritedReference, resourceAncestors, resourcePlacement } from './resourceHierarchy.ts';
+import type { LiveSchemaMap } from './liveSchema.ts';
 
-export type Diagnostic = {id:string;resourceId:string;severity:'error'|'warning';path?:string;message:string};
+export type Diagnostic = {id:string;resourceId:string;severity:'error'|'warning';path?:string;message:string;source?:'local'|'graph'|'validation'|'cli';code?:string;remediation?:string};
 function ipv4Range(text:string) {
 	const match=/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\/(\d{1,2})$/.exec(text);
 	if(!match){return undefined;} const bytes=match.slice(1,5).map(Number); const prefix=Number(match[5]);
@@ -24,12 +25,13 @@ function ranges(resource:Resource) {
 }
 
 /** Deterministic local feedback; this never represents a Terraform/provider validation run. */
-export function architectureDiagnostics(architecture:Architecture):Diagnostic[] {
-	const out:Diagnostic[]=[]; const add=(resourceId:string,severity:Diagnostic['severity'],message:string,path?:string)=>out.push({id:[resourceId,path??'',severity,message].join(':'),resourceId,severity,message,path});
+export function architectureDiagnostics(architecture:Architecture, liveSchemas?: LiveSchemaMap):Diagnostic[] {
+	const out:Diagnostic[]=[]; const add=(resourceId:string,severity:Diagnostic['severity'],message:string,path?:string)=>out.push({id:[resourceId,path??'',severity,message].join(':'),resourceId,severity,message,path,source:'local'});
 	for(const finding of checkDraft(architecture)){add(finding.resourceId,'error',finding.message,'name');}
 	for(const resource of architecture.resources){
-		for(const message of resourceFormIssues(resource,architecture.variables,architecture)){const at=message.indexOf(':');add(resource.id,'error',message,at>=0?message.slice(0,at).replace(/\[\d+\]/g,''):undefined);}
-		for(const field of editableFields(resource)){
+		const typeName = resourceDefinition(resource).type;
+		for(const message of resourceFormIssues(resource,architecture.variables,architecture,liveSchemas)){const at=message.indexOf(':');add(resource.id,'error',message,at>=0?message.slice(0,at).replace(/\[\d+\]/g,''):undefined);}
+		for(const field of editableFields(resource,liveSchemas)){
 			if(field.name==='name'){continue;}
 			const setting=Object.keys(resource.settings).find(name=>fieldTargetPath(resource,{kind:'setting',name}).join('.')===field.name);
 			const target=field.name==='location'||field.name==='region'?{kind:'region' as const}:{kind:'setting' as const,name:setting??field.name};
@@ -41,7 +43,7 @@ export function architectureDiagnostics(architecture:Architecture):Diagnostic[] 
 		}
 		if(resource.parentId&&!resourcePlacement(architecture,resource,resource.parentId).ok){add(resource.id,'error','The parent container is incompatible. Choose a compatible parent or move to the canvas.','parent');}
 		if(resourceAncestors(architecture,resource).some(parent=>parent.parentId===resource.id)){add(resource.id,'error','The container hierarchy contains a cycle.','parent');}
-		if(!getDef(resourceDefinition(resource).type)&&resource.kind!=='module'){add(resource.id,'warning','Only primitive catalogue fields are checked; a complete nested schema is unavailable.');}
+		if(!getDef(typeName)&&!liveSchemas?.[typeName]&&resource.kind!=='module'){add(resource.id,'warning','Only primitive catalogue fields are checked; a complete nested schema is unavailable.');}
 		for(const item of ranges(resource)){
 			if(resource.fieldBindings?.[bindingKey({kind:'setting',name:item.name})]||item.value.startsWith('var.')){continue;}
 			if(item.value.includes(':')){add(resource.id,'warning','IPv6 range checks are not available locally.',fieldTargetPath(resource,{kind:'setting',name:item.name}).join('.'));}

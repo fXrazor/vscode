@@ -958,6 +958,32 @@ Merged `origin/codex/infrastructure-studio-preview` (`f82e0c1200f`) cleanly into
 1. Wire live Stage 9B (`terraform plan -json` / `tofu plan -json`) once the Rust sidecar adds guarded plan capture, and bridge the verified Studio canvas components (`extensions/cloudforge/studio`) with the Rust service/extension-host Webview boundary (`extensions/cloudforge/src/canvas/protocol.ts`).
 2. Package one combined Windows x64 installer once Stage 9B or the Studio Webview integration is ready (pass `-SignCertificateThumbprint <40-hex>` + `-RequireSignedService` for signed releases).
 
+### Studio Extension-Host Webview Bridge, Live Rust `FormSchema` Adapter & Guarded Save Flow (2026-11-25)
+
+Implemented on `fxrazor/continue-project-handoff-review` in `E:\Orca\CloudForge-Code\dace` (fast-forward merged to `Z:\CloudForge-Code` `main` and pushed to `origin/main`). **No unnecessary Windows installer build was triggered** (`%LOCALAPPDATA%\Programs\CloudForge Proof` remains verified at `407d56014c1` + Rust Stage 9A `ef4be9d`; `extensions/cloudforge/studio/src/cloudlab-core/` provenance files and `Z:\CloudForge` remain untouched).
+
+- **Live Version-Matched Rust `FormSchema` Adapter ([liveSchema.ts](extensions/cloudforge/studio/src/liveSchema.ts), [formDefinition.ts](extensions/cloudforge/studio/src/formDefinition.ts), [fieldBindings.ts](extensions/cloudforge/studio/src/fieldBindings.ts), [diagnostics.ts](extensions/cloudforge/studio/src/diagnostics.ts), [ResourceFields.tsx](extensions/cloudforge/studio/src/ResourceFields.tsx), [ResourceWorkspace.tsx](extensions/cloudforge/studio/src/ResourceWorkspace.tsx)):**
+  - Converts live Rust `FormSchema` payloads (`getResourceFormSchema`) into Studio `AttrDef[]`, `BlockDefinition[]` (`minItems >= 1` -> required, `maxItems` -> cardinality), and exported outputs while preserving curated `cloudlab-core` `refTypes`/`refAttr`/`inherit` rules and clearing the primitive-only schema warning once a live Rust schema is active.
+- **Bidirectional `CanvasGraphSnapshot` <-> Studio `Architecture` Adapter & Bottom-Up Container Auto-Layout ([serviceAdapter.ts](extensions/cloudforge/studio/src/serviceAdapter.ts), [serviceAdapter.test.ts](extensions/cloudforge/studio/src/serviceAdapter.test.ts), [model.ts](extensions/cloudforge/studio/src/model.ts)):**
+  - Projects sanitized Rust `CanvasGraphSnapshot` nodes (`azurerm_*`, `aws_*`, `google_*`, `module`, generic resources) into Studio's single `Architecture` model while preserving exact opaque Rust node IDs 1:1.
+  - Automatically infers most-specific valid infrastructure containment (`Resource Group -> VNet -> Subnet -> VM/NIC`) from graph edges + schema rules, derives explicit typed `resourceRefs` (e.g., `vm.network_interface_ids -> nic.id`) into HCL and Technical-view dependency edges, lays out nested containers bottom-up with zero sibling overlap, and preserves user-positioned coordinates across live `sourceRevision` refreshes.
+  - Unifies Rust graph diagnostics, Stage 3/5 `ValidationRun` findings, and Stage 9A CLI `validate -json` findings with provenance badges (`CLI validate`, `Rust service`, `Graph`, `Local`) and Terraform address-to-nodeId resolution.
+- **VS Code Webview Protocol Bridge & Two-Step Guarded Save Modal ([webviewBridge.ts](extensions/cloudforge/studio/src/webviewBridge.ts), [DraftSaveDialog.tsx](extensions/cloudforge/studio/src/DraftSaveDialog.tsx), [App.tsx](extensions/cloudforge/studio/src/App.tsx), [VisualTopbar.tsx](extensions/cloudforge/studio/src/VisualTopbar.tsx), [IssuesPanel.tsx](extensions/cloudforge/studio/src/IssuesPanel.tsx), [editor-refinement.css](extensions/cloudforge/studio/src/editor-refinement.css)):**
+  - Detects `acquireVsCodeApi` transparently: standalone preview (`pnpm dev`) remains unchanged in sample mode; hosted VS Code Webview mode speaks the canonical `ExtensionToWebviewMessage` / `WebviewToExtensionMessage` protocol (`ready`, `graph`, `selectNode`, `openSource`, `refresh`, `requestSchema`/`liveSchema`, `requestValidation`/`validationRunUpdate`, `detectedEngines`/`requestEngineValidate`/`engineValidateReport`, `requestDraftSavePreview`/`applyDraftSave`, and `exportArtifact`).
+  - Adds compact hosted revision badge (`rev <8-hex>` / `Modified`), contextual `Save` button opening `DraftSaveDialog` (requiring an active Rust `previewToken` before `Apply Save`), `Open source` buttons in Inspector & Resource Workspace, and `Validate` / `OpenTofu|Terraform validate` actions in Checks & Validation.
+
+| Check (no full desktop/installer rebuild) | Verified result |
+| --- | --- |
+| `corepack pnpm run check` & `corepack pnpm run build` (in `extensions/cloudforge/studio`) | Passed (`0` errors). |
+| `corepack pnpm run test` (in `extensions/cloudforge/studio`) | **70/70 studio tests passed** (`0` skipped; includes [serviceAdapter.test.ts](extensions/cloudforge/studio/src/serviceAdapter.test.ts) with non-overlap container layout, live `FormSchema`, containment/ref inference, CLI/Rust diagnostic unification, and `replace` history reset). |
+| Headless Edge Playwright E2E (`studio-host-bridge-verify.mjs`) | **5/5 passed** (`0` console/page errors; standalone `Sample draft` regression, hosted `CanvasGraphSnapshot` load & zero-overlap bottom-up container layout, live `requestSchema` -> `liveSchema` hydration & `openSource`, Stage 9A `OpenTofu validate` finding reveal, and two-step guarded save `Preview -> Apply -> Refresh`; 4 screenshots visually inspected — caught and fixed topbar `.shell-preview.is-hosted` breakpoint & sibling-over-expanded-VNet overlap). |
+| `CLOUDFORGE_REPO=Z:\CloudForge node --test extensions/cloudforge/test/*.test.ts` | **60/60 root extension tests passed** (`0` skipped). |
+
+**Next actions:**
+1. Wire an opt-in desktop command/setting in `extensions/cloudforge` (e.g., `cloudforge.canvasEngine`: `'classic' | 'studio'` or `CloudForge: Open Studio Canvas (Preview)`) bundling `extensions/cloudforge/studio` into the extension Webview with CSP-safe nonce/asset URIs so users can switch to the live React Flow Studio canvas inside Code OSS without breaking existing packaged-desktop flows.
+2. Wire live Stage 9B (`terraform plan -json` / `tofu plan -json`) once the Rust sidecar adds guarded plan capture, then package one combined Windows x64 installer (pass `-SignCertificateThumbprint <40-hex>` + `-RequireSignedService` for signed releases).
+
+
 
 
 
