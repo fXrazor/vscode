@@ -94,6 +94,12 @@
 				"icon": "$(type-hierarchy)"
 			},
 			{
+				"command": "cloudforge.toggleCanvasFocusMode",
+				"title": "%command.toggleCanvasFocusMode%",
+				"category": "%displayName%",
+				"icon": "$(screen-full)"
+			},
+			{
 				"command": "cloudforge.validateArchitecture",
 				"title": "%command.validateArchitecture%",
 				"category": "%displayName%",
@@ -122,6 +128,13 @@
 				"title": "%command.openTemplateLibrary%",
 				"category": "%displayName%",
 				"icon": "$(library)"
+			}
+		],
+		"keybindings": [
+			{
+				"command": "cloudforge.toggleCanvasFocusMode",
+				"key": "ctrl+alt+f",
+				"mac": "cmd+alt+f"
 			}
 		],
 		"views": {

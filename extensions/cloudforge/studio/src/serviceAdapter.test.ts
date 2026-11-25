@@ -8,7 +8,8 @@ import { createHistory, historyReducer } from './model.ts';
 import { liveSchemaAttributes, liveSchemaBlocks, liveSchemaOutputs, type HostFormSchema } from './liveSchema.ts';
 import { additionalBlocks, editableFields } from './formDefinition.ts';
 import { architectureDiagnostics } from './diagnostics.ts';
-import { buildDraftSavePayload, buildHostViewState, projectGraphSnapshotToArchitecture, projectHostDiagnostics, resolveProviderRegions } from './serviceAdapter.ts';
+import { buildDraftSavePayload, buildHostViewState, defaultTargetTfFile, projectGraphSnapshotToArchitecture, projectHostDiagnostics, resolveProviderRegions } from './serviceAdapter.ts';
+import { projectResourceFiles } from './terraformProjection.ts';
 import { explicitResourceReferences, inheritedDependencies } from './resourceHierarchy.ts';
 import { terraformCode } from './terraformProjection.ts';
 import type { HostCloudRegionsPayload, HostEngineValidateReport, HostGraphSnapshot, HostValidationRun } from './webviewBridge.ts';
@@ -297,4 +298,42 @@ test('resolveProviderRegions merges live Rust Stage 6 cloudRegions with fallback
 
 	const gcpFallback = resolveProviderRegions('gcp', { azure: azurePayload });
 	assert.equal(gcpFallback.includes('europe-west2'), true);
+});
+
+test('multi-file Terraform projects preserve per-resource sourceFile and scope guarded draft save to the corresponding .tf file', () => {
+	const snapshot: HostGraphSnapshot = {
+		workspaceId: 'ws-1',
+		architectureId: 'arch-multi',
+		architectureName: 'Multi File Project',
+		sourceRevision: '6'.repeat(64),
+		status: 'complete',
+		nodes: [
+			{ id: 'rg-1', kind: 'resource', resourceType: 'azurerm_resource_group', name: 'rg_hub', label: 'rg_hub', hasSource: true, sourceFile: 'main.tf', sourceLine: 1 },
+			{ id: 'vnet-1', kind: 'resource', resourceType: 'azurerm_virtual_network', name: 'vnet_hub', label: 'vnet_hub', hasSource: true, sourceFile: 'network.tf', sourceLine: 4 },
+			{ id: 'vm-1', kind: 'resource', resourceType: 'azurerm_linux_virtual_machine', name: 'vm_app', label: 'vm_app', hasSource: true, sourceFile: 'compute.tf', sourceLine: 10 },
+		],
+		edges: [
+			{ fromId: 'vnet-1', toId: 'rg-1', kind: 'reference' },
+			{ fromId: 'vm-1', toId: 'rg-1', kind: 'reference' },
+		],
+		diagnostics: [],
+	};
+	const { architecture } = projectGraphSnapshotToArchitecture(snapshot);
+	assert.deepEqual(projectResourceFiles(architecture), ['main.tf', 'compute.tf', 'network.tf']);
+	assert.equal(architecture.resources.find(r => r.id === 'vnet-1')?.sourceFile, 'network.tf');
+	assert.equal(architecture.resources.find(r => r.id === 'vnet-1')?.sourceLine, 4);
+
+	// Selecting vnet-1 defaults Save to network.tf and emits ONLY network.tf resources (preserving cross-file rg_hub reference)!
+	assert.equal(defaultTargetTfFile(architecture, 'vnet-1'), 'network.tf');
+	const networkPayload = buildDraftSavePayload(architecture, undefined, 'vnet-1');
+	assert.equal(networkPayload.fileName, 'network.tf');
+	assert.match(networkPayload.contents, /resource "azurerm_virtual_network" "vnet_hub"/);
+	assert.match(networkPayload.contents, /azurerm_resource_group\.rg_hub\.name/);
+	assert.doesNotMatch(networkPayload.contents, /resource "azurerm_linux_virtual_machine" "vm_app"/);
+
+	// Selecting compute.tf emits ONLY vm_app!
+	const computePayload = buildDraftSavePayload(architecture, 'compute.tf');
+	assert.equal(computePayload.fileName, 'compute.tf');
+	assert.match(computePayload.contents, /resource "azurerm_linux_virtual_machine" "vm_app"/);
+	assert.doesNotMatch(computePayload.contents, /resource "azurerm_virtual_network" "vnet_hub"/);
 });

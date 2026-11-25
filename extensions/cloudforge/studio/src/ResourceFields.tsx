@@ -31,7 +31,7 @@ function fieldState(resource:Resource,architecture:Architecture|undefined,target
 		inheritance:available?{available,reference:architecture&&inheritedReference(architecture,resource,path),onInherit:(enabled:boolean)=>dispatch({type:'useInheritance',id:resource.id,target,enabled}),onReveal:onRevealResource}:undefined};
 }
 
-export function ResourceFields({ resource, dispatch, architecture, compactMetadata = false, onManageVariables, onRevealResource, liveSchemas, cloudRegions, moduleInspection }: { resource: Resource; dispatch: Dispatch<Action>; architecture?: Architecture; compactMetadata?: boolean; onManageVariables?: () => void; onRevealResource?:(id:string)=>void; liveSchemas?: LiveSchemaMap; cloudRegions?: Readonly<Partial<Record<'azure' | 'aws' | 'google', HostCloudRegionsPayload>>>; moduleInspection?: ResourceModuleInspectionProps }) {
+export function ResourceFields({ resource, dispatch, architecture, compactMetadata = false, onManageVariables, onRevealResource, liveSchemas, cloudRegions, moduleInspection, hasSource, onOpenSource }: { resource: Resource; dispatch: Dispatch<Action>; architecture?: Architecture; compactMetadata?: boolean; onManageVariables?: () => void; onRevealResource?:(id:string)=>void; liveSchemas?: LiveSchemaMap; cloudRegions?: Readonly<Partial<Record<'azure' | 'aws' | 'google', HostCloudRegionsPayload>>>; moduleInspection?: ResourceModuleInspectionProps; hasSource?: boolean; onOpenSource?: () => void }) {
 	const typeName = resourceDefinition(resource).type;
 	const liveSchema = liveSchemas?.[typeName];
 	const properties = editableFields(resource, liveSchemas);
@@ -71,7 +71,12 @@ export function ResourceFields({ resource, dispatch, architecture, compactMetada
 				<div className="form-section-body">
 					<SchemaField name="Resource name" value={resource.name} definition={{name:'name',type:'string',description:'The resource name. A variable changes the Terraform value; the identifier stays stable.'}} onChange={value => dispatch({ type:'update', id:resource.id, patch:{name:value} })} {...binding({kind:'name'})}/>
 					<label>Terraform identifier<input readOnly value={resource.terraformName ?? resource.name.replace(/[^A-Za-z0-9_-]/g, '_').replace(/^[^A-Za-z_]/, '_$&')} /></label>
-					<label>File name<input readOnly value="main.tf" /></label>
+					<label>Project Terraform file
+						<div className="source-file-row">
+							<input readOnly value={(resource.sourceFile ?? 'main.tf') + (resource.sourceLine ? ':' + resource.sourceLine : '')} />
+							{hasSource && onOpenSource && <button type="button" className="quiet-button source-file-open" title={'Open ' + (resource.sourceFile ?? 'main.tf') + ' in Code OSS editor'} onClick={onOpenSource}>Open</button>}
+						</div>
+					</label>
 					{architecture&&<label>Parent container<select aria-label="Parent infrastructure container" value={resource.parentId??''} onChange={event=>dispatch({type:'placeResource',id:resource.id,parentId:event.target.value||undefined,mode:'visual'})}><option value="">Canvas · no inheritance</option>{architecture.resources.filter(item=>item.id!==resource.id&&isResourceContainer(item)).map(parent=>{const placement=resourcePlacement(architecture,resource,parent.id);return <option key={parent.id} value={parent.id} disabled={!placement.ok||placement.parentId!==parent.id}>{parent.name} · {resourceDefinition(parent).label}{!placement.ok?' — incompatible':''}</option>;})}</select></label>}
 				</div>
 			</details>

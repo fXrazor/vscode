@@ -16,6 +16,7 @@
 	"command.removeRepository": "Remove from Project",
 	"command.cloneRepositoryAgain": "Clone Again",
 	"command.openCanvas": "Open Architecture Canvas",
+	"command.toggleCanvasFocusMode": "Toggle Canvas Focus Mode",
 	"command.validateArchitecture": "Validate Architecture",
 	"command.cancelValidation": "Cancel Validation Run",
 	"command.exportCanvas": "Export Architecture Diagram / Report…",

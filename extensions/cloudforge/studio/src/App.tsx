@@ -31,7 +31,8 @@ import { resourcePlacement } from './resourceHierarchy.ts';
 import { workflowTemplate } from './workflowTemplate.ts';
 import { createHostBridge, type HostCloudRegionsPayload, type HostDependencyReport, type HostDetectedEngine, type HostDraftSaveError, type HostDraftSavePreview, type HostEngineValidateReport, type HostExportAuditReport, type HostGraphSnapshot, type HostModuleInspection, type HostNotice, type HostValidationRun } from './webviewBridge.ts';
 import type { LiveSchemaMap } from './liveSchema.ts';
-import { buildDraftSavePayload, buildHostViewState, projectGraphSnapshotToArchitecture, projectHostDiagnostics, sanitizeDraftTfFileName } from './serviceAdapter.ts';
+import { buildDraftSavePayload, buildHostViewState, defaultTargetTfFile, projectGraphSnapshotToArchitecture, projectHostDiagnostics, sanitizeDraftTfFileName } from './serviceAdapter.ts';
+import { projectResourceFiles } from './terraformProjection.ts';
 import { DraftSaveDialog } from './DraftSaveDialog.tsx';
 import { presentationSvg } from './exportPresentation.ts';
 
@@ -88,6 +89,7 @@ export function Studio() {
 	const [savePreview, setSavePreview] = useState<HostDraftSavePreview | null>(null);
 	const [saveError, setSaveError] = useState<HostDraftSaveError | null>(null);
 	const [saving, setSaving] = useState(false);
+	const [focusMode, setFocusMode] = useState(false);
 	const architectureRef = useRef(history.present);
 	architectureRef.current = history.present;
 	const hostArchitectureIdRef = useRef<string | null>(null);
@@ -130,7 +132,7 @@ export function Studio() {
 					setHostSnapshot(incoming.graph);
 					setHasSourceById(projected.hasSourceById);
 					setHostNotice(incoming.notice ?? null);
-					setSaveFileName(sanitizeDraftTfFileName(incoming.graph.architectureName));
+					setSaveFileName(defaultTargetTfFile(projected.architecture, incoming.viewState?.selectedId ?? undefined));
 					if (incoming.viewState?.mode) {
 						setMode(incoming.viewState.mode);
 					}
@@ -261,6 +263,9 @@ export function Studio() {
 				case 'exportResult':
 					setMessage(incoming.message);
 					break;
+				case 'focusModeChanged':
+					setFocusMode(incoming.active);
+					break;
 			}
 		});
 		hostBridge.post({ type: 'ready' });
@@ -347,11 +352,12 @@ export function Studio() {
 		hostBridge.post(availableEngine ? { type: 'requestEngineValidate', engine: availableEngine } : { type: 'requestEngineValidate' });
 	}, [hostBridge, availableEngine]);
 
-	const openDraftSave = useCallback(() => {
+	const openDraftSave = useCallback((requestedFileName?: string) => {
 		if (!hostBridge.isHosted) {
 			return;
 		}
-		const payload = buildDraftSavePayload(architecture, saveFileName);
+		const targetFile = requestedFileName ?? defaultTargetTfFile(architecture, selectedId || undefined);
+		const payload = buildDraftSavePayload(architecture, targetFile, selectedId || undefined);
 		setSaveFileName(payload.fileName);
 		setSaveContents(payload.contents);
 		setSavePreview(null);
@@ -359,19 +365,32 @@ export function Studio() {
 		setSaveDialogOpen(true);
 		setSaving(true);
 		hostBridge.post({ type: 'requestDraftSavePreview', fileName: payload.fileName, contents: payload.contents });
-	}, [hostBridge, architecture, saveFileName]);
+	}, [hostBridge, architecture, selectedId]);
 
-	const refreshDraftSavePreview = useCallback(() => {
+	const selectDraftSaveProjectFile = useCallback((nextFileName: string) => {
 		if (!hostBridge.isHosted) {
 			return;
 		}
-		const payload = buildDraftSavePayload(architecture, saveFileName);
+		const payload = buildDraftSavePayload(architecture, nextFileName, selectedId || undefined);
+		setSaveFileName(payload.fileName);
 		setSaveContents(payload.contents);
 		setSavePreview(null);
 		setSaveError(null);
 		setSaving(true);
 		hostBridge.post({ type: 'requestDraftSavePreview', fileName: payload.fileName, contents: payload.contents });
-	}, [hostBridge, architecture, saveFileName]);
+	}, [hostBridge, architecture, selectedId]);
+
+	const refreshDraftSavePreview = useCallback(() => {
+		if (!hostBridge.isHosted) {
+			return;
+		}
+		const payload = buildDraftSavePayload(architecture, saveFileName, selectedId || undefined);
+		setSaveContents(payload.contents);
+		setSavePreview(null);
+		setSaveError(null);
+		setSaving(true);
+		hostBridge.post({ type: 'requestDraftSavePreview', fileName: payload.fileName, contents: payload.contents });
+	}, [hostBridge, architecture, saveFileName, selectedId]);
 
 	const applyHostDraftSave = useCallback(() => {
 		if (!hostBridge.isHosted || !savePreview) {
@@ -468,6 +487,7 @@ export function Studio() {
 		};
 		const resource:Resource = {
 			id, kind, provider, name: 'new-' + kind + '-' + (resourceCount + 1),
+			...(hostSnapshot ? { sourceFile: defaultTargetTfFile(architecture, selectedId || undefined) } : {}),
 			region: providerRegions[provider][0], settings: { ...definition.defaults },
 			blocks: [],
 			positions: { visual: placed, technical: placed }
@@ -484,7 +504,7 @@ export function Studio() {
   const bounds = document.querySelector('.canvas')?.getBoundingClientRect();
   const placed = position ?? (flow && bounds ? flow.screenToFlowPosition({ x: bounds.x+bounds.width/2, y:bounds.y+bounds.height/2 }) : { x:100,y:100 });
   const settings = Object.fromEntries(entry.fields.filter(field=>field.required && !['name','location','region'].includes(field.name)).map(field=>[field.name, field.default === undefined ? '' : String(field.default)]));
-  const resource:Resource={ id, kind:'generic', catalogue:entry, provider, name:entry.type.replace(/^(azurerm|aws|google)_/,'')+'_'+id.slice(0,4), region:providerRegions[provider][0], settings, blocks:[], positions:{visual:placed,technical:placed} };
+  const resource:Resource={ id, kind:'generic', catalogue:entry, provider, name:entry.type.replace(/^(azurerm|aws|google)_/,'')+'_'+id.slice(0,4), ...(hostSnapshot ? { sourceFile: defaultTargetTfFile(architecture, selectedId || undefined) } : {}), region:providerRegions[provider][0], settings, blocks:[], positions:{visual:placed,technical:placed} };
   const placement=resourcePlacement(architecture,resource,parentId);if(!placement.ok){setMessage(placement.reason);return;}resource.parentId=placement.parentId;dispatch({type:'add',resource});
   setSelectedId(id); setOverview(false); setInspectorOpen(true); setInspectorCategory('resources'); setDetailTab('form');
  },[flow,architecture]);
@@ -560,9 +580,11 @@ export function Studio() {
 					isDirty: history.past.length > 0,
 					validating,
 					saving,
+					focusMode,
 					onRefresh: () => hostBridge.post({ type: 'refresh' }),
 					onValidate: runHostValidation,
-					onSaveDraft: openDraftSave,
+					onSaveDraft: () => openDraftSave(),
+					onToggleFocusMode: () => hostBridge.post({ type: 'toggleFocusMode' }),
 					onExportArtifact: exportHostArtifact,
 				} : undefined} />
 			<div className="studio-body">
@@ -611,7 +633,7 @@ export function Studio() {
       ) : selected ? (
 						<>
        {detailTab === 'form' && <div>
-							<ResourceFields resource={selected} dispatch={dispatch} architecture={architecture} liveSchemas={liveSchemas} cloudRegions={hostCloudRegions} moduleInspection={hostBridge.isHosted && hostSnapshot && selected.kind === 'module' ? { loading: !!moduleInspections[selected.name]?.loading, inspection: moduleInspections[selected.name]?.inspection ?? null, error: moduleInspections[selected.name]?.error, onInspect: () => inspectModuleResource(selected.name) } : undefined} onRevealResource={openResource} onManageVariables={()=>{setInspectorCategory('variables');setDetailTab('form');requestAnimationFrame(()=>variablesButton.current?.focus());}} />
+							<ResourceFields resource={selected} dispatch={dispatch} architecture={architecture} liveSchemas={liveSchemas} cloudRegions={hostCloudRegions} moduleInspection={hostBridge.isHosted && hostSnapshot && selected.kind === 'module' ? { loading: !!moduleInspections[selected.name]?.loading, inspection: moduleInspections[selected.name]?.inspection ?? null, error: moduleInspections[selected.name]?.error, onInspect: () => inspectModuleResource(selected.name) } : undefined} hasSource={hostBridge.isHosted && !!hasSourceById[selected.id]} onOpenSource={hostBridge.isHosted ? () => hostBridge.post({ type: 'openSource', nodeId: selected.id }) : undefined} onRevealResource={openResource} onManageVariables={()=>{setInspectorCategory('variables');setDetailTab('form');requestAnimationFrame(()=>variablesButton.current?.focus());}} />
 							<div className="inspector-section"><h3>Connections</h3>
 								<p>{architecture.connections.filter(connection => connection.target === selected.id).length} incoming · {architecture.connections.filter(connection => connection.source === selected.id).length} outgoing</p>
 								<span className="muted">Design relationships</span>
@@ -629,13 +651,13 @@ export function Studio() {
 					) : <div className="empty-inspector"><h2>Select an element</h2><p>Choose a resource, note, text, shape or frame on the canvas.</p></div>}
      </>}
      <div className="variable-container" hidden={inspectorCategory !== 'variables' || detailTab === 'issues'}><VariablePanel architecture={architecture} dispatch={dispatch} code={detailTab === 'code'}/></div>
-     <CodePanel resource={selected} architecture={architecture} dispatch={dispatch} hidden={!inspectorOpen || detailTab !== 'code' || inspectorCategory !== 'resources'} />
+     <CodePanel resource={selected} architecture={architecture} dispatch={dispatch} hidden={!inspectorOpen || detailTab !== 'code' || inspectorCategory !== 'resources'} hasSource={hostBridge.isHosted && !!selected && !!hasSourceById[selected.id]} onOpenSource={hostBridge.isHosted && selected ? () => hostBridge.post({ type: 'openSource', nodeId: selected.id }) : undefined} onSaveFile={hostBridge.isHosted && hostSnapshot ? file => openDraftSave(file) : undefined} />
      </div>
 				</aside>
 			</div>
 			{message&&<div className="studio-action-status" role="status">{message}</div>}<footer className="sr-only"><span>{hostBridge.isHosted ? (hostSnapshot ? 'Connected · rev ' + hostSnapshot.sourceRevision.slice(0, 8) : 'Connecting') : (history.past.length ? 'Modified draft' : 'Original sample') + ' · In-memory preview'}</span></footer>
-			{workspaceResource && <ResourceWorkspace open={workspaceOpen} resource={workspaceResource} architecture={architecture} dispatch={dispatch} liveSchemas={liveSchemas} cloudRegions={hostCloudRegions} moduleInspection={hostBridge.isHosted && hostSnapshot && workspaceResource.kind === 'module' ? { loading: !!moduleInspections[workspaceResource.name]?.loading, inspection: moduleInspections[workspaceResource.name]?.inspection ?? null, error: moduleInspections[workspaceResource.name]?.error, onInspect: () => inspectModuleResource(workspaceResource.name) } : undefined} hostDiagnostics={hostFindings} hasSource={hostBridge.isHosted && !!hasSourceById[workspaceResource.id]} onOpenSource={hostBridge.isHosted ? () => hostBridge.post({ type: 'openSource', nodeId: workspaceResource.id }) : undefined} onNavigate={id=>{setWorkspaceResourceId(id);setSelectedId(id);}} onClose={() => setWorkspaceOpen(false)} />}
-			{hostBridge.isHosted && <DraftSaveDialog open={saveDialogOpen} fileName={saveFileName} contents={saveContents} busy={saving} preview={savePreview} error={saveError} onFileNameChange={setSaveFileName} onRefreshPreview={refreshDraftSavePreview} onApply={applyHostDraftSave} onClose={() => setSaveDialogOpen(false)} />}
+			{workspaceResource && <ResourceWorkspace open={workspaceOpen} resource={workspaceResource} architecture={architecture} dispatch={dispatch} liveSchemas={liveSchemas} cloudRegions={hostCloudRegions} moduleInspection={hostBridge.isHosted && hostSnapshot && workspaceResource.kind === 'module' ? { loading: !!moduleInspections[workspaceResource.name]?.loading, inspection: moduleInspections[workspaceResource.name]?.inspection ?? null, error: moduleInspections[workspaceResource.name]?.error, onInspect: () => inspectModuleResource(workspaceResource.name) } : undefined} hostDiagnostics={hostFindings} hasSource={hostBridge.isHosted && !!hasSourceById[workspaceResource.id]} onOpenSource={hostBridge.isHosted ? () => hostBridge.post({ type: 'openSource', nodeId: workspaceResource.id }) : undefined} onSaveFile={hostBridge.isHosted && hostSnapshot ? file => openDraftSave(file) : undefined} onNavigate={id=>{setWorkspaceResourceId(id);setSelectedId(id);}} onClose={() => setWorkspaceOpen(false)} />}
+			{hostBridge.isHosted && <DraftSaveDialog open={saveDialogOpen} fileName={saveFileName} projectFiles={hostSnapshot ? projectResourceFiles(architecture) : undefined} contents={saveContents} busy={saving} preview={savePreview} error={saveError} onFileNameChange={setSaveFileName} onSelectProjectFile={selectDraftSaveProjectFile} onRefreshPreview={refreshDraftSavePreview} onApply={applyHostDraftSave} onClose={() => setSaveDialogOpen(false)} />}
 			{moduleImportOpen && <ModuleImport onClose={() => setModuleImportOpen(false)} onImport={importModule} />}
 		</div>
 	);

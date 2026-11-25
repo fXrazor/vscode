@@ -22,7 +22,7 @@ import type { Diagnostic } from './diagnostics.ts';
 import { providerRegions, resourceDefinition, resourceTypes } from './fixture.ts';
 import { bindingKey, type ResourceRefBinding } from './fieldBindings.ts';
 import { fitResourceContainers, isResourceContainer, resourceAddress, resourcePlacement } from './resourceHierarchy.ts';
-import { terraformCode } from './terraformProjection.ts';
+import { projectResourceFiles, resourceSourceFile, terraformCode } from './terraformProjection.ts';
 import type {
 	HostCloudRegionsPayload,
 	HostEngineValidateReport,
@@ -166,6 +166,8 @@ function createResourceFromNode(node: HostNodeSummary, fallbackPosition: Positio
 		provider,
 		name: node.name,
 		terraformName: node.name,
+		...(node.sourceFile ? { sourceFile: node.sourceFile } : preserved?.sourceFile ? { sourceFile: preserved.sourceFile } : {}),
+		...(node.sourceLine !== undefined ? { sourceLine: node.sourceLine } : preserved?.sourceLine !== undefined ? { sourceLine: preserved.sourceLine } : {}),
 		...(node.label && node.label !== node.name ? { label: node.label } : {}),
 		region: preserved?.region ?? providerRegions[provider][0],
 		settings: preserved ? { ...defaultSettings, ...preserved.settings } : defaultSettings,
@@ -626,14 +628,42 @@ export function sanitizeDraftTfFileName(architectureName: string): string {
 	return `${slug || 'cloudforge-studio'}.tf`;
 }
 
-/** Generate a guarded `.tf` draft payload from Studio's single `Architecture` model. */
-export function buildDraftSavePayload(architecture: Architecture, fileName?: string): { readonly fileName: string; readonly contents: string } {
+/** Resolve the default `.tf` project file corresponding to the active selection or architecture. */
+export function defaultTargetTfFile(architecture: Architecture, selectedResourceId?: string): string {
+	if (selectedResourceId) {
+		const selected = architecture.resources.find(item => item.id === selectedResourceId);
+		if (selected?.sourceFile) {
+			return resourceSourceFile(selected);
+		}
+	}
+	const explicitFiles = architecture.resources
+		.map(resource => resource.sourceFile)
+		.filter((file): file is string => !!file && !file.startsWith('.') && /^[A-Za-z0-9._-]+\.tf$/i.test(file));
+	if (explicitFiles.includes('main.tf')) {
+		return 'main.tf';
+	}
+	if (explicitFiles.length > 0) {
+		return explicitFiles[0];
+	}
+	return sanitizeDraftTfFileName(architecture.name);
+}
+
+/** Generate a guarded `.tf` draft payload scoped to the corresponding project `.tf` file. */
+export function buildDraftSavePayload(
+	architecture: Architecture,
+	fileName?: string,
+	selectedResourceId?: string
+): { readonly fileName: string; readonly contents: string } {
 	const safeName = fileName && /^[A-Za-z0-9._-]+\.tf$/i.test(fileName) && !fileName.startsWith('.')
 		? fileName
-		: sanitizeDraftTfFileName(architecture.name);
+		: defaultTargetTfFile(architecture, selectedResourceId);
+	const files = projectResourceFiles(architecture);
+	const contents = files.includes(safeName)
+		? terraformCode(architecture, undefined, safeName)
+		: terraformCode(architecture);
 	return {
 		fileName: safeName,
-		contents: terraformCode(architecture),
+		contents,
 	};
 }
 

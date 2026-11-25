@@ -10,6 +10,21 @@ import { inheritedReferences } from './resourceHierarchy.ts';
 
 type Binding = { path: string[]; target: 'name' | 'region' | 'setting' | 'block'; key: string; blockId?: string; original: string };
 type Projected = { project: Project; bindings: Map<string, Binding[]> };
+const TF_FILE_PATTERN = /^[A-Za-z0-9._-]+\.tf$/i;
+
+export function resourceSourceFile(resource: Pick<Resource, 'sourceFile'>): string {
+	return resource.sourceFile && !resource.sourceFile.startsWith('.') && TF_FILE_PATTERN.test(resource.sourceFile)
+		? resource.sourceFile
+		: 'main.tf';
+}
+
+export function projectResourceFiles(architecture: Architecture): string[] {
+	const files = new Set<string>();
+	for (const resource of architecture.resources) {
+		files.add(resourceSourceFile(resource));
+	}
+	return [...files].sort((a, b) => a === 'main.tf' ? -1 : b === 'main.tf' ? 1 : a.localeCompare(b));
+}
 const identifier = (name: string) => /^[A-Za-z_]/.test(name) ? name.replace(/[^A-Za-z0-9_-]/g, '_') : '_' + name.replace(/[^A-Za-z0-9_-]/g, '_');
 const regionCode = (name: string) => name.toLowerCase().replace(/\s/g, '');
 function set(config: Record<string, Value>, path: string[], value: Value) {
@@ -54,7 +69,7 @@ export function projectTerraform(architecture: Architecture): Projected {
 		const node: ArchNode = { id: resource.id, kind: resource.kind === 'module' ? 'module' : 'resource', type: metadata.type,
 			parentId:resource.parentId,
 			name: resource.terraformName ?? identifier(resource.name), label: resource.name, x: resource.positions.visual.x, y: resource.positions.visual.y,
-			w: 112, h: 92, config: {}, optional: [], file: 'main.tf', extra: { depends_on: [], lifecycle: {} }, outputs: [], hiddenRefs: [] };
+			w: 112, h: 92, config: {}, optional: [], file: resourceSourceFile(resource), extra: { depends_on: [], lifecycle: {} }, outputs: [], hiddenRefs: [] };
 		if (resource.kind === 'module') { node.moduleId = 'custom'; node.module = { source: resource.settings.Source ?? '', version: resource.settings.Version === 'Unpinned' ? '' : resource.settings.Version ?? '', inputs: {} }; }
 		else {
 			if (!def || def.attributes.some(attr => attr.name === 'name')) { node.config.name = resolve({ kind: 'name' }, resource.name); list.push({ path: ['name'], target: 'name', key: 'name', original: resource.name }); }
@@ -90,10 +105,27 @@ export function projectTerraform(architecture: Architecture): Projected {
 	return { project, bindings };
 }
 
-export function terraformCode(architecture: Architecture, resourceId?: string): string {
+export function terraformCode(architecture: Architecture, resourceId?: string, fileName?: string): string {
 	const { project } = projectTerraform(architecture);
 	const node = project.nodes.find(node => node.id === resourceId);
-	return node ? nodeBlock(project, node) : generate(project).files['main.tf'] ?? '# No resources in this architecture.\n';
+	if (node) {
+		return nodeBlock(project, node);
+	}
+	const files = generate(project).files;
+	if (fileName) {
+		if (files[fileName]) {
+			return files[fileName];
+		}
+		return files['main.tf'] ?? '# No resources in ' + fileName + '.\n';
+	}
+	const resourceFiles = projectResourceFiles(architecture);
+	if (resourceFiles.length <= 1) {
+		return files[resourceFiles[0] ?? 'main.tf'] ?? '# No resources in this architecture.\n';
+	}
+	return resourceFiles
+		.map(file => files[file] ? `# --- ${file} ---\n${files[file].trimEnd()}` : '')
+		.filter(Boolean)
+		.join('\n\n') + '\n';
 }
 
 function leafPaths(value: Value, path: string[] = []): string[][] {

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { Architecture, DesignMode } from './model.ts';
 import { exportPresentation } from './exportPresentation.ts';
-import { Download, PanelLeft, PanelRight, Pencil, Waypoints, Moon, Sun, Undo2, Redo2, Menu, RefreshCw, ShieldCheck, Save } from 'lucide-react';
+import { Download, PanelLeft, PanelRight, Pencil, Waypoints, Moon, Sun, Undo2, Redo2, Menu, RefreshCw, ShieldCheck, Save, Maximize2, Minimize2 } from 'lucide-react';
 import type { HostNotice } from './webviewBridge.ts';
 
 export interface TopbarHostProps {
@@ -12,9 +12,11 @@ export interface TopbarHostProps {
 	readonly isDirty: boolean;
 	readonly validating: boolean;
 	readonly saving: boolean;
+	readonly focusMode?: boolean;
 	readonly onRefresh: () => void;
 	readonly onValidate: () => void;
 	readonly onSaveDraft: () => void;
+	readonly onToggleFocusMode?: () => void;
 	readonly onExportArtifact?: (format: 'svg' | 'png') => void;
 }
 
@@ -43,6 +45,7 @@ export function VisualTopbar({ mode, onMode, architecture, name, onRename, onTec
    {host?.isHosted && <button aria-label="Refresh from workspace" title="Refresh from workspace" onClick={host.onRefresh}><RefreshCw size={15} /></button>}
    {host?.isHosted && <button aria-label="Validate architecture" title={host.sourceRevision ? 'Validate architecture with CloudForge service' : 'Open an architecture in CloudForge Project to validate'} disabled={host.validating || !host.sourceRevision} onClick={host.onValidate}><ShieldCheck size={15} /></button>}
    {host?.isHosted && host.sourceRevision && host.isDirty && <button className="shell-save-button" aria-label="Preview and save Terraform draft" title="Preview and save Terraform draft" disabled={host.saving} onClick={host.onSaveDraft}><Save size={14} /><span>{host.saving ? 'Previewing…' : 'Save'}</span></button>}
+   {host?.isHosted && host.onToggleFocusMode && <button className={host.focusMode ? 'shell-focus-button is-active' : 'shell-focus-button'} aria-label={host.focusMode ? 'Exit Canvas Focus Mode' : 'Focus Canvas (Full Screen)'} title={host.focusMode ? 'Exit Canvas Focus Mode (Ctrl+Alt+F)' : 'Focus Canvas — full-screen workspace (Ctrl+Alt+F)'} aria-pressed={!!host.focusMode} onClick={host.onToggleFocusMode}>{host.focusMode ? <><Minimize2 size={14} /><span>Exit Focus</span></> : <Maximize2 size={15} />}</button>}
    <button aria-label="Undo" disabled={!revisions} onClick={onUndo}><Undo2 /></button>
    <button aria-label="Redo" disabled={!canRedo} onClick={onRedo}><Redo2 /></button>
    <button aria-label="Toggle resource library" title={libraryOpen?'Hide resource library':'Show resource library'} aria-controls="resource-library" aria-expanded={libraryOpen} aria-pressed={libraryOpen} onClick={onToggleLibrary}><PanelLeft /></button>
@@ -63,6 +66,7 @@ export function VisualTopbar({ mode, onMode, architecture, name, onRename, onTec
    {host?.isHosted && <button onClick={host.onRefresh}>Refresh from workspace</button>}
    {host?.isHosted && <button disabled={host.validating || !host.sourceRevision} onClick={host.onValidate}>Validate architecture</button>}
    {host?.isHosted && host.sourceRevision && host.isDirty && <button disabled={host.saving} onClick={host.onSaveDraft}>Preview and save Terraform draft</button>}
+   {host?.isHosted && host.onToggleFocusMode && <button aria-pressed={!!host.focusMode} onClick={host.onToggleFocusMode}>{host.focusMode ? 'Exit Canvas Focus Mode' : 'Focus Canvas (Full Screen)'}</button>}
    <button disabled={!revisions} onClick={onUndo}>Undo</button><button disabled={!canRedo} onClick={onRedo}>Redo</button>
    <button aria-expanded={libraryOpen} onClick={onToggleLibrary}>{libraryOpen?'Hide':'Show'} resource library</button><button aria-expanded={inspectorOpen} onClick={onToggleInspector}>{inspectorOpen?'Hide':'Show'} resource inspector</button><button onClick={onIssues}>Local checks · {errors} errors · {warnings} warnings</button>
    <button onClick={() => onMode('visual')}>Architecture view</button><button onClick={onTechnical}>Configuration view</button>

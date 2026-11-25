@@ -256,6 +256,8 @@ export interface CanvasNodeSummary {
 	readonly name: string;
 	readonly label: string;
 	readonly hasSource: boolean;
+	readonly sourceFile?: string;
+	readonly sourceLine?: number;
 }
 
 export interface CanvasEdgeSummary {
@@ -402,6 +404,10 @@ export type ExtensionToWebviewMessage =
 		readonly type: 'exportResult';
 		readonly ok: boolean;
 		readonly message: string;
+	}
+	| {
+		readonly type: 'focusModeChanged';
+		readonly active: boolean;
 	};
 
 export type WebviewToExtensionMessage =
@@ -409,6 +415,7 @@ export type WebviewToExtensionMessage =
 	| { readonly type: 'selectNode'; readonly nodeId: string | null }
 	| { readonly type: 'openSource'; readonly nodeId: string }
 	| { readonly type: 'refresh' }
+	| { readonly type: 'toggleFocusMode'; readonly active?: boolean }
 	| { readonly type: 'viewState'; readonly state: CanvasViewState }
 	| { readonly type: 'requestValidation'; readonly scope: 'architecture' | 'resource'; readonly nodeId?: string }
 	| { readonly type: 'cancelValidation' }
@@ -799,6 +806,11 @@ export function parseWebviewMessage(value: unknown): WebviewToExtensionMessage |
 			return { type: 'ready' };
 		case 'refresh':
 			return { type: 'refresh' };
+		case 'toggleFocusMode':
+			if (value.active !== undefined && typeof value.active !== 'boolean') {
+				return undefined;
+			}
+			return value.active === undefined ? { type: 'toggleFocusMode' } : { type: 'toggleFocusMode', active: value.active };
 		case 'selectNode':
 			if (value.nodeId === null) {
 				return { type: 'selectNode', nodeId: null };

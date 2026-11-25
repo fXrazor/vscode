@@ -91,6 +91,8 @@ export interface CanvasPanelHost {
 		encoding: 'utf8' | 'base64'
 	): Promise<{ readonly ok: boolean; readonly message: string }>;
 	onUseTemplateAsArchitecture?(templateId: string): Promise<void>;
+	onToggleFocusMode?(active?: boolean): Promise<boolean>;
+	isFocusModeActive?(): boolean;
 }
 
 /**
@@ -182,6 +184,14 @@ export class CloudForgeCanvasPanel implements Disposable {
 		this.post({ type: 'notice', notice });
 	}
 
+	/** Synchronizes Canvas Focus Mode state into the open canvas topbar. */
+	setFocusMode(active: boolean): void {
+		if (!this.panel || !this.ready) {
+			return;
+		}
+		this.post({ type: 'focusModeChanged', active });
+	}
+
 	/** Triggers a validation run inside the Architecture Canvas Webview. */
 	triggerValidation(graph: CanvasGraphSnapshot | undefined, scope: 'architecture' | 'resource' = 'architecture', nodeId?: string): void {
 		if (!this.panel) {
@@ -267,6 +277,9 @@ export class CloudForgeCanvasPanel implements Disposable {
 				this.pendingOpenExport = false;
 				this.pendingOpenTemplates = false;
 				void this.host.onCancelValidation?.();
+				if (this.host.isFocusModeActive?.()) {
+					void this.host.onToggleFocusMode?.(false);
+				}
 			}
 		});
 		return panel;
@@ -281,6 +294,7 @@ export class CloudForgeCanvasPanel implements Disposable {
 			case 'ready':
 				this.ready = true;
 				this.postCurrentState();
+				this.post({ type: 'focusModeChanged', active: !!this.host.isFocusModeActive?.() });
 				if (this.host.onLoadCatalogueSnapshots) {
 					void this.host.onLoadCatalogueSnapshots().then(snapshots => {
 						if (this.ready && snapshots.length > 0) {
@@ -331,6 +345,15 @@ export class CloudForgeCanvasPanel implements Disposable {
 					await this.host.onRefresh(this.graph.workspaceId, this.graph.architectureId);
 				}
 				return;
+			case 'toggleFocusMode': {
+				if (this.host.onToggleFocusMode) {
+					const active = await this.host.onToggleFocusMode(message.active);
+					if (this.panel && this.ready) {
+						this.post({ type: 'focusModeChanged', active });
+					}
+				}
+				return;
+			}
 			case 'requestValidation': {
 				const graph = this.graph;
 				if (!graph) {
@@ -513,6 +536,12 @@ export class CloudForgeCanvasPanel implements Disposable {
 				const graph = this.graph;
 				if (!graph) {
 					return;
+				}
+				if (this.host.isFocusModeActive?.() && this.host.onToggleFocusMode) {
+					const active = await this.host.onToggleFocusMode(false);
+					if (this.panel && this.ready) {
+						this.post({ type: 'focusModeChanged', active });
+					}
 				}
 				const errorCode = await this.host.onOpenSource(graph.workspaceId, graph.architectureId, graph.sourceRevision, message.nodeId);
 				if (errorCode === 'STALE_SOURCE') {
