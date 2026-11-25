@@ -80,6 +80,21 @@ Keyboard follow-up (same afternoon):
 
 Verified by keyboard walk: Enter on a selected VM opens the workspace (native modal `<dialog>`, focus stays inside). Ctrl+M → Tab leaves the editor. Escape closes and returns focus to the canvas. Enter on a focused edge opens the tools with focus on Close, Tab walks Label → Path → Style → Weight → Colour, and Escape returns to the canvas. 0 page errors; matrix rerun clean; 81/81 tests.
 
+## Whiteboard pass (same branch, 25 November, 15:00)
+
+Dale asked to leave the Windows Playwright run and build canvas features instead. The Edge run was stopped before it reported; `scripts/hosted-refresh-verify.mjs` still passes 20/20 on Linux.
+
+| Feature | How it works | Files |
+| --- | --- | --- |
+| **Equal-spacing guides** | While dragging, an element snaps to sit centred between its row/column neighbours, or to repeat a gap that already exists in that row/column (6 screen px). Gaps show as amber spans with end caps. Per axis, the closer of edge/centre alignment and equal spacing wins. Uses the existing "Alignment guides" toggle; grid snap still takes precedence | `alignmentGuides.ts` (`spacingSnap`), `AlignmentGuides.tsx`, `styles.css` |
+| **Drag-to-resize a multi-selection** | With 2+ unlocked elements selected, a dashed selection box shows a corner handle. Dragging previews the box and a live % label, then commits one `resize` command (one undo step), anchored at the top-left like the Size menu, clamped 25–400% | `SelectionResizeHandle.tsx`, `selectionGeometry.ts` (`dragScale`), `DesignCanvas.tsx` |
+| **Freehand pen** | New tool rail button (Pen, shortcut **P**). Each stroke becomes one `ink` drawing (`BoardItem.kind = 'ink'`, `path` in a 0–100 viewBox so it stretches on resize). Wheel zoom works while drawing; Escape or V leaves pen mode. Appearance offers pen colour, weight, line style and opacity. Ink exports to SVG; it never reaches Terraform | `ink.ts`, `InkCapture.tsx`, `model.ts`, `ResourceNode.tsx`, `ElementAppearance.tsx`, `exportPresentation.ts`, `SelectionControls.tsx`, `App.tsx` |
+| Tests | `alignmentGuides.test.ts` (4), `ink.test.ts` (4), `canvasResize.test.ts` (+1) | `package.json` |
+
+Verified: check, build, **91/91** tests. Playwright against the preview (1360×860): a stroke made one ink drawing, wheel zoom worked in pen mode, Escape left pen mode, the caption read "Drawing", Ctrl+Z removed it. Ctrl+A showed the handle, dragging showed "108%", release resized, Ctrl+Z restored exact widths. 0 console/page errors.
+
+Known limits: the resize box spans every selected element, including containers that do not scale, so its preview can overstate the change. Only the bottom-right corner is a handle. Pen colour/weight are set after drawing, not before.
+
 ## Verification (this pass, Linux cloud container)
 
 - Studio `check`, `build`: passed. Studio `test`: **81/81 passed**.
@@ -95,7 +110,7 @@ Verified by keyboard walk: Enter on a selected VM opens the workspace (native mo
 
 1. On Windows: run `studio-host-bridge-verify.mjs` and a live Code OSS session. Edit, save, wait for the refresh, then press Ctrl+Z: the edit should undo and the badge should read clean after the save. Check that drawing links and groups survive the refresh.
 2. ~~Fix the selection-toolbar / View-button overlap, refit at 1024 px, library tooltips, keyboard route to the toolbar~~ (done in the polish passes). Keyboard polish is complete for the canvas, selection toolbar, workspace and connector tools.
-3. Remaining whiteboard gaps, one bounded pass each: drag handles for multi-object resize (this pass added only menu-driven resize), rotation, freehand, free connector endpoints, equal-spacing guides.
+3. Remaining whiteboard gaps, one bounded pass each: rotation, free connector endpoints, all-corner resize handles, a pen colour picker before drawing. (Multi-object drag resize, freehand pen and equal-spacing guides are done.)
 4. Then the wider backlog: making Studio the default engine after a parity check against Classic; Stage 9B plan capture once Rust adds it; arbitrary HCL round-trip; authoritative validation and pricing; collaboration.
 
 Keep the rules in the repository AGENTS.md: one architecture and one semantic undo history across renderers; theme and viewport stay in presentation state; canvas first; Rust owns authorization and guarded I/O.

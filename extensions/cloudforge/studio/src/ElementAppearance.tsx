@@ -7,10 +7,20 @@ import { Bold, Italic, Underline } from 'lucide-react';
 import type { Action, BoardItem } from './model.ts';
 import type { TextAppearance } from './canvasOperations.ts';
 import { shapeDefinitions } from './shapes.ts';
+import { inkDefaults } from './ink.ts';
 
 export function ElementAppearance({ item, ids, dispatch }: { item: BoardItem; ids: string[]; dispatch: Dispatch<Action> }) {
 	const style = (patch: Partial<TextAppearance>) => dispatch({ type:'canvas',command:{kind:'style',ids,patch} });
 	const single = ids.length === 1;
+	if (item.kind === 'ink') {
+		return <div className="element-appearance-grid">
+			<label>Pen colour<input aria-label="Pen colour" type="color" value={item.strokeColor ?? inkDefaults.strokeColor} onChange={event=>style({strokeColor:event.target.value})}/></label>
+			<label>Pen weight<select aria-label="Pen weight" value={item.strokeWidth ?? inkDefaults.strokeWidth} onChange={event=>style({strokeWidth:Number(event.target.value)})}>{[1,2,3,4,6,8,12].map(width=><option key={width}>{width}</option>)}</select></label>
+			<label>Line style<select aria-label="Pen line style" value={item.strokeStyle??'solid'} onChange={event=>style({strokeStyle:event.target.value as BoardItem['strokeStyle']})}><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select></label>
+			<label>Opacity<select aria-label="Element opacity" value={item.opacity??1} onChange={event=>style({opacity:Number(event.target.value)})}>{[1,.75,.5,.25].map(value=><option key={value} value={value}>{value*100}%</option>)}</select></label>
+			{!single && <p className="appearance-wide field-help">Applies to all selected drawings. Controls show the first drawing’s values.</p>}
+		</div>;
+	}
 	return <div className="element-appearance-grid">
 		{single && <label className="appearance-wide">Text<textarea aria-label="Element text" rows={2} value={item.text} onChange={event=>dispatch({type:'updateItem',id:item.id,patch:{text:event.target.value}})}/></label>}
 		{single && item.kind === 'shape' && <label>Shape<select aria-label="Shape type" value={item.shape??'rectangle'} onChange={event=>dispatch({type:'updateItem',id:item.id,patch:{shape:event.target.value as BoardItem['shape']}})}>{shapeDefinitions.map(shape=><option key={shape.id} value={shape.id}>{shape.label}</option>)}</select></label>}

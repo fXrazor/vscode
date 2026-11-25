@@ -60,12 +60,12 @@ export function SelectionControls({ architecture, ids, dispatch, run, hasClipboa
  const resource = selected.length === 1 ? architecture.resources.find(item => item.id === ids[0]) : undefined;
  const grouped = architecture.groups?.find(group => group.members.some(id => ids.includes(id)));
  const units = selectionUnits(architecture, ids).length;
- const label = grouped?.label ?? (selected.length > 1 ? selected.length + ' elements' : first ? first.kind === 'note' ? 'Sticky note' : first.kind === 'frame' ? 'Frame' : first.kind === 'shape' ? 'Shape' : 'Text' : resource?.label || resource?.name || 'Resource');
+ const label = grouped?.label ?? (selected.length > 1 ? selected.length + ' elements' : first ? first.kind === 'note' ? 'Sticky note' : first.kind === 'frame' ? 'Frame' : first.kind === 'shape' ? 'Shape' : first.kind === 'ink' ? 'Drawing' : 'Text' : resource?.label || resource?.name || 'Resource');
  return <section className="selection-controls nodrag nopan" aria-label="Selection controls" aria-keyshortcuts="Alt+F10"
   onKeyDown={event => { if (event.key === 'Escape' && !(event.target as HTMLElement).closest('[role="menu"]')) { event.preventDefault(); event.stopPropagation(); container?.focus(); } }}>
   <span className="selection-caption" title={label + ' · Alt+F10 to reach these controls from the canvas'}>{label}</span>
   <div className="selection-quick-actions" role="toolbar" aria-label="Selection actions">
-   {!locked && selected.length === 1 && <button onClick={() => run('edit')} title={resource ? 'Configure resource' : 'Edit text (Enter)'}><Pencil size={14}/>{resource ? 'Configure' : 'Edit text'}</button>}
+   {!locked && selected.length === 1 && first?.kind !== 'ink' && <button onClick={() => run('edit')} title={resource ? 'Configure resource' : 'Edit text (Enter)'}><Pencil size={14}/>{resource ? 'Configure' : 'Edit text'}</button>}
    {!locked && allDrawings && <ContextPopover label="Appearance" icon={<SlidersHorizontal size={14}/>} container={container}><ElementAppearance item={first} ids={ids} dispatch={dispatch}/></ContextPopover>}
    {resource && <button aria-label="Open resource inspector" title="Quick edit in inspector" onClick={() => onInspect(resource.id)}><PanelRight size={15}/></button>}
    {resource && !isResourceContainer(resource) && mode === 'visual' && !locked && <select aria-label="Resource icon size" title="Icon size" value={resourceIconSize(resource)} onChange={event => dispatch({type:'resizeResource',id:resource.id,position:resource.positions.visual,iconSize:Number(event.target.value)})}>

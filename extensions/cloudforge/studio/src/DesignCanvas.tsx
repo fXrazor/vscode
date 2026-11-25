@@ -10,7 +10,9 @@ import { canConnect } from './designConnections.ts';
 import { memo, useEffect, useMemo, useRef, useState, type Dispatch, type RefObject, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { canvasElements, expandGroups, sceneOrder, selectionFragment } from './canvasOperations.ts';
 import { layoutSelection, type Alignment } from './selectionGeometry.ts';
-import { CanvasActionMenu, SelectionControls, type SelectionAction } from './SelectionControls.tsx';
+import { CanvasActionMenu, SelectionControls, resizable, type SelectionAction } from './SelectionControls.tsx';
+import { SelectionResizeHandle } from './SelectionResizeHandle.tsx';
+import { InkCapture } from './InkCapture.tsx';
 import { resourceIconSize } from './resourceGeometry.ts';
 import { inheritedDependencies, isResourceContainer, resourceAncestors, resourceDescendants, resourceDimensions, resourcePlacement } from './resourceHierarchy.ts';
 import { architectureDiagnostics } from './diagnostics.ts';
@@ -24,7 +26,7 @@ import {
 import { BoardNode, ResourceNode, type CanvasNode } from './ResourceNode.tsx';
 import type { Action, Architecture, BoardItem, DesignMode, Provider, ResourceKind, Position } from './model.ts';
 import { resourceDefinition, resourceTypes, providerNames } from './fixture.ts';
-import { MousePointer2, SquareDashedMousePointer, Hand, Type, StickyNote, Shapes, Frame, Minus, Plus, Scan, Cable } from 'lucide-react';
+import { MousePointer2, SquareDashedMousePointer, Hand, Type, StickyNote, Shapes, Frame, Minus, Plus, Scan, Cable, PenLine } from 'lucide-react';
 
 const nodeTypes = { resource: ResourceNode, board: BoardNode };
 const edgeTypes = { design: DesignEdge };
@@ -73,6 +75,7 @@ export const DesignCanvas = memo(function DesignCanvas({
 	const [guides, setGuides] = useState(true);
 	const [guideLines, setGuideLines] = useState<GuideLine[]>([]);
 	const [hand, setHand] = useState(false);
+	const [pen, setPen] = useState(false);
 	const [additiveSelection, setAdditiveSelection] = useState(false);
 	const [minimap, setMinimap] = useState(false);
 	const [zoom, setZoom] = useState(1);
@@ -127,7 +130,7 @@ export const DesignCanvas = memo(function DesignCanvas({
 			height: item.height
 		},
 		zIndex: item.kind === 'frame' ? -1 : 1,
-		ariaLabel: item.kind + ', ' + item.text
+		ariaLabel: item.kind === 'ink' ? 'Freehand drawing' : item.kind + ', ' + item.text
 	})), [architecture.items, mode, dispatch, editRequest]);
 
 	const displayNodes = useMemo(() => [...boardNodes, ...resourceNodes].map(node => ({
@@ -247,7 +250,10 @@ export const DesignCanvas = memo(function DesignCanvas({
 	function handleKeys(event: ReactKeyboardEvent<HTMLElement>) {
 		const target = event.target as HTMLElement;
 		const mod = event.ctrlKey || event.metaKey; const key = event.key.toLowerCase(); let action: SelectionAction | undefined;
-		if (target.closest('input, textarea, select, [contenteditable="true"], [role="menu"], [role="dialog"]') || (!mod && target.closest('button, summary'))) { return; }
+		if (target.closest('input, textarea, select, [contenteditable="true"], [role="menu"], [role="dialog"]')) { return; }
+		// Escape leaves pen mode even while focus is still on the Pen button.
+		if (pen && key === 'escape') { event.preventDefault(); event.stopPropagation(); setPen(false); return; }
+		if (!mod && target.closest('button, summary')) { return; }
 		const edgeId = target.closest<SVGElement>('.react-flow__edge')?.dataset.id;
 		const dependency = dependencies.find(item=>item.id===edgeId);
 		if(dependency){if(key==='enter'||key===' '){event.preventDefault();onOpen(dependency.target);}else if(key==='delete'||key==='backspace'){event.preventDefault();}return;}
@@ -278,7 +284,7 @@ export const DesignCanvas = memo(function DesignCanvas({
 			const ids = expandGroups(architecture, selectedIds);
 			const positions = Object.fromEntries(canvasElements(architecture).filter(item => ids.includes(item.id)).map(item => [item.id, { x: item.positions[mode].x + dx, y: item.positions[mode].y + dy }]));
 			event.preventDefault(); event.stopPropagation(); dispatch({ type: 'canvas', command: { kind: 'move', mode, positions } }); return;
-		} else if (key === 'v') { setHand(false); } else if (key === 'h') { setHand(true); }
+		} else if (key === 'v') { setHand(false); setPen(false); } else if (key === 'h') { setPen(false); setHand(true); } else if (key === 'p') { setHand(false); setPen(value => !value); }
 		else if (key === 't') { createItem('text'); } else if (key === 'n') { createItem('note'); }
 		if (action) { event.preventDefault(); event.stopPropagation(); run(action); }
 	}
@@ -310,11 +316,12 @@ export const DesignCanvas = memo(function DesignCanvas({
 				} catch { /* Ignore foreign drag payloads. */ }
 			}}>
 			<div className="canvas-tools" role="toolbar" aria-label="Canvas creation tools">
-				<button aria-label="Select tool" title="Select tool" aria-pressed={!hand} onClick={() => setHand(false)}><MousePointer2 /></button>
-				<button aria-label="Pan tool" title="Pan tool (hold Space)" aria-pressed={hand} onClick={() => setHand(true)}><Hand /></button>
+				<button aria-label="Select tool" title="Select tool" aria-pressed={!hand && !pen} onClick={() => { setHand(false); setPen(false); }}><MousePointer2 /></button>
+				<button aria-label="Pan tool" title="Pan tool (hold Space)" aria-pressed={hand} onClick={() => { setPen(false); setHand(true); }}><Hand /></button>
 				<button aria-label="Extend selection" title="Select multiple elements (Ctrl / Cmd + click)" aria-pressed={additiveSelection} onClick={() => { setHand(false); setAdditiveSelection(value => !value); }}><SquareDashedMousePointer /></button>
 				<span className="tool-divider" />
 				<button aria-label="Add text" title="Add text" onClick={() => createItem('text')}><Type /></button>
+				<button aria-label="Draw freehand" title="Pen (P) · draw freehand, Escape to stop" aria-pressed={pen} onClick={() => { setHand(false); setPen(value => !value); }}><PenLine /></button>
 				<button aria-label="Add sticky note" title="Add sticky note" onClick={() => createItem('note')}><StickyNote /></button>
 				<button aria-label="Add shape" title="Add shape" onClick={onOpenShapes}><Shapes /></button>
 				<button aria-label="Add frame" title="Add frame" onClick={() => createItem('frame')}><Frame /></button>
@@ -356,15 +363,17 @@ export const DesignCanvas = memo(function DesignCanvas({
 			>
 				<CanvasBackground grid={grid} />
 				<AlignmentGuides lines={guideLines}/>
+				{!hand && !creatingConnection && selectedIds.length > 1 && !canvasElements(architecture).some(item => selectedIds.includes(item.id) && item.canvasLocked) && resizable(architecture, selectedIds, mode) > 0 && <SelectionResizeHandle ids={selectedIds} onScale={scale => run(('size-' + scale) as SelectionAction)}/>}
 				{minimap && <MiniMap<CanvasNode> pannable zoomable nodeColor={node => node.type === 'board' && node.data.item.kind === 'frame' ? 'transparent' : '#8e79d9'} />}
 				{!creatingConnection && (selectedConnection && showConnections ? <SelectionAnchor ids={[selectedConnection.source,selectedConnection.target]} canvas={bounds}><ConnectionTools connection={selectedConnection} dispatch={dispatch} onClose={() => { setSelectedConnectionId(''); bounds.current?.focus(); }}/></SelectionAnchor> : selectedIds.some(id=>canvasElements(architecture).some(item=>item.id===id)) && <SelectionAnchor ids={selectedIds.filter(id=>canvasElements(architecture).some(item=>item.id===id))} canvas={bounds}><SelectionControls architecture={architecture} ids={selectedIds} dispatch={dispatch} run={run} hasClipboard={hasClipboard} mode={mode} onInspect={onOpen} container={bounds.current}/></SelectionAnchor>)}
 			</ReactFlow>
+			{pen && flow && <InkCapture flow={flow} zoom={zoom} onStroke={(position, size, path, ink) => { const id = crypto.randomUUID(); dispatch({ type: 'addItem', item: { id, kind: 'ink', text: '', path, strokeColor: ink.strokeColor, strokeWidth: ink.strokeWidth, positions: { visual: position, technical: position }, width: size.width, height: size.height, members: [] } }); }}/>}
 			{creatingConnection ? <ConnectionCreate architecture={architecture} selectedId={connectionSourceId} dispatch={dispatch} onClose={() => { setCreatingConnection(false); bounds.current?.querySelector<HTMLButtonElement>('[aria-label="Connect elements"]')?.focus(); }}/> : null}
 			<details className="canvas-options"><summary>View</summary><div className="view-options-content">
 				<label>Theme<select aria-label="Canvas theme" value={theme} onChange={event => onThemeChange(event.target.value as 'light' | 'dark')}><option value="light">Light</option><option value="dark">Dark</option></select></label>
 				<label>Grid<select aria-label="Canvas grid" value={grid} onChange={event => setGrid(event.target.value as typeof grid)}><option value="dots">Dots</option><option value="lines">Lines</option><option value="none">None</option></select></label>
 				<label><input type="checkbox" checked={snap} onChange={event => setSnap(event.target.checked)} />Snap</label>
-				<label title="Align edges and centres within 6 screen pixels. Grid snapping takes precedence."><input type="checkbox" checked={guides} onChange={event => {setGuides(event.target.checked);setGuideLines([]);}} />Alignment guides</label>
+				<label title="Snap to aligned edges and centres, or to equal spacing between neighbours, within 6 screen pixels. Grid snapping takes precedence."><input type="checkbox" checked={guides} onChange={event => {setGuides(event.target.checked);setGuideLines([]);}} />Alignment guides</label>
 				<label><input type="checkbox" checked={showConnections} onChange={event => setShowConnections(event.target.checked)} />Show connections</label>
 				{mode==='technical'&&<label><input type="checkbox" checked={technicalDesignLinks} onChange={event=>setTechnicalDesignLinks(event.target.checked)}/>Include design links</label>}
 				<label><input type="checkbox" checked={allDependencies} onChange={event=>setAllDependencies(event.target.checked)}/>All inherited dependencies</label>

@@ -533,7 +533,7 @@ export function Studio() {
 
 	const addItem = useCallback((kind: BoardItem['kind'], position: Position, caption?:string, shape?: ShapeId) => {
 		const id = crypto.randomUUID();
-		const text = { frame: 'New section', note: 'Add an architecture note', text: 'Architecture annotation', shape: 'Label' }[kind];
+		const text = { frame: 'New section', note: 'Add an architecture note', text: 'Architecture annotation', shape: 'Label', ink: '' }[kind];
 		dispatch({ type: 'addItem', item: {
 			id, kind, shape, text:caption??text, positions: { visual: position, technical: position },
 			width: kind === 'frame' ? 600 : 220, height: kind === 'frame' ? 380 : 140, members: []

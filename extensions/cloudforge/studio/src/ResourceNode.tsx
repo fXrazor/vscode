@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 import { shapeDefinition, shapeStrokeDash } from './shapes.ts';
+import { inkDefaults } from './ink.ts';
 import { DrawingText } from './DrawingText.tsx';
 import { memo } from 'react';
 import { LockKeyhole, TriangleAlert, Variable } from 'lucide-react';
@@ -68,12 +69,13 @@ export const BoardNode = memo(function BoardNode({ data, selected }: NodeProps<B
 	const { item, dispatch } = data;
 	return (
 		<div className={'board-item ' + item.kind + (selected ? ' is-selected' : '')}
-   style={{ background: item.kind === 'shape' ? undefined : item.fill, opacity: item.opacity ?? 1, ...(item.kind !== 'shape' && item.kind !== 'text' ? { borderColor: item.strokeColor, borderWidth: item.strokeWidth, borderStyle: item.strokeStyle } : {}) }}>
+   style={{ background: item.kind === 'shape' || item.kind === 'ink' ? undefined : item.fill, opacity: item.opacity ?? 1, ...(item.kind !== 'shape' && item.kind !== 'text' && item.kind !== 'ink' ? { borderColor: item.strokeColor, borderWidth: item.strokeWidth, borderStyle: item.strokeStyle } : {}) }}>
    {item.kind !== 'frame' && <Handle className="drawing-port" type="target" position={Position.Left} id="input" aria-label="Drawing connection input"/>}
-			<NodeResizer isVisible={selected && !item.canvasLocked} minWidth={140} minHeight={80}
+			<NodeResizer isVisible={selected && !item.canvasLocked} minWidth={item.kind === 'ink' ? 16 : 140} minHeight={item.kind === 'ink' ? 16 : 80}
 				onResizeEnd={(_, size) => dispatch({ type: 'resizeItem', id: item.id, mode: data.mode, position: { x: size.x, y: size.y }, width: size.width, height: size.height })} />
 			{item.kind === 'shape' && <svg className="board-shape-geometry" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path d={shapeDefinition(item.shape).path} fill={item.fill ?? '#eef2ff'} stroke={item.strokeColor ?? '#7565bd'} strokeWidth={item.strokeWidth ?? 1.5} strokeDasharray={shapeStrokeDash(item.strokeStyle, item.strokeWidth)} strokeLinecap="round" vectorEffect="non-scaling-stroke" /></svg>}
-<DrawingText item={item} dispatch={dispatch} editToken={data.editToken}/>{item.canvasLocked && <span className="drawing-lock"><LockKeyhole size={12}/></span>}
+{item.kind === 'ink' && <svg className="board-ink-geometry" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path d={item.path} fill="none" stroke={item.strokeColor ?? inkDefaults.strokeColor} strokeWidth={item.strokeWidth ?? inkDefaults.strokeWidth} strokeDasharray={shapeStrokeDash(item.strokeStyle, item.strokeWidth)} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" /></svg>}
+{item.kind !== 'ink' && <DrawingText item={item} dispatch={dispatch} editToken={data.editToken}/>}{item.canvasLocked && <span className="drawing-lock"><LockKeyhole size={12}/></span>}
    {item.kind !== 'frame' && <Handle className="drawing-port" type="source" position={Position.Right} id="output" aria-label="Drawing connection output"/>}
 		</div>
 	);

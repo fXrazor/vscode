@@ -1,4 +1,5 @@
 import { shapeDefinition, shapeTextColor, shapeStrokeDash } from './shapes.ts';
+import { inkDefaults } from './ink.ts';
 import { connectionPath, connectionDash } from './connectionGeometry.ts';
 import { connectionAnchor } from './designConnections.ts';
 import type { Architecture, BoardItem } from './model.ts';
@@ -12,6 +13,12 @@ const escape = (value: string) => value.replace(/[&<>"']/g, character => ({ '&':
 /** Portable SVG text with explicit line positions; no HTML foreignObject dependency. */
 function drawingMarkup(item: BoardItem): string {
 	const { x, y } = item.positions.visual;
+	if (item.kind === 'ink') {
+		// Path data is built by ink.ts; only path commands and numbers are allowed through.
+		const path = /^[MLQl0-9 .\-]*$/.test(item.path ?? '') ? item.path ?? '' : '';
+		const width = item.strokeWidth ?? inkDefaults.strokeWidth; const inkDash = shapeStrokeDash(item.strokeStyle ?? 'solid', width);
+		return `<g data-element="${escape(item.id)}" aria-label="Freehand drawing" transform="translate(${x},${y})" opacity="${item.opacity ?? 1}"><svg width="${item.width}" height="${item.height}" viewBox="0 0 100 100" preserveAspectRatio="none" overflow="visible"><path d="${path}" fill="none" stroke="${escape(item.strokeColor ?? inkDefaults.strokeColor)}" stroke-width="${width}" ${inkDash ? `stroke-dasharray="${inkDash}"` : ''} stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg></g>`;
+	}
 	const fill = item.fill ?? (item.kind === 'note' ? '#fff0b5' : item.kind === 'shape' ? '#eef2ff' : 'transparent');
 	const fontSize = item.fontSize ?? (item.kind === 'text' ? 20 : item.kind === 'frame' ? 12 : 16);
 	const insetX = item.kind === 'shape' ? item.width * 0.18 : item.kind === 'frame' ? 0 : 18;

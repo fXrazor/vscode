@@ -154,6 +154,12 @@ h1 { font-size: 19px; font-weight: 650; letter-spacing: -0.4px; display: flex; a
 .board-item.shape { border: 2px solid #9a88cc; border-radius: 12px; background: var(--selection); text-align: center; display: grid; place-content: center; font-size: 16px; }
 .board-item.is-selected { outline: 2px solid var(--accent); outline-offset: 3px; }
 .board-item.shape { position: relative; border: 0; border-radius: 0; padding: 0; background: transparent; }
+.board-item.ink { position: relative; border: 0; padding: 0; background: transparent; }
+.board-ink-geometry { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+.ink-capture { position: absolute; inset: 0; z-index: 6; cursor: crosshair; touch-action: none; }
+.ink-capture svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+.ink-capture path { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.ink-hint { position: absolute; left: 50%; top: 12px; translate: -50% 0; padding: 4px 10px; border-radius: 999px; background: var(--surface); border: 1px solid var(--border); color: var(--muted); font-size: 12px; pointer-events: none; }
 .board-shape-geometry { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
 .board-shape-label { position: absolute; inset: 28% 22%; display: grid; place-items: center; text-align: center; line-height: 1.3; pointer-events: none; }
 .shape-library { display: flex; flex-direction: column; min-height: 0; height: 100%; color: var(--text); }
@@ -607,6 +613,12 @@ dialog::backdrop { background: #12152488; backdrop-filter: blur(3px); }
 .studio .inspector-content-code > .code-panel { flex: 1; min-height: 0; }
 .alignment-guides { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 4; overflow: hidden; }
 .alignment-guides line { stroke: var(--accent-ink); stroke-width: 1; stroke-dasharray: 4 3; }
+.selection-resize { position: absolute; left: 0; top: 0; box-sizing: border-box; border: 1px dashed var(--accent-ink); pointer-events: none; transform-origin: 0 0; }
+.selection-resize[data-active] { border-style: solid; background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.selection-resize-handle { position: absolute; box-sizing: border-box; background: var(--surface); border: 1.5px solid var(--accent-ink); pointer-events: all; cursor: nwse-resize; touch-action: none; }
+.selection-resize-handle:hover { background: var(--accent); }
+.selection-resize-label { position: absolute; left: 0; background: var(--accent-ink); color: var(--surface); font-variant-numeric: tabular-nums; white-space: nowrap; line-height: 1.4; }
+.alignment-guides .spacing-guide line { stroke: var(--warning); stroke-width: 1.5; stroke-dasharray: none; }
 .studio .design-area { margin:0 0 0 8px; }
 .studio .catalogue-tabs { min-height:40px; height:40px; padding:4px 8px; gap:4px; }
 .studio .catalogue-tabs button { font-size:12px; padding:6px 8px; }

@@ -9,7 +9,7 @@
     "build": "node build.ts",
     "build:webview": "node build.ts --stage-media",
     "check": "tsc --noEmit",
-    "test": "node --test src/model.test.ts src/catalogue.test.ts src/panelLayout.test.ts src/resourceRefs.test.ts src/serviceAdapter.test.ts src/historyRebase.test.ts src/canvasResize.test.ts"
+    "test": "node --test src/model.test.ts src/catalogue.test.ts src/panelLayout.test.ts src/resourceRefs.test.ts src/serviceAdapter.test.ts src/historyRebase.test.ts src/canvasResize.test.ts src/alignmentGuides.test.ts src/ink.test.ts"
   },
   "dependencies": {
     "@radix-ui/react-context-menu": "2.4.1",

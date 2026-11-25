@@ -87,8 +87,10 @@ export interface BoardItem {
 	verticalAlign?: 'top' | 'middle' | 'bottom';
 	opacity?: number;
 	id: string;
-	kind: 'frame' | 'note' | 'text' | 'shape';
+	kind: 'frame' | 'note' | 'text' | 'shape' | 'ink';
 	shape?: ShapeId;
+	/** Freehand stroke for `ink` drawings, in a 0–100 viewBox stretched to the element. */
+	path?: string;
 	strokeColor?: string;
 	strokeWidth?: number;
 	strokeStyle?: 'solid' | 'dashed' | 'dotted';

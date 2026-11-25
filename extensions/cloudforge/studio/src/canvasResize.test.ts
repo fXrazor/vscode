@@ -52,3 +52,12 @@ test('visual resource icons scale within icon limits; technical cards and contai
 		assert.equal(resourceIconSize(scaled.present.resources.find(resource => resource.id === id)!), 160, 'clamped to the icon maximum');
 	}
 });
+
+test('dragging the selection corner gives a proportional scale within limits', async () => {
+	const { dragScale } = await import('./selectionGeometry.ts');
+	const bounds = { x: 0, y: 0, width: 200, height: 100 };
+	assert.equal(dragScale(bounds, 100, 0), 1.5);
+	assert.equal(dragScale(bounds, 0, 100), 2, 'the larger proportional change wins');
+	assert.equal(dragScale(bounds, -500, -500), 0.25);
+	assert.equal(dragScale(bounds, 5000, 0), 4);
+});
