@@ -114,6 +114,7 @@ export class CloudForgeCanvasPanel implements Disposable {
 	private graph: CanvasGraphSnapshot | undefined;
 	private notice: CanvasNotice | null = null;
 	private pendingValidation: { readonly scope: 'architecture' | 'resource'; readonly nodeId?: string } | undefined;
+	private pendingSelectNodeId: string | undefined;
 	private pendingOpenExport = false;
 	private pendingOpenTemplates = false;
 	private readonly disposables: Disposable[] = [];
@@ -180,6 +181,25 @@ export class CloudForgeCanvasPanel implements Disposable {
 			return;
 		}
 		this.post({ type: 'selectNode', nodeId });
+	}
+
+	/** Opens or reveals the Architecture Canvas and selects a specific resource node. */
+	revealNode(graph: CanvasGraphSnapshot | undefined, nodeId: string): void {
+		if (!this.panel) {
+			this.pendingSelectNodeId = nodeId;
+			this.show(graph, false);
+			return;
+		}
+		if (graph) {
+			this.graph = graph;
+			this.panel.title = this.panelTitle(graph);
+		}
+		this.panel.reveal(this.panel.viewColumn ?? ViewColumn.One, false);
+		if (this.ready) {
+			this.post({ type: 'selectNode', nodeId });
+		} else {
+			this.pendingSelectNodeId = nodeId;
+		}
 	}
 
 	/** Displays a stale, unavailable, or coverage notice inside the open canvas. */
@@ -281,6 +301,7 @@ export class CloudForgeCanvasPanel implements Disposable {
 				this.panel = undefined;
 				this.ready = false;
 				this.pendingValidation = undefined;
+				this.pendingSelectNodeId = undefined;
 				this.pendingOpenExport = false;
 				this.pendingOpenTemplates = false;
 				void this.host.onCancelValidation?.();
@@ -302,6 +323,11 @@ export class CloudForgeCanvasPanel implements Disposable {
 				this.ready = true;
 				this.postCurrentState();
 				this.post({ type: 'focusModeChanged', active: !!this.host.isFocusModeActive?.() });
+				if (this.pendingSelectNodeId) {
+					const selectId = this.pendingSelectNodeId;
+					this.pendingSelectNodeId = undefined;
+					this.post({ type: 'selectNode', nodeId: selectId });
+				}
 				if (this.host.onLoadCatalogueSnapshots) {
 					void this.host.onLoadCatalogueSnapshots().then(snapshots => {
 						if (this.ready && snapshots.length > 0) {

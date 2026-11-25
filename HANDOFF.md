@@ -1222,3 +1222,27 @@ Implemented on `fxrazor/auto-open-and-stage3-4` in `Z:\CloudForge-Code\.claude\w
 1. When ready for signed releases, install a Windows Authenticode certificate on the build host and pass `-SignCertificateThumbprint <40-hex>` + `-RequireSignedService` to `build/cloudforge/package-win32-x64.ps1`.
 2. Next roadmap slice (on user approval): explicit-opt-in offline provider mirror / `init -backend=false` & `providers schema -json` extraction into the Stage 3 catalogue, or AI Builder vertical slice from `Z:\CloudForge\docs\research\bb-agent-ide.md`.
 
+### Built-In Terraform / OpenTofu Editor Language & Canvas-Linked Code Intelligence (2026-11-25)
+
+Implemented on `fxrazor/continue-project-handoff-review` in `E:\Orca\CloudForge-Code\dace` (fast-forward merged to `Z:\CloudForge-Code` `main` and pushed to `origin/main`). **Zero overlap with Claude (`Z:\CloudForge` untouched) or Codex (`extensions/cloudforge/studio/` untouched); zero core VS Code patches; no unnecessary Windows installer rebuild triggered.**
+
+- **Built-in Terraform / OpenTofu Language Grammar & Editor Configuration ([package.json](extensions/cloudforge/package.json), [package.nls.json](extensions/cloudforge/package.nls.json), [terraform.language-configuration.json](extensions/cloudforge/terraform.language-configuration.json), [terraform.tmLanguage.json](extensions/cloudforge/syntaxes/terraform.tmLanguage.json)):**
+  - Registered built-in `terraform` language support for `.tf`, `.tfvars`, `.tofu`, and `.tftest.hcl` (Code OSS previously had no built-in Terraform grammar, opening `.tf` files as Plain Text), complete with `#` / `//` / `/* */` comment toggling, bracket matching, auto-closing pairs, folding markers, indentation rules, and a backtracking-safe HCL2 TextMate grammar.
+  - Added opt-out setting `cloudforge.editor.codeLens` (default `true`), `onLanguage:terraform` activation event, command `cloudforge.revealNodeInCanvas`, and right-click `editor/context` actions (**Reveal Resource in Canvas** & **Explain Resource…**) for Terraform editors.
+- **Pure Bounded HCL2 Parser & Graph Intelligence ([terraformLanguage.ts](extensions/cloudforge/src/editor/terraformLanguage.ts), [terraformLanguage.test.ts](extensions/cloudforge/test/terraformLanguage.test.ts)):**
+  - Linear-time, bounded (512 KiB / 2,000 blocks) `parseTerraformDocumentBlocks` handling nested blocks, comments, strings with `${...}` interpolations, heredocs (`<<EOF` / `<<-EOF`), and unclosed trailing blocks.
+  - Added `extractTerraformReferenceAtPosition`, `findTerraformBlockAtLine`, `matchBlockToGraphNode` (with Windows case-insensitive multi-file `sourceFile` disambiguation), `matchReferenceToGraphNode`, `findBlockDefinitionInText` (including `local.<key>` inside `locals {}`), and offline Markdown hover builders (`buildTerraformNodeHoverMarkdown`, `buildTerraformSchemaOnlyHoverMarkdown`).
+- **Native Workbench Language Providers & Canvas Reveal ([providers.ts](extensions/cloudforge/src/editor/providers.ts), [canvasPanel.ts](extensions/cloudforge/src/canvas/canvasPanel.ts), [extension.ts](extensions/cloudforge/src/extension.ts)):**
+  - Registered `DocumentSymbolProvider` (Outline view, Breadcrumbs, `Ctrl+Shift+O`), `CodeLensProvider` (`Open CloudForge Canvas`, `Preview Local Plan`, per-resource `Reveal in Canvas` & `Explain` refreshed automatically whenever the active architecture graph updates), `HoverProvider` (live/bundled schema provenance, upstream/downstream topology neighbors, offline cost estimate, and trusted command links), and intra-workspace `DefinitionProvider` (`F12` / `Ctrl+Click` across `.tf` / `.tofu` files).
+  - Added `CloudForgeCanvasPanel.revealNode(graph, nodeId)` with pending-selection replay on Webview `ready`, and enhanced `cloudforge.revealNodeInCanvas` & `cloudforge.explainResource` to resolve the resource under the active `.tf` editor cursor automatically.
+
+| Check (no full desktop/installer rebuild) | Verified result |
+| --- | --- |
+| `node extensions/cloudforge/esbuild.mts`, TS6 (`tsc6`), TS7 (`tsc`), `oxlint` & `hygiene` | Passed (`0` errors, `0` warnings). |
+| `CLOUDFORGE_REPO=Z:\CloudForge node --test extensions/cloudforge/test/*.test.ts` | **80/80 root extension tests passed** (`0` skipped; includes 6 new test suites in [terraformLanguage.test.ts](extensions/cloudforge/test/terraformLanguage.test.ts)). |
+| Live isolated Code OSS verification (`.agents/skills/launch` + `@playwright/cli` on `tf-workspace/main.tf`) | Passed (`0` page errors; screenshot `07-live-codeoss-terraform-editor.png` visually inspected): confirmed `Terraform` status bar language mode, 5 distinct TextMate syntax token classes, live Breadcrumbs (`main.tf > azurerm_resource_group.hub`), `Ctrl+Shift+O` Go to Symbol (`azurerm_resource_group.hub`, `azurerm_virtual_network.hub`), and rendered CloudForge Schema hover widget. |
+
+**Next actions:**
+1. Continue delivering high-value, conflict-free desktop/Workbench features outside `Z:\CloudForge` (Claude) and `extensions/cloudforge/studio/**` (Codex), e.g., Terraform completion/snippets & HCL diagnostics quick-fixes, or live multi-file Architecture Diff / Checkpoint comparison in native VS Code diff editors.
+2. When ready to package a new Windows x64 installer incorporating all post-`c61fbaf3eb1` Workbench improvements (Architecture Tooling Suite + Built-in Terraform Editor Intelligence) and Codex's merged Studio whiteboard updates, run `pwsh -NoProfile -ExecutionPolicy Bypass -File build/cloudforge/package-win32-x64.ps1` against the latest verified Rust service artifact.
+

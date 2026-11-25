@@ -35,6 +35,8 @@
 	"command.inspectArchitectureReadiness": "Inspect Readiness, Policy & Cost…",
 	"command.diffProviderSchema": "Diff Provider Schema Upgrade…",
 	"command.explainResource": "Explain Resource…",
+	"command.revealNodeInCanvas": "Reveal Resource in Canvas",
+	"config.editor.codeLens": "Show inline CloudForge Canvas and resource actions above Terraform blocks.",
 	"command.importProviderSchema": "Import Provider Schema Snapshot…",
 	"command.openTemplateLibrary": "Browse Template Library…",
 	"view.projects": "CloudForge Project",

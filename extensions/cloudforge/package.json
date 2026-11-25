@@ -19,6 +19,41 @@
 		"virtualWorkspaces": true
 	},
 	"contributes": {
+		"languages": [
+			{
+				"id": "terraform",
+				"extensions": [
+					".tf",
+					".tfvars",
+					".tofu",
+					".tftest.hcl"
+				],
+				"aliases": [
+					"Terraform",
+					"OpenTofu",
+					"terraform",
+					"hcl"
+				],
+				"configuration": "./terraform.language-configuration.json"
+			}
+		],
+		"grammars": [
+			{
+				"language": "terraform",
+				"scopeName": "source.hcl.terraform",
+				"path": "./syntaxes/terraform.tmLanguage.json"
+			}
+		],
+		"configuration": {
+			"title": "%displayName%",
+			"properties": {
+				"cloudforge.editor.codeLens": {
+					"type": "boolean",
+					"default": true,
+					"description": "%config.editor.codeLens%"
+				}
+			}
+		},
 		"commands": [
 			{
 				"command": "cloudforge.showProofStatus",
@@ -205,6 +240,12 @@
 				"title": "%command.explainResource%",
 				"category": "%displayName%",
 				"icon": "$(lightbulb)"
+			},
+			{
+				"command": "cloudforge.revealNodeInCanvas",
+				"title": "%command.revealNodeInCanvas%",
+				"category": "%displayName%",
+				"icon": "$(type-hierarchy)"
 			},
 			{
 				"command": "cloudforge.importProviderSchema",
@@ -471,10 +512,23 @@
 					"when": "view == cloudforge.resources && viewItem == cloudForgeResource",
 					"group": "inline@1"
 				}
+			],
+			"editor/context": [
+				{
+					"command": "cloudforge.revealNodeInCanvas",
+					"when": "resourceLangId == terraform || resourceLangId == hcl",
+					"group": "cloudforge@1"
+				},
+				{
+					"command": "cloudforge.explainResource",
+					"when": "resourceLangId == terraform || resourceLangId == hcl",
+					"group": "cloudforge@2"
+				}
 			]
 		}
 	},
 	"activationEvents": [
+		"onLanguage:terraform",
 		"workspaceContains:cloudforge.project.json",
 		"workspaceContains:*.tf",
 		"workspaceContains:*.tf.json"

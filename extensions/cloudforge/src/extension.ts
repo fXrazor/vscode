@@ -27,6 +27,14 @@ import {
 	type TreeView
 } from 'vscode';
 import { activateProjects } from './project/index';
+import { registerTerraformEditorProviders } from './editor/providers';
+import {
+	extractTerraformReferenceAtPosition,
+	findTerraformBlockAtLine,
+	matchBlockToGraphNode,
+	matchReferenceToGraphNode,
+	parseTerraformDocumentBlocks
+} from './editor/terraformLanguage';
 import {
 	formatReadinessReportText,
 	formatResourceExplanationMarkdown,
@@ -549,6 +557,7 @@ export function activate(context: ExtensionContext): void {
 	statusBar.name = l10n.t('CloudForge Architecture');
 	let currentArchitectureName = l10n.t('Architecture');
 	const projectControllerRef: { current?: ReturnType<typeof activateProjects> } = {};
+	const terraformProvidersRef: { current?: ReturnType<typeof registerTerraformEditorProviders> } = {};
 
 	function toVsSeverity(raw: string): DiagnosticSeverity {
 		const lower = raw.toLowerCase();
@@ -613,6 +622,7 @@ export function activate(context: ExtensionContext): void {
 	}
 
 	function updateStatusBar(graph: ArchitectureGraph | undefined): void {
+		terraformProvidersRef.current?.refresh();
 		if (!graph) {
 			statusBar.hide();
 			return;
@@ -1227,7 +1237,50 @@ export function activate(context: ExtensionContext): void {
 		isFocusModeActive: () => focusModeActive,
 	});
 
-	context.subscriptions.push(provider, treeView, problems, planOutput, readinessOutput, schemaDiffOutput, canvas, statusBar);
+	const terraformProviders = registerTerraformEditorProviders({
+		getActiveSnapshot() {
+			const graph = provider.getGraph();
+			return graph ? toCanvasSnapshot(graph, currentArchitectureName) : undefined;
+		},
+		getCachedSchema(kind, typeName) {
+			return cachedLiveSchemas.get(`${kind}:${typeName}`) ?? undefined;
+		},
+	});
+	terraformProvidersRef.current = terraformProviders;
+
+	function resolveNodeIdFromActiveEditor(graph: ArchitectureGraph): string | undefined {
+		const editor = window.activeTextEditor;
+		if (!editor) {
+			return undefined;
+		}
+		const doc = editor.document;
+		const lowerPath = doc.uri.path.toLowerCase();
+		if (!lowerPath.endsWith('.tf') && !lowerPath.endsWith('.tofu') && doc.languageId !== 'terraform' && doc.languageId !== 'hcl') {
+			return undefined;
+		}
+		const pos = editor.selection.active;
+		const ref = extractTerraformReferenceAtPosition(doc.lineAt(pos.line).text, pos.character);
+		if (ref) {
+			const matchedRef = matchReferenceToGraphNode(ref, graph.nodes);
+			if (matchedRef) {
+				return matchedRef.id;
+			}
+		}
+		const blocks = parseTerraformDocumentBlocks(doc.getText());
+		const block = findTerraformBlockAtLine(blocks, pos.line);
+		if (block) {
+			const pathStr = doc.uri.path;
+			const slashIdx = pathStr.lastIndexOf('/');
+			const baseName = slashIdx >= 0 ? pathStr.slice(slashIdx + 1) : pathStr;
+			const matchedBlock = matchBlockToGraphNode(block, graph.nodes, baseName);
+			if (matchedBlock) {
+				return matchedBlock.id;
+			}
+		}
+		return undefined;
+	}
+
+	context.subscriptions.push(provider, treeView, problems, planOutput, readinessOutput, schemaDiffOutput, canvas, statusBar, terraformProviders);
 	context.subscriptions.push(treeView.onDidChangeSelection(event => {
 		const resource = event.selection.find(item => item.type === 'resource');
 		const graph = provider.getGraph();
@@ -1243,6 +1296,42 @@ export function activate(context: ExtensionContext): void {
 	context.subscriptions.push(commands.registerCommand('cloudforge.openCanvas', () => {
 		const graph = provider.getGraph();
 		canvas.show(graph ? toCanvasSnapshot(graph, currentArchitectureName) : undefined, false);
+	}));
+	context.subscriptions.push(commands.registerCommand('cloudforge.revealNodeInCanvas', async (arg?: unknown) => {
+		const graph = provider.getGraph();
+		if (!graph || graph.nodes.length === 0) {
+			void window.showInformationMessage(l10n.t('Open an architecture before revealing a resource in the Canvas.'));
+			return;
+		}
+		let nodeId: string | undefined;
+		if (typeof arg === 'string' && arg.length > 0) {
+			nodeId = arg;
+		} else {
+			nodeId = resolveNodeIdFromActiveEditor(graph);
+		}
+		if (!nodeId) {
+			const picked = await window.showQuickPick(
+				graph.nodes.map(node => ({
+					label: node.label,
+					description: `${node.resourceType ?? node.kind}${node.sourceFile ? ` · ${node.sourceFile}${node.sourceLine ? `:${node.sourceLine}` : ''}` : ''}`,
+					nodeId: node.id,
+				})),
+				{
+					title: l10n.t('Reveal Resource in Canvas ({0})', currentArchitectureName),
+					placeHolder: l10n.t('Choose a resource to select on the CloudForge Architecture Canvas'),
+					matchOnDescription: true,
+				}
+			);
+			if (!picked) {
+				return;
+			}
+			nodeId = picked.nodeId;
+		}
+		const target = graph.nodes.find(node => node.id === nodeId);
+		if (!target) {
+			return;
+		}
+		canvas.revealNode(toCanvasSnapshot(graph, currentArchitectureName), target.id);
 	}));
 	async function applyWorkspacePreset(requestedId?: unknown): Promise<void> {
 		let presetId: WorkspacePresetId | undefined = isWorkspacePresetId(requestedId) ? requestedId : undefined;
@@ -1656,6 +1745,8 @@ export function activate(context: ExtensionContext): void {
 			nodeId = arg.node.id;
 		} else if (typeof arg === 'string') {
 			nodeId = arg;
+		} else {
+			nodeId = resolveNodeIdFromActiveEditor(graph);
 		}
 		if (!nodeId) {
 			const picked = await window.showQuickPick(
