@@ -9,7 +9,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type CSS
 import type { ReactFlowInstance, Viewport } from '@xyflow/react';
 import {
 	createHistory, historyReducer, type Resource, type BoardItem, type DesignMode,
-	type Position, type Provider, type ResourceKind, type CatalogueEntry
+	type Position, type Provider, type ResourceKind, type CatalogueEntry, type Architecture
 } from './model.ts';
 import { providerRegions, resourceDefinition, sampleArchitecture } from './fixture.ts';
 import type { CanvasNode } from './ResourceNode.tsx';
@@ -69,6 +69,8 @@ export function Studio() {
 	const [pendingField,setPendingField]=useState<Diagnostic>();
 	const [message, setMessage] = useState(hostBridge.isHosted ? 'Connecting to CloudForge workspace…' : 'Sample architecture loaded');
 	const [hostSnapshot, setHostSnapshot] = useState<HostGraphSnapshot | null>(null);
+	/** The architecture last loaded from the service; the draft is modified when the present differs from it. */
+	const [hostBaseline, setHostBaseline] = useState<Architecture | null>(null);
 	const [hasSourceById, setHasSourceById] = useState<Readonly<Record<string, boolean>>>({});
 	const [hostNotice, setHostNotice] = useState<HostNotice | null>(null);
 	const [liveSchemas, setLiveSchemas] = useState<LiveSchemaMap>({});
@@ -144,7 +146,8 @@ export function Studio() {
 					if (incoming.viewState?.viewports) {
 						viewport.current = { ...viewport.current, ...incoming.viewState.viewports };
 					}
-					dispatch({ type: 'replace', architecture: projected.architecture });
+					dispatch({ type: sameArch ? 'rebase' : 'replace', architecture: projected.architecture });
+					setHostBaseline(projected.architecture);
 					if (incoming.viewState?.selectedId && projected.architecture.resources.some(r => r.id === incoming.viewState?.selectedId)) {
 						setSelectedId(incoming.viewState.selectedId);
 					}
@@ -531,7 +534,7 @@ export function Studio() {
 					sourceRevision: hostSnapshot?.sourceRevision,
 					status: hostSnapshot?.status,
 					notice: hostNotice,
-					isDirty: history.past.length > 0,
+					isDirty: hostBaseline ? history.present !== hostBaseline : history.past.length > 0,
 					validating,
 					saving,
 					onRefresh: () => hostBridge.post({ type: 'refresh' }),

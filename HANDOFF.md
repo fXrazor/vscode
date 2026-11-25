@@ -1037,3 +1037,17 @@ Implemented on `fxrazor/continue-project-handoff-review` in `E:\Orca\CloudForge-
 
 
 
+
+### Studio Semantic Undo Survives Live Refreshes (2026-11-25)
+
+Branch `claude/project-thread-dnlp5o` from `main` (`156a0fdc`). Scope: `extensions/cloudforge/studio` plus this entry. No Rust, protocol, installer or classic-canvas changes.
+
+- A live `graph` refresh of the **same** architecture now dispatches `rebase` instead of `replace` ([historyRebase.ts](extensions/cloudforge/studio/src/historyRebase.ts), [model.ts](extensions/cloudforge/studio/src/model.ts), [App.tsx](extensions/cloudforge/studio/src/App.tsx)). Every past/future snapshot is three-way merged against the state the refresh replaced: what the refresh added, changed or removed (resources, board items, connections, variables, groups, layer order, name) is taken from the service in every step; everything else keeps the user's own step. Steps that become no-ops are dropped; dangling parents, connections and group members are pruned. Switching to a different architecture still uses `replace` and starts a fresh history.
+- The hosted `Modified` badge now compares the present against the last loaded architecture instead of `past.length > 0`, so a save-echo refresh with retained undo steps reads clean.
+
+| Check | Result |
+| --- | --- |
+| Studio `check`, `build` | Passed (`0` errors). |
+| Studio `test` | **76/76 passed** (adds [historyRebase.test.ts](extensions/cloudforge/studio/src/historyRebase.test.ts): echo refresh keeps undo/redo, external addition survives undo/redo, external removal prunes history, different architecture resets). |
+
+Not verified: hosted browser/Code OSS run of the refresh path (`studio-host-bridge-verify.mjs` lives on the Windows checkout). Known projection limits found while tracing, unchanged here: `projectGraphSnapshotToArchitecture` always takes the architecture name from the snapshot, and rebuilds connections from service edges, so user drawing links and `groups`/`layerOrder` are not carried through a refresh. Next: carry those through the projection, then the whiteboard gaps (multi-object resize, rotation, freehand, free connector endpoints).

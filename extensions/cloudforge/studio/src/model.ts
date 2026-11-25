@@ -8,6 +8,7 @@ import { applyCanvasCommand, type CanvasCommand } from './canvasOperations.ts';
 import { bindingKey, acceptsResourceRefs, acceptsVariable, canBindField, fieldDefinition, fieldTargetPath, findResourceBlock, pruneBlockBindings, pruneBlockResourceRefs, type FieldTarget, type ResourceRefBinding, type ResourceRefEntry, type VariableBinding } from './fieldBindings.ts';
 import { fitResourceContainers, isResourceContainer, reparentResource, resourcePlacement, terraformIdentifier } from './resourceHierarchy.ts';
 import type { ShapeId } from './shapes.ts';
+import { rebaseHistory } from './historyRebase.ts';
 export type DesignMode = 'visual' | 'technical';
 export type ResourceKind = 'network' | 'subnet' | 'gateway' | 'cluster' | 'storage' | 'monitor' | 'group' | 'compute' | 'database' | 'module' | 'generic';
 export type Provider = 'azure' | 'aws' | 'gcp';
@@ -134,7 +135,9 @@ export type Edit =
 	| { type: 'renameArchitecture'; name: string }
 	| { type: 'connect'; source: string; target: string };
 
-export type Action = Edit | { type: 'undo' } | { type: 'redo' } | { type: 'replace'; architecture: Architecture };
+export type Action = Edit | { type: 'undo' } | { type: 'redo' } | { type: 'replace'; architecture: Architecture }
+	/** A live refresh of the same architecture: keeps undo/redo, rebased onto the refreshed state. */
+	| { type: 'rebase'; architecture: Architecture };
 
 export function createHistory(architecture: Architecture): History {
 	return { past: [], present: architecture, future: [] };
@@ -310,6 +313,9 @@ function editArchitecture(architecture: Architecture, action: Edit): Architectur
 export function historyReducer(history: History, action: Action): History {
 	if (action.type === 'replace') {
 		return createHistory(action.architecture);
+	}
+	if (action.type === 'rebase') {
+		return rebaseHistory(history, action.architecture);
 	}
 	if (action.type === 'undo') {
 		const previous = history.past.at(-1);
