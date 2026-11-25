@@ -89,6 +89,19 @@ export const DesignCanvas = memo(function DesignCanvas({
 	const [editRequest, setEditRequest] = useState({ id: '', token: 0 });
 	const selectedConnection = architecture.connections.find(connection => connection.id === selectedConnectionId);
 	const bounds = useRef<HTMLDivElement>(null);
+	// An automatic first fit is redone when panels settle (e.g. the inspector opens on load), until the user moves the view.
+	const autoFit = useRef<{ mode?: DesignMode; at: number }>({ at: 0 });
+	useEffect(() => {
+		const element = bounds.current; if (!element || !flow) { return; }
+		let frame = 0;
+		const observer = new ResizeObserver(() => {
+			if (autoFit.current.mode !== mode || performance.now() - autoFit.current.at > 2500) { return; }
+			cancelAnimationFrame(frame);
+			frame = requestAnimationFrame(() => { void flow.fitView({ padding: canvasFitPadding, maxZoom: 1 }).then(() => { viewports.current[mode] = flow.getViewport(); setZoom(flow.getZoom()); }); });
+		});
+		observer.observe(element);
+		return () => { cancelAnimationFrame(frame); observer.disconnect(); };
+	}, [flow, mode, viewports]);
 	useEffect(() => { if (selectedIds.length) { setSelectedConnectionId(''); } }, [selectedIds]);
 	const order = useMemo(() => sceneOrder(architecture), [architecture]);
 	const diagnostics = useMemo(() => architectureDiagnostics(architecture), [architecture]);
@@ -244,6 +257,12 @@ export const DesignCanvas = memo(function DesignCanvas({
 		if ((edgeId || selectedConnectionId) && (key === 'delete' || key === 'backspace')) {
 			event.preventDefault(); event.stopPropagation(); dispatch({ type: 'deleteConnection', id: edgeId ?? selectedConnectionId }); setSelectedConnectionId(''); return;
 		}
+		if (event.altKey && key === 'f10') {
+			// Standard toolbar shortcut: move focus into the selection toolbar.
+			const first = bounds.current?.querySelector<HTMLElement>('.selection-controls button, .selection-controls select');
+			if (first) { event.preventDefault(); event.stopPropagation(); first.focus(); }
+			return;
+		}
 		if (mod) {
 			if (key === 'a') { action = 'selectAll'; } else if (key === 'c') { action = 'copy'; } else if (key === 'v') { action = 'paste'; }
 			else if (key === 'd') { action = 'duplicate'; } else if (key === 'g') { action = event.shiftKey ? 'ungroup' : 'group'; }
@@ -302,7 +321,8 @@ export const DesignCanvas = memo(function DesignCanvas({
 				key={mode} defaultViewport={viewports.current[mode]} fitView={!viewports.current[mode]} fitViewOptions={{padding:canvasFitPadding,maxZoom:1}}
 				forceColorMode={theme}
 				nodes={(nodes[0]?.data.mode===mode ? nodes : displayNodes).map(node=>({...node,className:dropFeedback?.target===node.id?'container-drop-'+(dropFeedback.ok?'valid':'invalid'):undefined}))} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange}
-				onInit={instance => { setFlow(instance); setZoom(instance.getZoom()); onInit(instance); if(!viewports.current[mode]){requestAnimationFrame(()=>{void instance.fitView({padding:canvasFitPadding,maxZoom:1}).then(()=>{viewports.current[mode]=instance.getViewport();setZoom(instance.getZoom());});});} }}
+				onInit={instance => { setFlow(instance); setZoom(instance.getZoom()); onInit(instance); if(!viewports.current[mode]){autoFit.current={mode,at:performance.now()};requestAnimationFrame(()=>{void instance.fitView({padding:canvasFitPadding,maxZoom:1}).then(()=>{viewports.current[mode]=instance.getViewport();setZoom(instance.getZoom());});});} }}
+				onMoveStart={event => { if (event) { autoFit.current = { at: 0 }; } }}
 				onConnect={connection => dispatch({ type: 'connect', source: connection.source, target: connection.target })}
 				isValidConnection={connection => canConnect(architecture, connection.source, connection.target)}
 				minZoom={0.1} maxZoom={20}
@@ -351,13 +371,13 @@ export const DesignCanvas = memo(function DesignCanvas({
 			</div></details>
 			{dropFeedback&&<div className={'container-drop-status '+(dropFeedback.ok?'valid':'invalid')} role="status">{dropFeedback.reason}</div>}
 			<div className="canvas-navigation" role="group" aria-label="Zoom and navigation">
-				<button aria-label="Zoom out" title="Zoom out" onClick={() => { void flow?.zoomOut(); }}><Minus /></button>
-				<select aria-label="Canvas zoom" value={zoom.toFixed(3)} onChange={event => { void flow?.zoomTo(Number(event.target.value)); }}>
+				<button aria-label="Zoom out" title="Zoom out" onClick={() => { autoFit.current = { at: 0 }; void flow?.zoomOut(); }}><Minus /></button>
+				<select aria-label="Canvas zoom" value={zoom.toFixed(3)} onChange={event => { autoFit.current = { at: 0 }; void flow?.zoomTo(Number(event.target.value)); }}>
 					{!zoomPresets.some(value => value.toFixed(3) === zoom.toFixed(3)) && <option value={zoom.toFixed(3)}>{Math.round(zoom * 100)}%</option>}
 					{zoomPresets.map(value => <option key={value} value={value.toFixed(3)}>{Math.round(value * 100)}%</option>)}
 				</select>
-				<button aria-label="Zoom in" title="Zoom in" onClick={() => { void flow?.zoomIn(); }}><Plus /></button>
-				<button aria-label="Fit architecture to view" title="Fit architecture to view" onClick={() => { void flow?.fitView({ padding: canvasFitPadding }); }}><Scan /></button>
+				<button aria-label="Zoom in" title="Zoom in" onClick={() => { autoFit.current = { at: 0 }; void flow?.zoomIn(); }}><Plus /></button>
+				<button aria-label="Fit architecture to view" title="Fit architecture to view" onClick={() => { autoFit.current = { at: 0 }; void flow?.fitView({ padding: canvasFitPadding }); }}><Scan /></button>
 			</div>
 		</main>
 		</CanvasActionMenu>

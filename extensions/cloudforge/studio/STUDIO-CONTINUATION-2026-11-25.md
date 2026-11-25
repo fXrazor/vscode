@@ -55,7 +55,17 @@ The rendered matrix (Playwright, sample mode) covered Architecture/Configuration
 
 After the fixes, the same matrix was clean: 0 console/page errors, and screenshots were inspected at each width. Studio check/build passed and 81/81 tests passed.
 
-Not addressed (next polish batch): at 1024 px the first fit happens before the inspector opens, so part of the graph sits under the inspector. The library tile labels truncate ("Azure VMware...") without tooltips. A keyboard-only walk of the Size/Align menus and reduced-motion checks have not been run.
+Second polish batch (same afternoon):
+
+| Finding | Fix | File |
+| --- | --- | --- |
+| At 1024 px the first fit ran before panels settled, leaving the graph under the inspector | For 2.5 s after an automatic first fit, a canvas resize refits. Any user pan, zoom, zoom control or manual Fit cancels it, so a chosen viewport is never overridden | `DesignCanvas.tsx` |
+| Truncated library labels ("Azure VMware...") had no full name | `title` on service tiles (name · N resource types) and resource rows (label · Terraform type) | `ResourceCatalogue.tsx` |
+| Keyboard users had no quick route from the canvas to the selection toolbar (Tab walks tools and nodes first) | **Alt+F10** on the canvas focuses the first toolbar control (`aria-keyshortcuts`). **Escape** inside the toolbar returns focus to the canvas | `DesignCanvas.tsx`, `SelectionControls.tsx` |
+
+Keyboard walk: the first 30 Tab stops (topbar, library) all had visible focus. Ctrl+A → Alt+F10 → Tab → Escape returned to the canvas at 1360 and 1024 px. Reduced motion is already covered by the global `prefers-reduced-motion` rule in `styles.css`, and fits are instant, so nothing needed changing. After the batch the matrix rerun and the refit check (inspector opened 0.9 s after load: graph right edge 717 < canvas right 744) were clean, with 0 errors and 81/81 tests.
+
+Still open for polish: the Alt+F10 shortcut is not yet shown in any visible help, and a keyboard-only walk of the resource workspace and connector toolbar has not been done.
 
 ## Verification (this pass, Linux cloud container)
 
@@ -71,7 +81,7 @@ Not addressed (next polish batch): at 1024 px the first fit happens before the i
 ## Exact next actions (in order)
 
 1. On Windows: run `studio-host-bridge-verify.mjs` and a live Code OSS session. Edit, save, wait for the refresh, then press Ctrl+Z: the edit should undo and the badge should read clean after the save. Check that drawing links and groups survive the refresh.
-2. ~~Fix the selection-toolbar / View-button overlap~~ (done in the polish pass). Next polish batch: refit after panels settle at 1024 px, tooltips for truncated library tiles, keyboard-only and reduced-motion walk.
+2. ~~Fix the selection-toolbar / View-button overlap, refit at 1024 px, library tooltips, keyboard route to the toolbar~~ (done in the polish passes). Remaining polish: show Alt+F10 in visible help; keyboard-walk the resource workspace and connector toolbar.
 3. Remaining whiteboard gaps, one bounded pass each: drag handles for multi-object resize (this pass added only menu-driven resize), rotation, freehand, free connector endpoints, equal-spacing guides.
 4. Then the wider backlog: making Studio the default engine after a parity check against Classic; Stage 9B plan capture once Rust adds it; arbitrary HCL round-trip; authoritative validation and pricing; collaboration.
 

@@ -61,7 +61,8 @@ export function SelectionControls({ architecture, ids, dispatch, run, hasClipboa
  const grouped = architecture.groups?.find(group => group.members.some(id => ids.includes(id)));
  const units = selectionUnits(architecture, ids).length;
  const label = grouped?.label ?? (selected.length > 1 ? selected.length + ' elements' : first ? first.kind === 'note' ? 'Sticky note' : first.kind === 'frame' ? 'Frame' : first.kind === 'shape' ? 'Shape' : 'Text' : resource?.label || resource?.name || 'Resource');
- return <section className="selection-controls nodrag nopan" aria-label="Selection controls">
+ return <section className="selection-controls nodrag nopan" aria-label="Selection controls" aria-keyshortcuts="Alt+F10"
+  onKeyDown={event => { if (event.key === 'Escape' && !(event.target as HTMLElement).closest('[role="menu"]')) { event.preventDefault(); event.stopPropagation(); container?.focus(); } }}>
   <span className="selection-caption" title={label}>{label}</span>
   <div className="selection-quick-actions" role="toolbar" aria-label="Selection actions">
    {!locked && selected.length === 1 && <button onClick={() => run('edit')} title={resource ? 'Configure resource' : 'Edit text (Enter)'}><Pencil size={14}/>{resource ? 'Configure' : 'Edit text'}</button>}
