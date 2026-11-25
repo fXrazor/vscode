@@ -17,6 +17,7 @@
  */
 
 import { getDef } from './cloudlab-core/catalog/index.ts';
+import { catalogueIconFor } from './catalogue.ts';
 import type { Architecture, DesignConnection, Position, Provider, Resource, ResourceBlock, ResourceKind } from './model.ts';
 import { elementEndpoint, endpointExists, endpointKey } from './connectionEndpoints.ts';
 import type { Diagnostic } from './diagnostics.ts';
@@ -46,6 +47,8 @@ export interface ProjectedGraphResult {
 	readonly hasSourceById: Readonly<Record<string, boolean>>;
 	readonly sourceRevision: string;
 	readonly status: 'complete' | 'partial';
+	/** Canvas ids that continue under a service node id (for example a palette resource after its first save). */
+	readonly idRemap: Readonly<Record<string, string>>;
 }
 
 const KNOWN_TYPE_TO_KIND: Readonly<Record<string, ResourceKind>> = {
@@ -92,22 +95,32 @@ export function inferProvider(resourceType: string | null): Provider {
 	return 'azure';
 }
 
-function defaultIconFor(provider: Provider, resourceType: string | null): string {
+/**
+ * Neutral icons for types no loaded catalogue knows yet. They are marked `iconMatch: 'fallback'` so the
+ * node swaps in the palette icon as soon as the provider catalogue loads (never the resource group icon,
+ * which made virtual machines and peerings look like resource groups after a save).
+ */
+export const FALLBACK_ICONS: Readonly<Record<Provider, string>> = {
+	azure: 'catalog-icons/azure/azure-all-resources.svg',
+	aws: 'catalog-icons/aws/aws-management-console.svg',
+	gcp: 'catalog-icons/gcp/gcp-cloud-generic.svg',
+};
+
+function normaliseIconPath(icon: string): string {
+	const fileName = icon.replace(/^\/?icons\//, '');
+	return fileName.includes('/') && !fileName.startsWith('catalog-icons/') ? 'catalog-icons/' + fileName : fileName;
+}
+
+function defaultIconFor(provider: Provider, resourceType: string | null): { readonly icon: string; readonly fallback: boolean } {
 	const def = resourceType ? getDef(resourceType) : undefined;
 	if (def?.icon) {
-		const fileName = def.icon.replace(/^\/?icons\//, '');
-		if (fileName.includes('/')) {
-			return 'catalog-icons/' + fileName;
-		}
-		return fileName;
+		return { icon: normaliseIconPath(def.icon), fallback: false };
 	}
-	if (provider === 'aws') {
-		return 'aws-vpc.svg';
+	const palette = resourceType ? catalogueIconFor(resourceType) : undefined;
+	if (palette) {
+		return { icon: palette, fallback: false };
 	}
-	if (provider === 'gcp') {
-		return 'gcp-project.svg';
-	}
-	return 'azure-resource-groups.svg';
+	return { icon: FALLBACK_ICONS[provider], fallback: true };
 }
 
 function friendlyLabelForType(resourceType: string): string {
@@ -130,13 +143,19 @@ function createResourceFromNode(node: HostNodeSummary, fallbackPosition: Positio
 		? 'module'
 		: (node.resourceType && KNOWN_TYPE_TO_KIND[node.resourceType]) || 'generic';
 	const def = node.resourceType ? getDef(node.resourceType) : undefined;
-	const catalogue = !isModule && mappedKind === 'generic' && node.resourceType
-		? {
+	const icon = node.resourceType ? defaultIconFor(provider, node.resourceType) : undefined;
+	// A resource placed from the palette keeps the palette's entry (icon, label, fields) across saves.
+	const preservedCatalogue = preserved?.catalogue && preserved.catalogue.type === node.resourceType && preserved.catalogue.iconMatch !== 'fallback'
+		? structuredClone(preserved.catalogue)
+		: undefined;
+	const catalogue = !isModule && mappedKind === 'generic' && node.resourceType && icon
+		? preservedCatalogue ?? {
 			type: node.resourceType,
 			label: friendlyLabelForType(node.resourceType),
 			service: def?.service ?? friendlyLabelForType(node.resourceType),
 			category: def?.category ?? 'Other',
-			icon: defaultIconFor(provider, node.resourceType),
+			icon: icon.icon,
+			...(icon.fallback ? { iconMatch: 'fallback' } : {}),
 			fields: (def?.attributes ?? [])
 				.filter(attr => attr.type !== 'block' && ['string', 'number', 'bool'].includes(attr.type))
 				.map(attr => ({
@@ -179,6 +198,7 @@ function createResourceFromNode(node: HostNodeSummary, fallbackPosition: Positio
 		...(preserved?.inheritanceOverrides ? { inheritanceOverrides: [...preserved.inheritanceOverrides] } : {}),
 		...(preserved?.containerSize ? { containerSize: { ...preserved.containerSize } } : {}),
 		...(preserved?.iconSize ? { iconSize: preserved.iconSize } : {}),
+		...(preserved?.iconKind ? { iconKind: preserved.iconKind } : {}),
 		...(preserved?.canvasLocked ? { canvasLocked: true } : {}),
 		positions,
 	};
@@ -417,6 +437,72 @@ function isServiceEdgeId(id: string): boolean {
 	return id.includes('->');
 }
 
+function remapElementEndpoint(endpoint: DesignConnection['source'], remapId: (id: string) => string): DesignConnection['source'] {
+	return endpoint.kind === 'element' ? { ...endpoint, elementId: remapId(endpoint.elementId) } : endpoint;
+}
+
+function nodeAddress(node: HostNodeSummary): string | undefined {
+	return node.kind !== 'module' && node.resourceType ? node.resourceType + '.' + node.name : undefined;
+}
+
+/**
+ * Pairs each service node with the canvas resource it continues. The service numbers its nodes
+ * in file order (`node-1`, `node-2`, …), so an id alone can point at a different resource after
+ * a save adds or removes blocks, and a resource placed from the palette carries a canvas id the
+ * service never saw. Pairs are made in this order: same id and same Terraform address, then the
+ * same address (the canvas resource that was just saved), then the same id and resource type (a
+ * block renamed in the file). Each canvas resource continues at most one node.
+ */
+export function matchPreviousResources(nodes: readonly HostNodeSummary[], previousResources: readonly Resource[]): Map<string, Resource> {
+	const matched = new Map<string, Resource>();
+	if (previousResources.length === 0) {
+		return matched;
+	}
+	const used = new Set<string>();
+	const previousById = new Map(previousResources.map(resource => [resource.id, resource]));
+	const previousByAddress = new Map<string, Resource>();
+	const modulesByName = new Map<string, Resource>();
+	for (const resource of previousResources) {
+		if (resource.kind === 'module') {
+			if (!modulesByName.has(resource.name)) {
+				modulesByName.set(resource.name, resource);
+			}
+			continue;
+		}
+		const address = resourceAddress(resource);
+		if (!previousByAddress.has(address)) {
+			previousByAddress.set(address, resource);
+		}
+	}
+	const claim = (node: HostNodeSummary, resource: Resource | undefined) => {
+		if (resource && !used.has(resource.id) && !matched.has(node.id)) {
+			matched.set(node.id, resource);
+			used.add(resource.id);
+		}
+	};
+	for (const node of nodes) {
+		const previous = previousById.get(node.id);
+		const address = nodeAddress(node);
+		if (!previous) {
+			continue;
+		}
+		if (address ? previous.kind !== 'module' && resourceAddress(previous) === address : node.kind === 'module' && previous.kind === 'module' && previous.name === node.name) {
+			claim(node, previous);
+		}
+	}
+	for (const node of nodes) {
+		const address = nodeAddress(node);
+		claim(node, address ? previousByAddress.get(address) : node.kind === 'module' ? modulesByName.get(node.name) : undefined);
+	}
+	for (const node of nodes) {
+		const previous = previousById.get(node.id);
+		if (previous && (node.kind === 'module' ? previous.kind === 'module' : previous.kind !== 'module' && !!node.resourceType && resourceDefinition(previous).type === node.resourceType)) {
+			claim(node, previous);
+		}
+	}
+	return matched;
+}
+
 /**
  * Project a live sanitized `CanvasGraphSnapshot` from the Rust service into CloudForge Studio's
  * single `Architecture` model, inferring containment and typed resource references automatically.
@@ -425,15 +511,31 @@ export function projectGraphSnapshotToArchitecture(
 	snapshot: HostGraphSnapshot,
 	options: ProjectGraphOptions = {}
 ): ProjectedGraphResult {
-	const previousById = new Map((options.previousArchitecture?.resources ?? []).map(resource => [resource.id, resource]));
-	const previousConnectionsById = new Map((options.previousArchitecture?.connections ?? []).map(connection => [connection.id, connection]));
+	const previousFor = matchPreviousResources(snapshot.nodes, options.previousArchitecture?.resources ?? []);
+	// Canvas ids that the service now knows under its own node id (a resource placed from the palette
+	// and then saved, or a node whose position in the file moved). Links to them follow the new id.
+	const idRemap = new Map<string, string>();
+	for (const [nodeId, previous] of previousFor) {
+		if (previous.id !== nodeId) {
+			idRemap.set(previous.id, nodeId);
+		}
+	}
+	const remapId = (id: string) => idRemap.get(id) ?? id;
+	const remapConnection = (connection: DesignConnection): DesignConnection => ({
+		...connection,
+		id: isServiceEdgeId(connection.id) ? connection.id.split('->').map(remapId).join('->') : connection.id,
+		source: remapElementEndpoint(connection.source, remapId),
+		target: remapElementEndpoint(connection.target, remapId),
+	});
+	const previousConnections = (options.previousArchitecture?.connections ?? []).map(remapConnection);
+	const previousConnectionsById = new Map(previousConnections.map(connection => [connection.id, connection]));
 	const viewPositions = options.viewState?.nodePositions?.visual ?? options.viewState?.nodePositions?.technical ?? {};
 	const hasSourceById: Record<string, boolean> = {};
 	const preservedIds = new Set<string>();
 
 	const resources: Resource[] = snapshot.nodes.map((node, index) => {
 		hasSourceById[node.id] = node.hasSource;
-		const previous = previousById.get(node.id);
+		const previous = previousFor.get(node.id);
 		const savedPos = viewPositions[node.id];
 		if (previous || savedPos) {
 			preservedIds.add(node.id);
@@ -444,6 +546,12 @@ export function projectGraphSnapshotToArchitecture(
 		const resource = createResourceFromNode(node, fallback, previous);
 		if (!previous && savedPos) {
 			resource.positions = { visual: { ...savedPos }, technical: { ...savedPos } };
+		}
+		if (resource.resourceRefs && idRemap.size > 0) {
+			resource.resourceRefs = Object.fromEntries(Object.entries(resource.resourceRefs).map(([key, binding]) => [
+				key,
+				{ ...binding, refs: binding.refs.map(entry => ({ ...entry, resourceId: remapId(entry.resourceId) })) },
+			]));
 		}
 		return resource;
 	});
@@ -482,14 +590,17 @@ export function projectGraphSnapshotToArchitecture(
 		name: options.previousArchitecture?.name ?? (snapshot.architectureName || 'CloudForge Architecture'),
 		variables: options.previousArchitecture?.variables ? structuredClone(options.previousArchitecture.variables) : [],
 		resources,
-		items: options.previousArchitecture?.items ? structuredClone(options.previousArchitecture.items) : [],
+		items: options.previousArchitecture?.items
+			? structuredClone(options.previousArchitecture.items).map(item => ({ ...item, members: item.members.map(remapId) }))
+			: [],
 		connections: [],
 	};
 
 	// Sort parents shallowest-first so container chains establish cleanly.
 	const orderedResources = [...resources].sort((a, b) => containerSpecificity(a) - containerSpecificity(b));
 	for (const resource of orderedResources) {
-		const previousParent = previousById.get(resource.id)?.parentId;
+		const previousParentId = previousFor.get(resource.id)?.parentId;
+		const previousParent = previousParentId === undefined ? undefined : remapId(previousParentId);
 		if (previousParent && byId.has(previousParent) && resourcePlacement(baseArch, resource, previousParent).ok) {
 			resource.parentId = previousParent;
 			continue;
@@ -542,7 +653,7 @@ export function projectGraphSnapshotToArchitecture(
 	// groups and layer order through the refresh, pruned to elements that still exist.
 	const elementIds = new Set([...resources.map(resource => resource.id), ...baseArch.items.map(item => item.id)]);
 	const serviceEndpoints = new Set(connections.map(connection => endpointKey(connection.source, 'source') + '\u0000' + endpointKey(connection.target, 'target')));
-	for (const previous of options.previousArchitecture?.connections ?? []) {
+	for (const previous of previousConnections) {
 		if (isServiceEdgeId(previous.id) || !endpointExists(previous.source, elementIds) || !endpointExists(previous.target, elementIds)) {
 			continue;
 		}
@@ -552,9 +663,9 @@ export function projectGraphSnapshotToArchitecture(
 		connections.push(structuredClone(previous));
 	}
 	const groups = (options.previousArchitecture?.groups ?? [])
-		.map(group => ({ ...group, members: group.members.filter(id => elementIds.has(id)) }))
+		.map(group => ({ ...group, members: group.members.map(remapId).filter(id => elementIds.has(id)) }))
 		.filter(group => group.members.length > 1);
-	const layerOrder = options.previousArchitecture?.layerOrder?.filter(id => elementIds.has(id));
+	const layerOrder = options.previousArchitecture?.layerOrder?.map(remapId).filter(id => elementIds.has(id));
 
 	layoutNewResources(resources, preservedIds);
 
@@ -570,6 +681,7 @@ export function projectGraphSnapshotToArchitecture(
 		hasSourceById,
 		sourceRevision: snapshot.sourceRevision,
 		status: snapshot.status,
+		idRemap: Object.fromEntries(idRemap),
 	};
 }
 

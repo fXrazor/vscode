@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 import { elementEndpoint } from './connectionEndpoints.ts';
 import type { Architecture, Resource, ResourceKind, Provider } from './model.ts';
+import { catalogueIconFor } from './catalogue.ts';
 
 export const resourceTypes: Record<ResourceKind, {
 	label: string;
@@ -61,7 +62,11 @@ const alternateResources: Record<Exclude<Provider, 'azure'>, Record<ResourceKind
 
 export function resourceDefinition(resource: Pick<Resource, 'kind' | 'provider'> & Partial<Pick<Resource, 'catalogue'>>) {
 	const base = resourceTypes[resource.kind];
- if (resource.catalogue) { return { ...base, ...resource.catalogue, description: resource.catalogue.label, defaults: {} }; }
+ if (resource.catalogue) {
+		// A projected type with no known icon yet shows the palette icon once its catalogue has loaded.
+		const icon = resource.catalogue.iconMatch === 'fallback' ? catalogueIconFor(resource.catalogue.type) ?? resource.catalogue.icon : resource.catalogue.icon;
+		return { ...base, ...resource.catalogue, icon, description: resource.catalogue.label, defaults: {} };
+	}
 	if (resource.provider === 'azure') { return base; }
 	const [label, type, icon] = alternateResources[resource.provider][resource.kind];
 	return { ...base, label, type, icon, description: label + ' in ' + providerNames[resource.provider] + '.', defaults: {} };

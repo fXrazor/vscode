@@ -183,7 +183,11 @@ export function Studio() {
 					hostBaselineRef.current = projected.architecture;
 					if (incoming.viewState?.selectedId && projected.architecture.resources.some(r => r.id === incoming.viewState?.selectedId)) {
 						setSelectedId(incoming.viewState.selectedId);
+					} else {
+						// A resource saved for the first time continues under the service's node id.
+						setSelectedIds(current => current.map(id => projected.idRemap[id] ?? id));
 					}
+					setWorkspaceResourceId(current => projected.idRemap[current] ?? current);
 					setMessage('Loaded ' + incoming.graph.architectureName + ' · rev ' + incoming.graph.sourceRevision.slice(0, 8));
 					break;
 				}
