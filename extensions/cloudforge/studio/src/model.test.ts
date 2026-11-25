@@ -24,6 +24,7 @@ import { inheritedReferences, resourcePlacement, resourceDimensions, resourceDes
 import { architectureDiagnostics } from './diagnostics.ts';
 import { projectTerraform } from './terraformProjection.ts';
 import { workflowTemplate } from './workflowTemplate.ts';
+import { parseVariableInput, variableInputIssue } from './variableInputs.ts';
 
 function framedArchitecture():Architecture {
 	const sample=sampleArchitecture();
@@ -684,4 +685,30 @@ test('flowchart starters share editable geometry, labelled links and atomic inse
  const svg=await presentationSvg(template);
  assert.ok(svg.includes('Approved?')&&svg.includes('Review Terraform plan'));
  assert.ok(template.items.every(item=>shapeDefinitions.some(shape=>shape.id===item.shape&&svg.includes(shape.path))));
+});
+
+test('typed variable controls preserve empty text, false, zero and explicit null without treating them as missing', () => {
+ assert.equal(parseVariableInput('', 'string'), '');
+ assert.equal(parseVariableInput('false', 'bool'), false);
+ assert.equal(parseVariableInput('0', 'number'), 0);
+ assert.equal(parseVariableInput('null', 'number'), null);
+ assert.deepEqual(parseVariableInput('["web", "api"]', 'list(string)'), ['web', 'api']);
+ assert.deepEqual(parseVariableInput('{"team":"platform"}', 'map(string)'), {team:'platform'});
+ const initial=createHistory(sampleArchitecture());
+ const saved=historyReducer(initial,{type:'saveVariable',variable:{id:'replicas',name:'replicas',type:'number',description:'',sensitive:false,defaultValue:parseVariableInput('2','number'),value:parseVariableInput('0','number')}});
+ assert.equal(saved.present.variables?.[0].value,0);
+ assert.equal(saved.present.variables?.[0].defaultValue,2);
+ assert.equal(saved.past.length,1);
+ assert.deepEqual(historyReducer(saved,{type:'undo'}).present,initial.present);
+});
+
+test('typed variable feedback rejects wrong values and expressions before a save can replace valid values', () => {
+ assert.ok(variableInputIssue('enabled','bool')?.includes('true or false'));
+ assert.ok(variableInputIssue('"2"','number')?.includes('number'));
+ assert.ok(variableInputIssue('[1]','list(string)')?.includes('quoted text'));
+ assert.ok(variableInputIssue('{"replicas":2}','map(string)')?.includes('text keys'));
+ assert.ok(variableInputIssue('var.other','any')?.includes('Valid JSON'));
+ assert.ok(variableInputIssue('','number'));
+ assert.equal(variableInputIssue('0','number'),undefined);
+ assert.equal(variableInputIssue('','string'),undefined);
 });

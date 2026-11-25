@@ -71,3 +71,12 @@ Known limits: nesting/ref constraints exist only where bundled definitions provi
 ## Exact next action
 
 When browser control is available again, first verify the final inline container CIDR editor/help styling and explicitly restore independent 50%/70% renderer zooms in a fresh disposable tab. Then add typed resource-attribute reference selection alongside Value/Variable/Inherited in the shared `SchemaField`, constrained by bundled `refTypes/refAttr`, with stable IDs, assignable output types, dependency projection, sensitivity and round-trip tests. Start with VM → NIC IDs and subnet references. Keep graph semantics distinct from drawing links. Then import complete version-matched schemas through the approved Rust/service boundary, rather than extending hand-authored guesses. Large-graph performance, equal-spacing/resize guides, multi-object resize, rotation/freehand, free connector endpoints and collaborative annotations need separate bounded passes. Integrate the preview into supported Workbench contributions only through the recorded product/protocol plan.
+
+
+## Appended checkpoint — configurator refinement, paused 25 November 2026
+
+The user requested two UI refinements plus easier workspace dismissal, then an immediate handoff/push. Progress and exact outstanding verification are in [CONFIGURATOR-REFINEMENT-2026-11-25.md](CONFIGURATOR-REFINEMENT-2026-11-25.md). Changes include clearer variable identity/type/default/override/sensitivity guidance and effective-value preview, resource-workspace hierarchy/context, and top-right Close/backdrop behavior preserving drafts.
+
+Fresh TypeScript, 60 tests and production preview build passed. The first variable-form version was exercised in an isolated REA browser and its screenshot retained; the final footer/scroll adjustments and all resource-workspace close/draft-retention paths remain to be browser-verified. Stop implementation here as requested.
+
+The complete original checkpoint above, including its Exact next action and all remaining work, is unchanged. This addendum does not replace or complete any previous outstanding item. Resume with the addendum's final UI checks, then continue the original backlog.

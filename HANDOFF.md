@@ -1,5 +1,13 @@
 # CloudForge Code OSS handoff
 
+## Configurator refinement — paused for handoff 25 November 2026
+
+User requested an immediate checkpoint and push. Same worktree and branch `codex/infrastructure-studio-preview`, starting at `e90aec47a5f50ca7dbca01799979012cfbf4068c`; integration owner Codex. Refined the variable configurator's spacing, typed controls, examples, default/override explanation, sensitivity and effective-value preview; improved resource workspace hierarchy and context; added the requested top-right X and guarded backdrop dismissal while retaining Back/Escape and mounted drafts. Scope stays within `extensions/cloudforge/studio` plus this handoff.
+
+Fresh TypeScript, 60/60 tests and preview production build passed. An isolated REA Chrome scenario exercised the first variable-form version, captured zero console errors and confirmed owned-process cleanup. Final footer/scroll corrections and the resource-workspace close/draft-retention paths still require browser verification. The user's embedded browser connection remained closed; their open draft/reference pages were not reset. No service, protocol, dependencies, main merge or product packaging changes.
+
+Resume from [CONFIGURATOR-REFINEMENT-2026-11-25.md](extensions/cloudforge/studio/CONFIGURATOR-REFINEMENT-2026-11-25.md), beginning with the explicitly listed final UI/close-path checks. A dated addendum is appended to [the existing checkpoint](extensions/cloudforge/studio/NESTING-AND-FEEDBACK-PASS.md); its original content and remaining-work list are preserved in full. All prior open items remain open.
+
 ## Canvas nesting and shared rendering — 25 November 2026
 
 Resumed the saved controls/node-details batch and implemented the user's new annotations in the existing isolated worktree `C:/Users/dalep/.codex/worktrees/infrastructure-studio/CloudForge-Code`, branch `codex/infrastructure-studio-preview`, starting revision `ccf110495e1209a3a3715a7ed038f5534507d887`. Integration owner: Codex. The checkpoint commit containing this entry is identified by `git log -1 -- HANDOFF.md`. Implementation ownership is `extensions/cloudforge/studio/src`, its README/checkpoints and artifact ignore rule; the remaining root change is this handoff.
