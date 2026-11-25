@@ -32,7 +32,7 @@ type CloudForgeServiceMethod =
 	| 'startValidationRun' | 'pollValidationRun' | 'cancelValidationRun'
 	| 'previewDraftSave' | 'applyDraftSave' | 'previewFocusedSave' | 'applyFocusedSave' | 'readResourceValues'
 	| 'previewFocusedSaveBatch' | 'applyFocusedSaveBatch'
-	| 'summarizeState' | 'listCloudConnections' | 'setCloudConnection' | 'storeCloudKey' | 'removeCloudConnection' | 'checkCloudSignIn'
+	| 'summarizeState' | 'listCloudConnections' | 'setCloudConnection' | 'storeCloudKey' | 'removeCloudConnection' | 'checkCloudSignIn' | 'listCloudAccounts'
 	| 'inspectDependencies' | 'readModule' | 'auditExportReadiness' | 'runEngineValidate' | 'runEnginePlan'
 	| 'checkOfflineMirrorReadiness' | 'runEngineInitOffline';
 type CloudForgeCatalogueMethod = 'inspectCatalogueSchemaFile' | 'importCatalogueSnapshot' | 'listCatalogueSnapshots' | 'listCatalogueTypes' | 'getResourceFormSchema' | 'getCatalogueCoverage' | 'renderResourceDraft' | 'listCloudRegions' | 'diffCatalogueSnapshots' | 'detectEngines' | 'listMirrorPackages' | 'extractProviderSchemaFromMirror' | 'importMirrorPackage' | 'evictMirrorPackage' | 'verifyMirrorIntegrity' | 'planMirrorCleanup';
@@ -288,7 +288,7 @@ CommandsRegistry.registerCommand('_cloudforge.callService', async (accessor, met
 		method !== 'startValidationRun' && method !== 'pollValidationRun' && method !== 'cancelValidationRun' &&
 		method !== 'previewDraftSave' && method !== 'applyDraftSave' && method !== 'previewFocusedSave' && method !== 'applyFocusedSave' &&
 		method !== 'previewFocusedSaveBatch' && method !== 'applyFocusedSaveBatch' &&
-		method !== 'summarizeState' && method !== 'listCloudConnections' && method !== 'setCloudConnection' && method !== 'storeCloudKey' && method !== 'removeCloudConnection' && method !== 'checkCloudSignIn' &&
+		method !== 'summarizeState' && method !== 'listCloudConnections' && method !== 'setCloudConnection' && method !== 'storeCloudKey' && method !== 'removeCloudConnection' && method !== 'checkCloudSignIn' && method !== 'listCloudAccounts' &&
 		method !== 'inspectDependencies' && method !== 'readResourceValues' &&
 		method !== 'readModule' && method !== 'auditExportReadiness' && method !== 'runEngineValidate' &&
 		method !== 'runEnginePlan' && method !== 'checkOfflineMirrorReadiness' && method !== 'runEngineInitOffline'
@@ -340,6 +340,7 @@ CommandsRegistry.registerCommand('_cloudforge.callService', async (accessor, met
 		case 'storeCloudKey':
 		case 'removeCloudConnection':
 		case 'checkCloudSignIn':
+		case 'listCloudAccounts':
 			// Workspace-scoped (checked above); Electron main validates the provider and fields.
 			break;
 		case 'pollValidationRun':

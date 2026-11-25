@@ -36,6 +36,8 @@ Fourteenth slice: **easy start**. Inside CloudForge the Studio starts from `blan
 
 Fifteenth slice: **service icons in the side panel**. `ResourceIconIndex` (`src/resourceIcons.ts`, pure parsing in `src/resourceIconModel.ts`) reads the Studio catalogue shipped at `media/studio/assets/catalogue/<provider>.json` (or `studio/assets` in a dev checkout) one provider at a time and returns `Uri`s to the same `catalog-icons/...svg` files the canvas uses. The graph tree (Explorer and side panel Graph) and Terraform State "Resources in state" rows use them, with ThemeIcon fallbacks; connections and diagnostics got arrows and severity icons. `CloudForgeGraphProvider.onDidChangeGraph` now fires only on graph changes, so an icon redraw does not reload the side panel's state.
 
+Sixteenth slice: **link picker** (Rust Stage 11D `listCloudAccounts`). "Link Cloud Account" first asks the service for what the signed-in CLI can use and shows a QuickPick (`cloudAccountPickItems`: Azure subscriptions by name with `…last4` subscription and tenant, the current link then the CLI default first; AWS profiles; Google projects) plus "Enter details manually…"; an empty or failed list explains why and falls back to the old prompts. `parseCloudAccountList` re-validates every entry. Broker allowlist + `{workspaceId, provider}` validation + test, bridge workspace scoping.
+
 Manual and Windows test list for all slices: [extensions/cloudforge/TEST-CHECKLIST-ksv8z9.md](extensions/cloudforge/TEST-CHECKLIST-ksv8z9.md).
 
 ## Studio continuation — read first — 25 November 2026

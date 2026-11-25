@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-	buildStatusHtml, describeConnection, describeSignInCheck, describeState, escapeHtml, parseCloudConnections, parseSignInCheck, parseStateSummary, parseStatusPageMessage, providersInUse, signInLabel, stateDrift,
+	cloudAccountPickItems, parseCloudAccountList, buildStatusHtml, describeConnection, describeSignInCheck, describeState, escapeHtml, parseCloudConnections, parseSignInCheck, parseStateSummary, parseStatusPageMessage, providersInUse, signInLabel, stateDrift,
 } from '../src/sidePanel/model.ts';
 
 const summary = {
@@ -94,4 +94,32 @@ test('sign-in checks are parsed strictly and shown without secrets', () => {
 	assert.match(html, /Sign-in expired/);
 	assert.ok(!html.includes('<img src=x>'));
 	assert.match(html, /&lt;img src=x&gt;/);
+});
+
+test('the link picker keeps only accounts that make a valid link, default and current first', () => {
+	const azure = parseCloudAccountList({
+		provider: 'azure', status: 'ok', truncated: false,
+		accounts: [
+			{ subscriptionId: 'AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE', tenantId: '11111111-2222-3333-4444-555555555555', name: 'Prod', cloud: 'AzureCloud', isDefault: true },
+			{ subscriptionId: 'bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee', tenantId: '11111111-2222-3333-4444-555555555555', name: 'Dev', cloud: 'AzureCloud', isDefault: false },
+			{ subscriptionId: 'not-a-guid', tenantId: '11111111-2222-3333-4444-555555555555', name: 'Bad', cloud: 'AzureCloud' },
+			{ subscriptionId: 'cccccccc-bbbb-cccc-dddd-eeeeeeeeeeee', tenantId: '11111111-2222-3333-4444-555555555555', name: 'Gov', cloud: 'MarsCloud' },
+		],
+	})!;
+	assert.equal(azure.accounts.length, 2);
+	assert.equal(azure.accounts[0].provider === 'azure' && azure.accounts[0].subscriptionId, 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee');
+	const rows = cloudAccountPickItems(azure, { subscriptionId: 'bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee' });
+	assert.deepEqual(rows.map(row => row.label), ['Dev', 'Prod']);
+	assert.equal(rows[0].description, 'subscription …eeee · tenant …5555 · linked now');
+	assert.match(rows[1].description, /CLI default/);
+
+	const aws = parseCloudAccountList({ provider: 'aws', status: 'ok', accounts: [{ profile: 'prod' }, { profile: 'default' }, { profile: 'bad name' }] })!;
+	assert.deepEqual(cloudAccountPickItems(aws).map(row => row.label), ['default', 'prod']);
+
+	const google = parseCloudAccountList({ provider: 'google', status: 'ok', accounts: [{ projectId: 'my-proj-123', name: 'My project' }, { projectId: 'Bad_Id' }] })!;
+	assert.deepEqual(cloudAccountPickItems(google).map(row => [row.label, row.description]), [['My project', 'my-proj-123']]);
+
+	assert.equal(parseCloudAccountList({ provider: 'azure', status: 'notSignedIn', accounts: [] })?.accounts.length, 0);
+	assert.equal(parseCloudAccountList({ provider: 'oracle', status: 'ok', accounts: [] }), undefined);
+	assert.equal(parseCloudAccountList({ provider: 'azure', status: 'hacked', accounts: [] }), undefined);
 });

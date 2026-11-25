@@ -4,11 +4,11 @@ Covers everything built in both repos on 25 November 2026 (updated for three-way
 
 ## 0. Build and automated checks (Windows)
 
-- [ ] Rust: in a checkout of the branch, from `service/`, with a **fresh** `CARGO_TARGET_DIR` (a stale one gives bogus `hcl-edit` E0599 errors), run `cargo test`. Expect everything to pass, including the `focused_save` (14) and `resource_values` (1) unit tests and, in `tests/draft_save.rs`, `focused_save_rewrites_only_changed_values_and_keeps_comments`, `read_resource_values_returns_file_values_without_secrets` and `focused_batch_saves_several_files_under_one_token`. `tests/stage11_state_connections.rs` (it writes and then deletes one generic credential in your Credential Manager, and runs `az account show` once if the Azure CLI is installed). `fixtures.rs` expects 22 Stage 2 fixtures, including `create-architecture-adopt-root-files`. `tests/stdio.rs` now expects the 2 MiB request limit.
+- [ ] Rust: in a checkout of the branch (now including Stage 11D `listCloudAccounts`), from `service/`, with a **fresh** `CARGO_TARGET_DIR` (a stale one gives bogus `hcl-edit` E0599 errors), run `cargo test`. Expect everything to pass, including the `focused_save` (14) and `resource_values` (1) unit tests and, in `tests/draft_save.rs`, `focused_save_rewrites_only_changed_values_and_keeps_comments`, `read_resource_values_returns_file_values_without_secrets` and `focused_batch_saves_several_files_under_one_token`. `tests/stage11_state_connections.rs` (it writes and then deletes one generic credential in your Credential Manager, and runs `az account show` once if the Azure CLI is installed). `fixtures.rs` expects 22 Stage 2 fixtures, including `create-architecture-adopt-root-files`. `tests/stdio.rs` now expects the 2 MiB request limit.
 - [ ] Rust: `node docs/protocol/fixtures/check-fixtures.mjs` reports the fixtures consistent.
 - [ ] Code OSS: build with the new service binary staged, then run the electron-main test `src/vs/code/test/electron-main/cloudForgeServiceChannel.test.ts`.
 - [ ] Code OSS: full type-check (`npm run compile` or the usual watch build). This covers `cloudForgeService.contribution.ts`, which couldn't be checked in the cloud.
-- [ ] Studio: `pnpm check` and tests (142 expected) in `extensions/cloudforge/studio`; extension tests (101 expected).
+- [ ] Studio: `pnpm check` and tests (142 expected) in `extensions/cloudforge/studio`; extension tests (102 expected).
 
 Use a test project with at least two architectures and one `.tf` file that has comments, a `tags = local.tags` line, a `lifecycle` block and a `dynamic` block.
 
@@ -111,6 +111,15 @@ Use a test project with at least two architectures and one `.tf` file that has c
 - [ ] Delete Stored Key removes the credential; Unlink removes the binding and any key.
 - [ ] Close and reopen the project, including after renaming or moving its folder: the links are still there.
 - [ ] The Azure, AWS and Google rows no longer say "not found" when the CLI is installed in its usual place (it used to always say so).
+
+## 10a. Link by picking an account (Stage 11D)
+
+- [ ] After `az login`, run **Link Cloud Account → Azure**. A list of your enabled subscriptions appears by name, with the last four characters of the subscription and tenant IDs, the CLI default marked, and "Enter details manually…" at the bottom. Picking one asks only for the optional service principal and label (pre-filled with the subscription name), then links it. No GUID typing.
+- [ ] Relink Azure: the current subscription is first and marked "linked now".
+- [ ] After `az logout`, linking says there are no signed-in accounts and drops into the manual prompts.
+- [ ] AWS: your profiles from `aws configure list-profiles` appear, `default` first. Google: your active projects appear by name with their IDs.
+- [ ] With the CLI uninstalled: "is not installed, so enter the details by hand", then the manual prompts.
+- [ ] The picker never shows your email or account name, and nothing new appears in the project folder.
 
 ## 10b. Check cloud sign-in
 

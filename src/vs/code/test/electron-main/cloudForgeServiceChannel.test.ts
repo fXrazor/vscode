@@ -448,6 +448,8 @@ suite('CloudForgeServiceChannel', () => {
 		assert.deepStrictEqual(validateCloudForgeServiceParams('checkCloudSignIn', { workspaceId, provider: 'azure' }), { workspaceId, provider: 'azure' });
 		assert.strictEqual(validateCloudForgeServiceParams('checkCloudSignIn', { workspaceId, provider: 'azure', command: 'az login' }), undefined);
 		assert.strictEqual(validateCloudForgeServiceParams('checkCloudSignIn', { workspaceId, provider: 'oracle' }), undefined);
+		assert.deepStrictEqual(validateCloudForgeServiceParams('listCloudAccounts', { workspaceId, provider: 'google' }), { workspaceId, provider: 'google' });
+		assert.strictEqual(validateCloudForgeServiceParams('listCloudAccounts', { workspaceId, provider: 'aws', args: ['sts'] }), undefined);
 		assert.strictEqual(validateCloudForgeServiceParams('readResourceValues', { workspaceId, architectureId: `${workspaceId}-architecture-1`, rootPath: 'C:\\Windows' }), undefined);
 		assert.ok(validateCloudForgeServiceParams('inspectDependencies', { workspaceId, architectureId: `${workspaceId}-architecture-1`, expectedSourceRevision: sha256, engine: 'opentofu' }));
 		assert.strictEqual(validateCloudForgeServiceParams('inspectDependencies', { workspaceId, architectureId: `${workspaceId}-architecture-1`, engine: 'pulumi' }), undefined);

@@ -40,7 +40,7 @@ const cloudForgeMethods: ReadonlySet<string> = new Set<CloudForgeServiceMethod>(
 	'previewDraftSave', 'applyDraftSave', 'previewFocusedSave', 'applyFocusedSave',
 	'previewFocusedSaveBatch', 'applyFocusedSaveBatch',
 	'inspectDependencies', 'readResourceValues', 'listCloudRegions', 'readModule',
-	'summarizeState', 'listCloudConnections', 'setCloudConnection', 'storeCloudKey', 'removeCloudConnection', 'checkCloudSignIn',
+	'summarizeState', 'listCloudConnections', 'setCloudConnection', 'storeCloudKey', 'removeCloudConnection', 'checkCloudSignIn', 'listCloudAccounts',
 	'diffCatalogueSnapshots', 'auditExportReadiness',
 	'detectEngines', 'runEngineValidate', 'runEnginePlan',
 	'listMirrorPackages', 'checkOfflineMirrorReadiness', 'runEngineInitOffline', 'extractProviderSchemaFromMirror',
@@ -612,7 +612,8 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 		case 'listCloudConnections':
 			return hasOnlyKeys(value, ['workspaceId']) && isOpaqueId(value.workspaceId) ? { workspaceId: value.workspaceId } : undefined;
 		case 'checkCloudSignIn':
-			// Read-only: the service runs the provider CLI's identity command, never a caller-supplied one.
+		case 'listCloudAccounts':
+			// Read-only: the service runs the provider CLI's fixed identity or listing command, never a caller-supplied one.
 			return hasOnlyKeys(value, ['workspaceId', 'provider']) && isOpaqueId(value.workspaceId) && cloudProviders.has(value.provider as string)
 				? { workspaceId: value.workspaceId, provider: value.provider }
 				: undefined;

@@ -175,6 +175,98 @@ export function parseSignInCheck(value: unknown): SignInCheck | undefined {
 	};
 }
 
+/** One account the signed-in CLI can use, from Rust `listCloudAccounts` (the link picker). */
+export type CloudAccount =
+	| { readonly provider: 'azure'; readonly subscriptionId: string; readonly tenantId: string; readonly name: string; readonly cloud: string; readonly isDefault: boolean }
+	| { readonly provider: 'aws'; readonly profile: string }
+	| { readonly provider: 'google'; readonly projectId: string; readonly name: string };
+
+export interface CloudAccountList {
+	readonly provider: CloudProvider;
+	readonly status: 'ok' | 'notSignedIn' | 'failed' | 'cliMissing' | 'timedOut';
+	readonly detail: string;
+	readonly accounts: readonly CloudAccount[];
+	readonly truncated: boolean;
+}
+
+const ACCOUNT_LIST_STATUSES = ['ok', 'notSignedIn', 'failed', 'cliMissing', 'timedOut'];
+const GUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const AZURE_CLOUDS = ['AzureCloud', 'AzureUSGovernment', 'AzureChinaCloud'];
+const PROFILE_PATTERN = /^[A-Za-z0-9_.-]{1,64}$/;
+const GOOGLE_PROJECT_PATTERN = /^[a-z][a-z0-9-]{4,28}[a-z0-9]$/;
+
+function displayName(value: unknown, fallback: string): string {
+	const name = text(value, 128);
+	return name && !/[\u0000-\u001f\u007f]/.test(name) ? name : fallback;
+}
+
+/** Validates a `listCloudAccounts` result; entries that would not make a valid binding are dropped. */
+export function parseCloudAccountList(value: unknown): CloudAccountList | undefined {
+	if (!isRecord(value) || !CLOUD_PROVIDERS.includes(value.provider as CloudProvider) || !ACCOUNT_LIST_STATUSES.includes(value.status as string)) {
+		return undefined;
+	}
+	const provider = value.provider as CloudProvider;
+	const accounts: CloudAccount[] = [];
+	for (const item of Array.isArray(value.accounts) ? value.accounts.slice(0, 200) : []) {
+		if (!isRecord(item)) {
+			continue;
+		}
+		if (provider === 'azure') {
+			const subscriptionId = typeof item.subscriptionId === 'string' ? item.subscriptionId.toLowerCase() : '';
+			const tenantId = typeof item.tenantId === 'string' ? item.tenantId.toLowerCase() : '';
+			if (GUID_PATTERN.test(subscriptionId) && GUID_PATTERN.test(tenantId) && AZURE_CLOUDS.includes(item.cloud as string)) {
+				accounts.push({ provider, subscriptionId, tenantId, name: displayName(item.name, subscriptionId), cloud: item.cloud as string, isDefault: item.isDefault === true });
+			}
+		} else if (provider === 'aws') {
+			if (typeof item.profile === 'string' && PROFILE_PATTERN.test(item.profile)) {
+				accounts.push({ provider, profile: item.profile });
+			}
+		} else if (typeof item.projectId === 'string' && GOOGLE_PROJECT_PATTERN.test(item.projectId)) {
+			accounts.push({ provider, projectId: item.projectId, name: displayName(item.name, item.projectId) });
+		}
+	}
+	return {
+		provider,
+		status: value.status as CloudAccountList['status'],
+		detail: text(value.detail, 512) ?? '',
+		accounts,
+		truncated: value.truncated === true,
+	};
+}
+
+/** Pick-list rows for the accounts, the CLI default (or the current link) first. */
+export function cloudAccountPickItems(list: CloudAccountList, current: Readonly<Record<string, string>> = {}): { readonly label: string; readonly description: string; readonly account: CloudAccount }[] {
+	const tail = (id: string) => '…' + id.slice(-4);
+	const rows = list.accounts.map(account => {
+		switch (account.provider) {
+			case 'azure': {
+				const linked = current.subscriptionId === account.subscriptionId;
+				const notes = [`subscription ${tail(account.subscriptionId)}`, `tenant ${tail(account.tenantId)}`];
+				if (account.cloud !== 'AzureCloud') {
+					notes.push(account.cloud);
+				}
+				if (linked) {
+					notes.push('linked now');
+				} else if (account.isDefault) {
+					notes.push('CLI default');
+				}
+				return { label: account.name, description: notes.join(' · '), account, rank: linked ? 0 : account.isDefault ? 1 : 2 };
+			}
+			case 'aws': {
+				const linked = current.profile === account.profile;
+				return { label: account.profile, description: linked ? 'linked now' : account.profile === 'default' ? 'default profile' : '', account, rank: linked ? 0 : account.profile === 'default' ? 1 : 2 };
+			}
+			default: {
+				const linked = current.projectId === account.projectId;
+				return { label: account.name, description: account.projectId + (linked ? ' · linked now' : ''), account, rank: linked ? 0 : 2 };
+			}
+		}
+	});
+	return rows
+		.sort((a, b) => a.rank - b.rank || a.label.localeCompare(b.label))
+		.map(({ label, description, account }) => ({ label, description, account }));
+}
+
 /** Short words for a sign-in status, for tree rows and the status tab. */
 export function signInLabel(status: SignInStatus): string {
 	switch (status) {
