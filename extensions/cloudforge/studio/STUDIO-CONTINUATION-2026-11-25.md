@@ -10,7 +10,7 @@ Dale approved continuing the proposed point-endpoint pass in this chat. No furth
 
 ### Current work queue
 
-1. Share clamped resize geometry between command and live preview, so minimum/maximum sizes and fixed corners agree before and after release.
+1. **Done:** shared clamped resize geometry between command and live preview; see the continuation pass below.
 2. Fix wide edge hit areas intercepting node-centre clicks while retaining accessible, selectable connections.
 3. Implement the approved design endpoint union, loose-end drop choice, endpoint movement/reconnection, refresh/clipboard/delete/export behavior and semantic Undo/Redo.
 4. Run targeted tests, Studio check/build, both themes at 1360×860 and 1024×768 and hosted refresh regression on Windows Edge. Record results here and update the root HANDOFF index; commit bounded passes and push this feature branch.
@@ -18,6 +18,12 @@ Dale approved continuing the proposed point-endpoint pass in this chat. No furth
 ### Wider backlog retained
 
 Live installed Workbench/service save-refresh-Undo verification remains separate from mocked hosted tests. Large-graph history tuning, arbitrary HCL round-trip, authoritative validation/pricing, collaboration and backend-dependent Stage 9B plan capture remain open. Classic was removed; do not restore it from historical instructions. Do not merge PR #1 or push to main without Dale's explicit instruction.
+
+### Continuation pass — exact clamped resize preview
+
+Extracted `resizeGeometry.ts`: the semantic resize command and selection preview now share per-element size limits, pixel rounding and fixed-corner correction. `resizeSelectionBoxes` supplies the same eligible dimensions/limits to both. This resolves the scale-clamp preview limitation from the previous iteration; proportional logical bounds for rotated drawings remain a separate limitation.
+
+Files: `resizeGeometry.ts`, `resizeGeometry.test.ts` (listed in package.json), `canvasOperations.ts`, `SelectionResizeHandle.tsx`, `DesignCanvas.tsx`, browser verification script. Fresh TypeScript/build passed; **114/114** Node tests, **20/20** Edge browser scenarios and hosted refresh **20/20**. The matrix includes dragging a maximum-size icon: the live box matches release instead of growing beyond the icon limit, in both requested sizes/themes. Zero console/page errors.
 
 ## Historical Codex whiteboard continuation
 

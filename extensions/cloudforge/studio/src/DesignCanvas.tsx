@@ -8,7 +8,7 @@ import { ConnectionTools } from './ConnectionTools.tsx';
 import { ConnectionCreate } from './ConnectionCreate.tsx';
 import { canConnect } from './designConnections.ts';
 import { memo, useEffect, useMemo, useRef, useState, type Dispatch, type RefObject, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { canvasElements, expandGroups, resizeTargets, sceneOrder, selectionFragment } from './canvasOperations.ts';
+import { canvasElements, expandGroups, resizeSelectionBoxes, sceneOrder, selectionFragment } from './canvasOperations.ts';
 import { layoutSelection, type Alignment } from './selectionGeometry.ts';
 import { CanvasActionMenu, SelectionControls, resizable, type SelectionAction } from './SelectionControls.tsx';
 import { SelectionResizeHandle } from './SelectionResizeHandle.tsx';
@@ -81,8 +81,7 @@ export const DesignCanvas = memo(function DesignCanvas({
 	const [hand, setHand] = useState(false);
 	const [pen, setPen] = useState(false);
 	const [ink, setInk] = useState(() => normaliseInkStyle({}));
-	const resizeSelection = resizeTargets(architecture, selectedIds, mode);
-	const resizeIds = [...resizeSelection.items, ...resizeSelection.icons].map(item => item.id);
+	const resizeBoxes = resizeSelectionBoxes(architecture, selectedIds, mode);
 	const [connectorDrop, setConnectorDrop] = useState<{ source: string; point: Position; left: number; top: number }>();
 	const [additiveSelection, setAdditiveSelection] = useState(false);
 	const [minimap, setMinimap] = useState(false);
@@ -382,7 +381,7 @@ export const DesignCanvas = memo(function DesignCanvas({
 			>
 				<CanvasBackground grid={grid} />
 				<AlignmentGuides lines={guideLines}/>
-				{!hand && !pen && !creatingConnection && selectedIds.length > 1 && resizeIds.length > 0 && <SelectionResizeHandle ids={resizeIds} onScale={(scale, anchor) => dispatch({ type: 'canvas', command: { kind: 'resize', ids: selectedIds, mode, scale, anchor } })}/>}
+				{!hand && !pen && !creatingConnection && selectedIds.length > 1 && resizeBoxes.length > 0 && <SelectionResizeHandle boxes={resizeBoxes} onScale={(scale, anchor) => dispatch({ type: 'canvas', command: { kind: 'resize', ids: selectedIds, mode, scale, anchor } })}/>}
 				{minimap && <MiniMap<CanvasNode> pannable zoomable nodeColor={node => node.type === 'board' && node.data.item.kind === 'frame' ? 'transparent' : '#8e79d9'} />}
 				{!creatingConnection && (selectedConnection && showConnections ? <SelectionAnchor ids={[selectedConnection.source,selectedConnection.target]} canvas={bounds}><ConnectionTools connection={selectedConnection} dispatch={dispatch} onClose={() => { setSelectedConnectionId(''); bounds.current?.focus(); }}/></SelectionAnchor> : selectedIds.some(id=>canvasElements(architecture).some(item=>item.id===id)) && <SelectionAnchor ids={selectedIds.filter(id=>canvasElements(architecture).some(item=>item.id===id))} canvas={bounds}><SelectionControls architecture={architecture} ids={selectedIds} dispatch={dispatch} run={run} hasClipboard={hasClipboard} mode={mode} onInspect={onOpen} container={bounds.current}/></SelectionAnchor>)}
 			</ReactFlow>

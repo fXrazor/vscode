@@ -170,6 +170,18 @@ try {
 			assert.equal(await page.locator('.react-flow__node.selected').count(), 2);
 			await checkFrame(false);
 			assert.equal(await page.locator('.selection-resize-handle').count(), 4, 'one eligible icon plus a container still has usable handles');
+			await page.getByLabel('Resize selection', { exact: true }).selectOption('2');
+			await page.getByLabel('Resize selection', { exact: true }).selectOption('2');
+			const clampedBefore = await page.locator('.selection-resize').boundingBox();
+			const clampedHandle = await page.locator('.selection-resize-handle[data-corner="bottom-right"]').boundingBox();
+			await page.mouse.move(clampedHandle.x + clampedHandle.width / 2, clampedHandle.y + clampedHandle.height / 2);
+			await page.mouse.down();
+			await page.mouse.move(clampedHandle.x + clampedHandle.width / 2 + 100, clampedHandle.y + clampedHandle.height / 2 + 100, { steps: 6 });
+			const clampedPreview = await page.locator('.selection-resize').boundingBox();
+			for (const key of ['x', 'y', 'width', 'height']) { assert.ok(Math.abs(clampedPreview[key] - clampedBefore[key]) < 1, 'an icon at its maximum does not overstate the live resize'); }
+			await page.mouse.up();
+			const clampedCommit = await page.locator('.selection-resize').boundingBox();
+			for (const key of ['x', 'y', 'width', 'height']) { assert.ok(Math.abs(clampedPreview[key] - clampedCommit[key]) < 1, 'clamped preview agrees with release'); }
 			await page.getByRole('button', { name: 'Configuration', exact: true }).click();
 			assert.equal(await page.locator('.selection-resize').count(), 0, 'a selection with no eligible target has no resize frame');
 			assert.deepEqual(errors, [], 'no browser errors');

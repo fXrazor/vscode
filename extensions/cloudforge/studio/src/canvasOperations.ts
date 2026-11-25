@@ -6,16 +6,10 @@ import type { Architecture, BoardItem, DesignMode, Position, ResourceBlock } fro
 import { bindingKey, bindingTarget } from './fieldBindings.ts';
 import { fitResourceContainers, isResourceContainer, resourceAncestors, resourceDescendants } from './resourceHierarchy.ts';
 import { iconSizeLimits, resourceIconSize } from './resourceGeometry.ts';
+import { projectResize, resizeAnchors, resizeLimits, type ResizeAnchor, type ResizeBox } from './resizeGeometry.ts';
+export { resizeAnchorPoint, resizeAnchors, resizeLimits, type ResizeAnchor } from './resizeGeometry.ts';
 
 export type TextAppearance = Pick<BoardItem, 'fontSize' | 'bold' | 'italic' | 'underline' | 'textColor' | 'fontFamily' | 'textAlign' | 'verticalAlign' | 'fill' | 'opacity' | 'strokeColor' | 'strokeWidth' | 'strokeStyle'>;
-export const resizeAnchors = ['top-left', 'top-right', 'bottom-left', 'bottom-right'] as const;
-export type ResizeAnchor = typeof resizeAnchors[number];
-
-/** World-space fixed corner of an unrotated selection bounds rectangle. */
-export function resizeAnchorPoint(bounds: { x: number; y: number; width: number; height: number }, anchor: ResizeAnchor): Position {
-	return { x: bounds.x + (anchor.endsWith('right') ? bounds.width : 0), y: bounds.y + (anchor.startsWith('bottom') ? bounds.height : 0) };
-}
-
 export type CanvasCommand =
 	| { kind: 'move'; mode: DesignMode; positions: Record<string, Position>; fit?: boolean }
 	| { kind: 'style'; ids: string[]; patch: Partial<TextAppearance> }
@@ -36,8 +30,6 @@ export function normaliseRotation(degrees: number): number | undefined {
 	return value === 0 || value === 360 ? undefined : value;
 }
 
-export const resizeLimits = { minScale: 0.25, maxScale: 4, minItem: 24, maxItem: 4000 };
-
 export function canvasElements(architecture: Architecture) { return [...architecture.resources, ...architecture.items]; }
 
 export function expandGroups(architecture: Architecture, ids: string[]): string[] {
@@ -53,6 +45,14 @@ export function resizeTargets(architecture: Architecture, ids: string[], mode: D
 		items: architecture.items.filter(item => selected.has(item.id) && !item.canvasLocked),
 		icons: mode === 'visual' ? architecture.resources.filter(resource => selected.has(resource.id) && !resource.canvasLocked && !isResourceContainer(resource)) : []
 	};
+}
+
+export function resizeSelectionBoxes(architecture: Architecture, ids: string[], mode: DesignMode): ResizeBox[] {
+	const { items, icons } = resizeTargets(architecture, ids, mode);
+	return [
+		...items.map(item => ({ id: item.id, ...item.positions[mode], width: item.width, height: item.height, min: resizeLimits.minItem, max: resizeLimits.maxItem })),
+		...icons.map(icon => ({ id: icon.id, ...icon.positions.visual, width: resourceIconSize(icon), height: resourceIconSize(icon), min: iconSizeLimits.min, max: iconSizeLimits.max }))
+	];
 }
 
 export function sceneOrder(architecture: Architecture): string[] {
@@ -174,26 +174,14 @@ export function applyCanvasCommand(architecture: Architecture, command: CanvasCo
 				const side = command.match === 'height' ? height : command.match === 'width' ? width : Math.max(width, height);
 				for (const icon of icons) { iconPatch.set(icon.id, { iconSize: clampIcon(side) }); }
 			} else {
-				const left = Math.min(...items.map(item => item.positions[command.mode].x), ...icons.map(icon => icon.positions.visual.x));
-				const top = Math.min(...items.map(item => item.positions[command.mode].y), ...icons.map(icon => icon.positions.visual.y));
-				const right = Math.max(...items.map(item => item.positions[command.mode].x + item.width), ...icons.map(icon => icon.positions.visual.x + resourceIconSize(icon)));
-				const bottom = Math.max(...items.map(item => item.positions[command.mode].y + item.height), ...icons.map(icon => icon.positions.visual.y + resourceIconSize(icon)));
-				const anchor = command.anchor ?? 'top-left';
-				const origin = resizeAnchorPoint({ x: left, y: top, width: right - left, height: bottom - top }, anchor);
-				const place = (position: Position): Position => ({ x: Math.round(origin.x + (position.x - origin.x) * scale!), y: Math.round(origin.y + (position.y - origin.y) * scale!) });
-				for (const item of items) { const position = place(item.positions[command.mode]); itemPatch.set(item.id, { width: clampItem(item.width * scale!), height: clampItem(item.height * scale!), positions: { visual: position, technical: position } }); }
-				for (const icon of icons) { iconPatch.set(icon.id, { iconSize: clampIcon(resourceIconSize(icon) * scale!), position: place(icon.positions.visual) }); }
-				// Size clamps and pixel rounding must not move the fixed corner. Correct the whole
-				// resized selection together inside this command, never as a second move/history step.
-				const boxes = [
-					...items.map(item => { const patch = itemPatch.get(item.id)!; return { ...patch.positions![command.mode], width: patch.width!, height: patch.height! }; }),
-					...icons.map(icon => { const patch = iconPatch.get(icon.id)!; return { ...patch.position!, width: patch.iconSize, height: patch.iconSize }; })
-				];
-				const x = Math.min(...boxes.map(box => box.x)); const y = Math.min(...boxes.map(box => box.y));
-				const after = resizeAnchorPoint({ x, y, width: Math.max(...boxes.map(box => box.x + box.width)) - x, height: Math.max(...boxes.map(box => box.y + box.height)) - y }, anchor);
-				const shift = (position: Position) => ({ x: position.x + origin.x - after.x, y: position.y + origin.y - after.y });
-				for (const patch of itemPatch.values()) { const position = shift(patch.positions![command.mode]); patch.positions = { visual: position, technical: position }; }
-				for (const patch of iconPatch.values()) { patch.position = shift(patch.position!); }
+				const projection = projectResize(resizeSelectionBoxes(architecture, command.ids, command.mode), scale!, command.anchor);
+				if (!projection) { return architecture; }
+				const boxes = new Map(projection.boxes.map(box => [box.id, box]));
+				for (const item of items) {
+					const box = boxes.get(item.id)!; const position = { x: box.x, y: box.y };
+					itemPatch.set(item.id, { width: box.width, height: box.height, positions: { visual: position, technical: position } });
+				}
+				for (const icon of icons) { const box = boxes.get(icon.id)!; iconPatch.set(icon.id, { iconSize: box.width, position: { x: box.x, y: box.y } }); }
 			}
 			let changed = false;
 			const nextItems = architecture.items.map(item => {

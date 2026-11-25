@@ -4,8 +4,9 @@
  *--------------------------------------------------------------------------------------------*/
 import { useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { useInternalNodes, useViewport, ViewportPortal } from '@xyflow/react';
-import { dragScale, scaledSelectionBounds, type Bounds } from './selectionGeometry.ts';
+import { dragScale, type Bounds } from './selectionGeometry.ts';
 import { resizeAnchors, type ResizeAnchor } from './canvasOperations.ts';
+import { projectResize, type ResizeBox } from './resizeGeometry.ts';
 
 const oppositeCorner: Record<ResizeAnchor, ResizeAnchor> = { 'top-left': 'bottom-right', 'top-right': 'bottom-left', 'bottom-left': 'top-right', 'bottom-right': 'top-left' };
 
@@ -14,24 +15,24 @@ const oppositeCorner: Record<ResizeAnchor, ResizeAnchor> = { 'top-left': 'bottom
  * commits one `resize` canvas command on release, so the whole gesture is one undo step. The
  * corner opposite the pointer stays fixed. The Size menu still defaults to top-left.
  */
-export function SelectionResizeHandle({ ids, onScale }: { ids: string[]; onScale: (scale: number, anchor: ResizeAnchor) => void }) {
+export function SelectionResizeHandle({ boxes: targets, onScale }: { boxes: ResizeBox[]; onScale: (scale: number, anchor: ResizeAnchor) => void }) {
 	const { zoom } = useViewport();
-	const nodes = useInternalNodes(ids);
-	const boxes = nodes.map(node => [node.internals.positionAbsolute.x, node.internals.positionAbsolute.y, node.measured.width ?? 0, node.measured.height ?? 0]);
+	const nodes = useInternalNodes(targets.map(box => box.id));
+	const boxes = nodes.map(node => ({ ...targets.find(box => box.id === node.id)!, x: node.internals.positionAbsolute.x, y: node.internals.positionAbsolute.y, width: node.measured.width ?? 0, height: node.measured.height ?? 0 }));
 	const [scale, setScale] = useState<number>();
-	const drag = useRef<{ x: number; y: number; bounds: Bounds; corner: ResizeAnchor; zoom: number }>(undefined);
+	const drag = useRef<{ x: number; y: number; bounds: Bounds; boxes: ResizeBox[]; corner: ResizeAnchor; zoom: number }>(undefined);
 	if (!boxes.length) { return null; }
-	const x = Math.min(...boxes.map(box => box[0])); const y = Math.min(...boxes.map(box => box[1]));
-	const bounds = { x, y, width: Math.max(...boxes.map(box => box[0] + box[2])) - x, height: Math.max(...boxes.map(box => box[1] + box[3])) - y };
+	const x = Math.min(...boxes.map(box => box.x)); const y = Math.min(...boxes.map(box => box.y));
+	const bounds = { x, y, width: Math.max(...boxes.map(box => box.x + box.width)) - x, height: Math.max(...boxes.map(box => box.y + box.height)) - y };
 	if (bounds.width <= 0 || bounds.height <= 0) { return null; }
-	const shown = scale !== undefined && drag.current ? scaledSelectionBounds(drag.current.bounds, scale, oppositeCorner[drag.current.corner]) : bounds;
+	const shown = scale !== undefined && drag.current ? projectResize(drag.current.boxes, scale, oppositeCorner[drag.current.corner])?.bounds ?? bounds : bounds;
 	const size = 12 / zoom;
 
 	const down = (event: ReactPointerEvent<HTMLDivElement>, corner: ResizeAnchor) => {
 		if (event.button !== 0 || drag.current) { return; }
 		event.preventDefault(); event.stopPropagation();
 		event.currentTarget.setPointerCapture(event.pointerId);
-		drag.current = { x: event.clientX, y: event.clientY, bounds, corner, zoom }; setScale(1);
+		drag.current = { x: event.clientX, y: event.clientY, bounds, boxes, corner, zoom }; setScale(1);
 	};
 	const move = (event: ReactPointerEvent<HTMLDivElement>) => {
 		const start = drag.current; if (!start) { return; }
