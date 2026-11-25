@@ -5,7 +5,8 @@
 
 import { useEffect, useRef } from 'react';
 import { ShieldCheck, TriangleAlert, X, Save } from 'lucide-react';
-import type { HostDraftSaveError, HostDraftSavePreview } from './webviewBridge.ts';
+import type { HostDraftSaveError, HostDraftSaveMerge, HostDraftSavePreview } from './webviewBridge.ts';
+import { describeMerge } from './draftSaveMerge.ts';
 
 export interface DraftSaveDialogProps {
 	readonly open: boolean;
@@ -126,6 +127,7 @@ export function DraftSaveDialog({
 							<span>+{preview.addedLines} / -{preview.removedLines} lines</span>
 							<code>rev {preview.sourceRevision.slice(0, 8)}</code>
 						</div>
+						{preview.merge && <MergeSummary merge={preview.merge} />}
 						{preview.findings.length > 0 && (
 							<ul className="draft-save-findings">
 								{preview.findings.map((finding, index) => (
@@ -139,8 +141,8 @@ export function DraftSaveDialog({
 					</div>
 				)}
 
-				<details className="draft-save-hcl" open>
-					<summary>Generated Terraform ({contents.split('\n').length} lines)</summary>
+				<details className="draft-save-hcl" open={!preview?.merge}>
+					<summary>{preview?.merge ? 'Canvas Terraform (merged into the file, not written as is)' : 'Generated Terraform'} ({contents.split('\n').length} lines)</summary>
 					<pre><code>{contents}</code></pre>
 				</details>
 			</div>
@@ -157,5 +159,13 @@ export function DraftSaveDialog({
 				</button>
 			</footer>
 		</dialog>
+	);
+}
+
+function MergeSummary({ merge }: { readonly merge: HostDraftSaveMerge }) {
+	return (
+		<ul className="draft-save-merge" aria-label="What this save changes">
+			{describeMerge(merge).map(line => <li key={line}>{line}</li>)}
+		</ul>
 	);
 }

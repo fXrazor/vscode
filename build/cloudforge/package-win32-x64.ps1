@@ -69,8 +69,8 @@ try {
         throw 'Package the desktop from a clean checkout.'
     }
     $product = Get-Content -LiteralPath 'product.json' -Raw | ConvertFrom-Json
-    if ($product.applicationName -ne 'cloudforge-proof' -or $product.win32VersionedUpdate) {
-        throw 'This script packages the unversioned CloudForge Windows x64 proof.'
+    if (($product.applicationName -cnotin @('cloudforge', 'cloudforge-proof')) -or $product.win32VersionedUpdate) {
+        throw 'This script packages the unversioned CloudForge Windows x64 desktop.'
     }
 
     $sample = $product.builtInExtensions | Where-Object name -eq 'ms-vscode.js-debug'
@@ -113,6 +113,8 @@ try {
     $packedCloudForge = Join-Path $app 'extensions/cloudforge'
     foreach ($requiredRel in @(
         'dist/extension.js',
+        'terraform.language-configuration.json',
+        'syntaxes/terraform.tmLanguage.json',
         'media/studio/studio.js',
         'media/studio/studio.css',
         'media/studio/assets/catalogue/azure.json',
@@ -173,7 +175,8 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "Packaging task failed: $task" }
     }
 
-    $installer = Get-Item -LiteralPath '.build/win32-x64/user-setup/CloudForgeProofSetup-x64.exe'
+    $installerName = if ($product.applicationName -ceq 'cloudforge') { 'CloudForgeSetup-x64.exe' } else { 'CloudForgeProofSetup-x64.exe' }
+    $installer = Get-Item -LiteralPath ".build/win32-x64/user-setup/$installerName"
     [pscustomobject]@{
         Installer = $installer.FullName
         Size = $installer.Length

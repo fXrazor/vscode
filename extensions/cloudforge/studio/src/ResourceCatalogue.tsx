@@ -1,12 +1,12 @@
 import { ShapeLibrary } from './ShapeLibrary.tsx';
 import type { ShapeId } from './shapes.ts';
-import { memo, useEffect, useMemo, useState, useRef, type ReactNode } from 'react';
+import { memo, useEffect, useMemo, useState, useRef, useSyncExternalStore, type ReactNode } from 'react';
 import * as Tabs from '@radix-ui/react-tabs';
 import type { Architecture, Provider, ResourceKind, BoardItem, CatalogueEntry } from './model.ts';
 import { resourceDefinition } from './fixture.ts';
 import { ProviderMark } from './ProviderMark.tsx';
 import type { LiveSchemaMap } from './liveSchema.ts';
-import { loadCatalogue, groupServices, technologySections, type CatalogueSnapshot } from './catalogue.ts';
+import { loadCatalogue, groupServices, technologySections, serviceOnlyEntries, serviceTypesSnapshot, subscribeServiceTypes, type CatalogueSnapshot } from './catalogue.ts';
 import { Box, Cpu, Network, Database, HardDrive, Activity, PanelLeftClose, Square, Type, Shapes, Package, ChevronDown, ChevronLeft, Search, History, Star, Shield, Zap, Wrench, Brain, BarChart3, Layers, StickyNote, KeyRound, MapPin } from 'lucide-react';
 
 const icons: Record<string, typeof Box> = { Compute: Cpu, Network, Storage:HardDrive, Database, Monitoring:Activity, 'Security & Identity':Shield, Integration:Zap, Management:Wrench, 'AI & ML':Brain, Analytics:BarChart3, Other:Box };
@@ -41,7 +41,9 @@ export const ResourceCatalogue = memo(function ResourceCatalogue({ architecture,
   loadCatalogue(provider).then(value => { if (active) { setSnapshot(value); } }, error => { if (active) { setFailure(error.message); } });
   return () => { active = false; };
  },[provider]);
- const entries = snapshot?.entries ?? [];
+ const serviceTypesVersion = useSyncExternalStore(subscribeServiceTypes, serviceTypesSnapshot);
+ // Types from an imported provider schema that the bundled catalogue does not list yet.
+ const entries = useMemo(() => snapshot ? [...snapshot.entries, ...serviceOnlyEntries(provider, snapshot.entries)] : [], [snapshot, provider, serviceTypesVersion]);
  const services = useMemo(()=>groupServices(entries),[entries]);
  const needle = search.trim().toLowerCase();
  const results = entries.filter(entry => (entry.type+' '+entry.label+' '+entry.service).toLowerCase().includes(needle));

@@ -32,7 +32,7 @@ export async function callProjectService(method: string, params: Record<string, 
 
 export function projectErrorMessage(code: string): string {
 	switch (code) {
-		case 'ALREADY_EXISTS': return l10n.t('A project folder or workspace file with that name already exists.');
+		case 'ALREADY_EXISTS': return l10n.t('A project, architecture, or workspace file with that name already exists.');
 		case 'STALE_SOURCE': return l10n.t('The project changed on disk. CloudForge reloaded it; try again.');
 		case 'UNSUPPORTED_FORMAT': return l10n.t('CloudForge did not find a supported project or Terraform configuration there.');
 		case 'WORKSPACE_UNAVAILABLE': return l10n.t('That folder is not available or has changed.');

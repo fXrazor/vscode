@@ -33,25 +33,42 @@ export type CloudForgeCallResult = CloudForgeCallSuccess | CloudForgeCallFailure
 const cloudForgeMethods: ReadonlySet<string> = new Set<CloudForgeServiceMethod>([
 	'openWorkspace', 'chooseTerraformRoot', 'selectArchitecture', 'readArchitecture',
 	'createProject', 'openProject', 'grantProject', 'forgetProjectAccess', 'createWorkspaceFile',
-	'inspectRepository', 'importRepository', 'removeRepository', 'installGit',
+	'inspectRepository', 'importRepository', 'removeRepository', 'createArchitecture', 'summarizeArchitectures', 'installGit',
 	'inspectCatalogueSchemaFile', 'importCatalogueSnapshot',
-	'listCatalogueSnapshots', 'listCatalogueTypes', 'getResourceFormSchema', 'renderResourceDraft',
+	'listCatalogueSnapshots', 'listCatalogueTypes', 'getResourceFormSchema', 'getCatalogueCoverage', 'renderResourceDraft',
 	'startValidationRun', 'pollValidationRun', 'cancelValidationRun',
-	'previewDraftSave', 'applyDraftSave',
-	'inspectDependencies', 'listCloudRegions', 'readModule',
+	'previewDraftSave', 'applyDraftSave', 'previewFocusedSave', 'applyFocusedSave',
+	'previewFocusedSaveBatch', 'applyFocusedSaveBatch',
+	'inspectDependencies', 'readResourceValues', 'listCloudRegions', 'readModule',
+	'summarizeState', 'listCloudConnections', 'setCloudConnection', 'storeCloudKey', 'removeCloudConnection', 'checkCloudSignIn',
 	'diffCatalogueSnapshots', 'auditExportReadiness',
-	'detectEngines', 'runEngineValidate'
+	'detectEngines', 'runEngineValidate', 'runEnginePlan',
+	'listMirrorPackages', 'checkOfflineMirrorReadiness', 'runEngineInitOffline', 'extractProviderSchemaFromMirror',
+	'importMirrorPackage', 'evictMirrorPackage', 'verifyMirrorIntegrity', 'planMirrorCleanup'
 ]);
 
 /** The service allows `installGit` 10 minutes; the broker waits a little longer for its reply. */
 const installGitTimeoutMs = 11 * 60 * 1000;
+/** Stage 9B `runEnginePlan` allows 60 s for `plan` + 30 s for `show -json`; the broker waits 120 s. */
+const enginePlanTimeoutMs = 2 * 60 * 1000;
+/** Stage 10 `runEngineInitOffline` allows 120 s; the broker waits 125 s. */
+const engineInitOfflineTimeoutMs = 125 * 1000;
+/** Stage 10 `extractProviderSchemaFromMirror` allows 120 s init + 120 s schema; the broker waits 245 s. */
+const extractMirrorSchemaTimeoutMs = 245 * 1000;
+/** Stage 10B `importMirrorPackage` streams & verifies large provider ZIP archives; wait 65 s. */
+const importMirrorPackageTimeoutMs = 65 * 1000;
 const maxPathLength = 32767;
 const maxNameLength = 255;
 const maxRemoteBytes = 2048;
+const cloudProviders: ReadonlySet<string> = new Set(['azure', 'aws', 'google']);
+/** A batch save must fit in one service request (2 MiB) with room for the envelope. */
+const maxBatchBytes = 1_900_000;
 const maxSelections = 32;
 const maxWorkspaceFolders = 1024;
 const maxPollEvents = 512;
 const maxDraftBytes = 512 * 1024;
+const maxStarterFiles = 16;
+const maxStarterBytes = 2 * 1024 * 1024;
 const maxConfiguredRegions = 128;
 const maxScopeFieldLength = 128;
 
@@ -299,6 +316,38 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 			}
 			return { workspaceId: value.workspaceId, repositoryId: value.repositoryId };
 		}
+		case 'summarizeArchitectures': {
+			return hasOnlyKeys(value, ['workspaceId']) && isOpaqueId(value.workspaceId) ? { workspaceId: value.workspaceId } : undefined;
+		}
+		case 'createArchitecture': {
+			if (!hasOnlyKeys(value, ['workspaceId', 'name', 'files', 'adoptRootFiles']) || !isOpaqueId(value.workspaceId) || !isPathComponent(value.name)) {
+				return undefined;
+			}
+			const adopt = value.adoptRootFiles;
+			if (adopt !== undefined && (!Array.isArray(adopt) || adopt.length === 0 || adopt.length > maxStarterFiles ||
+				!adopt.every(name => isPathComponent(name) && /\.tf(\.json)?$/i.test(name)))) {
+				return undefined;
+			}
+			const adoptRootFiles = adopt === undefined ? {} : { adoptRootFiles: [...adopt as string[]] };
+			if (value.files === undefined) {
+				return { workspaceId: value.workspaceId, name: value.name, ...adoptRootFiles };
+			}
+			if (!Array.isArray(value.files) || value.files.length > maxStarterFiles) {
+				return undefined;
+			}
+			const files: { fileName: string; contents: string }[] = [];
+			for (const file of value.files) {
+				if (
+					!isRecord(file) || !hasOnlyKeys(file, ['fileName', 'contents']) ||
+					!isPathComponent(file.fileName) || !/\.tf(\.json)?$/i.test(file.fileName) ||
+					typeof file.contents !== 'string' || Buffer.byteLength(file.contents, 'utf8') > maxStarterBytes
+				) {
+					return undefined;
+				}
+				files.push({ fileName: file.fileName, contents: file.contents });
+			}
+			return { workspaceId: value.workspaceId, name: value.name, files, ...adoptRootFiles };
+		}
 		case 'inspectCatalogueSchemaFile':
 		case 'listCatalogueSnapshots': {
 			return Object.keys(value).length === 0 ? {} : undefined;
@@ -339,6 +388,19 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 			}
 			const key = validateSnapshotKey(value.key);
 			return key ? { key, kind: value.kind, typeName: value.typeName } : undefined;
+		}
+		case 'getCatalogueCoverage': {
+			if (!hasOnlyKeys(value, ['key', 'kind', 'typeName']) || (value.kind === undefined) !== (value.typeName === undefined)) {
+				return undefined;
+			}
+			const key = validateSnapshotKey(value.key);
+			if (!key) {
+				return undefined;
+			}
+			if (value.kind === undefined) {
+				return { key };
+			}
+			return isSchemaKind(value.kind) && isTypeName(value.typeName) ? { key, kind: value.kind, typeName: value.typeName } : undefined;
 		}
 		case 'renderResourceDraft': {
 			if (!hasOnlyKeys(value, ['key', 'draft']) || !isRecord(value.draft)) {
@@ -435,6 +497,159 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 				previewToken: value.previewToken
 			};
 		}
+		case 'previewFocusedSave': {
+			const removeAddresses = value.removeAddresses;
+			const renames = value.renames;
+			if (
+				!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'expectedSourceRevision', 'fileName', 'contents', 'removeAddresses', 'renames', 'baseContents']) ||
+				!isOpaqueId(value.workspaceId) ||
+				!isOpaqueId(value.architectureId) ||
+				typeof value.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(value.expectedSourceRevision) ||
+				!isPathComponent(value.fileName) || value.fileName.startsWith('.') || !value.fileName.toLowerCase().endsWith('.tf') || value.fileName.length <= 3 ||
+				typeof value.contents !== 'string' || Buffer.byteLength(value.contents, 'utf8') > maxDraftBytes ||
+				(removeAddresses !== undefined && (!Array.isArray(removeAddresses) || removeAddresses.length > 256 ||
+					!removeAddresses.every(address => typeof address === 'string' && address.length > 0 && address.length <= 512))) ||
+				(renames !== undefined && (!Array.isArray(renames) || renames.length > 256 ||
+					!renames.every(rename => isRecord(rename) && hasOnlyKeys(rename, ['from', 'to']) &&
+						typeof rename.from === 'string' && rename.from.length > 0 && rename.from.length <= 512 &&
+						typeof rename.to === 'string' && rename.to.length > 0 && rename.to.length <= 512))) ||
+				(value.baseContents !== undefined && (typeof value.baseContents !== 'string' || Buffer.byteLength(value.baseContents, 'utf8') > maxDraftBytes))
+			) {
+				return undefined;
+			}
+			return {
+				workspaceId: value.workspaceId,
+				architectureId: value.architectureId,
+				expectedSourceRevision: value.expectedSourceRevision,
+				fileName: value.fileName,
+				contents: value.contents,
+				...(removeAddresses === undefined ? {} : { removeAddresses: [...removeAddresses as string[]] }),
+				...(renames === undefined ? {} : { renames: (renames as { from: string; to: string }[]).map(({ from, to }) => ({ from, to })) }),
+				...(typeof value.baseContents === 'string' ? { baseContents: value.baseContents } : {})
+			};
+		}
+		case 'applyFocusedSave': {
+			if (
+				!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'expectedSourceRevision', 'fileName', 'previewToken']) ||
+				!isOpaqueId(value.workspaceId) ||
+				!isOpaqueId(value.architectureId) ||
+				typeof value.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(value.expectedSourceRevision) ||
+				!isPathComponent(value.fileName) || value.fileName.startsWith('.') || !value.fileName.toLowerCase().endsWith('.tf') || value.fileName.length <= 3 ||
+				!isOpaqueId(value.previewToken)
+			) {
+				return undefined;
+			}
+			return {
+				workspaceId: value.workspaceId,
+				architectureId: value.architectureId,
+				expectedSourceRevision: value.expectedSourceRevision,
+				fileName: value.fileName,
+				previewToken: value.previewToken
+			};
+		}
+		case 'previewFocusedSaveBatch': {
+			if (
+				!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'expectedSourceRevision', 'files']) ||
+				!isOpaqueId(value.workspaceId) ||
+				!isOpaqueId(value.architectureId) ||
+				typeof value.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(value.expectedSourceRevision) ||
+				!Array.isArray(value.files) || value.files.length === 0 || value.files.length > 16
+			) {
+				return undefined;
+			}
+			const files: Record<string, unknown>[] = [];
+			const names = new Set<string>();
+			let total = 0;
+			for (const file of value.files) {
+				if (!isRecord(file) || 'workspaceId' in file || 'architectureId' in file || 'expectedSourceRevision' in file) {
+					return undefined;
+				}
+				const checked = validateCloudForgeServiceParams('previewFocusedSave', {
+					...file,
+					workspaceId: value.workspaceId,
+					architectureId: value.architectureId,
+					expectedSourceRevision: value.expectedSourceRevision
+				});
+				if (!checked || names.has(String(checked.fileName).toLowerCase())) {
+					return undefined;
+				}
+				names.add(String(checked.fileName).toLowerCase());
+				total += Buffer.byteLength(String(checked.contents), 'utf8') + (typeof checked.baseContents === 'string' ? Buffer.byteLength(checked.baseContents, 'utf8') : 0);
+				delete checked.workspaceId;
+				delete checked.architectureId;
+				delete checked.expectedSourceRevision;
+				files.push(checked);
+			}
+			if (total > maxBatchBytes) {
+				return undefined;
+			}
+			return {
+				workspaceId: value.workspaceId,
+				architectureId: value.architectureId,
+				expectedSourceRevision: value.expectedSourceRevision,
+				files
+			};
+		}
+		case 'applyFocusedSaveBatch': {
+			if (
+				!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'expectedSourceRevision', 'previewToken']) ||
+				!isOpaqueId(value.workspaceId) ||
+				!isOpaqueId(value.architectureId) ||
+				typeof value.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(value.expectedSourceRevision) ||
+				!isOpaqueId(value.previewToken)
+			) {
+				return undefined;
+			}
+			return {
+				workspaceId: value.workspaceId,
+				architectureId: value.architectureId,
+				expectedSourceRevision: value.expectedSourceRevision,
+				previewToken: value.previewToken
+			};
+		}
+		case 'summarizeState':
+			return validateCloudForgeServiceParams('readResourceValues', value);
+		case 'listCloudConnections':
+			return hasOnlyKeys(value, ['workspaceId']) && isOpaqueId(value.workspaceId) ? { workspaceId: value.workspaceId } : undefined;
+		case 'checkCloudSignIn':
+			// Read-only: the service runs the provider CLI's identity command, never a caller-supplied one.
+			return hasOnlyKeys(value, ['workspaceId', 'provider']) && isOpaqueId(value.workspaceId) && cloudProviders.has(value.provider as string)
+				? { workspaceId: value.workspaceId, provider: value.provider }
+				: undefined;
+		case 'setCloudConnection':
+		case 'storeCloudKey':
+		case 'removeCloudConnection': {
+			const field = method === 'setCloudConnection' ? 'binding' : method === 'storeCloudKey' ? 'key' : undefined;
+			const keys = ['workspaceId', 'provider', ...(field ? [field] : ['keyOnly'])];
+			if (!hasOnlyKeys(value, keys) || !isOpaqueId(value.workspaceId) || !cloudProviders.has(value.provider as string)) {
+				return undefined;
+			}
+			if (field) {
+				// Shape only: the service checks every field. A key is passed through once and never logged.
+				const body = value[field];
+				if (!isRecord(body) || Object.keys(body).length > 8 || !Object.values(body).every(item => item === null || (typeof item === 'string' && item.length <= 512))) {
+					return undefined;
+				}
+				return { workspaceId: value.workspaceId, provider: value.provider, [field]: { ...body } };
+			}
+			if (value.keyOnly !== undefined && typeof value.keyOnly !== 'boolean') {
+				return undefined;
+			}
+			return { workspaceId: value.workspaceId, provider: value.provider, ...(value.keyOnly === true ? { keyOnly: true } : {}) };
+		}
+		case 'readResourceValues': {
+			if (!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'expectedSourceRevision']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId)) {
+				return undefined;
+			}
+			if (value.expectedSourceRevision !== undefined && (typeof value.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(value.expectedSourceRevision))) {
+				return undefined;
+			}
+			return {
+				workspaceId: value.workspaceId,
+				architectureId: value.architectureId,
+				...(value.expectedSourceRevision === undefined ? {} : { expectedSourceRevision: value.expectedSourceRevision })
+			};
+		}
 		case 'inspectDependencies': {
 			if (!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'expectedSourceRevision', 'engine']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId)) {
 				return undefined;
@@ -506,7 +721,9 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 			};
 		}
 		case 'auditExportReadiness':
-		case 'runEngineValidate': {
+		case 'runEngineValidate':
+		case 'runEnginePlan':
+		case 'runEngineInitOffline': {
 			if (!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'expectedSourceRevision', 'engine']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId)) {
 				return undefined;
 			}
@@ -523,7 +740,132 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 				...(value.engine === undefined ? {} : { engine: value.engine })
 			};
 		}
+		case 'checkOfflineMirrorReadiness': {
+			if (!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'expectedSourceRevision', 'engine', 'platforms']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId)) {
+				return undefined;
+			}
+			if (value.expectedSourceRevision !== undefined && (typeof value.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(value.expectedSourceRevision))) {
+				return undefined;
+			}
+			if (value.engine !== undefined && value.engine !== 'openTofu' && value.engine !== 'terraform') {
+				return undefined;
+			}
+			let platforms: string[] | undefined;
+			if (value.platforms !== undefined) {
+				if (!Array.isArray(value.platforms) || value.platforms.length === 0 || value.platforms.length > 8) {
+					return undefined;
+				}
+				platforms = [];
+				for (const item of value.platforms) {
+					if (typeof item !== 'string' || !/^[a-z0-9]{1,32}_[a-z0-9]{1,32}$/.test(item)) {
+						return undefined;
+					}
+					platforms.push(item);
+				}
+			}
+			return {
+				workspaceId: value.workspaceId,
+				architectureId: value.architectureId,
+				...(value.expectedSourceRevision === undefined ? {} : { expectedSourceRevision: value.expectedSourceRevision }),
+				...(value.engine === undefined ? {} : { engine: value.engine }),
+				...(platforms === undefined ? {} : { platforms })
+			};
+		}
+		case 'extractProviderSchemaFromMirror': {
+			if (!hasOnlyKeys(value, ['address', 'version', 'engine']) || typeof value.address !== 'string' || !isSnapshotSegment(value.version)) {
+				return undefined;
+			}
+			const segments = value.address.split('/');
+			if (segments.length !== 3 || !segments.every(isSnapshotSegment)) {
+				return undefined;
+			}
+			if (value.engine !== undefined && value.engine !== 'openTofu' && value.engine !== 'terraform') {
+				return undefined;
+			}
+			return {
+				address: value.address,
+				version: value.version,
+				...(value.engine === undefined ? {} : { engine: value.engine })
+			};
+		}
+		case 'importMirrorPackage': {
+			// `archivePath` is strictly broker-owned (supplied via Electron-main native .zip picker).
+			if (
+				!hasOnlyKeys(value, ['address', 'version', 'platform', 'expectedSha256', 'publisher']) ||
+				typeof value.address !== 'string' ||
+				!isSnapshotSegment(value.version) ||
+				typeof value.platform !== 'string' || !/^[a-z0-9]{1,32}_[a-z0-9]{1,32}$/.test(value.platform) ||
+				typeof value.expectedSha256 !== 'string' || !/^[0-9a-fA-F]{64}$/.test(value.expectedSha256)
+			) {
+				return undefined;
+			}
+			const segments = value.address.split('/');
+			if (segments.length !== 3 || !segments.every(isSnapshotSegment)) {
+				return undefined;
+			}
+			if (value.publisher !== undefined && !isScopeText(value.publisher)) {
+				return undefined;
+			}
+			return {
+				address: value.address,
+				version: value.version,
+				platform: value.platform,
+				expectedSha256: value.expectedSha256.toLowerCase(),
+				...(value.publisher === undefined ? {} : { publisher: value.publisher.trim() })
+			};
+		}
+		case 'evictMirrorPackage': {
+			if (
+				!hasOnlyKeys(value, ['address', 'version', 'platform']) ||
+				typeof value.address !== 'string' ||
+				!isSnapshotSegment(value.version) ||
+				typeof value.platform !== 'string' || !/^[a-z0-9]{1,32}_[a-z0-9]{1,32}$/.test(value.platform)
+			) {
+				return undefined;
+			}
+			const segments = value.address.split('/');
+			if (segments.length !== 3 || !segments.every(isSnapshotSegment)) {
+				return undefined;
+			}
+			return {
+				address: value.address,
+				version: value.version,
+				platform: value.platform
+			};
+		}
+		case 'planMirrorCleanup': {
+			if (!hasOnlyKeys(value, ['quotaBytes', 'workspaceId', 'architectureId', 'expectedSourceRevision', 'engine'])) {
+				return undefined;
+			}
+			if (typeof value.quotaBytes !== 'number' || !Number.isSafeInteger(value.quotaBytes) || value.quotaBytes < 0) {
+				return undefined;
+			}
+			const hasWs = value.workspaceId !== undefined;
+			const hasArch = value.architectureId !== undefined;
+			if (hasWs !== hasArch) {
+				return undefined;
+			}
+			if (hasWs && (!isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId))) {
+				return undefined;
+			}
+			if (value.expectedSourceRevision !== undefined) {
+				if (!hasWs || typeof value.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(value.expectedSourceRevision)) {
+					return undefined;
+				}
+			}
+			if (value.engine !== undefined && value.engine !== 'openTofu' && value.engine !== 'terraform') {
+				return undefined;
+			}
+			return {
+				quotaBytes: value.quotaBytes,
+				...(hasWs ? { workspaceId: value.workspaceId, architectureId: value.architectureId } : {}),
+				...(value.expectedSourceRevision === undefined ? {} : { expectedSourceRevision: value.expectedSourceRevision }),
+				...(value.engine === undefined ? {} : { engine: value.engine })
+			};
+		}
 		case 'detectEngines':
+		case 'listMirrorPackages':
+		case 'verifyMirrorIntegrity':
 			return hasOnlyKeys(value, []) ? {} : undefined;
 		case 'listCloudRegions': {
 			if (!hasOnlyKeys(value, ['provider', 'scope', 'configuredRegions'])) {
@@ -614,6 +956,8 @@ export interface ICloudForgeRequestContext {
 	pickParentFolder(): Promise<string | undefined>;
 	/** Opens a native schema JSON file picker owned by the calling window. `undefined` when cancelled. */
 	pickSchemaFile?(): Promise<string | undefined>;
+	/** Opens a native provider `.zip` archive picker owned by the calling window. `undefined` when cancelled. */
+	pickMirrorArchive?(): Promise<string | undefined>;
 }
 
 export type CloudForgeResolvedRequest =
@@ -667,6 +1011,16 @@ export async function resolveCloudForgeRequest(method: CloudForgeServiceMethod, 
 				return { kind: 'failure', code: 'SCOPE_DENIED' };
 			}
 			return { kind: 'call', params: { schemaPath } };
+		}
+		case 'importMirrorPackage': {
+			const archivePath = await context.pickMirrorArchive?.();
+			if (archivePath === undefined) {
+				return { kind: 'failure', code: 'CANCELLED' };
+			}
+			if (!isLocalPath(archivePath)) {
+				return { kind: 'failure', code: 'SCOPE_DENIED' };
+			}
+			return { kind: 'call', params: { ...params, archivePath } };
 		}
 		default:
 			return { kind: 'call', params };
@@ -751,12 +1105,24 @@ export class CloudForgeServiceBroker implements IServerChannel<string> {
 			const request = await resolveCloudForgeRequest(method, params, {
 				resolveScope: () => resolveCloudForgeWindowScope(window.openedWorkspace, configPath => this.workspacesManagementMainService.resolveLocalWorkspace(configPath)),
 				pickParentFolder: () => this.pickParentFolder(window.win ?? undefined),
-				pickSchemaFile: () => this.pickSchemaFile(window.win ?? undefined)
+				pickSchemaFile: () => this.pickSchemaFile(window.win ?? undefined),
+				pickMirrorArchive: () => this.pickMirrorArchive(window.win ?? undefined)
 			});
 			if (request.kind === 'failure') {
 				return safeFailure(new CloudForgeServiceError(request.code)) as T;
 			}
-			let value = await service.call(method, request.params, method === 'installGit' ? installGitTimeoutMs : undefined);
+			const timeoutMs = method === 'installGit'
+				? installGitTimeoutMs
+				: method === 'runEnginePlan'
+					? enginePlanTimeoutMs
+					: method === 'runEngineInitOffline'
+						? engineInitOfflineTimeoutMs
+						: method === 'extractProviderSchemaFromMirror'
+							? extractMirrorSchemaTimeoutMs
+							: method === 'importMirrorPackage' || method === 'verifyMirrorIntegrity'
+								? importMirrorPackageTimeoutMs
+								: undefined;
+			let value = await service.call(method, request.params, timeoutMs);
 			if (method === 'createProject') {
 				value = completeCreateProject(value, request.params.parentPath);
 			}
@@ -801,6 +1167,19 @@ export class CloudForgeServiceBroker implements IServerChannel<string> {
 			buttonLabel: localize('cloudForge.inspectSchema', "Inspect Schema"),
 			properties: ['openFile'],
 			filters: [{ name: localize('cloudForge.schemaJsonFilter', "Provider Schema JSON"), extensions: ['json'] }]
+		}, window);
+		if (result.canceled || result.filePaths.length !== 1) {
+			return undefined;
+		}
+		return result.filePaths[0];
+	}
+
+	private async pickMirrorArchive(window: electron.BrowserWindow | undefined): Promise<string | undefined> {
+		const result = await this.dialogMainService.showOpenDialog({
+			title: localize('cloudForge.pickMirrorArchive', "Choose Provider Archive (.zip) to Import into Local Mirror"),
+			buttonLabel: localize('cloudForge.importMirrorArchive', "Import Archive"),
+			properties: ['openFile'],
+			filters: [{ name: localize('cloudForge.providerZipFilter', "Provider Archive (.zip)"), extensions: ['zip'] }]
 		}, window);
 		if (result.canceled || result.filePaths.length !== 1) {
 			return undefined;

@@ -13,7 +13,8 @@ import type { ILogService } from '../../platform/log/common/log.js';
 const protocolVersion = 1;
 const requestId = 'startup';
 const maxHeaderBytes = 4 * 1024;
-const maxRequestBytes = 64 * 1024;
+// Matches the service limit: a 512 KiB draft plus its three-way base fit after JSON escaping.
+const maxRequestBytes = 2 * 1024 * 1024;
 const maxResponseBytes = 8 * 1024 * 1024;
 const initializeTimeoutMs = 5000;
 const requestTimeoutMs = 30000;
@@ -50,14 +51,18 @@ export function cloudForgeServiceEnvironment(source: NodeJS.ProcessEnv): Record<
 export type CloudForgeServiceMethod =
 	| 'openWorkspace' | 'chooseTerraformRoot' | 'selectArchitecture' | 'readArchitecture'
 	| 'createProject' | 'openProject' | 'grantProject' | 'forgetProjectAccess' | 'createWorkspaceFile'
-	| 'inspectRepository' | 'importRepository' | 'removeRepository' | 'installGit'
+	| 'inspectRepository' | 'importRepository' | 'removeRepository' | 'createArchitecture' | 'summarizeArchitectures' | 'installGit'
 	| 'inspectCatalogueSchemaFile' | 'importCatalogueSnapshot'
-	| 'listCatalogueSnapshots' | 'listCatalogueTypes' | 'getResourceFormSchema' | 'renderResourceDraft'
+	| 'listCatalogueSnapshots' | 'listCatalogueTypes' | 'getResourceFormSchema' | 'getCatalogueCoverage' | 'renderResourceDraft'
 	| 'startValidationRun' | 'pollValidationRun' | 'cancelValidationRun'
-	| 'previewDraftSave' | 'applyDraftSave'
+	| 'previewDraftSave' | 'applyDraftSave' | 'previewFocusedSave' | 'applyFocusedSave' | 'readResourceValues'
+	| 'previewFocusedSaveBatch' | 'applyFocusedSaveBatch'
+	| 'summarizeState' | 'listCloudConnections' | 'setCloudConnection' | 'storeCloudKey' | 'removeCloudConnection' | 'checkCloudSignIn'
 	| 'inspectDependencies' | 'listCloudRegions' | 'readModule'
 	| 'diffCatalogueSnapshots' | 'auditExportReadiness'
-	| 'detectEngines' | 'runEngineValidate';
+	| 'detectEngines' | 'runEngineValidate' | 'runEnginePlan'
+	| 'listMirrorPackages' | 'checkOfflineMirrorReadiness' | 'runEngineInitOffline' | 'extractProviderSchemaFromMirror'
+	| 'importMirrorPackage' | 'evictMirrorPackage' | 'verifyMirrorIntegrity' | 'planMirrorCleanup';
 
 export class CloudForgeServiceError extends Error {
 	constructor(readonly code: string, readonly kind?: string) {

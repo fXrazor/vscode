@@ -7,9 +7,14 @@ import assert from 'node:assert/strict';
 import { createHistory, historyReducer } from './model.ts';
 import { liveSchemaAttributes, liveSchemaBlocks, liveSchemaOutputs, type HostFormSchema } from './liveSchema.ts';
 import { additionalBlocks, editableFields } from './formDefinition.ts';
-import { architectureDiagnostics } from './diagnostics.ts';
-import { buildDraftSavePayload, buildHostViewState, defaultTargetTfFile, projectGraphSnapshotToArchitecture, projectHostDiagnostics, resolveProviderRegions } from './serviceAdapter.ts';
+import { architectureDiagnostics, isStaleDiagnostic } from './diagnostics.ts';
+import { sourceChanges, buildDraftSavePayload, changedFilePayloads, refreshPrevious, adoptSavedFiles, buildHostViewState, defaultTargetTfFile, projectGraphSnapshotToArchitecture, projectHostDiagnostics, resolveProviderRegions } from './serviceAdapter.ts';
 import { projectResourceFiles } from './terraformProjection.ts';
+import { describeMerge } from './draftSaveMerge.ts';
+import { buildResourceDraft, parseSchemaPreview } from './resourceDraft.ts';
+import { hydrateResourceValues, parseResourceValues } from './resourceValues.ts';
+import { terraformCode as codeFor } from './terraformProjection.ts';
+import { sampleArchitecture as schemaSample } from './fixture.ts';
 import { explicitResourceReferences, inheritedDependencies } from './resourceHierarchy.ts';
 import { terraformCode } from './terraformProjection.ts';
 import type { HostCloudRegionsPayload, HostEngineValidateReport, HostGraphSnapshot, HostValidationRun } from './webviewBridge.ts';
@@ -227,6 +232,12 @@ test('projectHostDiagnostics unifies graph, Rust validation, and CLI validate -j
 	assert.equal(cli?.resourceId, 'vnet-1');
 	assert.equal(cli?.severity, 'error');
 	assert.match(cli?.message ?? '', /Missing required argument/);
+	assert.deepEqual(cli?.location, { fileName: 'main.tf', line: 12 });
+	assert.ok(diags.every(d => d.sourceRevision === '3'.repeat(64)));
+	assert.equal(diags.some(d => isStaleDiagnostic(d, architecture, '3'.repeat(64))), false);
+	assert.equal(isStaleDiagnostic(cli!, architecture, '9'.repeat(64)), true, 'a newer source revision makes host findings stale');
+	const validation = diags.find(d => d.source === 'validation')!;
+	assert.equal(isStaleDiagnostic({ ...validation, resourceId: 'deleted-node' }, architecture, '3'.repeat(64)), true, 'a deleted target makes the finding stale');
 });
 
 test('historyReducer replace resets undo/redo history cleanly for live workspace loads', () => {
@@ -345,4 +356,154 @@ test('multi-file Terraform projects preserve per-resource sourceFile and scope g
 	assert.equal(computePayload.fileName, 'compute.tf');
 	assert.match(computePayload.contents, /resource "azurerm_linux_virtual_machine" "vm_app"/);
 	assert.doesNotMatch(computePayload.contents, /resource "azurerm_virtual_network" "vnet_hub"/);
+});
+
+test('focused save summary says what changes and what is kept', () => {
+	assert.deepEqual(describeMerge({ updated: ['aws_vpc.main'], added: ['aws_subnet.a'], removed: [], unchanged: 1, preserved: 2, skipped: [] }), [
+		'Updates aws_vpc.main',
+		'Adds aws_subnet.a',
+		'Keeps 3 other blocks exactly as written',
+		'Comments and fields the canvas does not show are kept',
+	]);
+	assert.ok(describeMerge({ updated: [], added: [], removed: [], unchanged: 0, preserved: 0, skipped: [], renamed: [{ from: 'a.b', to: 'a.c' }] }).includes('Renames a.b to a.c and adds a moved block'));
+	assert.deepEqual(describeMerge({ updated: [], added: [], removed: [], unchanged: 1, preserved: 0, skipped: ['a.b'] }), [
+		'No changes to write',
+		'Keeps 1 other block exactly as written',
+		'Comments and fields the canvas does not show are kept',
+		'Left alone because the address appears twice: a.b',
+	]);
+});
+
+test('resource drafts for the Rust schema check keep literals and turn references into expressions', () => {
+	const architecture = schemaSample();
+	const schema = { kind: 'resource' as const, typeName: 'azurerm_virtual_network', providerSource: 'registry.terraform.io/hashicorp/azurerm', providerVersion: '4.0.0', description: '', docsUrl: '', exampleHcl: '', attributes: [], blocks: [], outputs: [] };
+	const draft = buildResourceDraft(architecture, 'network', schema);
+	assert.equal(draft?.typeName, 'azurerm_virtual_network');
+	assert.deepEqual(draft?.body.attributes.address_space, { kind: 'literal', value: ['10.20.0.0/16'] });
+	assert.deepEqual(draft?.body.attributes.location, { kind: 'expression', text: 'azurerm_resource_group.rg-production.location' });
+	assert.equal(buildResourceDraft(architecture, 'network', { ...schema, typeName: 'azurerm_subnet' }), undefined);
+	assert.equal(buildResourceDraft(architecture, 'network', undefined), undefined);
+
+	const preview = parseSchemaPreview({ resourceId: 'network', hcl: 'resource "x" "y" {}\n', diagnostics: [{ path: 'location', message: 'Required', severity: 'error' }, { path: 1 }], hasErrors: false, providerVersion: '4.0.0' });
+	assert.equal(preview?.hasErrors, true);
+	assert.equal(preview?.diagnostics.length, 1);
+	assert.equal(parseSchemaPreview({ resourceId: 'network', hcl: 3, diagnostics: [] }), undefined);
+});
+
+test('focused saves remove only blocks deleted or renamed on the canvas', () => {
+	const architecture = schemaSample();
+	const keep = architecture.resources.find(resource => resource.id === 'network')!;
+	const node = (id: string, kind: string, resourceType: string | null, name: string, sourceFile = 'main.tf') => ({ id, kind, resourceType, name, label: name, hasSource: true, sourceFile });
+	const snapshot = {
+		workspaceId: 'w', architectureId: 'a', architectureName: 'a', sourceRevision: 'f'.repeat(64), status: 'complete' as const, edges: [], diagnostics: [],
+		nodes: [
+			node('network', 'resource', 'azurerm_virtual_network', keep.terraformName ?? keep.name),
+			node('gone', 'resource', 'azurerm_subnet', 'old'),
+			node('gone-data', 'data', 'azurerm_client_config', 'current'),
+			node('gone-module', 'module', null, 'net'),
+			node('other-file', 'resource', 'azurerm_subnet', 'x', 'other.tf'),
+		],
+	};
+	assert.deepEqual(sourceChanges(architecture, snapshot, 'main.tf'), { removeAddresses: ['azurerm_subnet.old', 'data.azurerm_client_config.current', 'module.net'], renames: [] });
+	const renamed = { ...architecture, resources: architecture.resources.map(resource => resource.id === 'network' ? { ...resource, terraformName: 'hub' } : resource) };
+	assert.deepEqual(sourceChanges(renamed, snapshot, 'main.tf').renames, [{ from: 'azurerm_virtual_network.' + (keep.terraformName ?? keep.name), to: 'azurerm_virtual_network.hub' }]);
+	assert.deepEqual(sourceChanges(architecture, null, 'main.tf'), { removeAddresses: [], renames: [] });
+});
+
+test('save payloads carry the load-time canvas text so the service applies only canvas edits', () => {
+	const baseline = schemaSample();
+	const edited = { ...baseline, resources: baseline.resources.map(resource => resource.id === 'network' ? { ...resource, name: resource.name + '-x' } : resource) };
+	const payload = buildDraftSavePayload(edited, 'main.tf', 'network', null, baseline);
+	assert.equal(typeof payload.baseContents, 'string');
+	assert.notEqual(payload.baseContents, payload.contents);
+	assert.equal(buildDraftSavePayload(baseline, 'main.tf', 'network', null, baseline).baseContents, undefined);
+});
+
+test('save all sends only the files the canvas changed, including a file emptied by a move', () => {
+	const baseline = schemaSample();
+	const files = projectResourceFiles(baseline);
+	assert.deepEqual(changedFilePayloads(baseline, null, baseline), []);
+	assert.deepEqual(changedFilePayloads(baseline, null, null), []);
+	const renamedVnet = { ...baseline, resources: baseline.resources.map(resource => resource.id === 'network' ? { ...resource, name: resource.name + '-x' } : resource) };
+	const one = changedFilePayloads(renamedVnet, null, baseline);
+	assert.equal(one.length, 1);
+	assert.equal(one[0].fileName, files.length === 1 ? 'main.tf' : one[0].fileName);
+	assert.notEqual(one[0].contents, one[0].baseContents);
+	const moved = { ...baseline, resources: baseline.resources.map(resource => resource.id === 'network' ? { ...resource, sourceFile: 'network.tf' } : resource) };
+	const both = changedFilePayloads(moved, null, baseline);
+	assert.deepEqual(both.map(payload => payload.fileName).sort(), ['main.tf', 'network.tf'].sort());
+	const added = both.find(payload => payload.fileName === 'network.tf')!;
+	assert.equal(added.baseContents, '');
+	assert.match(added.contents, /azurerm_virtual_network/);
+});
+
+test('the canvas takes literal values from the files and keeps its own for expressions and secrets', () => {
+	const architecture = schemaSample();
+	const network = architecture.resources.find(resource => resource.id === 'network')!;
+	const name = network.terraformName ?? network.name;
+	const snapshot = {
+		workspaceId: 'w', architectureId: 'a', architectureName: 'a', sourceRevision: 'f'.repeat(64), status: 'complete' as const, edges: [], diagnostics: [],
+		nodes: [{ id: 'network', kind: 'resource', resourceType: 'azurerm_virtual_network', name, label: name, hasSource: true, sourceFile: 'main.tf' }],
+	};
+	const parsed = parseResourceValues({
+		sourceRevision: 'f'.repeat(64),
+		resources: [{
+			address: 'azurerm_virtual_network.' + name, file: 'main.tf',
+			attributes: { name: { kind: 'literal', value: 'vnet-from-file' }, location: { kind: 'literal', value: 'westeurope' }, address_space: { kind: 'expression', text: 'var.space' }, secret: { kind: 'redacted' } },
+			blocks: [],
+		}, { bad: true }],
+	});
+	assert.equal(parsed?.resources.length, 1);
+	const hydrated = hydrateResourceValues(architecture, snapshot, parsed!.resources);
+	const next = hydrated.resources.find(resource => resource.id === 'network')!;
+	assert.equal(next.name, 'vnet-from-file');
+	assert.equal(next.region, 'West Europe');
+	assert.deepEqual(next.settings, network.settings);
+	assert.equal(hydrateResourceValues(architecture, snapshot, []), architecture);
+	assert.equal(parseResourceValues({ resources: [] }), undefined);
+});
+
+test('variables declared in the files become canvas variables and var. fields become bindings', () => {
+	const architecture = { ...schemaSample(), variables: [] };
+	const network = architecture.resources.find(resource => resource.id === 'network')!;
+	const name = network.terraformName ?? network.name;
+	const snapshot = {
+		workspaceId: 'w', architectureId: 'a', architectureName: 'a', sourceRevision: 'f'.repeat(64), status: 'complete' as const, edges: [], diagnostics: [],
+		nodes: [{ id: 'network', kind: 'resource', resourceType: 'azurerm_virtual_network', name, label: name, hasSource: true, sourceFile: 'main.tf' }],
+	};
+	const parsed = parseResourceValues({
+		sourceRevision: 'f'.repeat(64),
+		resources: [{ address: 'azurerm_virtual_network.' + name, file: 'main.tf', attributes: { address_space: { kind: 'expression', text: 'var.space' } }, blocks: [] }],
+		variables: [
+			{ name: 'space', file: 'variables.tf', type: 'list(string)', description: 'Ranges', sensitive: false, default: { kind: 'literal', value: ['10.0.0.0/16'] } },
+			{ name: 'key', file: 'variables.tf', sensitive: true, default: { kind: 'redacted' } },
+			{ name: '../bad', file: 'variables.tf', sensitive: false },
+		],
+	})!;
+	assert.equal(parsed.variables.length, 2);
+	const hydrated = hydrateResourceValues(architecture, snapshot, parsed.resources, parsed.variables);
+	assert.deepEqual(hydrated.variables?.map(item => [item.name, item.type, item.sensitive, item.defaultValue]), [['space', 'list(string)', false, ['10.0.0.0/16']], ['key', 'string', true, undefined]]);
+	assert.match(codeFor(hydrated, 'network'), /address_space\s*=\s*var\.space/);
+});
+
+test('a refresh is projected from the file baseline plus resources that exist only on the canvas', () => {
+	const baseline = schemaSample();
+	const added = { ...baseline.resources[0], id: 'canvas-only', name: 'canvas-only' };
+	const edited = { ...baseline, resources: [...baseline.resources.map(resource => ({ ...resource, name: resource.name + '-edited' })), added] };
+	const previous = refreshPrevious(baseline, edited);
+	assert.equal(previous.resources.length, baseline.resources.length + 1);
+	assert.equal(previous.resources[0].name, baseline.resources[0].name, 'file baseline wins for known resources');
+	assert.equal(previous.resources.at(-1)?.id, 'canvas-only');
+	assert.equal(refreshPrevious(null, edited), edited);
+});
+
+test('after a save the saved files take the canvas version in the next baseline', () => {
+	const baseline = schemaSample();
+	const target = baseline.resources[0];
+	const saved = { ...baseline, resources: baseline.resources.map(resource => resource.id === target.id ? { ...resource, name: 'saved-name' } : resource) };
+	const file = projectResourceFiles(baseline)[0];
+	assert.equal(adoptSavedFiles(baseline, saved, new Set([file])).resources.find(resource => resource.id === target.id)?.name, 'saved-name');
+	assert.equal(adoptSavedFiles(baseline, saved, new Set(['other.tf'])).resources.find(resource => resource.id === target.id)?.name, target.name);
+	const deleted = { ...baseline, resources: baseline.resources.filter(resource => resource.id !== target.id) };
+	assert.equal(adoptSavedFiles(baseline, deleted, new Set([file])).resources.some(resource => resource.id === target.id), false);
 });

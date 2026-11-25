@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { EventEmitter, l10n, ThemeIcon, TreeItem, TreeItemCollapsibleState, workspace, type Event, type TreeDataProvider } from 'vscode';
+import { EventEmitter, l10n, ThemeColor, ThemeIcon, TreeItem, TreeItemCollapsibleState, workspace, type Event, type TreeDataProvider } from 'vscode';
 import type { ProjectController } from './controller';
 import type { ProjectArchitecture, ProjectRepository } from './model';
 
@@ -55,27 +55,42 @@ export class ProjectsViewProvider implements TreeDataProvider<ProjectNode> {
 	}
 
 	getTreeItem(element: ProjectNode): TreeItem {
+		const project = this.controller.current;
 		switch (element.type) {
 			case 'repository': {
 				const { repository } = element;
+				const archCount = project?.architectures.filter(arch => arch.repositoryId === repository.repositoryId).length ?? 0;
 				const item = new TreeItem(repository.displayName, TreeItemCollapsibleState.Expanded);
 				item.iconPath = new ThemeIcon(repository.status === 'available' ? 'repo' : 'warning');
-				item.description = statusText(repository);
+				const status = statusText(repository);
+				const countLabel = archCount === 1 ? l10n.t('1 architecture') : l10n.t('{0} architectures', archCount);
+				item.description = status ? `${countLabel} · ${status}` : countLabel;
 				item.tooltip = repository.remote ? `${repository.displayName}\n${repository.remote}` : repository.displayName;
 				item.contextValue = `cloudforge.repository.${repository.status}${repository.remote ? '.remote' : ''}`;
 				return item;
 			}
 			case 'local': {
+				const localCount = project?.architectures.filter(arch => arch.source === 'local').length ?? 0;
 				const item = new TreeItem(l10n.t('Project architectures'), TreeItemCollapsibleState.Expanded);
 				item.iconPath = new ThemeIcon('folder');
+				item.description = localCount === 1 ? l10n.t('1 architecture') : l10n.t('{0} architectures', localCount);
 				return item;
 			}
 			case 'architecture': {
+				const isActive = element.architecture.architectureId === this.controller.activeArchitectureId;
 				const item = new TreeItem(element.architecture.displayName, TreeItemCollapsibleState.None);
-				item.iconPath = new ThemeIcon('type-hierarchy');
-				item.contextValue = 'cloudforge.architecture';
+				item.iconPath = isActive
+					? new ThemeIcon('type-hierarchy', new ThemeColor('charts.purple'))
+					: new ThemeIcon('type-hierarchy');
+				item.contextValue = element.readable
+					? `cloudforge.architecture.${element.architecture.source}.readable`
+					: 'cloudforge.architecture.unavailable';
 				if (element.readable) {
 					item.command = { command: 'cloudforge.openArchitecture', title: l10n.t('Show Architecture'), arguments: [element.architecture.architectureId] };
+					if (isActive) {
+						item.description = l10n.t('active');
+						item.tooltip = l10n.t('{0} (active architecture)', element.architecture.displayName);
+					}
 				} else {
 					item.description = l10n.t('unavailable');
 				}

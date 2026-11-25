@@ -12,6 +12,7 @@
  * preview (`pnpm dev`), `acquireVsCodeApi` is absent and Studio stays in in-memory sample mode.
  */
 
+import type { ResourceDraft } from './resourceDraft.ts';
 import type { HostFormSchema } from './liveSchema.ts';
 
 export interface HostNodeSummary {
@@ -208,6 +209,18 @@ export interface HostDraftSavePreview {
 	readonly removedLines: number;
 	readonly findings: readonly HostDraftSaveFinding[];
 	readonly previewToken: string;
+	/** Present for a focused save: only these blocks change, the rest of the file is kept as written. */
+	readonly merge?: HostDraftSaveMerge;
+}
+
+export interface HostDraftSaveMerge {
+	readonly updated: readonly string[];
+	readonly added: readonly string[];
+	readonly removed: readonly string[];
+	readonly unchanged: number;
+	readonly preserved: number;
+	readonly skipped: readonly string[];
+	readonly renamed?: readonly { readonly from: string; readonly to: string }[];
 }
 
 export interface HostDraftSaveApplied {
@@ -215,6 +228,28 @@ export interface HostDraftSaveApplied {
 	readonly created: boolean;
 	readonly newSourceRevision: string;
 	readonly bytesWritten: number;
+}
+
+export interface HostSaveAllPreviewFile {
+	readonly fileName: string;
+	readonly created: boolean;
+	readonly changed: boolean;
+	readonly addedLines: number;
+	readonly removedLines: number;
+	readonly findings: readonly HostDraftSaveFinding[];
+	readonly merge?: HostDraftSaveMerge;
+}
+
+/** Every changed file merged by Rust under one preview token. */
+export interface HostSaveAllPreview {
+	readonly sourceRevision: string;
+	readonly files: readonly HostSaveAllPreviewFile[];
+	readonly previewToken: string;
+}
+
+export interface HostSaveAllApplied {
+	readonly files: readonly { readonly fileName: string; readonly created: boolean; readonly bytesWritten: number }[];
+	readonly newSourceRevision: string;
 }
 
 export interface HostDraftSaveError {
@@ -262,6 +297,84 @@ export interface HostEngineValidateReport {
 	readonly truncated: boolean;
 }
 
+export interface HostEnginePlanSummary {
+	readonly create: number;
+	readonly update: number;
+	readonly replace: number;
+	readonly delete: number;
+	readonly read: number;
+	readonly noOp: number;
+	readonly total: number;
+}
+
+export interface HostEnginePlanResourceChange {
+	readonly address: string;
+	readonly moduleAddress?: string;
+	readonly mode: 'managed' | 'data';
+	readonly typeName: string;
+	readonly name: string;
+	readonly providerName?: string;
+	readonly actions: readonly string[];
+	readonly actionKind: 'create' | 'update' | 'replace' | 'delete' | 'read' | 'noOp';
+	readonly hasSensitiveAttributes: boolean;
+	readonly changedAttributePaths: readonly string[];
+}
+
+export interface HostEnginePlanOutputChange {
+	readonly name: string;
+	readonly actions: readonly string[];
+	readonly sensitive: boolean;
+}
+
+export interface HostEnginePlanReport {
+	readonly sourceRevision: string;
+	readonly engine: 'openTofu' | 'terraform';
+	readonly engineVersion: string;
+	readonly engineInferred: boolean;
+	readonly status: 'planned' | 'failed';
+	readonly formatVersion?: string;
+	readonly errored: boolean;
+	readonly durationMs: number;
+	readonly summary: HostEnginePlanSummary;
+	readonly resourceChanges: readonly HostEnginePlanResourceChange[];
+	readonly outputChanges: readonly HostEnginePlanOutputChange[];
+	readonly diagnostics: readonly HostEngineValidateDiagnostic[];
+	readonly truncated: boolean;
+}
+
+export interface HostMirrorPackageKey {
+	readonly address: string;
+	readonly version: string;
+	readonly platform: string;
+}
+
+export interface HostCorruptedMirrorPackage {
+	readonly key: HostMirrorPackageKey;
+	readonly reason: string;
+}
+
+export interface HostOfflineMirrorReadiness {
+	readonly sourceRevision: string;
+	readonly engine: 'openTofu' | 'terraform';
+	readonly engineInferred: boolean;
+	readonly lockState: 'absent' | 'valid' | 'invalid' | 'unreadable';
+	readonly isReady: boolean;
+	readonly ready: readonly HostMirrorPackageKey[];
+	readonly missing: readonly HostMirrorPackageKey[];
+	readonly corrupted: readonly HostCorruptedMirrorPackage[];
+}
+
+export interface HostEngineInitOfflineReport {
+	readonly sourceRevision: string;
+	readonly engine: 'openTofu' | 'terraform';
+	readonly engineVersion: string;
+	readonly engineInferred: boolean;
+	readonly status: 'initialized' | 'failed';
+	readonly exitCode: number;
+	readonly durationMs: number;
+	readonly summary: string;
+}
+
 export type HostInboundMessage =
 	| { readonly type: 'graph'; readonly graph: HostGraphSnapshot; readonly viewState?: Partial<HostViewState>; readonly notice?: HostNotice | null }
 	| { readonly type: 'selectNode'; readonly nodeId: string | null }
@@ -270,14 +383,22 @@ export type HostInboundMessage =
 	| { readonly type: 'validationRunUpdate'; readonly run: HostValidationRun }
 	| { readonly type: 'draftSavePreview'; readonly result: { readonly ok: true; readonly preview: HostDraftSavePreview } | { readonly ok: false; readonly error: HostDraftSaveError } }
 	| { readonly type: 'draftSaveApplied'; readonly result: { readonly ok: true; readonly applied: HostDraftSaveApplied } | { readonly ok: false; readonly error: HostDraftSaveError } }
+	| { readonly type: 'saveAllPreview'; readonly result: { readonly ok: true; readonly preview: HostSaveAllPreview } | { readonly ok: false; readonly error: HostDraftSaveError } }
+	| { readonly type: 'saveAllApplied'; readonly result: { readonly ok: true; readonly applied: HostSaveAllApplied } | { readonly ok: false; readonly error: HostDraftSaveError } }
 	| { readonly type: 'catalogueSnapshots'; readonly snapshots: readonly HostCatalogueSnapshot[] }
 	| { readonly type: 'liveSchema'; readonly typeName: string; readonly schema: HostFormSchema | null }
+	| { readonly type: 'resourceValues'; readonly sourceRevision: string; readonly values: unknown }
+	| { readonly type: 'resourceDraftRendered'; readonly resourceId: string; readonly preview: unknown }
+	| { readonly type: 'catalogueTypes'; readonly types: { readonly provider: 'azure' | 'aws' | 'gcp'; readonly version: string; readonly resources: readonly string[] } }
 	| { readonly type: 'cloudRegions'; readonly data: HostCloudRegionsPayload }
 	| { readonly type: 'dependencyReport'; readonly report: HostDependencyReport | null }
 	| { readonly type: 'exportAuditReport'; readonly report: HostExportAuditReport | null }
 	| { readonly type: 'moduleInspection'; readonly modulePath: readonly string[]; readonly inspection: HostModuleInspection | null; readonly error?: string }
 	| { readonly type: 'detectedEngines'; readonly engines: readonly HostDetectedEngine[] }
 	| { readonly type: 'engineValidateReport'; readonly report: HostEngineValidateReport | null; readonly error?: string }
+	| { readonly type: 'enginePlanReport'; readonly report: HostEnginePlanReport | null; readonly error?: string }
+	| { readonly type: 'offlineMirrorReadiness'; readonly report: HostOfflineMirrorReadiness | null }
+	| { readonly type: 'engineInitOfflineReport'; readonly report: HostEngineInitOfflineReport | null; readonly error?: string }
 	| { readonly type: 'runValidation'; readonly scope: 'architecture' | 'resource'; readonly nodeId?: string; readonly localOnly?: boolean }
 	| { readonly type: 'cancelValidation' }
 	| { readonly type: 'openExport' }
@@ -289,16 +410,22 @@ export type HostOutboundMessage =
 	| { readonly type: 'ready' }
 	| { readonly type: 'selectNode'; readonly nodeId: string | null }
 	| { readonly type: 'openSource'; readonly nodeId: string }
+	| { readonly type: 'renderResourceDraft'; readonly resourceId: string; readonly draft: ResourceDraft }
+	| { readonly type: 'openSourceLocation'; readonly sourceRevision: string; readonly fileName: string; readonly line?: number; readonly column?: number }
 	| { readonly type: 'refresh' }
 	| { readonly type: 'toggleFocusMode'; readonly active?: boolean }
 	| { readonly type: 'viewState'; readonly state: HostViewState }
 	| { readonly type: 'requestValidation'; readonly scope: 'architecture' | 'resource'; readonly nodeId?: string }
 	| { readonly type: 'cancelValidation' }
-	| { readonly type: 'requestDraftSavePreview'; readonly fileName: string; readonly contents: string }
+	| { readonly type: 'requestDraftSavePreview'; readonly fileName: string; readonly contents: string; readonly removeAddresses?: readonly string[]; readonly renames?: readonly { readonly from: string; readonly to: string }[]; readonly baseContents?: string }
 	| { readonly type: 'applyDraftSave'; readonly fileName: string; readonly contents: string; readonly previewToken: string }
+	| { readonly type: 'requestSaveAllPreview'; readonly files: readonly { readonly fileName: string; readonly contents: string; readonly removeAddresses?: readonly string[]; readonly renames?: readonly { readonly from: string; readonly to: string }[]; readonly baseContents?: string }[] }
+	| { readonly type: 'applySaveAll'; readonly previewToken: string }
 	| { readonly type: 'requestSchema'; readonly kind: 'resource' | 'dataSource'; readonly typeName: string }
 	| { readonly type: 'requestModule'; readonly modulePath: readonly string[] }
 	| { readonly type: 'requestEngineValidate'; readonly engine?: 'openTofu' | 'terraform' }
+	| { readonly type: 'requestEnginePlan'; readonly engine?: 'openTofu' | 'terraform' }
+	| { readonly type: 'requestEngineInitOffline'; readonly engine?: 'openTofu' | 'terraform' }
 	| { readonly type: 'exportArtifact'; readonly format: 'svg' | 'png' | 'markdown'; readonly suggestedFileName: string; readonly content: string; readonly encoding: 'utf8' | 'base64' };
 
 interface VsCodeWebviewApi {

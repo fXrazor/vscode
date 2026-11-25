@@ -15,8 +15,8 @@ export interface ImportSelection {
 
 export type ImportSelectionError = 'noSelection' | 'candidateUnavailable' | 'duplicateCandidate' | 'invalidName' | 'duplicateName';
 
-// The service applies the Windows component rules to each linked architecture name.
-function isArchitectureName(name: string): boolean {
+// The service applies the Windows component rules to each linked or local architecture/project name.
+export function isValidArchitectureName(name: string): boolean {
 	const stem = name.split('.', 1)[0];
 	return name.length > 0 && name.length <= 255 && name.trim() === name && !name.endsWith('.')
 		&& !name.toLowerCase().startsWith('.cloudforge-staging-') && !/[<>:"/\\|?*\p{Cc}]/u.test(name)
@@ -41,7 +41,7 @@ export function validateImportSelections(
 		if (selectedIds.has(candidateId)) {
 			return 'duplicateCandidate';
 		}
-		if (!isArchitectureName(displayName)) {
+		if (!isValidArchitectureName(displayName)) {
 			return 'invalidName';
 		}
 		const name = displayName.toLowerCase();

@@ -21,7 +21,7 @@ import { ResourceCatalogue } from './ResourceCatalogue.tsx';
 import { DesignCanvas } from './DesignCanvas.tsx';
 import { CodePanel } from './CodePanel.tsx';
 import { ModuleImport, type ModuleReference } from './ModuleImport.tsx';
-import { loadCatalogue } from './catalogue.ts';
+import { loadCatalogue, registerServiceTypes } from './catalogue.ts';
 import { ArchitectureOverview } from './ArchitectureOverview.tsx';
 import { VisualTopbar } from './VisualTopbar.tsx';
 import { ArrowLeft, Scan, PanelsTopLeft, PanelRightClose, Code2, ListTree, Boxes, Variable, AlertCircle, FileCode2 } from 'lucide-react';
@@ -30,11 +30,14 @@ import { architectureDiagnostics, type Diagnostic } from './diagnostics.ts';
 import { IssuesPanel, focusResourceField } from './IssuesPanel.tsx';
 import { visualResourcePlacement } from './resourceHierarchy.ts';
 import { workflowTemplate } from './workflowTemplate.ts';
-import { createHostBridge, type HostCloudRegionsPayload, type HostDependencyReport, type HostDetectedEngine, type HostDraftSaveError, type HostDraftSavePreview, type HostEngineValidateReport, type HostExportAuditReport, type HostGraphSnapshot, type HostModuleInspection, type HostNotice, type HostValidationRun } from './webviewBridge.ts';
+import { createHostBridge, type HostCloudRegionsPayload, type HostDependencyReport, type HostDetectedEngine, type HostDraftSaveError, type HostDraftSavePreview, type HostEngineInitOfflineReport, type HostEnginePlanReport, type HostEngineValidateReport, type HostSaveAllPreview, type HostExportAuditReport, type HostGraphSnapshot, type HostModuleInspection, type HostNotice, type HostOfflineMirrorReadiness, type HostValidationRun } from './webviewBridge.ts';
 import type { LiveSchemaMap } from './liveSchema.ts';
-import { buildDraftSavePayload, buildHostViewState, defaultTargetTfFile, projectGraphSnapshotToArchitecture, projectHostDiagnostics, sanitizeDraftTfFileName } from './serviceAdapter.ts';
+import { parseSchemaPreview, type SchemaPreview } from './resourceDraft.ts';
+import { hydrateResourceValues, parseResourceValues } from './resourceValues.ts';
+import { buildDraftSavePayload, buildHostViewState, changedFilePayloads, refreshPrevious, adoptSavedFiles, defaultTargetTfFile, projectGraphSnapshotToArchitecture, projectHostDiagnostics, sanitizeDraftTfFileName } from './serviceAdapter.ts';
 import { projectResourceFiles } from './terraformProjection.ts';
 import { DraftSaveDialog } from './DraftSaveDialog.tsx';
+import { SaveAllDialog } from './SaveAllDialog.tsx';
 import { presentationSvg } from './exportPresentation.ts';
 
 function detectInitialTheme(isHosted: boolean): 'light' | 'dark' {
@@ -76,24 +79,38 @@ export function Studio() {
 	const [hostSnapshot, setHostSnapshot] = useState<HostGraphSnapshot | null>(null);
 	/** The architecture last loaded from the service; the draft is modified when the present differs from it. */
 	const [hostBaseline, setHostBaseline] = useState<Architecture | null>(null);
+	const hostBaselineRef = useRef<Architecture | null>(null);
+	/** The canvas state and file names of the last successful save, adopted into the next baseline. */
+	const savedFilesRef = useRef<{ readonly state: Architecture; readonly files: ReadonlySet<string> } | null>(null);
+	const hostGraphRef = useRef<HostGraphSnapshot | null>(null);
 	const [hasSourceById, setHasSourceById] = useState<Readonly<Record<string, boolean>>>({});
 	const [hostNotice, setHostNotice] = useState<HostNotice | null>(null);
 	const [liveSchemas, setLiveSchemas] = useState<LiveSchemaMap>({});
+	const [schemaPreviews, setSchemaPreviews] = useState<Record<string, SchemaPreview | null>>({});
 	const requestedSchemasRef = useRef<Set<string>>(new Set());
 	const [hostCloudRegions, setHostCloudRegions] = useState<Partial<Record<'azure' | 'aws' | 'google', HostCloudRegionsPayload>>>({});
 	const [dependencyReport, setDependencyReport] = useState<HostDependencyReport | null>(null);
 	const [exportAuditReport, setExportAuditReport] = useState<HostExportAuditReport | null>(null);
+	const [offlineMirrorReadiness, setOfflineMirrorReadiness] = useState<HostOfflineMirrorReadiness | null>(null);
+	const [engineInitReport, setEngineInitReport] = useState<HostEngineInitOfflineReport | null>(null);
 	const [moduleInspections, setModuleInspections] = useState<Record<string, { loading: boolean; inspection: HostModuleInspection | null; error?: string }>>({});
 	const [validationRun, setValidationRun] = useState<HostValidationRun | null>(null);
 	const [detectedEngines, setDetectedEngines] = useState<readonly HostDetectedEngine[]>([]);
 	const [engineReport, setEngineReport] = useState<HostEngineValidateReport | null>(null);
+	const [enginePlanReport, setEnginePlanReport] = useState<HostEnginePlanReport | null>(null);
 	const [validating, setValidating] = useState(false);
+	const [planning, setPlanning] = useState(false);
+	const [initializingOffline, setInitializingOffline] = useState(false);
 	const [saveDialogOpen, setSaveDialogOpen] = useState(false);
 	const [saveFileName, setSaveFileName] = useState('cloudforge-studio.tf');
 	const [saveContents, setSaveContents] = useState('');
 	const [savePreview, setSavePreview] = useState<HostDraftSavePreview | null>(null);
 	const [saveError, setSaveError] = useState<HostDraftSaveError | null>(null);
 	const [saving, setSaving] = useState(false);
+	const [saveAllOpen, setSaveAllOpen] = useState(false);
+	const [saveAllFiles, setSaveAllFiles] = useState<readonly string[]>([]);
+	const [saveAllPreview, setSaveAllPreview] = useState<HostSaveAllPreview | null>(null);
+	const [saveAllError, setSaveAllError] = useState<HostDraftSaveError | null>(null);
 	const [focusMode, setFocusMode] = useState(false);
 	const architectureRef = useRef(history.present);
 	architectureRef.current = history.present;
@@ -130,11 +147,21 @@ export function Studio() {
 				case 'graph': {
 					const sameArch = hostArchitectureIdRef.current === incoming.graph.architectureId;
 					hostArchitectureIdRef.current = incoming.graph.architectureId;
+					// Project from what the files said last time, not from the canvas: unsaved canvas edits
+					// are then rebased onto the refresh instead of being folded into the new baseline.
+					const saved = savedFilesRef.current;
+					savedFilesRef.current = null;
+					const previousBaseline = sameArch && hostBaselineRef.current
+						? (saved ? adoptSavedFiles(hostBaselineRef.current, saved.state, saved.files) : hostBaselineRef.current)
+						: null;
 					const projected = projectGraphSnapshotToArchitecture(incoming.graph, {
-						previousArchitecture: sameArch ? architectureRef.current : undefined,
+						previousArchitecture: sameArch ? refreshPrevious(previousBaseline, architectureRef.current) : undefined,
 						viewState: incoming.viewState,
 					});
 					setHostSnapshot(incoming.graph);
+					hostGraphRef.current = incoming.graph;
+					setEnginePlanReport(null);
+					setEngineInitReport(null);
 					setHasSourceById(projected.hasSourceById);
 					setHostNotice(incoming.notice ?? null);
 					setSaveFileName(defaultTargetTfFile(projected.architecture, incoming.viewState?.selectedId ?? undefined));
@@ -152,8 +179,9 @@ export function Studio() {
 					if (incoming.viewState?.viewports) {
 						viewport.current = { ...viewport.current, ...incoming.viewState.viewports };
 					}
-					dispatch({ type: sameArch ? 'rebase' : 'replace', architecture: projected.architecture });
+					dispatch(sameArch ? { type: 'rebase', architecture: projected.architecture, ...(previousBaseline ? { base: previousBaseline } : {}) } : { type: 'replace', architecture: projected.architecture });
 					setHostBaseline(projected.architecture);
+					hostBaselineRef.current = projected.architecture;
 					if (incoming.viewState?.selectedId && projected.architecture.resources.some(r => r.id === incoming.viewState?.selectedId)) {
 						setSelectedId(incoming.viewState.selectedId);
 					}
@@ -178,6 +206,29 @@ export function Studio() {
 				case 'empty':
 					setMessage(incoming.message);
 					break;
+				case 'catalogueTypes':
+					registerServiceTypes(incoming.types);
+					break;
+				case 'resourceValues': {
+					// Show what the files say: the values go into the baseline, and the canvas is rebased
+					// onto it, so file values appear without replacing any unsaved canvas edit.
+					const graph = hostGraphRef.current;
+					const parsed = parseResourceValues(incoming.values);
+					const base = hostBaselineRef.current;
+					if (!graph || !base || !parsed || parsed.sourceRevision !== graph.sourceRevision || incoming.sourceRevision !== graph.sourceRevision) {
+						break;
+					}
+					const hydrated = hydrateResourceValues(base, graph, parsed.resources, parsed.variables);
+					if (hydrated !== base) {
+						dispatch({ type: 'rebase', architecture: hydrated, base });
+						setHostBaseline(hydrated);
+						hostBaselineRef.current = hydrated;
+					}
+					break;
+				}
+				case 'resourceDraftRendered':
+					setSchemaPreviews(prev => ({ ...prev, [incoming.resourceId]: parseSchemaPreview(incoming.preview) ?? null }));
+					break;
 				case 'liveSchema':
 					if (incoming.schema) {
 						setLiveSchemas(prev => ({ ...prev, [incoming.typeName]: incoming.schema! }));
@@ -191,6 +242,19 @@ export function Studio() {
 					break;
 				case 'exportAuditReport':
 					setExportAuditReport(incoming.report);
+					break;
+				case 'offlineMirrorReadiness':
+					setOfflineMirrorReadiness(incoming.report);
+					break;
+				case 'engineInitOfflineReport':
+					setInitializingOffline(false);
+					if (incoming.report) {
+						setEngineInitReport(incoming.report);
+						const label = incoming.report.engine === 'openTofu' ? 'OpenTofu' : 'Terraform';
+						setMessage(`${label} offline init: ${incoming.report.status} (${incoming.report.durationMs} ms)`);
+					} else if (incoming.error) {
+						setMessage(incoming.error);
+					}
 					break;
 				case 'moduleInspection': {
 					const modKey = incoming.modulePath.join('.');
@@ -219,6 +283,18 @@ export function Studio() {
 						setMessage(incoming.error);
 					}
 					break;
+				case 'enginePlanReport':
+					setPlanning(false);
+					if (incoming.report) {
+						setEnginePlanReport(incoming.report);
+						const label = incoming.report.engine === 'openTofu' ? 'OpenTofu' : 'Terraform';
+						setMessage(incoming.report.status === 'planned'
+							? `${label} plan: +${incoming.report.summary.create} ~${incoming.report.summary.update} ±${incoming.report.summary.replace} -${incoming.report.summary.delete} (${incoming.report.outputChanges.length} outputs)`
+							: `${label} plan reported diagnostics`);
+					} else if (incoming.error) {
+						setMessage(incoming.error);
+					}
+					break;
 				case 'draftSavePreview':
 					setSaving(false);
 					if (incoming.result.ok) {
@@ -235,10 +311,34 @@ export function Studio() {
 						setSaveDialogOpen(false);
 						setSavePreview(null);
 						setSaveError(null);
+						savedFilesRef.current = { state: architectureRef.current, files: new Set([incoming.result.applied.fileName]) };
 						setMessage('Saved ' + incoming.result.applied.fileName + ' · rev ' + incoming.result.applied.newSourceRevision.slice(0, 8));
 						hostBridge.post({ type: 'refresh' });
 					} else {
 						setSaveError(incoming.result.error);
+					}
+					break;
+				case 'saveAllPreview':
+					setSaving(false);
+					if (incoming.result.ok) {
+						setSaveAllPreview(incoming.result.preview);
+						setSaveAllError(null);
+					} else {
+						setSaveAllPreview(null);
+						setSaveAllError(incoming.result.error);
+					}
+					break;
+				case 'saveAllApplied':
+					setSaving(false);
+					if (incoming.result.ok) {
+						setSaveAllOpen(false);
+						setSaveAllPreview(null);
+						setSaveAllError(null);
+						savedFilesRef.current = { state: architectureRef.current, files: new Set(incoming.result.applied.files.map(file => file.fileName)) };
+						setMessage('Saved ' + incoming.result.applied.files.map(file => file.fileName).join(', ') + ' · rev ' + incoming.result.applied.newSourceRevision.slice(0, 8));
+						hostBridge.post({ type: 'refresh' });
+					} else {
+						setSaveAllError(incoming.result.error);
 					}
 					break;
 				case 'runValidation':
@@ -340,7 +440,13 @@ export function Studio() {
 	}, [setSelectedId]);
 	useEffect(()=>{if(pendingField&&selectedId===pendingField.resourceId&&detailTab==='form'){focusResourceField(document.querySelector('#resource-inspector'),pendingField.path);setPendingField(undefined);}},[pendingField,selectedId,detailTab]);
 	function showIssues(){setInspectorOpen(true);setDetailTab('issues');}
-	function revealIssue(finding:Diagnostic){openResource(finding.resourceId);setPendingField(finding);}
+	function revealIssue(finding:Diagnostic){
+		// A multi-resource finding fits every target on the canvas, then opens the first one's field.
+		if(finding.targets&&finding.targets.length>1){void flow?.fitView({nodes:finding.targets.map(target=>({id:target.resourceId})),padding:0.3,maxZoom:1.2});}
+		else if(finding.resourceId){void flow?.fitView({nodes:[{id:finding.resourceId}],padding:0.5,maxZoom:1.2});}
+		openResource(finding.resourceId);setPendingField(finding.targets?.[0]?{...finding,path:finding.targets[0].path}:finding);
+	}
+	function openIssueLocation(finding:Diagnostic){if(finding.location&&finding.sourceRevision){hostBridge.post({type:'openSourceLocation',sourceRevision:finding.sourceRevision,fileName:finding.location.fileName,line:finding.location.line,column:finding.location.column});}}
 
 	const runHostValidation = useCallback(() => {
 		if (!hostBridge.isHosted) {
@@ -358,45 +464,61 @@ export function Studio() {
 		hostBridge.post(availableEngine ? { type: 'requestEngineValidate', engine: availableEngine } : { type: 'requestEngineValidate' });
 	}, [hostBridge, availableEngine]);
 
+	const runHostEnginePlan = useCallback(() => {
+		if (!hostBridge.isHosted) {
+			return;
+		}
+		setPlanning(true);
+		hostBridge.post(availableEngine ? { type: 'requestEnginePlan', engine: availableEngine } : { type: 'requestEnginePlan' });
+	}, [hostBridge, availableEngine]);
+
+	const runHostEngineInitOffline = useCallback(() => {
+		if (!hostBridge.isHosted) {
+			return;
+		}
+		setInitializingOffline(true);
+		hostBridge.post(availableEngine ? { type: 'requestEngineInitOffline', engine: availableEngine } : { type: 'requestEngineInitOffline' });
+	}, [hostBridge, availableEngine]);
+
 	const openDraftSave = useCallback((requestedFileName?: string) => {
 		if (!hostBridge.isHosted) {
 			return;
 		}
 		const targetFile = requestedFileName ?? defaultTargetTfFile(architecture, selectedId || undefined);
-		const payload = buildDraftSavePayload(architecture, targetFile, selectedId || undefined);
+		const payload = buildDraftSavePayload(architecture, targetFile, selectedId || undefined, hostSnapshot, hostBaseline);
 		setSaveFileName(payload.fileName);
 		setSaveContents(payload.contents);
 		setSavePreview(null);
 		setSaveError(null);
 		setSaveDialogOpen(true);
 		setSaving(true);
-		hostBridge.post({ type: 'requestDraftSavePreview', fileName: payload.fileName, contents: payload.contents });
-	}, [hostBridge, architecture, selectedId]);
+		hostBridge.post({ type: 'requestDraftSavePreview', fileName: payload.fileName, contents: payload.contents, removeAddresses: payload.removeAddresses, renames: payload.renames, baseContents: payload.baseContents });
+	}, [hostBridge, architecture, selectedId, hostSnapshot, hostBaseline]);
 
 	const selectDraftSaveProjectFile = useCallback((nextFileName: string) => {
 		if (!hostBridge.isHosted) {
 			return;
 		}
-		const payload = buildDraftSavePayload(architecture, nextFileName, selectedId || undefined);
+		const payload = buildDraftSavePayload(architecture, nextFileName, selectedId || undefined, hostSnapshot, hostBaseline);
 		setSaveFileName(payload.fileName);
 		setSaveContents(payload.contents);
 		setSavePreview(null);
 		setSaveError(null);
 		setSaving(true);
-		hostBridge.post({ type: 'requestDraftSavePreview', fileName: payload.fileName, contents: payload.contents });
-	}, [hostBridge, architecture, selectedId]);
+		hostBridge.post({ type: 'requestDraftSavePreview', fileName: payload.fileName, contents: payload.contents, removeAddresses: payload.removeAddresses, renames: payload.renames, baseContents: payload.baseContents });
+	}, [hostBridge, architecture, selectedId, hostSnapshot, hostBaseline]);
 
 	const refreshDraftSavePreview = useCallback(() => {
 		if (!hostBridge.isHosted) {
 			return;
 		}
-		const payload = buildDraftSavePayload(architecture, saveFileName, selectedId || undefined);
+		const payload = buildDraftSavePayload(architecture, saveFileName, selectedId || undefined, hostSnapshot, hostBaseline);
 		setSaveContents(payload.contents);
 		setSavePreview(null);
 		setSaveError(null);
 		setSaving(true);
-		hostBridge.post({ type: 'requestDraftSavePreview', fileName: payload.fileName, contents: payload.contents });
-	}, [hostBridge, architecture, saveFileName, selectedId]);
+		hostBridge.post({ type: 'requestDraftSavePreview', fileName: payload.fileName, contents: payload.contents, removeAddresses: payload.removeAddresses, renames: payload.renames, baseContents: payload.baseContents });
+	}, [hostBridge, architecture, saveFileName, selectedId, hostSnapshot, hostBaseline]);
 
 	const applyHostDraftSave = useCallback(() => {
 		if (!hostBridge.isHosted || !savePreview) {
@@ -410,6 +532,51 @@ export function Studio() {
 			previewToken: savePreview.previewToken,
 		});
 	}, [hostBridge, savePreview, saveContents]);
+
+	const requestSaveAll = useCallback(() => {
+		const payloads = changedFilePayloads(architecture, hostSnapshot, hostBaseline);
+		setSaveAllFiles(payloads.map(payload => payload.fileName));
+		setSaveAllPreview(null);
+		setSaveAllError(null);
+		if (!payloads.length) {
+			setSaving(false);
+			setSaveAllError({ code: 'NO_CHANGES', message: 'The canvas has no unsaved changes to Terraform files.' });
+			return;
+		}
+		setSaving(true);
+		hostBridge.post({
+			type: 'requestSaveAllPreview',
+			files: payloads.map(payload => ({
+				fileName: payload.fileName,
+				contents: payload.contents,
+				...(payload.removeAddresses.length ? { removeAddresses: payload.removeAddresses } : {}),
+				...(payload.renames.length ? { renames: payload.renames } : {}),
+				...(payload.baseContents !== undefined ? { baseContents: payload.baseContents } : {}),
+			})),
+		});
+	}, [hostBridge, architecture, hostSnapshot, hostBaseline]);
+
+	/** Topbar Save: one changed file opens the single-file save, several open save-all. */
+	const openSave = useCallback(() => {
+		if (!hostBridge.isHosted) {
+			return;
+		}
+		const payloads = changedFilePayloads(architecture, hostSnapshot, hostBaseline);
+		if (payloads.length > 1) {
+			setSaveAllOpen(true);
+			requestSaveAll();
+			return;
+		}
+		openDraftSave(payloads[0]?.fileName);
+	}, [hostBridge, architecture, hostSnapshot, hostBaseline, requestSaveAll, openDraftSave]);
+
+	const applySaveAll = useCallback(() => {
+		if (!hostBridge.isHosted || !saveAllPreview) {
+			return;
+		}
+		setSaving(true);
+		hostBridge.post({ type: 'applySaveAll', previewToken: saveAllPreview.previewToken });
+	}, [hostBridge, saveAllPreview]);
 
 	const exportHostArtifact = useCallback((format: 'svg' | 'png') => {
 		if (!hostBridge.isHosted) {
@@ -594,7 +761,7 @@ export function Studio() {
 					focusMode,
 					onRefresh: () => hostBridge.post({ type: 'refresh' }),
 					onValidate: runHostValidation,
-					onSaveDraft: () => openDraftSave(),
+					onSaveDraft: openSave,
 					onToggleFocusMode: () => hostBridge.post({ type: 'toggleFocusMode' }),
 					onExportArtifact: exportHostArtifact,
 				} : undefined} />
@@ -637,7 +804,7 @@ export function Studio() {
 						<div className="form-action-row"><span className="form-action-spacer" />{hostBridge.isHosted && hasSourceById[selected.id] && <button aria-label="Open Terraform source" title="Open Terraform source in editor" onClick={() => hostBridge.post({ type: 'openSource', nodeId: selected.id })}><FileCode2 /></button>}<button aria-label="Open focused resource workspace" title="Open focused resource workspace" onClick={() => openDetails(selected.id)}><PanelsTopLeft /></button><button aria-label="Focus selected resource" title="Focus selected resource" onClick={() => { void flow?.fitView({ nodes: [{ id: selected.id }], padding: 0.5, maxZoom: 1.5 }); }}><Scan /></button></div>
      </>}
      <div className={'inspector-content'+(detailTab==='code'&&inspectorCategory==='resources'?' inspector-content-code':'')}>
-     {detailTab === 'issues' ? <IssuesPanel architecture={architecture} findings={findings} onReveal={revealIssue} host={hostBridge.isHosted ? { isHosted: true, hasWorkspace: !!hostSnapshot, sourceRevision: hostSnapshot?.sourceRevision, validationRun, engineReport, dependencyReport, exportAuditReport, availableEngine, validating, onRunValidation: runHostValidation, onRunEngineValidate: runHostEngineValidate } : undefined}/> : inspectorCategory === 'variables' ? null : <>
+     {detailTab === 'issues' ? <IssuesPanel architecture={architecture} findings={findings} onReveal={revealIssue} host={hostBridge.isHosted ? { isHosted: true, hasWorkspace: !!hostSnapshot, sourceRevision: hostSnapshot?.sourceRevision, validationRun, engineReport, enginePlanReport, dependencyReport, exportAuditReport, offlineMirrorReadiness, engineInitReport, availableEngine, validating, planning, initializingOffline, onRunValidation: runHostValidation, onRunEngineValidate: runHostEngineValidate, onOpenLocation: openIssueLocation, onRunEnginePlan: runHostEnginePlan, onRunEngineInitOffline: runHostEngineInitOffline } : undefined}/> : inspectorCategory === 'variables' ? null : <>
 
 					{detailTab === 'code' && !selected ? null : overview ? (
 						<ArchitectureOverview architecture={architecture} onSelect={id => { setSelectedId(id); setOverview(false); setDetailTab('form'); }} />
@@ -662,12 +829,13 @@ export function Studio() {
 					) : <div className="empty-inspector"><h2>Select an element</h2><p>Choose a resource, note, text, shape or frame on the canvas.</p></div>}
      </>}
      <div className="variable-container" hidden={inspectorCategory !== 'variables' || detailTab === 'issues'}><VariablePanel architecture={architecture} dispatch={dispatch} code={detailTab === 'code'}/></div>
-     <CodePanel resource={selected} architecture={architecture} dispatch={dispatch} hidden={!inspectorOpen || detailTab !== 'code' || inspectorCategory !== 'resources'} hasSource={hostBridge.isHosted && !!selected && !!hasSourceById[selected.id]} onOpenSource={hostBridge.isHosted && selected ? () => hostBridge.post({ type: 'openSource', nodeId: selected.id }) : undefined} onSaveFile={hostBridge.isHosted && hostSnapshot ? file => openDraftSave(file) : undefined} />
+     <CodePanel resource={selected} architecture={architecture} dispatch={dispatch} liveSchema={selected ? liveSchemas[resourceDefinition(selected).type] : undefined} schemaPreview={selected ? schemaPreviews[selected.id] : undefined} onRequestSchemaPreview={hostBridge.isHosted ? (resourceId, draft) => hostBridge.post({ type: 'renderResourceDraft', resourceId, draft }) : undefined} hidden={!inspectorOpen || detailTab !== 'code' || inspectorCategory !== 'resources'} hasSource={hostBridge.isHosted && !!selected && !!hasSourceById[selected.id]} onOpenSource={hostBridge.isHosted && selected ? () => hostBridge.post({ type: 'openSource', nodeId: selected.id }) : undefined} onSaveFile={hostBridge.isHosted && hostSnapshot ? file => openDraftSave(file) : undefined} />
      </div>
 				</aside>
 			</div>
 			{message&&<div className="studio-action-status" role="status">{message}</div>}<footer className="sr-only"><span>{hostBridge.isHosted ? (hostSnapshot ? 'Connected · rev ' + hostSnapshot.sourceRevision.slice(0, 8) : 'Connecting') : (history.past.length ? 'Modified draft' : 'Original sample') + ' · In-memory preview'}</span></footer>
 			{workspaceResource && <ResourceWorkspace open={workspaceOpen} resource={workspaceResource} architecture={architecture} dispatch={dispatch} liveSchemas={liveSchemas} cloudRegions={hostCloudRegions} moduleInspection={hostBridge.isHosted && hostSnapshot && workspaceResource.kind === 'module' ? { loading: !!moduleInspections[workspaceResource.name]?.loading, inspection: moduleInspections[workspaceResource.name]?.inspection ?? null, error: moduleInspections[workspaceResource.name]?.error, onInspect: () => inspectModuleResource(workspaceResource.name) } : undefined} hostDiagnostics={hostFindings} hasSource={hostBridge.isHosted && !!hasSourceById[workspaceResource.id]} onOpenSource={hostBridge.isHosted ? () => hostBridge.post({ type: 'openSource', nodeId: workspaceResource.id }) : undefined} onSaveFile={hostBridge.isHosted && hostSnapshot ? file => openDraftSave(file) : undefined} onNavigate={id=>{setWorkspaceResourceId(id);setSelectedId(id);}} onClose={() => setWorkspaceOpen(false)} />}
+			{hostBridge.isHosted && <SaveAllDialog open={saveAllOpen} fileNames={saveAllFiles} busy={saving} preview={saveAllPreview} error={saveAllError} onRefreshPreview={requestSaveAll} onReviewFile={file => { setSaveAllOpen(false); openDraftSave(file); }} onApply={applySaveAll} onClose={() => setSaveAllOpen(false)} />}
 			{hostBridge.isHosted && <DraftSaveDialog open={saveDialogOpen} fileName={saveFileName} projectFiles={hostSnapshot ? projectResourceFiles(architecture) : undefined} contents={saveContents} busy={saving} preview={savePreview} error={saveError} onFileNameChange={setSaveFileName} onSelectProjectFile={selectDraftSaveProjectFile} onRefreshPreview={refreshDraftSavePreview} onApply={applyHostDraftSave} onClose={() => setSaveDialogOpen(false)} />}
 			{moduleImportOpen && <ModuleImport onClose={() => setModuleImportOpen(false)} onImport={importModule} />}
 		</div>

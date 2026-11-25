@@ -8,6 +8,7 @@ import { test } from 'node:test';
 import { isValidTfFileName, parseWebviewMessage, type CanvasGraphSnapshot } from '../src/canvas/protocol.ts';
 import {
 	draftSaveErrorMessage,
+	formatEnginePlanReportText,
 	mapRustFormSchemaToCanvasFormSchema,
 	mapServiceValidationPollToRun,
 	parseCatalogueSnapshots,
@@ -16,13 +17,23 @@ import {
 	parseDetectedEngines,
 	parseDraftSaveApply,
 	parseDraftSavePreview,
+	parseSaveAllApply,
+	parseSaveAllPreview,
+	parseSchemaPreview,
+	parseEngineInitOfflineReport,
+	parseEnginePlanReport,
 	parseEngineValidateReport,
 	parseExportAuditReport,
+	parseMirrorPackages,
 	parseModuleInspection,
+	parseOfflineMirrorReadiness,
 	parseSchemaDiffReport,
 	parseValidationPoll,
 	parseValidationStart,
-	selectBestSnapshotForType
+	selectBestSnapshotForType,
+	newestPaletteSnapshots,
+	parseCatalogueTypes,
+	parseFormCoverage,
 } from '../src/canvas/serviceAdapters.ts';
 
 function sampleGraph(): CanvasGraphSnapshot {
@@ -222,6 +233,19 @@ test('Stage 5 guarded save parsers and Webview protocol validation enforce stric
 	assert.ok(preview);
 	assert.equal(preview.created, true);
 	assert.equal(preview.findings.length, 1);
+	assert.equal(preview.merge, undefined);
+
+	const focusedBase = {
+		sourceRevision: 'b'.repeat(64), fileName: 'network.tf', created: false, afterSha256: 'c'.repeat(64),
+		addedLines: 1, removedLines: 1, findings: [], previewToken: 'save-' + 'd'.repeat(32), focused: true,
+	};
+	const focused = parseDraftSavePreview({
+		...focusedBase,
+		merge: { updated: ['aws_vpc.main'], added: [], removed: [], unchanged: 1, preserved: 2, skipped: [''] },
+	});
+	assert.deepEqual(focused?.merge, { updated: ['aws_vpc.main'], added: [], removed: [], unchanged: 1, preserved: 2, skipped: [], renamed: [] });
+	assert.equal(parseDraftSavePreview({ ...focusedBase, merge: { updated: 'x' } })?.merge, undefined);
+	assert.equal(parseDraftSavePreview({ ...focusedBase, focused: false, merge: { updated: [], added: [], removed: [], unchanged: 0, preserved: 0, skipped: [] } })?.merge, undefined);
 
 	const applied = parseDraftSaveApply({
 		fileName: 'network.tf',
@@ -419,4 +443,208 @@ test('Stage 9A local engine discovery and CLI validate adapters sanitize payload
 	assert.equal(report.errorCount, 1);
 	assert.equal(report.diagnostics[0].filename, 'main.tf');
 	assert.equal(report.diagnostics[0].line, 3);
+});
+
+test('palette uses the newest imported snapshot per provider and validates its types and coverage', () => {
+	const snap = (address: string, version: string) => ({ address, version, formatVersion: '1.0', sha256: 'c'.repeat(64), resourceCount: 1, dataSourceCount: 0 });
+	const newest = newestPaletteSnapshots([
+		snap('registry.terraform.io/hashicorp/azurerm', '5.14.0'),
+		snap('registry.terraform.io/hashicorp/azurerm', '5.15.0'),
+		snap('registry.terraform.io/hashicorp/aws', '6.73.0'),
+		snap('registry.terraform.io/hashicorp/random', '3.6.0'),
+	]);
+	assert.deepEqual(newest.map(item => [item.provider, item.snapshot.version]).sort(), [['aws', '6.73.0'], ['azure', '5.15.0']]);
+	assert.deepEqual(parseCatalogueTypes({ resources: ['azurerm_new_thing', 'Bad Type', 7] }, 'azure', '5.15.0'), { provider: 'azure', version: '5.15.0', resources: ['azurerm_new_thing'] });
+	assert.equal(parseCatalogueTypes({}, 'azure', '5.15.0'), undefined);
+	assert.deepEqual(parseFormCoverage({ complete: false, paths: 12, readOnly: 2, gaps: [{ path: 'a.b', reason: 'dynamic' }, { path: 3 }] }), { complete: false, paths: 12, readOnly: 2, gaps: [{ path: 'a.b', reason: 'dynamic' }] });
+	assert.equal(parseFormCoverage({ complete: 'yes', paths: 1, readOnly: 0, gaps: [] }), undefined);
+});
+
+test('renderResourceDraft messages and results are validated before reaching the service or Studio', () => {
+	const draft = { kind: 'resource', typeName: 'azurerm_virtual_network', label: 'hub', body: { attributes: {}, blocks: [] } };
+	assert.deepEqual(parseWebviewMessage({ type: 'renderResourceDraft', resourceId: 'network', draft }), { type: 'renderResourceDraft', resourceId: 'network', draft });
+	assert.equal(parseWebviewMessage({ type: 'renderResourceDraft', resourceId: 'network', draft: { ...draft, kind: 'module' } }), undefined);
+	assert.equal(parseWebviewMessage({ type: 'renderResourceDraft', resourceId: '', draft }), undefined);
+	assert.equal(parseWebviewMessage({ type: 'renderResourceDraft', resourceId: 'network', draft: { ...draft, label: 'x'.repeat(50_000) } }), undefined);
+
+	const preview = parseSchemaPreview({ hcl: 'resource "a" "b" {}\n', diagnostics: [{ path: 'location', message: 'Required attribute', severity: 'error' }, { path: 'x', message: '', severity: 'error' }], hasErrors: true }, 'network', '4.0.0');
+	assert.deepEqual(preview, { resourceId: 'network', hcl: 'resource "a" "b" {}\n', diagnostics: [{ path: 'location', message: 'Required attribute', severity: 'error' }], hasErrors: true, providerVersion: '4.0.0' });
+	assert.equal(parseSchemaPreview({ hcl: 1, diagnostics: [] }, 'network', '4.0.0'), undefined);
+});
+
+test('draft save previews carry bounded canvas deletions', () => {
+	assert.deepEqual(parseWebviewMessage({ type: 'requestDraftSavePreview', fileName: 'main.tf', contents: '', removeAddresses: ['aws_vpc.old'] }), { type: 'requestDraftSavePreview', fileName: 'main.tf', contents: '', removeAddresses: ['aws_vpc.old'] });
+	assert.deepEqual(parseWebviewMessage({ type: 'requestDraftSavePreview', fileName: 'main.tf', contents: '', removeAddresses: [] }), { type: 'requestDraftSavePreview', fileName: 'main.tf', contents: '' });
+	assert.equal(parseWebviewMessage({ type: 'requestDraftSavePreview', fileName: 'main.tf', contents: '', removeAddresses: [''] }), undefined);
+	assert.equal(parseWebviewMessage({ type: 'requestDraftSavePreview', fileName: 'main.tf', contents: '', removeAddresses: 'aws_vpc.old' }), undefined);
+	assert.deepEqual(parseWebviewMessage({ type: 'requestDraftSavePreview', fileName: 'main.tf', contents: '', renames: [{ from: 'a.b', to: 'a.c' }] }), { type: 'requestDraftSavePreview', fileName: 'main.tf', contents: '', renames: [{ from: 'a.b', to: 'a.c' }] });
+	assert.equal(parseWebviewMessage({ type: 'requestDraftSavePreview', fileName: 'main.tf', contents: '', renames: [{ from: 'a.b', to: 'a.c', extra: 1 }] }), undefined);
+	assert.deepEqual(parseWebviewMessage({ type: 'requestDraftSavePreview', fileName: 'main.tf', contents: 'a', baseContents: 'b' }), { type: 'requestDraftSavePreview', fileName: 'main.tf', contents: 'a', baseContents: 'b' });
+	assert.equal(parseWebviewMessage({ type: 'requestDraftSavePreview', fileName: 'main.tf', contents: 'a', baseContents: 1 }), undefined);
+});
+
+test('save-all preview and apply results are validated and messages are bounded', () => {
+	const merge = { updated: ['aws_vpc.main'], added: [], removed: [], unchanged: 0, preserved: 1, skipped: [], renamed: [] };
+	const preview = parseSaveAllPreview({
+		workspaceId: 'w', architectureId: 'a', sourceRevision: 'a'.repeat(64), focused: true, previewToken: 'save-' + 'd'.repeat(32),
+		files: [
+			{ fileName: 'main.tf', created: false, changed: true, addedLines: 1, removedLines: 1, findings: [{ code: 'X', file: 'main.tf', line: 2 }], merge },
+			{ fileName: 'new.tf', created: true, changed: false, addedLines: 0, removedLines: 0, findings: [] },
+		],
+	});
+	assert.equal(preview?.files.length, 2);
+	assert.deepEqual(preview?.files[0].merge, merge);
+	assert.equal(preview?.files[1].merge, undefined);
+	assert.equal(parseSaveAllPreview({ sourceRevision: 'a'.repeat(64), previewToken: 't', files: [{ fileName: 'main.tf' }] }), undefined);
+	assert.deepEqual(parseSaveAllApply({ newSourceRevision: 'e'.repeat(64), files: [{ fileName: 'main.tf', created: false, bytesWritten: 9 }] }), {
+		newSourceRevision: 'e'.repeat(64), files: [{ fileName: 'main.tf', created: false, bytesWritten: 9 }],
+	});
+	assert.equal(parseSaveAllApply({ newSourceRevision: 'bad', files: [] }), undefined);
+
+	assert.deepEqual(parseWebviewMessage({ type: 'requestSaveAllPreview', files: [{ fileName: 'main.tf', contents: 'x', baseContents: 'y', renames: [{ from: 'a.b', to: 'a.c' }] }] }), {
+		type: 'requestSaveAllPreview', files: [{ fileName: 'main.tf', contents: 'x', baseContents: 'y', renames: [{ from: 'a.b', to: 'a.c' }] }],
+	});
+	assert.equal(parseWebviewMessage({ type: 'requestSaveAllPreview', files: [] }), undefined);
+	assert.equal(parseWebviewMessage({ type: 'requestSaveAllPreview', files: [{ fileName: 'a.tf', contents: '' }, { fileName: 'A.tf', contents: '' }] }), undefined);
+	assert.equal(parseWebviewMessage({ type: 'requestSaveAllPreview', files: [{ fileName: '../a.tf', contents: '' }] }), undefined);
+	assert.equal(parseWebviewMessage({ type: 'requestSaveAllPreview', files: [{ type: 'applyDraftSave', fileName: 'a.tf', contents: '' }] }), undefined);
+	assert.deepEqual(parseWebviewMessage({ type: 'applySaveAll', previewToken: 'save-' + 'd'.repeat(32) }), { type: 'applySaveAll', previewToken: 'save-' + 'd'.repeat(32) });
+});
+
+test('Stage 9B guarded local engine plan adapters sanitize planned/failed responses and never carry literal values', () => {
+	assert.deepStrictEqual(parseWebviewMessage({ type: 'requestEnginePlan' }), { type: 'requestEnginePlan' });
+	assert.deepStrictEqual(parseWebviewMessage({ type: 'requestEnginePlan', engine: 'terraform' }), { type: 'requestEnginePlan', engine: 'terraform' });
+	assert.equal(parseWebviewMessage({ type: 'requestEnginePlan', engine: 'powershell' }), undefined);
+
+	const planned = parseEnginePlanReport({
+		sourceRevision: 'b'.repeat(64),
+		engine: 'openTofu',
+		engineVersion: '1.13.9',
+		engineInferred: true,
+		status: 'planned',
+		formatVersion: '1.2',
+		errored: false,
+		durationMs: 312,
+		summary: { create: 1, update: 1, replace: 0, delete: 0, read: 0, noOp: 0, total: 2 },
+		resourceChanges: [
+			{
+				address: 'azurerm_resource_group.hub',
+				mode: 'managed',
+				typeName: 'azurerm_resource_group',
+				name: 'hub',
+				providerName: 'registry.opentofu.org/hashicorp/azurerm',
+				actions: ['create'],
+				actionKind: 'create',
+				hasSensitiveAttributes: false,
+				changedAttributePaths: ['location', 'name'],
+				after: { secret_value: 'SHOULD_BE_STRIPPED' },
+			},
+			{
+				address: 'azurerm_key_vault_secret.api',
+				mode: 'managed',
+				typeName: 'azurerm_key_vault_secret',
+				name: 'api',
+				actions: ['update'],
+				actionKind: 'update',
+				hasSensitiveAttributes: true,
+				changedAttributePaths: ['value'],
+			},
+		],
+		outputChanges: [
+			{ name: 'db_password', actions: ['create'], sensitive: true, after: 'TOP_SECRET' },
+		],
+		diagnostics: [],
+		truncated: false,
+	});
+	assert.ok(planned);
+	assert.equal(planned.status, 'planned');
+	assert.equal(planned.summary.create, 1);
+	assert.equal(planned.summary.update, 1);
+	assert.equal(planned.resourceChanges.length, 2);
+	assert.equal(planned.resourceChanges[1].hasSensitiveAttributes, true);
+	assert.equal(planned.outputChanges[0].sensitive, true);
+	assert.equal(JSON.stringify(planned).includes('SHOULD_BE_STRIPPED'), false);
+	assert.equal(JSON.stringify(planned).includes('TOP_SECRET'), false);
+
+	const formatted = formatEnginePlanReportText(planned, 'Hub Network');
+	assert.ok(formatted.includes('OpenTofu 1.13.9'));
+	assert.ok(formatted.includes('+1 create · ~1 update'));
+	assert.ok(formatted.includes('[create] azurerm_resource_group.hub [location, name]'));
+	assert.ok(formatted.includes('(sensitive attributes redacted)'));
+	assert.ok(formatted.includes('output.db_password (sensitive)'));
+
+	const failed = parseEnginePlanReport({
+		sourceRevision: 'b'.repeat(64),
+		engine: 'terraform',
+		engineVersion: '1.15.8',
+		engineInferred: false,
+		status: 'failed',
+		errored: true,
+		durationMs: 85,
+		summary: { create: 0, update: 0, replace: 0, delete: 0, read: 0, noOp: 0, total: 0 },
+		resourceChanges: [],
+		outputChanges: [],
+		diagnostics: [
+			{ severity: 'error', summary: 'Inconsistent dependency lock file', filename: 'main.tf', line: 1 },
+		],
+		truncated: false,
+	});
+	assert.ok(failed);
+	assert.equal(failed.status, 'failed');
+	assert.equal(failed.diagnostics.length, 1);
+	assert.equal(parseEnginePlanReport({ status: 'unknown' }), undefined);
+});
+
+test('Stage 10 mirror package, readiness, offline init adapters and webview protocol enforce bounds', () => {
+	const sha = 'c'.repeat(64);
+	const packages = parseMirrorPackages({
+		packages: [
+			{
+				key: { address: 'registry.terraform.io/hashicorp/azurerm', version: '5.14.0', platform: 'windows_amd64' },
+				sizeBytes: 1024,
+				sha256: sha,
+				recordedAt: '2026-11-25T00:00:00Z',
+				publisher: 'HashiCorp',
+			},
+			{ key: { address: '', version: '1.0.0', platform: 'windows_amd64' }, sizeBytes: 10, sha256: sha, recordedAt: '2026-11-25T00:00:00Z' },
+		],
+	});
+	assert.equal(packages.length, 1);
+	assert.equal(packages[0].key.address, 'registry.terraform.io/hashicorp/azurerm');
+	assert.equal(packages[0].publisher, 'HashiCorp');
+
+	const readiness = parseOfflineMirrorReadiness({
+		sourceRevision: sha,
+		engine: 'openTofu',
+		engineInferred: true,
+		lockState: 'valid',
+		isReady: false,
+		ready: [{ address: 'registry.terraform.io/hashicorp/azurerm', version: '5.14.0', platform: 'windows_amd64' }],
+		missing: [{ address: 'registry.terraform.io/hashicorp/azurerm', version: '5.14.0', platform: 'linux_amd64' }],
+		corrupted: [],
+	});
+	assert.ok(readiness);
+	assert.equal(readiness.isReady, false);
+	assert.equal(readiness.ready.length, 1);
+	assert.equal(readiness.missing.length, 1);
+	assert.equal(parseOfflineMirrorReadiness({ isReady: true }), undefined);
+
+	const initReport = parseEngineInitOfflineReport({
+		sourceRevision: sha,
+		engine: 'openTofu',
+		engineVersion: '1.13.9',
+		engineInferred: true,
+		status: 'initialized',
+		exitCode: 0,
+		durationMs: 140,
+		summary: 'Offline mirror initialization succeeded (lock file: valid, 1 provider package(s)).',
+	});
+	assert.ok(initReport);
+	assert.equal(initReport.status, 'initialized');
+	assert.equal(initReport.exitCode, 0);
+	assert.equal(parseEngineInitOfflineReport({ status: 'weird' }), undefined);
+
+	assert.deepEqual(parseWebviewMessage({ type: 'requestEngineInitOffline' }), { type: 'requestEngineInitOffline' });
+	assert.deepEqual(parseWebviewMessage({ type: 'requestEngineInitOffline', engine: 'terraform' }), { type: 'requestEngineInitOffline', engine: 'terraform' });
+	assert.equal(parseWebviewMessage({ type: 'requestEngineInitOffline', engine: 'bash' }), undefined);
 });

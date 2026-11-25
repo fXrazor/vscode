@@ -534,6 +534,7 @@ export function projectHostDiagnostics(
 				code: diag.code,
 				message: diag.message,
 				source: 'graph',
+				sourceRevision: snapshot.sourceRevision,
 			});
 		});
 	}
@@ -549,6 +550,7 @@ export function projectHostDiagnostics(
 					message: finding.message,
 					remediation: finding.remediation,
 					source: 'validation',
+					sourceRevision: validationRun.capturedRevision,
 				});
 			}
 		}
@@ -564,6 +566,8 @@ export function projectHostDiagnostics(
 				path: diag.address || location,
 				message: diag.detail ? `${diag.summary} — ${diag.detail}` : diag.summary,
 				source: 'cli',
+				sourceRevision: engineValidateReport.sourceRevision,
+				...(diag.filename ? { location: { fileName: diag.filename, ...(diag.line ? { line: diag.line } : {}), ...(diag.column ? { column: diag.column } : {}) } } : {}),
 			});
 		});
 	}
@@ -601,11 +605,67 @@ export function defaultTargetTfFile(architecture: Architecture, selectedResource
 }
 
 /** Generate a guarded `.tf` draft payload scoped to the corresponding project `.tf` file. */
+/** Terraform identifier the projection writes for a canvas name (mirrors terraformProjection). */
+function terraformIdentifier(resource: Pick<Resource, 'name' | 'terraformName'>): string {
+	if (resource.terraformName) {
+		return resource.terraformName;
+	}
+	const cleaned = resource.name.replace(/[^A-Za-z0-9_-]/g, '_');
+	return /^[A-Za-z_]/.test(resource.name) ? cleaned : '_' + cleaned;
+}
+
+export interface SourceChanges {
+	/** Blocks in the file on disk that were deleted on the canvas. */
+	readonly removeAddresses: readonly string[];
+	/** Blocks renamed on the canvas; the service renames them in place and writes `moved`. */
+	readonly renames: readonly { readonly from: string; readonly to: string }[];
+}
+
+/**
+ * What the canvas changed in `fileName` compared with the host graph: deleted blocks and renamed
+ * blocks. A focused save applies these; everything else the canvas does not generate is kept.
+ */
+export function sourceChanges(architecture: Architecture, snapshot: HostGraphSnapshot | null | undefined, fileName: string): SourceChanges {
+	const removeAddresses: string[] = [];
+	const renames: { from: string; to: string }[] = [];
+	if (!snapshot) {
+		return { removeAddresses, renames };
+	}
+	const current = new Map(architecture.resources.map(resource => [resource.id, resource]));
+	const address = (kind: string, type: string | null, name: string) =>
+		kind === 'resource' && type ? `${type}.${name}` : kind === 'data' && type ? `data.${type}.${name}` : kind === 'module' ? `module.${name}` : undefined;
+	for (const node of snapshot.nodes) {
+		if (!node.hasSource || node.sourceFile !== fileName) {
+			continue;
+		}
+		const from = address(node.kind, node.resourceType, node.name);
+		if (!from) {
+			continue;
+		}
+		const resource = current.get(node.id);
+		if (!resource) {
+			removeAddresses.push(from);
+			continue;
+		}
+		const name = terraformIdentifier(resource);
+		if (node.kind !== 'data' && name !== node.name) {
+			renames.push({ from, to: address(node.kind, node.resourceType, name)! });
+		}
+	}
+	return { removeAddresses: removeAddresses.slice(0, 256), renames: renames.slice(0, 256) };
+}
+
+function baselineContents(baseline: Architecture, fileName: string): string {
+	return projectResourceFiles(baseline).includes(fileName) ? terraformCode(baseline, undefined, fileName) : terraformCode(baseline);
+}
+
 export function buildDraftSavePayload(
 	architecture: Architecture,
 	fileName?: string,
-	selectedResourceId?: string
-): { readonly fileName: string; readonly contents: string } {
+	selectedResourceId?: string,
+	snapshot?: HostGraphSnapshot | null,
+	baseline?: Architecture | null
+): { readonly fileName: string; readonly contents: string; readonly baseContents?: string } & SourceChanges {
 	const safeName = fileName && /^[A-Za-z0-9._-]+\.tf$/i.test(fileName) && !fileName.startsWith('.')
 		? fileName
 		: defaultTargetTfFile(architecture, selectedResourceId);
@@ -616,7 +676,88 @@ export function buildDraftSavePayload(
 	return {
 		fileName: safeName,
 		contents,
+		...sourceChanges(architecture, snapshot, safeName),
+		// What the canvas generated for this file when it loaded it: the service then applies only
+		// what changed since, so canvas defaults never overwrite values in the file.
+		...(baseline && baseline !== architecture ? { baseContents: baselineContents(baseline, safeName) } : {}),
 	};
+}
+
+/**
+ * What a refresh of the same architecture is projected from: the last state the files said
+ * (`baseline`), not the canvas with its unsaved edits, so the new baseline stays a faithful copy
+ * of the files and the next three-way save still sees those edits. Resources and connections
+ * that exist only on the canvas (added and not yet reloaded) come from `present`, so a resource
+ * the user just saved keeps its canvas configuration when it first appears in the graph.
+ */
+export function refreshPrevious(baseline: Architecture | null | undefined, present: Architecture): Architecture {
+	if (!baseline || baseline === present) {
+		return present;
+	}
+	const resourceIds = new Set(baseline.resources.map(resource => resource.id));
+	const connectionIds = new Set(baseline.connections.map(connection => connection.id));
+	return {
+		...baseline,
+		resources: [...baseline.resources, ...present.resources.filter(resource => !resourceIds.has(resource.id))],
+		connections: [...baseline.connections, ...present.connections.filter(connection => !connectionIds.has(connection.id))],
+	};
+}
+
+/**
+ * After a save, the saved files say what the canvas said: resources of those files take the
+ * saved canvas version (and ones deleted on the canvas leave), so the next baseline treats them
+ * as saved even where `readResourceValues` cannot hydrate a value (expressions, bindings).
+ */
+export function adoptSavedFiles(baseline: Architecture, saved: Architecture, files: ReadonlySet<string>): Architecture {
+	const savedById = new Map(saved.resources.map(resource => [resource.id, resource]));
+	const inSavedFile = (resource: Architecture['resources'][number]) => files.has(resourceSourceFile(resource));
+	const resources = baseline.resources
+		.filter(resource => !inSavedFile(resource) || savedById.has(resource.id))
+		.map(resource => {
+			const mine = savedById.get(resource.id);
+			return mine && (inSavedFile(resource) || inSavedFile(mine)) ? mine : resource;
+		});
+	const known = new Set(resources.map(resource => resource.id));
+	for (const resource of saved.resources) {
+		if (!known.has(resource.id) && inSavedFile(resource)) {
+			resources.push(resource);
+		}
+	}
+	return { ...baseline, resources };
+}
+
+export type DraftSavePayload = ReturnType<typeof buildDraftSavePayload>;
+
+/**
+ * Every project file the canvas changed since it loaded, ready for one `previewFocusedSaveBatch`.
+ * A file is included when its generated text differs from what the canvas generated at load, or
+ * when blocks in it were deleted or renamed. A file that only exists in the baseline (its last
+ * resource moved or was deleted) is sent with empty contents so the three-way merge removes the
+ * blocks the canvas no longer generates. Without a baseline nothing can be compared and the
+ * result is empty; the single-file save handles that case.
+ */
+export function changedFilePayloads(
+	architecture: Architecture,
+	snapshot?: HostGraphSnapshot | null,
+	baseline?: Architecture | null
+): DraftSavePayload[] {
+	if (!baseline || baseline === architecture) {
+		return [];
+	}
+	const current = projectResourceFiles(architecture);
+	const before = projectResourceFiles(baseline);
+	const names = [...new Set([...current, ...before])].filter(name => /^[A-Za-z0-9._-]+\.tf$/i.test(name) && !name.startsWith('.'));
+	const payloads: DraftSavePayload[] = [];
+	for (const fileName of names) {
+		const contents = current.includes(fileName) ? terraformCode(architecture, undefined, fileName) : '';
+		const baseContents = before.includes(fileName) ? terraformCode(baseline, undefined, fileName) : '';
+		const changes = sourceChanges(architecture, snapshot, fileName);
+		if (contents === baseContents && !changes.removeAddresses.length && !changes.renames.length) {
+			continue;
+		}
+		payloads.push({ fileName, contents, ...changes, baseContents });
+	}
+	return payloads.slice(0, 16);
 }
 
 /**

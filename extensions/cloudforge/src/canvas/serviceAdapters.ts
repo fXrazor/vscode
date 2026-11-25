@@ -12,31 +12,48 @@ import type {
 	CanvasChildModuleRef,
 	CanvasCloudRegion,
 	CanvasCloudRegionsPayload,
+	CanvasCorruptedMirrorPackage,
 	CanvasDependencyReport,
 	CanvasDetectedEngine,
 	CanvasDiagnosticSummary,
+	CanvasCatalogueTypes,
 	CanvasEdgeSummary,
+	CanvasEngineInitOfflineReport,
+	CanvasEnginePlanActionKind,
+	CanvasEnginePlanOutputChange,
+	CanvasEnginePlanReport,
+	CanvasEnginePlanResourceChange,
+	CanvasEnginePlanSummary,
 	CanvasEngineValidateDiagnostic,
 	CanvasEngineValidateReport,
 	CanvasExportAuditReport,
 	CanvasGraphSnapshot,
+	CanvasMirrorPackageKey,
+	CanvasMirrorPackageSummary,
 	CanvasModuleInspection,
 	CanvasModuleOutput,
 	CanvasModuleVariable,
 	CanvasNodeSummary,
+	CanvasOfflineMirrorReadiness,
 	CanvasProviderDependency,
 	CanvasSchemaDiffReport,
 	CanvasSchemaImpactedItem,
 	DraftSaveApplyResult,
 	DraftSaveError,
 	DraftSaveFinding,
-	DraftSavePreviewResult
+	DraftSaveMergeSummary,
+	CanvasSchemaPreview,
+	DraftSavePreviewResult,
+	SaveAllApplyResult,
+	SaveAllPreviewFile,
+	SaveAllPreviewResult
 } from './protocol';
 import type {
 	FieldAccess,
 	FieldValueType,
 	FormAttribute,
 	FormBlockType,
+	FormCoverage,
 	FormSchema,
 	SchemaKind,
 	SchemaOutput
@@ -928,7 +945,33 @@ export function parseDraftSavePreview(value: unknown): DraftSavePreviewResult | 
 		removedLines: value.removedLines,
 		findings,
 		previewToken: value.previewToken,
+		...(value.focused === true ? optionalMerge(value.merge) : {}),
 	};
+}
+
+function addressList(value: unknown): string[] | undefined {
+	if (!Array.isArray(value) || value.length > 2048) {
+		return undefined;
+	}
+	return value.filter((item): item is string => isNonEmptyString(item, 512));
+}
+
+/** Validates the `merge` summary of a focused save preview; a malformed summary is dropped. */
+function optionalMerge(value: unknown): { merge?: DraftSaveMergeSummary } {
+	if (!isRecord(value) || !isNonNegativeInt(value.unchanged) || !isNonNegativeInt(value.preserved)) {
+		return {};
+	}
+	const updated = addressList(value.updated);
+	const added = addressList(value.added);
+	const removed = addressList(value.removed);
+	const skipped = addressList(value.skipped);
+	if (!updated || !added || !removed || !skipped) {
+		return {};
+	}
+	const renamed = Array.isArray(value.renamed)
+		? value.renamed.slice(0, 256).filter((item): item is { from: string; to: string } => isRecord(item) && isNonEmptyString(item.from, 512) && isNonEmptyString(item.to, 512)).map(({ from, to }) => ({ from, to }))
+		: [];
+	return { merge: { updated, added, removed, unchanged: value.unchanged, preserved: value.preserved, skipped, renamed } };
 }
 
 export function parseDraftSaveApply(value: unknown): DraftSaveApplyResult | undefined {
@@ -947,6 +990,62 @@ export function parseDraftSaveApply(value: unknown): DraftSaveApplyResult | unde
 		newSourceRevision: value.newSourceRevision,
 		bytesWritten: value.bytesWritten,
 	};
+}
+
+function parseFindings(value: unknown[]): DraftSaveFinding[] {
+	const findings: DraftSaveFinding[] = [];
+	for (const f of value) {
+		if (!isRecord(f) || !isNonEmptyString(f.code, 128) || !isNonEmptyString(f.file, 255)) {
+			continue;
+		}
+		findings.push({ code: f.code, file: f.file, ...(isNonNegativeInt(f.line) ? { line: f.line } : {}) });
+	}
+	return findings;
+}
+
+/** `previewFocusedSaveBatch` result: every file merged, one token for all of them. */
+export function parseSaveAllPreview(value: unknown): SaveAllPreviewResult | undefined {
+	if (!isRecord(value) || !isSha256(value.sourceRevision) || !isNonEmptyString(value.previewToken, 256) || !Array.isArray(value.files) || value.files.length > 16) {
+		return undefined;
+	}
+	const files: SaveAllPreviewFile[] = [];
+	for (const file of value.files) {
+		if (
+			!isRecord(file) ||
+			!isNonEmptyString(file.fileName, 255) ||
+			typeof file.created !== 'boolean' ||
+			typeof file.changed !== 'boolean' ||
+			!isNonNegativeInt(file.addedLines) ||
+			!isNonNegativeInt(file.removedLines) ||
+			!Array.isArray(file.findings)
+		) {
+			return undefined;
+		}
+		files.push({
+			fileName: file.fileName,
+			created: file.created,
+			changed: file.changed,
+			addedLines: file.addedLines,
+			removedLines: file.removedLines,
+			findings: parseFindings(file.findings),
+			...optionalMerge(file.merge),
+		});
+	}
+	return { sourceRevision: value.sourceRevision, files, previewToken: value.previewToken };
+}
+
+export function parseSaveAllApply(value: unknown): SaveAllApplyResult | undefined {
+	if (!isRecord(value) || !isSha256(value.newSourceRevision) || !Array.isArray(value.files) || value.files.length > 16) {
+		return undefined;
+	}
+	const files: { fileName: string; created: boolean; bytesWritten: number }[] = [];
+	for (const file of value.files) {
+		if (!isRecord(file) || !isNonEmptyString(file.fileName, 255) || typeof file.created !== 'boolean' || !isNonNegativeInt(file.bytesWritten)) {
+			return undefined;
+		}
+		files.push({ fileName: file.fileName, created: file.created, bytesWritten: file.bytesWritten });
+	}
+	return { files, newSourceRevision: value.newSourceRevision };
 }
 
 export function draftSaveErrorMessage(code: string): DraftSaveError {
@@ -1406,5 +1505,395 @@ export function parseEngineValidateReport(value: unknown): CanvasEngineValidateR
 		durationMs: value.durationMs,
 		diagnostics,
 		truncated: value.truncated,
+	};
+}
+
+const paletteProviders: Readonly<Record<string, CanvasCatalogueTypes['provider']>> = { azurerm: 'azure', aws: 'aws', google: 'gcp' };
+
+/** The newest snapshot for each palette provider (azurerm, aws, google), keyed by Studio provider. */
+export function newestPaletteSnapshots(snapshots: readonly CanvasCatalogueSnapshot[]): { readonly provider: CanvasCatalogueTypes['provider']; readonly snapshot: CanvasCatalogueSnapshot }[] {
+	const best = new Map<CanvasCatalogueTypes['provider'], CanvasCatalogueSnapshot>();
+	for (const snapshot of snapshots) {
+		const segments = snapshot.address.toLowerCase().split('/');
+		const provider = segments.length === 3 ? paletteProviders[segments[2]] : undefined;
+		if (!provider) {
+			continue;
+		}
+		const current = best.get(provider);
+		if (!current || compareSemverDescending(snapshot.version, current.version) < 0) {
+			best.set(provider, snapshot);
+		}
+	}
+	return [...best].map(([provider, snapshot]) => ({ provider, snapshot }));
+}
+
+/** Validates a `listCatalogueTypes` result into palette types (resources only, bounded). */
+export function parseCatalogueTypes(value: unknown, provider: CanvasCatalogueTypes['provider'], version: string): CanvasCatalogueTypes | undefined {
+	if (typeof value !== 'object' || value === null || !Array.isArray((value as { resources?: unknown }).resources)) {
+		return undefined;
+	}
+	const resources = ((value as { resources: unknown[] }).resources)
+		.filter((type): type is string => typeof type === 'string' && /^[a-z0-9_]{1,128}$/.test(type))
+		.slice(0, 5000);
+	return { provider, version, resources };
+}
+
+/** Validates one type's `getCatalogueCoverage` result; at most 20 gaps are kept for display. */
+export function parseFormCoverage(value: unknown): FormCoverage | undefined {
+	if (typeof value !== 'object' || value === null) {
+		return undefined;
+	}
+	const raw = value as { complete?: unknown; paths?: unknown; readOnly?: unknown; gaps?: unknown };
+	const count = (n: unknown) => typeof n === 'number' && Number.isInteger(n) && n >= 0;
+	if (typeof raw.complete !== 'boolean' || !count(raw.paths) || !count(raw.readOnly) || !Array.isArray(raw.gaps)) {
+		return undefined;
+	}
+	const gaps = raw.gaps
+		.filter((gap): gap is { path: string; reason: string } => typeof gap === 'object' && gap !== null && typeof (gap as { path?: unknown }).path === 'string' && typeof (gap as { reason?: unknown }).reason === 'string')
+		.slice(0, 20)
+		.map(gap => ({ path: gap.path.slice(0, 256), reason: gap.reason.slice(0, 512) }));
+	return { complete: raw.complete, paths: raw.paths as number, readOnly: raw.readOnly as number, gaps };
+}
+
+/** Validates a `renderResourceDraft` result; anything malformed returns undefined. */
+export function parseSchemaPreview(value: unknown, resourceId: string, providerVersion: string): CanvasSchemaPreview | undefined {
+	if (!isRecord(value) || typeof value.hcl !== 'string' || value.hcl.length > 256 * 1024 || !Array.isArray(value.diagnostics)) {
+		return undefined;
+	}
+	const diagnostics: { path: string; message: string; severity: 'error' | 'warning' }[] = [];
+	for (const item of value.diagnostics.slice(0, 200)) {
+		if (isRecord(item) && typeof item.path === 'string' && item.path.length <= 512 && isNonEmptyString(item.message, 1024) && (item.severity === 'error' || item.severity === 'warning')) {
+			diagnostics.push({ path: item.path, message: item.message, severity: item.severity });
+		}
+	}
+	return {
+		resourceId,
+		hcl: value.hcl,
+		diagnostics,
+		hasErrors: value.hasErrors === true || diagnostics.some(item => item.severity === 'error'),
+		providerVersion,
+	};
+}
+
+// ============================================================================
+// Stage 9B: Guarded Local Engine Plan Capture (`runEnginePlan`) Adapters
+// ============================================================================
+
+const PLAN_ACTIONS: ReadonlySet<string> = new Set(['no-op', 'create', 'read', 'update', 'delete']);
+const PLAN_ACTION_KINDS: ReadonlySet<string> = new Set<CanvasEnginePlanActionKind>(['create', 'update', 'replace', 'delete', 'read', 'no-op']);
+const MAX_PLAN_RESOURCE_CHANGES = 500;
+const MAX_PLAN_OUTPUT_CHANGES = 200;
+const MAX_PLAN_CHANGED_PATHS = 64;
+const MAX_PLAN_DIAGNOSTICS = 100;
+
+function parsePlanSummary(value: unknown): CanvasEnginePlanSummary | undefined {
+	if (
+		!isRecord(value) ||
+		!isNonNegativeInt(value.create) ||
+		!isNonNegativeInt(value.update) ||
+		!isNonNegativeInt(value.replace) ||
+		!isNonNegativeInt(value.delete) ||
+		!isNonNegativeInt(value.read) ||
+		!isNonNegativeInt(value.noOp) ||
+		!isNonNegativeInt(value.total)
+	) {
+		return undefined;
+	}
+	return {
+		create: value.create,
+		update: value.update,
+		replace: value.replace,
+		delete: value.delete,
+		read: value.read,
+		noOp: value.noOp,
+		total: value.total,
+	};
+}
+
+function parsePlanActions(value: unknown): string[] {
+	if (!Array.isArray(value)) {
+		return ['no-op'];
+	}
+	const out: string[] = [];
+	for (const item of value.slice(0, 4)) {
+		if (typeof item === 'string' && PLAN_ACTIONS.has(item)) {
+			out.push(item);
+		}
+	}
+	return out.length > 0 ? out : ['no-op'];
+}
+
+function parseValidateDiagnostics(raw: readonly unknown[], limit: number): CanvasEngineValidateDiagnostic[] {
+	const diagnostics: CanvasEngineValidateDiagnostic[] = [];
+	for (const item of raw.slice(0, limit)) {
+		if (
+			!isRecord(item) ||
+			(item.severity !== 'error' && item.severity !== 'warning') ||
+			!isNonEmptyString(item.summary, 300)
+		) {
+			continue;
+		}
+		const line = typeof item.line === 'number' && Number.isSafeInteger(item.line) && item.line >= 1 ? item.line : undefined;
+		const column = typeof item.column === 'number' && Number.isSafeInteger(item.column) && item.column >= 1 ? item.column : undefined;
+		diagnostics.push({
+			severity: item.severity,
+			summary: item.summary,
+			...(isNonEmptyString(item.detail, 600) ? { detail: item.detail } : {}),
+			...(isNonEmptyString(item.address, 256) ? { address: item.address } : {}),
+			...(isNonEmptyString(item.filename, 255) ? { filename: item.filename } : {}),
+			...(line !== undefined ? { line } : {}),
+			...(column !== undefined ? { column } : {}),
+		});
+	}
+	return diagnostics;
+}
+
+/**
+ * Strictly parses a Rust Stage 9B `runEnginePlan` response, allowing only structural action
+ * summaries, top-level changed attribute names, sensitivity booleans, and sanitized diagnostics.
+ */
+export function parseEnginePlanReport(value: unknown): CanvasEnginePlanReport | undefined {
+	if (
+		!isRecord(value) ||
+		!isSha256(value.sourceRevision) ||
+		(value.engine !== 'openTofu' && value.engine !== 'terraform') ||
+		!isNonEmptyString(value.engineVersion, 64) ||
+		typeof value.engineInferred !== 'boolean' ||
+		(value.status !== 'planned' && value.status !== 'failed') ||
+		typeof value.errored !== 'boolean' ||
+		!isNonNegativeInt(value.durationMs) ||
+		!Array.isArray(value.resourceChanges) ||
+		!Array.isArray(value.outputChanges) ||
+		!Array.isArray(value.diagnostics) ||
+		typeof value.truncated !== 'boolean'
+	) {
+		return undefined;
+	}
+	const summary = parsePlanSummary(value.summary);
+	if (!summary) {
+		return undefined;
+	}
+
+	const resourceChanges: CanvasEnginePlanResourceChange[] = [];
+	for (const item of value.resourceChanges.slice(0, MAX_PLAN_RESOURCE_CHANGES)) {
+		if (
+			!isRecord(item) ||
+			!isNonEmptyString(item.address, 256) ||
+			(item.mode !== 'managed' && item.mode !== 'data') ||
+			!isNonEmptyString(item.typeName, 128) ||
+			!isNonEmptyString(item.name, 128) ||
+			typeof item.actionKind !== 'string' || !PLAN_ACTION_KINDS.has(item.actionKind) ||
+			typeof item.hasSensitiveAttributes !== 'boolean'
+		) {
+			continue;
+		}
+		const changedAttributePaths: string[] = [];
+		if (Array.isArray(item.changedAttributePaths)) {
+			for (const path of item.changedAttributePaths.slice(0, MAX_PLAN_CHANGED_PATHS)) {
+				if (isNonEmptyString(path, 128)) {
+					changedAttributePaths.push(path);
+				}
+			}
+		}
+		resourceChanges.push({
+			address: item.address,
+			...(isNonEmptyString(item.moduleAddress, 256) ? { moduleAddress: item.moduleAddress } : {}),
+			mode: item.mode,
+			typeName: item.typeName,
+			name: item.name,
+			...(isNonEmptyString(item.providerName, 256) ? { providerName: item.providerName } : {}),
+			actions: parsePlanActions(item.actions),
+			actionKind: item.actionKind as CanvasEnginePlanActionKind,
+			hasSensitiveAttributes: item.hasSensitiveAttributes,
+			changedAttributePaths,
+		});
+	}
+
+	const outputChanges: CanvasEnginePlanOutputChange[] = [];
+	for (const item of value.outputChanges.slice(0, MAX_PLAN_OUTPUT_CHANGES)) {
+		if (
+			!isRecord(item) ||
+			!isNonEmptyString(item.name, 128) ||
+			typeof item.sensitive !== 'boolean'
+		) {
+			continue;
+		}
+		outputChanges.push({
+			name: item.name,
+			actions: parsePlanActions(item.actions),
+			sensitive: item.sensitive,
+		});
+	}
+
+	const diagnostics = parseValidateDiagnostics(value.diagnostics, MAX_PLAN_DIAGNOSTICS);
+	const formatVersion = isNonEmptyString(value.formatVersion, 32) ? value.formatVersion : undefined;
+
+	return {
+		sourceRevision: value.sourceRevision,
+		engine: value.engine,
+		engineVersion: value.engineVersion,
+		engineInferred: value.engineInferred,
+		status: value.status,
+		...(formatVersion ? { formatVersion } : {}),
+		errored: value.errored,
+		durationMs: value.durationMs,
+		summary,
+		resourceChanges,
+		outputChanges,
+		diagnostics,
+		truncated: value.truncated || value.resourceChanges.length > MAX_PLAN_RESOURCE_CHANGES || value.outputChanges.length > MAX_PLAN_OUTPUT_CHANGES,
+	};
+}
+
+/** Formats a zero-secret structural plan report for the CloudForge Plan output channel. */
+export function formatEnginePlanReportText(report: CanvasEnginePlanReport, architectureName: string): string {
+	const engineLabel = report.engine === 'openTofu' ? 'OpenTofu' : 'Terraform';
+	const lines: string[] = [
+		`CloudForge Local Plan (${architectureName})`,
+		`Engine: ${engineLabel} ${report.engineVersion}${report.engineInferred ? ' (inferred)' : ''} · rev ${report.sourceRevision.slice(0, 8)} · ${report.durationMs} ms`,
+		`Status: ${report.status === 'planned' ? (report.errored ? 'planned (errored)' : 'planned') : 'failed'} (credential-free, -refresh=false -lock=false, zero workspace files written)`,
+	];
+	if (report.status === 'planned') {
+		const s = report.summary;
+		lines.push(`Summary: +${s.create} create · ~${s.update} update · +/-${s.replace} replace · -${s.delete} delete · ${s.read} read · ${s.noOp} no-op (${s.total} total)`);
+		if (report.resourceChanges.length > 0) {
+			lines.push('', 'Resource changes:');
+			for (const rc of report.resourceChanges) {
+				const attrs = rc.changedAttributePaths.length > 0 ? ` [${rc.changedAttributePaths.join(', ')}]` : '';
+				const sens = rc.hasSensitiveAttributes ? ' (sensitive attributes redacted)' : '';
+				lines.push(`  [${rc.actionKind}] ${rc.address}${attrs}${sens}`);
+			}
+		}
+		if (report.outputChanges.length > 0) {
+			lines.push('', 'Output changes:');
+			for (const out of report.outputChanges) {
+				const sens = out.sensitive ? ' (sensitive)' : '';
+				lines.push(`  [${out.actions.join('/')}] output.${out.name}${sens}`);
+			}
+		}
+	}
+	if (report.diagnostics.length > 0) {
+		lines.push('', 'Diagnostics:');
+		for (const diag of report.diagnostics) {
+			const loc = diag.filename ? ` (${diag.filename}${diag.line ? `:${diag.line}` : ''})` : '';
+			lines.push(`  [${diag.severity}] ${diag.summary}${loc}${diag.detail ? ` — ${diag.detail}` : ''}`);
+		}
+	}
+	if (report.truncated) {
+		lines.push('', 'Note: Plan output exceeded service bounds and was truncated.');
+	}
+	return lines.join('\n') + '\n';
+}
+
+// ============================================================================
+// Stage 10: Offline Provider Mirror, Offline Init, & Mirror Schema Extraction
+// ============================================================================
+
+function parseMirrorPackageKey(value: unknown): CanvasMirrorPackageKey | undefined {
+	if (
+		!isRecord(value) ||
+		!isNonEmptyString(value.address, 256) ||
+		!isNonEmptyString(value.version, 64) ||
+		!isNonEmptyString(value.platform, 64)
+	) {
+		return undefined;
+	}
+	return {
+		address: value.address,
+		version: value.version,
+		platform: value.platform,
+	};
+}
+
+export function parseMirrorPackages(value: unknown): readonly CanvasMirrorPackageSummary[] {
+	if (!isRecord(value) || !Array.isArray(value.packages)) {
+		return [];
+	}
+	const out: CanvasMirrorPackageSummary[] = [];
+	for (const item of value.packages.slice(0, 512)) {
+		if (
+			!isRecord(item) ||
+			!isNonNegativeInt(item.sizeBytes) ||
+			!isSha256(item.sha256) ||
+			!isNonEmptyString(item.recordedAt, 64)
+		) {
+			continue;
+		}
+		const key = parseMirrorPackageKey(item.key);
+		if (!key) {
+			continue;
+		}
+		out.push({
+			key,
+			sizeBytes: item.sizeBytes,
+			sha256: item.sha256,
+			recordedAt: item.recordedAt,
+			...(isNonEmptyString(item.publisher, 128) ? { publisher: item.publisher } : {}),
+		});
+	}
+	return out;
+}
+
+export function parseOfflineMirrorReadiness(value: unknown): CanvasOfflineMirrorReadiness | undefined {
+	if (
+		!isRecord(value) ||
+		!isSha256(value.sourceRevision) ||
+		(value.engine !== 'openTofu' && value.engine !== 'terraform') ||
+		typeof value.engineInferred !== 'boolean' ||
+		(value.lockState !== 'absent' && value.lockState !== 'valid' && value.lockState !== 'invalid' && value.lockState !== 'unreadable') ||
+		typeof value.isReady !== 'boolean' ||
+		!Array.isArray(value.ready) ||
+		!Array.isArray(value.missing) ||
+		!Array.isArray(value.corrupted)
+	) {
+		return undefined;
+	}
+	const ready = value.ready.slice(0, 128).map(parseMirrorPackageKey).filter((k): k is CanvasMirrorPackageKey => k !== undefined);
+	const missing = value.missing.slice(0, 128).map(parseMirrorPackageKey).filter((k): k is CanvasMirrorPackageKey => k !== undefined);
+	const corrupted: CanvasCorruptedMirrorPackage[] = [];
+	for (const item of value.corrupted.slice(0, 128)) {
+		if (!isRecord(item) || !isNonEmptyString(item.reason, 256)) {
+			continue;
+		}
+		const key = parseMirrorPackageKey(item.key);
+		if (key) {
+			corrupted.push({ key, reason: item.reason });
+		}
+	}
+	return {
+		sourceRevision: value.sourceRevision,
+		engine: value.engine,
+		engineInferred: value.engineInferred,
+		lockState: value.lockState,
+		isReady: value.isReady,
+		ready,
+		missing,
+		corrupted,
+	};
+}
+
+export function parseEngineInitOfflineReport(value: unknown): CanvasEngineInitOfflineReport | undefined {
+	if (
+		!isRecord(value) ||
+		!isSha256(value.sourceRevision) ||
+		(value.engine !== 'openTofu' && value.engine !== 'terraform') ||
+		!isNonEmptyString(value.engineVersion, 64) ||
+		typeof value.engineInferred !== 'boolean' ||
+		(value.status !== 'initialized' && value.status !== 'failed') ||
+		typeof value.exitCode !== 'number' || !Number.isSafeInteger(value.exitCode) ||
+		!isNonNegativeInt(value.durationMs) ||
+		!isNonEmptyString(value.summary, 512)
+	) {
+		return undefined;
+	}
+	return {
+		sourceRevision: value.sourceRevision,
+		engine: value.engine,
+		engineVersion: value.engineVersion,
+		engineInferred: value.engineInferred,
+		status: value.status,
+		exitCode: value.exitCode,
+		durationMs: value.durationMs,
+		summary: value.summary,
 	};
 }

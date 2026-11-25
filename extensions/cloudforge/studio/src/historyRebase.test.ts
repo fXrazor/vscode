@@ -104,6 +104,38 @@ test('a refresh keeps user drawing links, edge styling, groups and layer order',
 	assert.deepEqual(h.present.layerOrder, ['note-1', 'rg-2']);
 });
 
+test('unsaved canvas edits survive a refresh and file changes land on top of them', () => {
+	const graph = snapshot([rg, vnet], 'a');
+	const vnetId = 'vnet-1';
+	const [mine, theirs] = ['Address space', 'DNS servers'];
+	const projected = projectGraphSnapshotToArchitecture(graph).architecture;
+	const baseline = { ...projected, resources: projected.resources.map(resource => resource.id === vnetId ? { ...resource, settings: { ...resource.settings, [mine]: 'old', [theirs]: 'old' } } : resource) };
+	let h = createHistory(baseline);
+	// The user edits one setting on the canvas and does not save.
+	const edited = { ...h.present, resources: h.present.resources.map(resource => resource.id === vnetId ? { ...resource, settings: { ...resource.settings, [mine]: 'canvas-value' } } : resource) };
+	h = { past: [baseline], present: edited, future: [] } as History;
+	// Meanwhile the file changes another setting of the same resource and a refresh arrives.
+	const fromFiles = { ...baseline, resources: baseline.resources.map(resource => resource.id === vnetId ? { ...resource, settings: { ...resource.settings, [theirs]: 'file-value' } } : resource) };
+	h = historyReducer(h, { type: 'rebase', architecture: fromFiles, base: baseline });
+	const vnetNow = h.present.resources.find(resource => resource.id === vnetId)!;
+	assert.equal(vnetNow.settings[mine], 'canvas-value', 'unsaved edit kept');
+	assert.equal(vnetNow.settings[theirs], 'file-value', 'file change applied');
+	assert.notEqual(h.present, fromFiles, 'still dirty against the new baseline');
+	h = historyReducer(h, { type: 'undo' });
+	assert.equal(h.present.resources.find(resource => resource.id === vnetId)!.settings[theirs], 'file-value', 'undo keeps the file change');
+
+	// Both changed the same field: the file wins.
+	const conflict = { ...fromFiles, resources: fromFiles.resources.map(resource => resource.id === vnetId ? { ...resource, settings: { ...resource.settings, [mine]: 'file-wins' } } : resource) };
+	let c = { past: [], present: { ...edited }, future: [] } as History;
+	c = historyReducer(c, { type: 'rebase', architecture: conflict, base: baseline });
+	assert.equal(c.present.resources.find(resource => resource.id === vnetId)!.settings[mine], 'file-wins');
+
+	// No canvas edits: the refreshed object becomes the present, so the canvas reads as clean.
+	let clean = createHistory(baseline);
+	clean = historyReducer(clean, { type: 'rebase', architecture: fromFiles, base: baseline });
+	assert.equal(clean.present, fromFiles);
+});
+
 test('a local architecture rename survives repeated refreshes and stays undoable alongside external additions', () => {
 	let h = createHistory(projectGraphSnapshotToArchitecture(snapshot([rg], 'a')).architecture);
 	h = historyReducer(h, { type: 'renameArchitecture', name: 'Platform network' });

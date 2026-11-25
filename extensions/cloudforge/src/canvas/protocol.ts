@@ -81,6 +81,21 @@ export interface CanvasCatalogueSnapshot {
 	readonly dataSourceCount: number;
 }
 
+/** Resource types of the newest imported snapshot for one provider, for the Studio palette. */
+export interface CanvasSchemaPreview {
+	readonly resourceId: string;
+	readonly hcl: string;
+	readonly diagnostics: readonly { readonly path: string; readonly message: string; readonly severity: 'error' | 'warning' }[];
+	readonly hasErrors: boolean;
+	readonly providerVersion: string;
+}
+
+export interface CanvasCatalogueTypes {
+	readonly provider: 'azure' | 'aws' | 'gcp';
+	readonly version: string;
+	readonly resources: readonly string[];
+}
+
 export interface DraftSaveFinding {
 	readonly code: string;
 	readonly file: string;
@@ -97,6 +112,19 @@ export interface DraftSavePreviewResult {
 	readonly removedLines: number;
 	readonly findings: readonly DraftSaveFinding[];
 	readonly previewToken: string;
+	/** Present when the service folded the draft into the file on disk (`previewFocusedSave`). */
+	readonly merge?: DraftSaveMergeSummary;
+}
+
+/** Block addresses a focused save changes; everything else in the file is kept as written. */
+export interface DraftSaveMergeSummary {
+	readonly updated: readonly string[];
+	readonly added: readonly string[];
+	readonly removed: readonly string[];
+	readonly unchanged: number;
+	readonly preserved: number;
+	readonly skipped: readonly string[];
+	readonly renamed: readonly { readonly from: string; readonly to: string }[];
 }
 
 export interface DraftSaveApplyResult {
@@ -104,6 +132,37 @@ export interface DraftSaveApplyResult {
 	readonly created: boolean;
 	readonly newSourceRevision: string;
 	readonly bytesWritten: number;
+}
+
+/** One file of a `previewFocusedSaveBatch` call, as the webview sends it. */
+export interface SaveAllFile {
+	readonly fileName: string;
+	readonly contents: string;
+	readonly removeAddresses?: readonly string[];
+	readonly renames?: readonly { readonly from: string; readonly to: string }[];
+	readonly baseContents?: string;
+}
+
+export interface SaveAllPreviewFile {
+	readonly fileName: string;
+	readonly created: boolean;
+	readonly changed: boolean;
+	readonly addedLines: number;
+	readonly removedLines: number;
+	readonly findings: readonly DraftSaveFinding[];
+	readonly merge?: DraftSaveMergeSummary;
+}
+
+/** Several files merged under one preview token; nothing is written until `applySaveAll`. */
+export interface SaveAllPreviewResult {
+	readonly sourceRevision: string;
+	readonly files: readonly SaveAllPreviewFile[];
+	readonly previewToken: string;
+}
+
+export interface SaveAllApplyResult {
+	readonly files: readonly { readonly fileName: string; readonly created: boolean; readonly bytesWritten: number }[];
+	readonly newSourceRevision: string;
 }
 
 export interface DraftSaveError {
@@ -243,6 +302,94 @@ export interface CanvasEngineValidateReport {
 	readonly truncated: boolean;
 }
 
+export type CanvasEnginePlanActionKind = 'create' | 'update' | 'replace' | 'delete' | 'read' | 'no-op';
+
+export interface CanvasEnginePlanSummary {
+	readonly create: number;
+	readonly update: number;
+	readonly replace: number;
+	readonly delete: number;
+	readonly read: number;
+	readonly noOp: number;
+	readonly total: number;
+}
+
+export interface CanvasEnginePlanResourceChange {
+	readonly address: string;
+	readonly moduleAddress?: string;
+	readonly mode: 'managed' | 'data';
+	readonly typeName: string;
+	readonly name: string;
+	readonly providerName?: string;
+	readonly actions: readonly string[];
+	readonly actionKind: CanvasEnginePlanActionKind;
+	readonly hasSensitiveAttributes: boolean;
+	readonly changedAttributePaths: readonly string[];
+}
+
+export interface CanvasEnginePlanOutputChange {
+	readonly name: string;
+	readonly actions: readonly string[];
+	readonly sensitive: boolean;
+}
+
+export interface CanvasEnginePlanReport {
+	readonly sourceRevision: string;
+	readonly engine: 'openTofu' | 'terraform';
+	readonly engineVersion: string;
+	readonly engineInferred: boolean;
+	readonly status: 'planned' | 'failed';
+	readonly formatVersion?: string;
+	readonly errored: boolean;
+	readonly durationMs: number;
+	readonly summary: CanvasEnginePlanSummary;
+	readonly resourceChanges: readonly CanvasEnginePlanResourceChange[];
+	readonly outputChanges: readonly CanvasEnginePlanOutputChange[];
+	readonly diagnostics: readonly CanvasEngineValidateDiagnostic[];
+	readonly truncated: boolean;
+}
+
+export interface CanvasMirrorPackageKey {
+	readonly address: string;
+	readonly version: string;
+	readonly platform: string;
+}
+
+export interface CanvasMirrorPackageSummary {
+	readonly key: CanvasMirrorPackageKey;
+	readonly sizeBytes: number;
+	readonly sha256: string;
+	readonly recordedAt: string;
+	readonly publisher?: string;
+}
+
+export interface CanvasCorruptedMirrorPackage {
+	readonly key: CanvasMirrorPackageKey;
+	readonly reason: string;
+}
+
+export interface CanvasOfflineMirrorReadiness {
+	readonly sourceRevision: string;
+	readonly engine: 'openTofu' | 'terraform';
+	readonly engineInferred: boolean;
+	readonly lockState: 'absent' | 'valid' | 'invalid' | 'unreadable';
+	readonly isReady: boolean;
+	readonly ready: readonly CanvasMirrorPackageKey[];
+	readonly missing: readonly CanvasMirrorPackageKey[];
+	readonly corrupted: readonly CanvasCorruptedMirrorPackage[];
+}
+
+export interface CanvasEngineInitOfflineReport {
+	readonly sourceRevision: string;
+	readonly engine: 'openTofu' | 'terraform';
+	readonly engineVersion: string;
+	readonly engineInferred: boolean;
+	readonly status: 'initialized' | 'failed';
+	readonly exitCode: number;
+	readonly durationMs: number;
+	readonly summary: string;
+}
+
 export interface CanvasViewport {
 	readonly x: number;
 	readonly y: number;
@@ -354,6 +501,34 @@ export type ExtensionToWebviewMessage =
 		| { readonly ok: false; readonly error: DraftSaveError };
 	}
 	| {
+		readonly type: 'saveAllPreview';
+		readonly result:
+		| { readonly ok: true; readonly preview: SaveAllPreviewResult }
+		| { readonly ok: false; readonly error: DraftSaveError };
+	}
+	| {
+		readonly type: 'saveAllApplied';
+		readonly result:
+		| { readonly ok: true; readonly applied: SaveAllApplyResult }
+		| { readonly ok: false; readonly error: DraftSaveError };
+	}
+	| {
+		readonly type: 'catalogueTypes';
+		readonly types: CanvasCatalogueTypes;
+	}
+	| {
+		/** Rust `readResourceValues` result for the current graph revision (passed through; Studio validates). */
+		readonly type: 'resourceValues';
+		readonly sourceRevision: string;
+		readonly values: unknown;
+	}
+	| {
+		/** Rust `renderResourceDraft` result for one canvas resource (null when unavailable). */
+		readonly type: 'resourceDraftRendered';
+		readonly resourceId: string;
+		readonly preview: CanvasSchemaPreview | null;
+	}
+	| {
 		readonly type: 'catalogueSnapshots';
 		readonly snapshots: readonly CanvasCatalogueSnapshot[];
 	}
@@ -395,6 +570,20 @@ export type ExtensionToWebviewMessage =
 		readonly error?: string;
 	}
 	| {
+		readonly type: 'enginePlanReport';
+		readonly report: CanvasEnginePlanReport | null;
+		readonly error?: string;
+	}
+	| {
+		readonly type: 'offlineMirrorReadiness';
+		readonly report: CanvasOfflineMirrorReadiness | null;
+	}
+	| {
+		readonly type: 'engineInitOfflineReport';
+		readonly report: CanvasEngineInitOfflineReport | null;
+		readonly error?: string;
+	}
+	| {
 		readonly type: 'openExport';
 	}
 	| {
@@ -414,13 +603,17 @@ export type WebviewToExtensionMessage =
 	| { readonly type: 'ready' }
 	| { readonly type: 'selectNode'; readonly nodeId: string | null }
 	| { readonly type: 'openSource'; readonly nodeId: string }
+	| { readonly type: 'renderResourceDraft'; readonly resourceId: string; readonly draft: Readonly<Record<string, unknown>> }
+	| { readonly type: 'openSourceLocation'; readonly sourceRevision: string; readonly fileName: string; readonly line?: number; readonly column?: number }
 	| { readonly type: 'refresh' }
 	| { readonly type: 'toggleFocusMode'; readonly active?: boolean }
 	| { readonly type: 'viewState'; readonly state: CanvasViewState }
 	| { readonly type: 'requestValidation'; readonly scope: 'architecture' | 'resource'; readonly nodeId?: string }
 	| { readonly type: 'cancelValidation' }
-	| { readonly type: 'requestDraftSavePreview'; readonly fileName: string; readonly contents: string }
+	| { readonly type: 'requestDraftSavePreview'; readonly fileName: string; readonly contents: string; readonly removeAddresses?: readonly string[]; readonly renames?: readonly { readonly from: string; readonly to: string }[]; readonly baseContents?: string }
 	| { readonly type: 'applyDraftSave'; readonly fileName: string; readonly contents: string; readonly previewToken: string }
+	| { readonly type: 'requestSaveAllPreview'; readonly files: readonly SaveAllFile[] }
+	| { readonly type: 'applySaveAll'; readonly previewToken: string }
 	| { readonly type: 'requestSchema'; readonly kind: 'resource' | 'dataSource'; readonly typeName: string }
 	| { readonly type: 'requestModule'; readonly modulePath: readonly string[] }
 	| {
@@ -429,11 +622,16 @@ export type WebviewToExtensionMessage =
 		readonly toKey: { readonly address: string; readonly version: string; readonly formatVersion: string; readonly sha256: string };
 	}
 	| { readonly type: 'requestEngineValidate'; readonly engine?: 'openTofu' | 'terraform' }
+	| { readonly type: 'requestEnginePlan'; readonly engine?: 'openTofu' | 'terraform' }
+	| { readonly type: 'requestEngineInitOffline'; readonly engine?: 'openTofu' | 'terraform' }
 	| { readonly type: 'exportArtifact'; readonly format: ExportFormat; readonly suggestedFileName: string; readonly content: string; readonly encoding: 'utf8' | 'base64' }
 	| { readonly type: 'useTemplateAsArchitecture'; readonly templateId: string };
 
 const MAX_COLLAPSED_GROUPS = 256;
 const MAX_DRAFT_SAVE_CHARS = 512 * 1024;
+/** Mirrors the broker: 16 files, and the whole batch must fit one 2 MiB service request. */
+const MAX_SAVE_ALL_FILES = 16;
+const MAX_SAVE_ALL_CHARS = 1_800_000;
 const MAX_EXPORT_CHARS = 8 * 1024 * 1024;
 const MAX_FRAMES = 48;
 const MAX_ANNOTATIONS = 64;
@@ -818,6 +1016,37 @@ export function parseWebviewMessage(value: unknown): WebviewToExtensionMessage |
 			return isOpaqueId(value.nodeId) ? { type: 'selectNode', nodeId: value.nodeId } : undefined;
 		case 'openSource':
 			return isOpaqueId(value.nodeId) ? { type: 'openSource', nodeId: value.nodeId } : undefined;
+		case 'renderResourceDraft': {
+			// Shape only; the Electron-main broker validates the draft body field by field.
+			const draft = value.draft;
+			if (
+				typeof value.resourceId !== 'string' || value.resourceId.length === 0 || value.resourceId.length > 256
+				|| typeof draft !== 'object' || draft === null || Array.isArray(draft)
+				|| (draft as { kind?: unknown }).kind !== 'resource'
+				|| typeof (draft as { typeName?: unknown }).typeName !== 'string' || !/^[a-z][a-z0-9_]{0,127}$/.test((draft as { typeName: string }).typeName)
+				|| JSON.stringify(draft).length > 48 * 1024
+			) {
+				return undefined;
+			}
+			return { type: 'renderResourceDraft', resourceId: value.resourceId, draft: draft as Record<string, unknown> };
+		}
+		case 'openSourceLocation': {
+			const position = (raw: unknown) => raw === undefined || (typeof raw === 'number' && Number.isSafeInteger(raw) && raw >= 1);
+			if (
+				typeof value.sourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(value.sourceRevision)
+				|| typeof value.fileName !== 'string' || value.fileName.length > 255 || !/^[^<>:"/\\|?*\u0000-\u001f]+\.tf(\.json)?$/i.test(value.fileName) || value.fileName.startsWith('.')
+				|| !position(value.line) || !position(value.column)
+			) {
+				return undefined;
+			}
+			return {
+				type: 'openSourceLocation',
+				sourceRevision: value.sourceRevision,
+				fileName: value.fileName,
+				...(value.line === undefined ? {} : { line: value.line as number }),
+				...(value.column === undefined ? {} : { column: value.column as number }),
+			};
+		}
 		case 'viewState':
 			return isRecord(value.state) ? { type: 'viewState', state: sanitizeViewState(value.state) } : undefined;
 		case 'requestValidation': {
@@ -839,7 +1068,28 @@ export function parseWebviewMessage(value: unknown): WebviewToExtensionMessage |
 			if (!isValidTfFileName(value.fileName) || typeof value.contents !== 'string' || value.contents.length > MAX_DRAFT_SAVE_CHARS) {
 				return undefined;
 			}
-			return { type: 'requestDraftSavePreview', fileName: value.fileName, contents: value.contents };
+			{
+				const remove = value.removeAddresses;
+				const renames = value.renames;
+				const isAddress = (item: unknown) => typeof item === 'string' && item.length > 0 && item.length <= 512;
+				if (remove !== undefined && (!Array.isArray(remove) || remove.length > 256 || !remove.every(isAddress))) {
+					return undefined;
+				}
+				if (renames !== undefined && (!Array.isArray(renames) || renames.length > 256 || !renames.every(item =>
+					typeof item === 'object' && item !== null && Object.keys(item).length === 2 && isAddress((item as { from?: unknown }).from) && isAddress((item as { to?: unknown }).to)))) {
+					return undefined;
+				}
+				const base = value.baseContents;
+				if (base !== undefined && (typeof base !== 'string' || base.length > MAX_DRAFT_SAVE_CHARS)) {
+					return undefined;
+				}
+				return {
+					type: 'requestDraftSavePreview', fileName: value.fileName, contents: value.contents,
+					...(typeof base === 'string' ? { baseContents: base } : {}),
+					...(Array.isArray(remove) && remove.length ? { removeAddresses: [...remove as string[]] } : {}),
+					...(Array.isArray(renames) && renames.length ? { renames: (renames as { from: string; to: string }[]).map(({ from, to }) => ({ from, to })) } : {}),
+				};
+			}
 		case 'applyDraftSave':
 			if (
 				!isValidTfFileName(value.fileName)
@@ -855,6 +1105,38 @@ export function parseWebviewMessage(value: unknown): WebviewToExtensionMessage |
 				contents: value.contents,
 				previewToken: value.previewToken,
 			};
+		case 'requestSaveAllPreview': {
+			if (!Array.isArray(value.files) || value.files.length === 0 || value.files.length > MAX_SAVE_ALL_FILES) {
+				return undefined;
+			}
+			const files: SaveAllFile[] = [];
+			const names = new Set<string>();
+			let total = 0;
+			for (const file of value.files) {
+				if (typeof file !== 'object' || file === null || Array.isArray(file) || 'type' in file) {
+					return undefined;
+				}
+				const parsed = parseWebviewMessage({ ...file, type: 'requestDraftSavePreview' });
+				if (!parsed || parsed.type !== 'requestDraftSavePreview' || names.has(parsed.fileName.toLowerCase())) {
+					return undefined;
+				}
+				names.add(parsed.fileName.toLowerCase());
+				total += parsed.contents.length + (parsed.baseContents?.length ?? 0);
+				files.push({
+					fileName: parsed.fileName,
+					contents: parsed.contents,
+					...(parsed.baseContents !== undefined ? { baseContents: parsed.baseContents } : {}),
+					...(parsed.removeAddresses ? { removeAddresses: parsed.removeAddresses } : {}),
+					...(parsed.renames ? { renames: parsed.renames } : {}),
+				});
+			}
+			if (total > MAX_SAVE_ALL_CHARS) {
+				return undefined;
+			}
+			return { type: 'requestSaveAllPreview', files };
+		}
+		case 'applySaveAll':
+			return isOpaqueId(value.previewToken) ? { type: 'applySaveAll', previewToken: value.previewToken } : undefined;
 		case 'requestSchema':
 			if ((value.kind !== 'resource' && value.kind !== 'dataSource') || !isTypeName(value.typeName)) {
 				return undefined;
@@ -894,6 +1176,18 @@ export function parseWebviewMessage(value: unknown): WebviewToExtensionMessage |
 				return undefined;
 			}
 			return value.engine ? { type: 'requestEngineValidate', engine: value.engine } : { type: 'requestEngineValidate' };
+		}
+		case 'requestEnginePlan': {
+			if (value.engine !== undefined && value.engine !== 'openTofu' && value.engine !== 'terraform') {
+				return undefined;
+			}
+			return value.engine ? { type: 'requestEnginePlan', engine: value.engine } : { type: 'requestEnginePlan' };
+		}
+		case 'requestEngineInitOffline': {
+			if (value.engine !== undefined && value.engine !== 'openTofu' && value.engine !== 'terraform') {
+				return undefined;
+			}
+			return value.engine ? { type: 'requestEngineInitOffline', engine: value.engine } : { type: 'requestEngineInitOffline' };
 		}
 		case 'exportArtifact': {
 			if (

@@ -4,9 +4,82 @@
 
 Canonical Studio checkpoint: this file. Dale requested consolidation on 25 November 2026; the earlier Claude continuation and Codex whiteboard continuation are retained below as historical evidence. Use the current queue here instead of historical branch commands or pending-approval notes.
 
-Worktree: `C:/Users/dalep/.codex/worktrees/infrastructure-studio/CloudForge-Code`. Branch: `codex/studio-whiteboard-2`. Integration owner: Codex. Starting revision for this continuation: `5963df26af39f3f65365304025df8fa70773ff9d`. Fresh baseline: Studio check/build passed, **111/111** Node tests. The previous iteration also verified both Edge browser suites 20/20; those are inherited results until rerun for the new changes.
+Worktree: `C:/Users/dalep/.codex/worktrees/infrastructure-studio/CloudForge-Code`. Branch: `codex/studio-whiteboard-2`. Integration owner: Codex. Initial revision for this continuation: `5963df26af39f3f65365304025df8fa70773ff9d`. Historical starting baseline: Studio check/build passed, **111/111** Node tests and two Edge suites 20/20. Use the main integration verification below for the current merged result.
 
 Dale approved continuing the proposed point-endpoint pass in this chat. No further approval is needed for that plan. Work remains within Studio and handoff documentation; one architecture and one semantic undo history, independent theme/viewport/tool preferences, drawings excluded from Terraform and Rust-owned guarded I/O remain binding.
+
+### Main integration and portable agent handoff — 25 November 2026
+
+Dale explicitly instructed Codex to finish the handoff and push completed work to **main**. This authorizes the present main integration and supersedes the older no-main-push notes below; it does not authorize force-pushing, merging unrelated open PRs or changing the Rust repository. Integration work remains in the existing isolated worktree on `codex/studio-whiteboard-2`. The fetched main baseline was `e9a36e0e73fdf429a0ac1a0cc11474e32ac81e68` (35 commits ahead of the feature branch's base); the four feature commits through `64c01b2b4c3` are integrated with it. Resolve the final integration revision from the repository root with `git log -1 -- extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md` or the latest root HANDOFF entry. The remote main revision, rather than an old local worktree path, is the portable starting point.
+
+Repository: **https://github.com/fXrazor/vscode**. Canonical continuation: `extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md` (this file). Supporting research: `research/provider-intelligence.md` and `research/provider-source-manifest.json` under the Studio directory. They supplement this handoff; do not create a second continuation document. Prior backlog and source notes remain intact below.
+
+**What is included:** the earlier designer/endpoint work, variable picker/provider/icon/constraint follow-ups, independent visual versus provider containment, preliminary provider intelligence, and the technical-graph mutation safety correction. Graph gestures cannot write the design layout; explicit Parameters/Code project editing remains available. D3, the final TechnicalGraph renderer, tasteful curve/density/attachment-row design, graph-local pins, Miro copy handles and perimeter/bend controls remain planned, not implemented.
+
+**Main capabilities to reuse:** `resourceValues.ts` and App's `resourceValues` event hydrate source literals and `var.NAME` bindings with source-revision checks/rebase. Imported provider types/coverage are registered in `catalogue.ts`/`liveSchema.ts`; `resourceDraft.ts` supports schema draft checks. `sourceChanges`, focused and three-way saves, Save All, clickable/stale diagnostics, source navigation, project gallery/side panel, offline mirror and `HostEnginePlanReport`/`enginePlanReport` already exist. Do not build replacement service APIs from the earlier historical gap descriptions. The graph snapshot alone remains a summary; consume the separate existing value/schema/plan payloads. Complex resource expressions are not yet comprehensively converted into typed, provenance-backed graph relationships. Installed integration and graph-overlay completeness still need verification.
+
+Two merge conflicts were resolved: root HANDOFF preserves both the new graph handoff and main's Rust/desktop history; `ResourceCatalogue.tsx` keeps both provider identity/schema disclosure and main's imported-schema registration. Auto-merges retain source hydration, focused saves, diagnostics, rebase and plan support. No new dependency versions, Rust source, protocol authority or installer changes were introduced relative to main.
+
+#### Copy this prompt to a successor agent
+
+```text
+Continue CloudForge Infrastructure Studio from the latest origin/main in https://github.com/fXrazor/vscode. Use your own isolated worktree and a codex/ branch; preserve other agents' work. Read AGENTS.md, HANDOFF.md, and extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md before editing. That is the single canonical continuation; keep it updated.
+
+Start Phase 1 of the Technical Graph rebuild: audit the CURRENT source-value/schema/dependency/plan capabilities, then define and test an immutable graph projection contract with evidence/version/unknown-state metadata. Reuse resourceValues.ts, existing imported schema coverage, focused/three-way save and plan-report bridges. Do not invent new backend APIs or infer attachments from resource-type compatibility. Do not duplicate the architecture model.
+
+Critical invariant: graph layout, simulation ticks, node dragging/pins, expansion, routing, selection and filters must NEVER write Resource.positions, parentId, visualParentId, container sizes, Terraform, Modified state or project Undo. The previous shared-delta experiment was wrong and removed. Keep the current safety guard. Any future graph-local dragging belongs in separate presentation state; deliberate configuration edits use explicit project commands/editors.
+
+The current technical cards/packing are a guarded prototype, not the accepted final UI. Follow the master phases: provider evidence/graph contract -> engineer workflows and visual design -> D3/Canvas versus React Flow/compound-layout benchmark and dedicated TechnicalGraph -> provider patterns -> diagnostics/impact -> installed integration. Preserve the approved interest in tasteful curved paths, bounded attachment rows with distinct stable ports, zoom-dependent density, graph-local pins, and the separately queued Miro copy/perimeter/bend controls.
+
+Research is preliminary: 88 pinned documents, 87 documented profiles and 4,005 unreviewed records; AWS source applicability is unresolved and Kubernetes is manifest research, not a newly supported provider. Runtime connectivity/outages/prices/replacement effects require the appropriate evidence. Do not silently treat defaults or diagram positions as infrastructure facts.
+
+Finish one bounded phase with meaningful tests, record exact branch/revision/file ownership/checks/gaps/next action in the same handoff, and give the integration owner a reviewable commit. Do not push unrelated main/Claude/Rust branches or deploy cloud infrastructure. See the current integration verification entry for commands and known limits. Do not require the previous chat to understand the work.
+```
+
+#### Optional work ownership for separate successor agents
+
+| Workstream | Scoped ownership | Dependency / integration rule |
+| --- | --- | --- |
+| Provider evidence | `providerKnowledge.ts`, registry generation/source manifests and provider fixtures | Research actual selected versions; keep unknowns explicit. Coordinate registry contract changes with the graph-contract owner. |
+| Graph contract (next priority) | New readonly graph projection/types/tests plus narrow adapters | Reuse current service/value/plan payloads; establish no-mutation tests before changing the renderer. One integration owner reconciles shared model/adapter files. |
+| Visual/layout exploration | Separate graph prototype/spec/benchmarks and existing design tokens | Depends on the agreed graph DTO. Compare D3/Canvas and compound layout with identical fixtures; no canonical model setters in renderer callbacks. |
+| Designer handle follow-up | Drawing/endpoint geometry, copy gesture, exports and tests | Separate branch/worktree, preserving Graph View isolation. Coordinate changes to shared endpoint types before integration. |
+
+These are handoff scopes, not agents launched by this checkpoint. Each editing agent needs a separate worktree. Do not have parallel agents edit `model.ts`, `App.tsx`, `serviceAdapter.ts` or this handoff without an integration owner.
+
+#### Main integration verification and reproducible commands
+
+The merged source passed Studio TypeScript and production preview build, **160/160 Studio Node tests**, **96/96 extension Node tests** (including adjacent Rust fixture parsing, no skips), and the extension TypeScript check. The successful extension compiler invocation uses Studio's installed compiler and Node types; the root checkout has no directly executable `tsc`. No dependencies were installed or shared across worktrees.
+
+From the repository root (PowerShell, Node **24.22.1**, pnpm **12.16.0**):
+
+```powershell
+corepack pnpm --dir extensions/cloudforge/studio run check
+corepack pnpm --dir extensions/cloudforge/studio run test
+corepack pnpm --dir extensions/cloudforge/studio run build
+# Point this at the matching, separately owned Rust checkout for fixture tests.
+$env:CLOUDFORGE_REPO = 'Z:/CloudForge'
+$extensionTests = @(rg --files extensions/cloudforge/test -g '*.test.ts')
+node --test @extensionTests
+```
+
+From `extensions/cloudforge/studio`: `corepack pnpm exec tsc --noEmit -p ../tsconfig.json --typeRoots ./node_modules/@types`. Research capture verification: `node scripts/research-provider-intelligence.mjs --verify-local` — **88/88** document hashes matched. Pure tests read local fixtures; these commands do not deploy infrastructure or mutate the Rust checkout.
+
+Browser checks use the existing owned QA preview (`http://127.0.0.1:56797/` while running), an installed Playwright runtime selected with `PLAYWRIGHT_DIR`, and `--channel=msedge`. On another machine start its own preview with `corepack pnpm --dir extensions/cloudforge/studio run dev`, use the printed URL and a locally installed browser/runtime. Run suites serially from the Studio directory; their scenarios reload owned pages and mock extension-host messages. Do not point them at the user's draft tab or a live project.
+
+| Fresh merged browser suite | Result | Command from Studio (append the owned preview URL and `--channel=msedge`) |
+| --- | --- | --- |
+| Technical graph isolation/layout | 20/20 | `node scripts/technical-view-verify.mjs` |
+| Variable/provider/icon/containment annotations | 16/16 | `node scripts/annotation-followup-verify.mjs` |
+| Hosted refresh/history/Modified state | 20/20 | `node scripts/hosted-refresh-verify.mjs` |
+| Whiteboard controls | 20/20 | `node scripts/whiteboard-controls-verify.mjs` |
+| Loose endpoints/reconnection/export | 16/16 | `node scripts/loose-connectors-verify.mjs` |
+
+**92/92 browser checks passed with zero console/page errors.** The graph, annotation, whiteboard and endpoint matrices cover light/dark at 1360×860 and 1024×768; hosted refresh covers both widths. The graph test attempts a large AKS drag and mutation shortcuts, compares the entire exported project and checks mode/theme boundaries. This is preview and mocked-host evidence, not installed-product proof.
+
+The hosted refresh script now distinguishes an external graph refresh from an acknowledged save: unsaved edits remain **Modified** until the actual save flow acknowledges them. It also moves its note clear of neighbouring selection controls before multi-selection, using ordinary keyboard actions. No forced clicks or product behavior changes were used to make the test pass.
+
+Artifacts live under ignored `output/playwright/`; test counts and commands are recorded here so the handoff remains useful without those local files. Installed Code OSS/service interaction, real save/plan execution, desktop/installer builds, renderer benchmarks and the final Technical Graph design remain unverified or pending as specified by the master phases. Historical verification entries below describe their own earlier source revisions, not this integration.
 
 ### Master handoff: Technical Graph rebuild — latest user correction takes precedence
 
@@ -14,7 +87,7 @@ Dale approved continuing the proposed point-endpoint pass in this chat. No furth
 
 **Latest additions:** evaluate D3.js (Dale wrote “ds3”) for a large technical graph; support limited editing with a strict separation of graph presentation from project edits; give the graph a more tasteful visual design, including curved routes as an option. These extend this plan. They do not authorize another architecture model or implicit topology changes from positioning.
 
-Worktree: `C:/Users/dalep/.codex/worktrees/infrastructure-studio/CloudForge-Code`; branch `codex/studio-whiteboard-2`; integration owner Codex. Research commit: `f48b9c15b3d`; verified graph-isolation code checkpoint: `129b58e0eeb` (pushed). The commit containing this master handoff preserves the guarded experiment and safety correction; resolve its revision with `git log -1 -- extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md` from the repository root. Nothing here is a product-release or installed Workbench/service verification claim. Do not merge PR #1 or push main/Claude's branch.
+Worktree: `C:/Users/dalep/.codex/worktrees/infrastructure-studio/CloudForge-Code`; branch `codex/studio-whiteboard-2`; integration owner Codex. Research commit: `f48b9c15b3d`; verified graph-isolation code checkpoint: `129b58e0eeb` (pushed). The commit containing this master handoff preserves the guarded experiment and safety correction; resolve its revision with `git log -1 -- extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md` from the repository root. Nothing here is a product-release or installed Workbench/service verification claim. Dale's latest explicit main-integration instruction above supersedes the older main restriction for this checkpoint; do not merge unrelated PRs or push Claude/Rust branches.
 
 #### Binding state and interaction contract
 
@@ -60,7 +133,7 @@ The 88-document capture and 87 profiles are a **preliminary evidence inventory**
 
 | Scope to complete | Existing evidence and remaining work |
 | --- | --- |
-| Terraform Core | Graph generation, implicit expressions, `depends_on`, data reads, outputs, providers/aliases, modules/module references, state/orphans, plan, apply and destroy/lifecycle ordering are covered in the report. Actual graph adapters still lack complete field, module-instance, provider, output, state and plan records. Build those capability tests before depicting them. |
+| Terraform Core | Graph generation, implicit expressions, `depends_on`, data reads, outputs, providers/aliases, modules/module references, state/orphans, plan, apply and destroy/lifecycle ordering are covered in the report. The final graph projection still needs complete, provenance-backed field/module/provider/output/state/plan records; reuse the existing source-value and plan-report bridges rather than assuming those APIs are absent. Build those capability tests before depicting them. |
 | Azure | Resource groups, VNets/subnets, NSGs/rules and associations, routes, public IPs, LB/pools, Application Gateway, Firewall, AKS, VMs/NICs, identities/role grants, storage, Key Vault, Log Analytics and Monitor: 25 pinned AzureRM 5.14.0 documents. Validate parent/attachment/runtime distinctions, identity propagation, subnet/route/NSG failures, monitoring agent/DCR paths and cycles with versioned fixtures. |
 | AWS | VPC/subnets/SGs/routes, NAT/IGW, EC2/ENIs, EKS/node groups, ALB/NLB listeners/targets, RDS, IAM, S3, Lambda, Route53 and Organizations: 28 documents. The catalogue's 6.73.1 tag was unavailable; current research revision is not version-matched. Resolve applicability and conditional constraints before authoritative rules. Landing-zone recognition needs account/OU/security/logging evidence, not VPC names. |
 | Google Cloud | Global VPC, regional subnetworks, GKE, Compute Engine, Cloud SQL, Storage, IAM/service accounts, Router/NAT, firewall, global/regional LB chains and monitoring/logging: 22 pinned 8.10.0 documents. Audit doubled catalogue prefixes, private-service networking/API prerequisites and actual project/region evidence. |
@@ -68,7 +141,7 @@ The 88-document capture and 87 profiles are a **preliminary evidence inventory**
 
 Each reviewed resource entry must retain resource/parent/child/attachment types, dependency possibilities, runtime/security/monitoring evidence requirements, cost category and blast-radius category, plus source/version and field-syntax metadata. Cost category is not a price; shared-component category is not an outage score. Required fixture families must cover creation/import, association resources, computed/read-only fields, advanced/nested blocks, circular references and common deployment failures.
 
-The adapter audit found generic graph edges being converted into guessed NIC bindings and inherited fields. Fresh source summaries now retain edge provenance and suggest visual grouping only. Existing explicit local bindings remain preserved. Further source-value import/round-trip work is still required; the bridge currently sends IDs/types/labels/edges/source locations, not complete resource values. Do not work around this by guessing fields or reading workspace files directly in the browser. Backend changes belong in `Z:/CloudForge` through the canonical service boundary and its applicable approval scope. Read-only Rust source used for direction: `terraform_graph.rs` at Rust HEAD `8e8dcc38f40f7fb288963008977b3ead9080ceeb`; desktop normalization: `extensions/cloudforge/src/canvas/layout.ts:orientServiceEdgesForCanvas`. No Rust files were edited.
+The adapter audit found generic graph edges being converted into guessed NIC bindings and inherited fields. Fresh source summaries now retain edge provenance and suggest visual grouping only. Existing explicit local bindings remain preserved. The original summary-only observation is historical: integrated main now also supplies `readResourceValues` payloads and source-preserving saves. Reuse those capabilities; full expression-to-relationship provenance and the final graph adapter still need Phase 1 work. Do not work around this by guessing fields or reading workspace files directly in the browser. Backend changes belong in `Z:/CloudForge` through the canonical service boundary and its applicable approval scope. Read-only Rust source used for direction: `terraform_graph.rs` at Rust HEAD `8e8dcc38f40f7fb288963008977b3ead9080ceeb`; desktop normalization: `extensions/cloudforge/src/canvas/layout.ts:orientServiceEdgesForCanvas`. No Rust files were edited.
 
 #### Renderer candidates and visual design
 
