@@ -379,7 +379,7 @@ export type HostInboundMessage =
 	| { readonly type: 'graph'; readonly graph: HostGraphSnapshot; readonly viewState?: Partial<HostViewState>; readonly notice?: HostNotice | null }
 	| { readonly type: 'selectNode'; readonly nodeId: string | null }
 	| { readonly type: 'notice'; readonly notice: HostNotice | null }
-	| { readonly type: 'empty'; readonly message: string }
+	| { readonly type: 'empty'; readonly message: string; readonly start?: HostStartContext }
 	| { readonly type: 'validationRunUpdate'; readonly run: HostValidationRun }
 	| { readonly type: 'draftSavePreview'; readonly result: { readonly ok: true; readonly preview: HostDraftSavePreview } | { readonly ok: false; readonly error: HostDraftSaveError } }
 	| { readonly type: 'draftSaveApplied'; readonly result: { readonly ok: true; readonly applied: HostDraftSaveApplied } | { readonly ok: false; readonly error: HostDraftSaveError } }
@@ -406,8 +406,20 @@ export type HostInboundMessage =
 	| { readonly type: 'exportResult'; readonly ok: boolean; readonly message: string }
 	| { readonly type: 'focusModeChanged'; readonly active: boolean };
 
+/** Start-screen buttons; the host maps each one to a fixed CloudForge or workbench command. */
+export type HostStartAction = 'createProject' | 'openProject' | 'createArchitecture' | 'switchArchitecture' | 'openArchitecture';
+
+/** What the canvas start screen offers when no architecture is open. */
+export interface HostStartContext {
+	readonly projectOpen: boolean;
+	readonly projectName?: string;
+	readonly architectures: readonly { readonly architectureId: string; readonly name: string }[];
+	readonly moreArchitectures: number;
+}
+
 export type HostOutboundMessage =
 	| { readonly type: 'ready' }
+	| { readonly type: 'startAction'; readonly action: HostStartAction; readonly architectureId?: string }
 	| { readonly type: 'selectNode'; readonly nodeId: string | null }
 	| { readonly type: 'openSource'; readonly nodeId: string }
 	| { readonly type: 'renderResourceDraft'; readonly resourceId: string; readonly draft: ResourceDraft }

@@ -368,6 +368,31 @@ export function buildArchitectureSwitchItems(
 	});
 }
 
+/** What the canvas start screen offers when no architecture is open. */
+export interface StartScreenContext {
+	readonly projectOpen: boolean;
+	readonly projectName?: string;
+	readonly architectures: readonly { readonly architectureId: string; readonly name: string }[];
+	readonly moreArchitectures: number;
+}
+
+/**
+ * The start screen's view of the window: no project (offer to create or open one), or the
+ * project's openable architectures, the last one opened first, at most `limit` of them.
+ */
+export function buildStartScreenContext(project: ProjectResult | undefined, activeArchitectureId?: string, limit = 8): StartScreenContext {
+	if (!project) {
+		return { projectOpen: false, architectures: [], moreArchitectures: 0 };
+	}
+	const available = buildArchitectureSwitchItems(project, activeArchitectureId).filter(item => item.available);
+	return {
+		projectOpen: true,
+		projectName: project.displayName,
+		architectures: available.slice(0, limit).map(item => ({ architectureId: item.architectureId, name: item.displayName })),
+		moreArchitectures: Math.max(0, available.length - limit),
+	};
+}
+
 /** Describes a finding's kind without ever showing a value. */
 export function findingDescription(code: FindingCode): string {
 	switch (code) {

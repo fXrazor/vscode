@@ -90,6 +90,11 @@ function resource(id: string, kind: ResourceKind, name: string, x: number, y: nu
 	};
 }
 
+/** The empty canvas shown inside CloudForge until an architecture opens (never the sample below). */
+export function blankArchitecture(): Architecture {
+	return { name: 'Untitled architecture', variables: [], resources: [], items: [], connections: [] };
+}
+
 export function sampleArchitecture(): Architecture {
 	return {
 		name: 'Production network',

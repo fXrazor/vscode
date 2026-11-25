@@ -648,3 +648,12 @@ test('Stage 10 mirror package, readiness, offline init adapters and webview prot
 	assert.deepEqual(parseWebviewMessage({ type: 'requestEngineInitOffline', engine: 'terraform' }), { type: 'requestEngineInitOffline', engine: 'terraform' });
 	assert.equal(parseWebviewMessage({ type: 'requestEngineInitOffline', engine: 'bash' }), undefined);
 });
+
+test('start-screen buttons parse to fixed actions only', () => {
+	assert.deepEqual(parseWebviewMessage({ type: 'startAction', action: 'createProject' }), { type: 'startAction', action: 'createProject' });
+	assert.deepEqual(parseWebviewMessage({ type: 'startAction', action: 'openArchitecture', architectureId: 'arch-1' }), { type: 'startAction', action: 'openArchitecture', architectureId: 'arch-1' });
+	assert.equal(parseWebviewMessage({ type: 'startAction', action: 'openArchitecture' }), undefined);
+	assert.equal(parseWebviewMessage({ type: 'startAction', action: 'createProject', architectureId: 'arch-1' }), undefined);
+	assert.equal(parseWebviewMessage({ type: 'startAction', action: 'workbench.action.terminal.new' }), undefined);
+	assert.equal(parseWebviewMessage({ type: 'startAction', action: 'openArchitecture', architectureId: 'a\u0000b' }), undefined);
+});

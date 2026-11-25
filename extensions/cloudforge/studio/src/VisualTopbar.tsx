@@ -31,7 +31,7 @@ export function VisualTopbar({ mode, onMode, architecture, name, onRename, onTec
 }) {
  const [environment, setEnvironment] = useState('Development');
  const revisionLabel = host?.isHosted
-  ? (host.sourceRevision ? 'rev ' + host.sourceRevision.slice(0, 8) : 'Sample preview') + (host.sourceRevision && host.isDirty ? ' · Modified' : host.status === 'partial' ? ' · Partial' : '')
+  ? (host.sourceRevision ? 'rev ' + host.sourceRevision.slice(0, 8) : 'No architecture open') + (host.sourceRevision && host.isDirty ? ' · Modified' : host.status === 'partial' ? ' · Partial' : '')
   : 'Sample draft';
  return <header className="cloudlab-topbar">
   <div className="workspace-brand"><img src="./assets/cloudforge.png" alt="" /><strong>CloudForge</strong><small>Studio</small></div>

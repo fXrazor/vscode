@@ -45,6 +45,8 @@ const IGNORED_ROOT_TERRAFORM_KEY = 'cloudforge.ignoredRootTerraform';
 const LAST_ARCHITECTURE_NAME_KEY = 'cloudforge.lastArchitectureName';
 const PENDING_CLONE_KEY = 'cloudforge.pendingClone';
 const PENDING_CLONE_LIFETIME_MS = 15 * 60 * 1000;
+/** A project this window just created; the reopened window gives it a first blank architecture. */
+const PENDING_NEW_PROJECT_KEY = 'cloudforge.pendingNewProject';
 const WORKSPACE_FOLDER_ADD_TIMEOUT_MS = 5000;
 
 /** Shows an architecture's graph in the Stage 1 graph view and Architecture Canvas. */
@@ -58,6 +60,11 @@ export interface GraphHost {
 
 interface PendingClone {
 	readonly provider: CloneProvider;
+	readonly createdAt: number;
+}
+
+interface PendingNewProject {
+	readonly workspaceFile: string;
 	readonly createdAt: number;
 }
 
@@ -145,9 +152,12 @@ export class ProjectController implements Disposable {
 			}
 			return;
 		}
-		const project = this.accept(result.value);
+		let project = this.accept(result.value);
 		if (!project) {
 			return;
+		}
+		if (await this.startNewProject(project)) {
+			project = this.project ?? project;
 		}
 		if (!this.hasAutoOpenedArchitecture) {
 			const lastName = this.context.workspaceState.get<string>(LAST_ARCHITECTURE_NAME_KEY);
@@ -555,7 +565,43 @@ export class ProjectController implements Disposable {
 			showProjectError('SERVICE_ERROR');
 			return false;
 		}
+		const pending: PendingNewProject = { workspaceFile: created.workspaceFile, createdAt: Date.now() };
+		await this.context.globalState.update(PENDING_NEW_PROJECT_KEY, pending);
 		await commands.executeCommand('vscode.openFolder', Uri.parse(created.workspaceFile));
+		return true;
+	}
+
+	/**
+	 * A project created a moment ago opens straight onto a blank canvas: CloudForge makes its first
+	 * architecture (named after the project, with the service's empty starter `main.tf`) and opens
+	 * it, so there is nothing to set up before drawing. Returns true when it created one.
+	 */
+	private async startNewProject(project: ProjectResult): Promise<boolean> {
+		const pending = this.context.globalState.get<PendingNewProject>(PENDING_NEW_PROJECT_KEY);
+		const workspaceFile = workspace.workspaceFile;
+		if (!pending || typeof pending.workspaceFile !== 'string' || !workspaceFile) {
+			return false;
+		}
+		let pendingPath: string;
+		try {
+			pendingPath = Uri.parse(pending.workspaceFile).fsPath.toLowerCase();
+		} catch {
+			pendingPath = '';
+		}
+		if (pendingPath !== workspaceFile.fsPath.toLowerCase()) {
+			// Another window's project; leave the note for it unless it has expired.
+			if (Date.now() - pending.createdAt >= PENDING_CLONE_LIFETIME_MS) {
+				await this.context.globalState.update(PENDING_NEW_PROJECT_KEY, undefined);
+			}
+			return false;
+		}
+		await this.context.globalState.update(PENDING_NEW_PROJECT_KEY, undefined);
+		if (Date.now() - pending.createdAt >= PENDING_CLONE_LIFETIME_MS || project.architectures.length > 0) {
+			return false;
+		}
+		const name = isValidArchitectureName(project.displayName) ? project.displayName : 'main';
+		this.hasAutoOpenedArchitecture = true;
+		await this.createArchitectureInService(project.workspaceId, name);
 		return true;
 	}
 

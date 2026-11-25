@@ -8,7 +8,7 @@ Covers everything built in both repos on 25 November 2026 (updated for three-way
 - [ ] Rust: `node docs/protocol/fixtures/check-fixtures.mjs` reports the fixtures consistent.
 - [ ] Code OSS: build with the new service binary staged, then run the electron-main test `src/vs/code/test/electron-main/cloudForgeServiceChannel.test.ts`.
 - [ ] Code OSS: full type-check (`npm run compile` or the usual watch build). This covers `cloudForgeService.contribution.ts`, which couldn't be checked in the cloud.
-- [ ] Studio: `pnpm check` and tests (139 expected after merging main) in `extensions/cloudforge/studio`; extension tests (96 expected).
+- [ ] Studio: `pnpm check` and tests (141 expected) in `extensions/cloudforge/studio`; extension tests (98 expected).
 
 Use a test project with at least two architectures and one `.tf` file that has comments, a `tags = local.tags` line, a `lifecycle` block and a `dynamic` block.
 
@@ -122,6 +122,23 @@ Use a test project with at least two architectures and one `.tf` file that has c
 - [ ] Uninstall or rename the CLI folder: "CLI not found". Unplug the network: the check ends within about 25 seconds with "No answer" and CloudForge stays responsive afterwards.
 - [ ] Task Manager shows no `az`, `python`, `aws` or `gcloud` process left after a check.
 - [ ] Linking a provider offers "Check Sign-In" in the confirmation. Changing the link, storing a key or switching project clears the old result.
+
+## 10c. Starting fresh (start screen and new projects)
+
+- [ ] Open a window with no folder, then run **CloudForge: Open Canvas** (or open the canvas from the side panel). The canvas is blank with a card saying "Start designing your infrastructure" and two buttons, **New project** and **Open project folder**. The "Production network" sample never appears, and the top bar says "No architecture open".
+- [ ] Click **New project**, give it a name and pick a parent folder. The window reopens on the project, and without any more questions it shows a blank canvas for an architecture named after the project. `architectures/<project name>/main.tf` exists with only the comment line.
+- [ ] Drag a resource group and a virtual network from the library and save. Both land in that `main.tf`.
+- [ ] Open a project that has architectures but none open (or close the open one). The card shows the project name, **New blank architecture**, the architectures you can open (the last one used first) and, when there are more than eight, **All architectures (N)**. Each button does what it says.
+- [ ] Open an existing project with no architectures: the card says the project has none yet, and **New blank architecture** asks for a name and opens it.
+- [ ] In the browser preview (outside CloudForge) the sample still loads, as before.
+
+## 10d. Icons and places survive a save
+
+- [ ] In an architecture, drag from the library a virtual machine (`azurerm_virtual_machine`), a virtual network peering and a type the canvas has no built-in shape for. Move them somewhere distinctive, draw a line between two of them and group two. Save.
+- [ ] After the save each keeps its own icon (the VM keeps the VM icon, the peering keeps the virtual network icon), its place on the canvas, the drawn line, the group and the selection. Nothing shows the resource group icon unless it is a resource group.
+- [ ] Add a new resource **above** the others in the `.tf` file by hand and save the file. The canvas adds it without moving or swapping the existing ones.
+- [ ] Rename a resource block in the `.tf` file (same type, new name) and save. It stays where it was on the canvas.
+- [ ] Reopen CloudForge on a project saved with the older build: any resource that showed the resource group icon by mistake now shows a neutral icon for a moment, then its proper icon.
 
 ## 8. Known gaps (not bugs)
 

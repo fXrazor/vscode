@@ -27,6 +27,7 @@ import {
 	type TreeView
 } from 'vscode';
 import { activateProjects } from './project/index';
+import { buildStartScreenContext } from './project/model';
 import { registerTerraformEditorProviders } from './editor/providers';
 import {
 	extractTerraformReferenceAtPosition,
@@ -1409,6 +1410,32 @@ export function activate(context: ExtensionContext): void {
 			}
 			await projectControllerRef.current?.createArchitectureFromTemplate(template.defaultArchName, template.starterMainTf);
 		},
+		startContext() {
+			const controller = projectControllerRef.current;
+			return buildStartScreenContext(controller?.current, controller?.activeArchitectureId);
+		},
+		async onStartAction(action, architectureId) {
+			// Each button maps to one fixed command; the webview never names a command itself.
+			switch (action) {
+				case 'createProject':
+					await commands.executeCommand('cloudforge.createProject');
+					return;
+				case 'openProject':
+					await commands.executeCommand('workbench.action.files.openFolder');
+					return;
+				case 'createArchitecture':
+					await commands.executeCommand('cloudforge.createArchitecture');
+					return;
+				case 'switchArchitecture':
+					await commands.executeCommand('cloudforge.switchArchitecture');
+					return;
+				case 'openArchitecture':
+					if (architectureId && projectControllerRef.current?.current?.architectures.some(item => item.architectureId === architectureId)) {
+						await projectControllerRef.current.openArchitecture(architectureId);
+					}
+					return;
+			}
+		},
 		onToggleFocusMode: setCanvasFocusMode,
 		isFocusModeActive: () => focusModeActive,
 	});
@@ -2499,7 +2526,10 @@ export function activate(context: ExtensionContext): void {
 
 	// Stage 11: the CloudForge side panel (Project Status, Terraform State, Cloud Connections).
 	const projectChanged = new EventEmitter<void>();
-	context.subscriptions.push(projectChanged, projectControllerRef.current.onDidChange(() => projectChanged.fire()));
+	context.subscriptions.push(projectChanged, projectControllerRef.current.onDidChange(() => {
+		projectChanged.fire();
+		canvas.refreshStartScreen();
+	}));
 	activateSidePanel(context, {
 		callService,
 		getGraph: () => provider.getGraph(),
