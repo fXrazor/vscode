@@ -86,6 +86,23 @@
 				},
 				"publisherDisplayName": "Microsoft"
 			}
+		},
+		{
+			"name": "AykutSarac.jsoncrack-vscode",
+			"version": "5.1.0",
+			"sha256": "7c7bb618e8e7834b9674953206d1e44a1fcb94c10676e2c4ab97121342134753",
+			"repo": "https://github.com/AykutSarac/jsoncrack.com.git",
+			"vsix": ".build/cloudforge/AykutSarac.jsoncrack-vscode.5.1.0.vsix",
+			"metadata": {
+				"id": "87c9998f-5c0f-49ee-b89f-51340cdc449a",
+				"publisherId": {
+					"publisherId": "5e875904-36d0-440d-97f8-69ddf9d6791a",
+					"publisherName": "AykutSarac",
+					"displayName": "AykutSarac",
+					"flags": ""
+				},
+				"publisherDisplayName": "AykutSarac"
+			}
 		}
 	],
 	"defaultChatAgent": {
