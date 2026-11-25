@@ -34,6 +34,10 @@ export function variableUses(architecture: Architecture): Map<string, Set<string
 	const uses = new Map<string, Set<string>>();
 	const values = (blocks: ResourceBlock[]): string[] => blocks.flatMap(block => [...Object.values(block.values), ...values(block.blocks)]);
 	for (const resource of architecture.resources) {
+		for (const binding of Object.values(resource.fieldBindings ?? {})) {
+			const variable = architecture.variables?.find(item => item.id === binding.variableId);
+			if (variable) { const ids = uses.get(variable.name) ?? new Set<string>(); ids.add(resource.id); uses.set(variable.name, ids); }
+		}
   const attrs = getDef(resourceDefinition(resource).type)?.attributes ?? [];
   for (const name of Object.keys(resource.settings)) {
    if (isSensitiveProperty(name, resource.catalogue?.fields.find(field => field.name === name)?.sensitive || attrs.find(attr => attr.name === name)?.sensitive)) {

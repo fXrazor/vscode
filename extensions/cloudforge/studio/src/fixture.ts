@@ -80,7 +80,7 @@ function resource(id: string, kind: ResourceKind, name: string, x: number, y: nu
 		id, kind, provider: 'azure', name, region: 'UK South',
 		settings: { ...resourceTypes[kind].defaults },
 		blocks: [],
-		positions: { visual: { x, y }, technical: { x: x * 1.7, y: y * 1.3 } }
+		positions: { visual: { x, y }, technical: { x, y } }
 	};
 }
 
@@ -88,16 +88,19 @@ export function sampleArchitecture(): Architecture {
 	return {
 		name: 'Production network',
 		items: [
-			{ id: 'frame-network', kind: 'frame', text: 'Networking', positions: { visual: { x: 20, y: 65 }, technical: { x: 0, y: 100 } }, width: 525, height: 390, members: ['network', 'subnet'] },
-			{ id: 'frame-platform', kind: 'frame', text: 'Application platform', positions: { visual: { x: 560, y: -30 }, technical: { x: 940, y: -20 } }, width: 525, height: 550, members: ['gateway', 'cluster', 'storage', 'monitor'] }
+			{ id: 'frame-network', kind: 'frame', text: 'Networking', positions: { visual: { x: 70, y: 145 }, technical: { x: 70, y: 145 } }, width: 700, height: 660, members: [] },
+			{ id: 'frame-platform', kind: 'frame', text: 'Application platform', positions: { visual: { x: 815, y: 145 }, technical: { x: 815, y: 145 } }, width: 300, height: 900, members: [] }
 		],
 		resources: [
-			resource('network', 'network', 'vnet-production', 80, 170),
-			resource('subnet', 'subnet', 'snet-applications', 330, 170),
-			resource('gateway', 'gateway', 'agw-public', 580, 30),
-			resource('cluster', 'cluster', 'aks-production', 580, 300),
-			resource('storage', 'storage', 'stplatformdata', 850, 30),
-			resource('monitor', 'monitor', 'log-production', 850, 300)
+			{...resource('network', 'network', 'vnet-production', 100, 180),parentId:'resource-group',containerSize:{width:640,height:570}},
+			{...resource('subnet', 'subnet', 'snet-applications', 135, 275),parentId:'network',containerSize:{width:570,height:430}},
+			{...resource('gateway', 'gateway', 'agw-public', 160, 820),parentId:'resource-group'},
+			{...resource('cluster', 'cluster', 'aks-production', 845, 180),parentId:'resource-group'},
+			{...resource('storage', 'storage', 'stplatformdata', 845, 510),parentId:'resource-group'},
+			{...resource('monitor', 'monitor', 'log-production', 845, 820),parentId:'resource-group'},
+			{...resource('resource-group','group','rg-production',20,30),containerSize:{width:1130,height:1140}},
+			{...resource('vm','compute','vm-application',425,355),parentId:'subnet',settings:{Size:'Standard_D2s_v5',admin_username:'labadmin',network_interface_ids:'[]'}},
+			{...resource('nic','generic','nic-application',167,355),parentId:'subnet',catalogue:{type:'azurerm_network_interface',label:'Network interface',service:'Network Interface',category:'Network',icon:'catalog-icons/azure/azure-network-interfaces.svg',fields:[]},blocks:[{id:'sample-ip',type:'ip_configuration',values:{name:'internal',private_ip_address_allocation:'Dynamic'},blocks:[]}]}
 		],
 		connections: [
 			{ id: 'network-subnet', source: 'network', target: 'subnet' },

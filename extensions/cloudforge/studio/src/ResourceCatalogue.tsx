@@ -15,7 +15,7 @@ export const ResourceCatalogue = memo(function ResourceCatalogue({ architecture,
  search: string; onSearch: (value: string) => void; onImportModule: () => void; visible: boolean; onClose: () => void;
  onDesignAdd: (kind: BoardItem['kind'],caption?:string, shape?:ShapeId) => void; resizeHandle: ReactNode;
  onAddCatalogue: (entry: CatalogueEntry, provider: Provider) => void;
- onTemplate: (kind: 'network' | 'platform') => void;
+ onTemplate: (kind: 'network' | 'platform' | 'workflow') => void;
 }) {
  const shapesButton = useRef<HTMLButtonElement>(null);
  const [provider, setProvider] = useState<Provider>('azure');
@@ -58,8 +58,8 @@ export const ResourceCatalogue = memo(function ResourceCatalogue({ architecture,
   </button></div>;
  }
  const moduleCount = architecture.resources.filter(resource => resource.kind === 'module').length;
- if (shapesOpen) { return <aside className="resource-sidebar" hidden={!visible}>{resizeHandle}<ShapeLibrary onBack={() => { onShapesBack(); requestAnimationFrame(() => shapesButton.current?.focus()); }} onAdd={(shape,label) => onDesignAdd('shape',label,shape)} /></aside>; }
- return <Tabs.Root asChild value={tab} onValueChange={setTab}><aside className="resource-sidebar" hidden={!visible}>
+ if (shapesOpen) { return <aside id="resource-library" className="resource-sidebar" hidden={!visible}>{resizeHandle}<ShapeLibrary onWorkflow={()=>onTemplate('workflow')} onBack={() => { onShapesBack(); requestAnimationFrame(() => shapesButton.current?.focus()); }} onAdd={(shape,label) => onDesignAdd('shape',label,shape)} /></aside>; }
+ return <Tabs.Root asChild value={tab} onValueChange={setTab}><aside id="resource-library" className="resource-sidebar" hidden={!visible}>
   {resizeHandle}
   <Tabs.List className="lab-tabs library-title" aria-label="Resource sidebar"><Tabs.Trigger value="resources">Resources</Tabs.Trigger><Tabs.Trigger value="templates">Templates</Tabs.Trigger><span className="spacer"/><span className="lib-count">{entries.length.toLocaleString()} types</span><button aria-label="Close resource library" onClick={onClose}><PanelLeftClose size={15}/></button></Tabs.List>
   <div className="cat-head">

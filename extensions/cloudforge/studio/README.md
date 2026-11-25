@@ -13,7 +13,7 @@ The development server prints an available loopback port. Verification commands 
 
 ## Rendering contract
 
-Architecture Design View renders cloud icons, labels, groups and design relationships. Infrastructure Configuration View renders configuration cards with inline name/settings editors, expandable incoming relationships, local name-check findings and a clearly unavailable cost estimate. Both views use `history.present` in `App.tsx`. `ResourceNode.tsx` projects the same resource objects; inline inputs dispatch the same update actions as `ResourceFields`. Switching renderers does not dispatch an architecture edit or reset history. Per-view positions and viewport are presentation metadata, not copies of resources or configuration.
+Architecture Design View renders cloud icons, labels, containers and design relationships. Infrastructure Configuration View renders inline configuration cards, the same container hierarchy, inherited dependencies, local configuration findings and an unavailable cost estimate. Both use `history.present` in `App.tsx`; inline inputs dispatch the same actions as `ResourceFields`. Moving or resizing an element preserves its position across both renderers. The retained two layout fields are synchronized at edit boundaries for adapter compatibility. Viewports remain independent; renderer and theme changes do not enter architecture history. See [NESTING-AND-FEEDBACK-PASS.md](NESTING-AND-FEEDBACK-PASS.md) for the latest checkpoint.
 
 The shared resource form also appears in the focused resource workspace. Nested blocks derive from bundled curated definitions where available, with required prompts and typed fields; other entries retain imported primitive metadata. Advanced properties exposes optional additions. These are local catalogue checks, not complete version-matched provider validation. Code view projects Terraform through the supplied CloudLab generator: no selection shows main.tf; a selected resource shows its block. Existing representable field edits apply atomically; unsupported changes retain the draft and report an error. Module import records a reference only and does not fetch or execute code.
 
@@ -23,7 +23,7 @@ Persistent chrome must directly support the current workflow. The authoring layo
 
 ## Export
 
-Resource design connections now have selection-only label, path, stroke and arrow controls. View can hide connections or reveal all labels without changing the graph. Connection edits share Undo/Redo across both renderers and retain their appearance in presentation export. They remain visual links, not verified Terraform dependencies. See [CANVAS-CONNECTIONS-PASS.md](CANVAS-CONNECTIONS-PASS.md).
+Resource design connections have selection-only label, path, stroke and arrow controls. Connection edits share Undo/Redo and presentation export. These remain design links. Inherited dependencies are derived separately from the resource hierarchy and bundled inheritance rules; they generate typed Terraform references. Technical view hides design links by default and uses dotted dependencies, animating incident links only. View can reveal design links or all inherited dependencies without editing the graph. See [CANVAS-CONNECTIONS-PASS.md](CANVAS-CONNECTIONS-PASS.md) for the earlier connection pass.
 
 Shapes, notes and text can also connect to each other and to resources. Use their left/right ports or the keyboard-accessible Connect elements tool. Moving/resizing follows stable endpoints; deleting a drawing removes its links in the same undo step. Frames remain visual containers. At narrow widths, Workspace actions holds the compact header controls. See [CANVAS-DESIGN-REFINEMENT.md](CANVAS-DESIGN-REFINEMENT.md) for the design review and coverage limits.
 
@@ -31,9 +31,9 @@ Workspace offers SVG, PNG and Print / Save PDF. Export projects the architecture
 
 ## Boundaries
 
-This is an in-memory sample preview. Reload resets edits. No Rust service, workspace authorization, live provider schema lookup, Terraform validation, pricing service or deployment operation is connected. Bundled CloudLab catalogue snapshots supply metadata and primitive form properties. A passing node indicator means only the local draft-name check passed. Relationship labels describe design links, not verified Terraform references. Cost is explicitly Not estimated. Normal Code OSS source editors remain future integration work.
+This is an in-memory sample preview. Reload resets edits. Rust persistence, workspace authorization, live provider schema lookup, Terraform/provider validation, pricing and deployment are not connected. Local findings cover bundled required/type/block rules, hierarchy and basic literal IPv4 CIDR checks; a clear indicator is not deployment readiness. All 4,078 catalogue entries retain primitive descriptors; complete nested/provider constraints are unavailable for many entries. Normal Code OSS source-editor integration remains future work.
 
-Catalogue and code-panel tabs now use Radix Tabs. Dialogs and other menu surfaces still use native controls; the full shadcn/Radix migration is pending. Do not report the production shadcn/Radix migration as complete.
+Tabs, variable popovers, context menus and selection menus use Radix primitives; the focused workspace uses a native dialog. The full production shadcn/Radix migration remains pending.
 
 ## Verification recorded 2026-11-17
 

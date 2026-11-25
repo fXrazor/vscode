@@ -1,5 +1,5 @@
 import type { Dispatch } from 'react';
-import { Trash2, X } from 'lucide-react';
+import { ArrowRightLeft, Trash2, X } from 'lucide-react';
 import type { Action, DesignConnection } from './model.ts';
 
 export function ConnectionTools({ connection, dispatch, onClose }: { connection: DesignConnection; dispatch: Dispatch<Action>; onClose: () => void }) {
@@ -14,6 +14,12 @@ export function ConnectionTools({ connection, dispatch, onClose }: { connection:
 			<label>Colour<input aria-label="Connection colour" type="color" value={connection.stroke ?? '#7565bd'} onChange={event => update({ stroke: event.target.value })}/></label>
 			<label className="connection-checkbox"><input type="checkbox" checked={connection.startArrow ?? false} onChange={event => update({ startArrow: event.target.checked })}/>Start arrow</label>
 			<label className="connection-checkbox"><input type="checkbox" checked={connection.endArrow ?? true} onChange={event => update({ endArrow: event.target.checked })}/>End arrow</label>
+			<details className="connection-label-options"><summary>Label formatting</summary><div>
+				<label>Size<select aria-label="Connection label size" value={connection.labelFontSize ?? 11} onChange={event => update({ labelFontSize: Number(event.target.value) })}>{[10,11,12,14,16,20,24,32].map(size => <option key={size}>{size}</option>)}</select></label>
+				<label>Position<select aria-label="Connection label position" value={connection.labelPosition ?? 'center'} onChange={event => update({ labelPosition: event.target.value as DesignConnection['labelPosition'] })}><option value="above">Above line</option><option value="center">On line</option><option value="below">Below line</option></select></label>
+				<label>Text colour<input aria-label="Connection label colour" type="color" value={connection.labelColor ?? '#7565bd'} onChange={event => update({ labelColor: event.target.value })}/></label>
+			</div></details>
+			<button aria-label="Reverse connection direction" title="Reverse connection direction" onClick={() => dispatch({ type: 'reverseConnection', id: connection.id })}><ArrowRightLeft size={15}/></button>
 			<button aria-label="Delete design connection" onClick={() => { dispatch({ type: 'deleteConnection', id: connection.id }); onClose(); }}><Trash2 size={15}/></button>
 		</div>
 	</section>;

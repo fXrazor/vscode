@@ -2,9 +2,11 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-import type { Resource, ResourceBlock } from './model.ts';
+import type { Architecture, Resource, ResourceBlock } from './model.ts';
 import { getDef, type AttrDef } from './cloudlab-core/catalog/index.ts';
 import { resourceDefinition } from './fixture.ts';
+import { bindingKey, bindingTarget, fieldDefinition, fieldTargetPath, variableBindingIssue } from './fieldBindings.ts';
+import { inheritedReference } from './resourceHierarchy.ts';
 
 export interface BlockDefinition {
 	type: string;
@@ -51,12 +53,14 @@ export function fieldIssue(value: string, attribute?: AttrDef): string | undefin
 	return undefined;
 }
 
-export function resourceFormIssues(resource: Resource): string[] {
+export function resourceFormIssues(resource: Resource, variables?: import('./variables.ts').VariableDefinition[], architecture?: Architecture): string[] {
 	const issues: string[] = [];
+	for (const [key, binding] of Object.entries(resource.fieldBindings ?? {})) { const target = bindingTarget(key); const issue = variableBindingIssue(binding, variables ?? [], target ? fieldDefinition(resource,target) : undefined); if (issue) { issues.push((target?.kind === 'setting' || target?.kind === 'block' ? target.name : target?.kind ?? 'Field') + ': ' + issue); } }
 	if (resource.catalogue) {
 		for (const field of editableFields(resource)) {
 			if (['name', 'location', 'region'].includes(field.name)) { continue; }
-			const issue = fieldIssue(resource.settings[field.name] ?? '', field);
+			if(architecture&&inheritedReference(architecture,resource,[field.name])){continue;}
+			const issue = resource.fieldBindings?.[bindingKey({kind:'setting',name:field.name})] ? undefined : fieldIssue(resource.settings[field.name] ?? '', field);
 			if (issue) { issues.push(field.name + ': ' + issue); }
 		}
 	}
@@ -68,7 +72,8 @@ export function resourceFormIssues(resource: Resource): string[] {
 			matching.forEach((block, index) => {
 				const prefix = path + definition.type + '[' + (index + 1) + '].';
 				for (const field of definition.attributes ?? []) {
-					const issue = fieldIssue(block.values[field.name] ?? '', field);
+					if(architecture&&inheritedReference(architecture,resource,fieldTargetPath(resource,{kind:'block',blockId:block.id,name:field.name}))){continue;}
+					const issue = resource.fieldBindings?.[bindingKey({kind:'block',blockId:block.id,name:field.name})] ? undefined : fieldIssue(block.values[field.name] ?? '', field);
 					if (issue) { issues.push(prefix + field.name + ': ' + issue); }
 				}
 				visit(block.blocks, definition.children, prefix);
