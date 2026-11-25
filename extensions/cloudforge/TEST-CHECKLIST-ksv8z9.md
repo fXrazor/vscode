@@ -8,7 +8,7 @@ Covers everything built in both repos on 25 November 2026 (updated for three-way
 - [ ] Rust: `node docs/protocol/fixtures/check-fixtures.mjs` reports the fixtures consistent.
 - [ ] Code OSS: build with the new service binary staged, then run the electron-main test `src/vs/code/test/electron-main/cloudForgeServiceChannel.test.ts`.
 - [ ] Code OSS: full type-check (`npm run compile` or the usual watch build). This covers `cloudForgeService.contribution.ts`, which couldn't be checked in the cloud.
-- [ ] Studio: `pnpm check` and tests (142 expected) in `extensions/cloudforge/studio`; extension tests (98 expected).
+- [ ] Studio: `pnpm check` and tests (142 expected) in `extensions/cloudforge/studio`; extension tests (101 expected).
 
 Use a test project with at least two architectures and one `.tf` file that has comments, a `tags = local.tags` line, a `lifecycle` block and a `dynamic` block.
 
@@ -139,6 +139,14 @@ Use a test project with at least two architectures and one `.tf` file that has c
 - [ ] Add a new resource **above** the others in the `.tf` file by hand and save the file. The canvas adds it without moving or swapping the existing ones.
 - [ ] Rename a resource block in the `.tf` file (same type, new name) and save. It stays where it was on the canvas.
 - [ ] Reopen CloudForge on a project saved with the older build: any resource that showed the resource group icon by mistake now shows a neutral icon for a moment, then its proper icon.
+
+## 10e. Service icons in the side panel
+
+- [ ] Open an Azure architecture. In the CloudForge side panel's **Graph** view (and Explorer's CloudForge Graph), each resource row shows the same service icon as the canvas: virtual network, subnet, virtual machine, resource group and so on. Modules show a package icon; types with no catalogue icon show the plain class icon.
+- [ ] The first time, rows may show the plain icon for a moment, then switch to the service icons without the view reloading or losing its expanded rows.
+- [ ] Connections under a resource show an in or out arrow, and diagnostics show red, yellow or blue icons by severity.
+- [ ] **Terraform State → Resources in state** rows show the same service icons.
+- [ ] Do the same with an AWS and a Google architecture.
 
 ## 8. Known gaps (not bugs)
 

@@ -10,7 +10,7 @@
 
 import { randomBytes } from 'node:crypto';
 import {
-	commands, EventEmitter, l10n, ThemeColor, ThemeIcon, TreeItem, TreeItemCollapsibleState, ViewColumn, window, workspace,
+	commands, EventEmitter, l10n, ThemeColor, ThemeIcon, TreeItem, TreeItemCollapsibleState, Uri, ViewColumn, window, workspace,
 	type Disposable, type Event, type ExtensionContext, type TreeDataProvider, type WebviewPanel,
 } from 'vscode';
 import {
@@ -46,6 +46,9 @@ export interface SidePanelHost {
 	projectWorkspaceId(): string | undefined;
 	readonly onDidChangeProject: Event<void>;
 	openNodeSource(graph: SidePanelGraph, nodeId: string): Promise<unknown>;
+	/** The cloud service icon for a Terraform resource type, when its catalogue has loaded. */
+	resourceIcon?(resourceType: string): Uri | undefined;
+	readonly onDidChangeResourceIcons?: Event<void>;
 }
 
 const GUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
@@ -170,12 +173,14 @@ interface PanelNode {
 	readonly children?: () => PanelNode[];
 }
 
-function leaf(id: string, label: string, options: { description?: string; icon?: string; color?: string; tooltip?: string; command?: TreeItem['command']; contextValue?: string } = {}): PanelNode {
+function leaf(id: string, label: string, options: { description?: string; icon?: string; iconUri?: Uri; color?: string; tooltip?: string; command?: TreeItem['command']; contextValue?: string } = {}): PanelNode {
 	const item = new TreeItem(label, TreeItemCollapsibleState.None);
 	item.id = id;
 	item.description = options.description;
 	item.tooltip = options.tooltip ?? (options.description ? `${label} · ${options.description}` : label);
-	if (options.icon) {
+	if (options.iconUri) {
+		item.iconPath = options.iconUri;
+	} else if (options.icon) {
 		item.iconPath = new ThemeIcon(options.icon, options.color ? new ThemeColor(options.color) : undefined);
 	}
 	item.command = options.command;
@@ -200,6 +205,11 @@ class PanelTree implements TreeDataProvider<PanelNode>, Disposable {
 
 	constructor(data: SidePanelData, private readonly roots: () => PanelNode[]) {
 		this.subscription = data.onDidChange(() => this.changeEmitter.fire(undefined));
+	}
+
+	/** Redraws the rows without reloading anything (for example once resource icons have loaded). */
+	redraw(): void {
+		this.changeEmitter.fire(undefined);
 	}
 
 	getTreeItem(node: PanelNode): TreeItem {
@@ -324,6 +334,7 @@ export function activateSidePanel(context: ExtensionContext, host: SidePanelHost
 				return leaf(`state.resource.${resource.address}`, resource.address, {
 					description: resource.instances === 1 ? resource.provider : `${resource.instances} instances · ${resource.provider}`,
 					icon: resource.mode === 'data' ? 'symbol-interface' : 'symbol-class',
+					iconUri: host.resourceIcon?.(resource.type),
 					command: node ? { command: 'cloudforge.revealStateResource', title: l10n.t('Open Source'), arguments: [node.id] } : undefined,
 				});
 			}), { description: String(local.resources.length) + (local.truncated ? '+' : '') }),
@@ -618,6 +629,7 @@ export function activateSidePanel(context: ExtensionContext, host: SidePanelHost
 		data.onDidChange(renderStatusPanel),
 		host.onDidChangeGraph(scheduleRefresh),
 		host.onDidChangeProject(scheduleRefresh),
+		...(host.onDidChangeResourceIcons ? [host.onDidChangeResourceIcons(() => stateTree.redraw())] : []),
 		{ dispose: () => clearTimeout(timer) },
 		{ dispose: () => statusPanel?.dispose() },
 		commands.registerCommand('cloudforge.openProjectStatus', openStatus),

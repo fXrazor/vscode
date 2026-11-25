@@ -15,6 +15,8 @@ import {
 	ProgressLocation,
 	Range,
 	StatusBarAlignment,
+	ThemeColor,
+	ThemeIcon,
 	TreeItem,
 	TreeItemCollapsibleState,
 	Uri,
@@ -27,6 +29,7 @@ import {
 	type TreeView
 } from 'vscode';
 import { activateProjects } from './project/index';
+import { ResourceIconIndex } from './resourceIcons';
 import { buildStartScreenContext } from './project/model';
 import { registerTerraformEditorProviders } from './editor/providers';
 import {
@@ -176,11 +179,20 @@ class DiagnosticTreeItem {
 class CloudForgeGraphProvider implements TreeDataProvider<GraphTreeItem> {
 	private readonly changeEmitter = new EventEmitter<GraphTreeItem | undefined>();
 	readonly onDidChangeTreeData: Event<GraphTreeItem | undefined> = this.changeEmitter.event;
+	/** Fires only when the graph itself changes (not when icons finish loading). */
+	private readonly graphEmitter = new EventEmitter<void>();
+	readonly onDidChangeGraph: Event<void> = this.graphEmitter.event;
 	private graph: ArchitectureGraph | undefined;
+	private readonly iconSubscription: { dispose(): unknown } | undefined;
+
+	constructor(private readonly icons?: ResourceIconIndex) {
+		this.iconSubscription = icons?.onDidChange(() => this.changeEmitter.fire(undefined));
+	}
 
 	setGraph(graph: ArchitectureGraph | undefined): void {
 		this.graph = graph;
 		this.changeEmitter.fire(undefined);
+		this.graphEmitter.fire();
 	}
 
 	getGraph(): ArchitectureGraph | undefined {
@@ -210,17 +222,27 @@ class CloudForgeGraphProvider implements TreeDataProvider<GraphTreeItem> {
 				? `${element.node.kind}: ${element.node.name}\n${sourceLabel}`
 				: `${element.node.kind}: ${element.node.name}`;
 			item.contextValue = 'cloudForgeResource';
+			// The cloud service icon the canvas shows for this type, once the provider catalogue has loaded.
+			item.iconPath = this.icons?.iconFor(element.node.resourceType)
+				?? new ThemeIcon(element.node.kind === 'module' ? 'package' : element.node.kind === 'data' ? 'symbol-interface' : 'symbol-class');
 			return item;
 		}
 		if (element.type === 'connection') {
 			const item = new TreeItem(element.label, TreeItemCollapsibleState.None);
 			item.description = element.direction;
 			item.contextValue = 'cloudForgeConnection';
+			item.iconPath = new ThemeIcon(element.direction === l10n.t('incoming') ? 'arrow-small-left' : 'arrow-small-right');
 			return item;
 		}
 		const item = new TreeItem(element.diagnostic.message, TreeItemCollapsibleState.None);
 		item.description = element.diagnostic.code + ' · ' + element.diagnostic.severity;
 		item.contextValue = 'cloudForgeDiagnostic';
+		const severity = element.diagnostic.severity.toLowerCase();
+		item.iconPath = severity === 'error'
+			? new ThemeIcon('error', new ThemeColor('problemsErrorIcon.foreground'))
+			: severity === 'warning'
+				? new ThemeIcon('warning', new ThemeColor('problemsWarningIcon.foreground'))
+				: new ThemeIcon('info', new ThemeColor('problemsInfoIcon.foreground'));
 		return item;
 	}
 
@@ -258,7 +280,9 @@ class CloudForgeGraphProvider implements TreeDataProvider<GraphTreeItem> {
 	}
 
 	dispose(): void {
+		this.iconSubscription?.dispose();
 		this.changeEmitter.dispose();
+		this.graphEmitter.dispose();
 	}
 }
 
@@ -558,7 +582,9 @@ function toCanvasSnapshot(graph: ArchitectureGraph, architectureName: string): C
 }
 
 export function activate(context: ExtensionContext): void {
-	const provider = new CloudForgeGraphProvider();
+	const resourceIcons = new ResourceIconIndex(context.extensionUri);
+	context.subscriptions.push(resourceIcons);
+	const provider = new CloudForgeGraphProvider(resourceIcons);
 	const treeView = window.createTreeView('cloudforge.resources', { treeDataProvider: provider });
 	// The same graph also shows in the CloudForge side panel; Explorer keeps its copy.
 	const panelTreeView = window.createTreeView('cloudforge.panel.resources', { treeDataProvider: provider });
@@ -2533,7 +2559,9 @@ export function activate(context: ExtensionContext): void {
 	activateSidePanel(context, {
 		callService,
 		getGraph: () => provider.getGraph(),
-		onDidChangeGraph: provider.onDidChangeTreeData,
+		onDidChangeGraph: provider.onDidChangeGraph,
+		resourceIcon: type => resourceIcons.iconFor(type),
+		onDidChangeResourceIcons: resourceIcons.onDidChange,
 		architectureName: () => provider.getGraph() ? currentArchitectureName : undefined,
 		projectName: () => projectControllerRef.current?.current?.displayName,
 		projectWorkspaceId: () => projectControllerRef.current?.current?.workspaceId,
