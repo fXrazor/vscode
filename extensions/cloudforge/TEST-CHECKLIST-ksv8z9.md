@@ -1,14 +1,14 @@
 # CloudForge: test checklist for branch `claude/project-thread-ksv8z9`
 
-Covers everything built in both repos on 25 November 2026 (updated for three-way saves, file values and saving several files at once) (Rust `fXrazor/CloudForge` and Code OSS `fXrazor/vscode`, same branch name). Nothing is merged yet.
+Covers everything built in both repos on 25 November 2026 (updated for three-way saves, file values, saving several files at once, the side panel and the cloud sign-in check) (Rust `fXrazor/CloudForge` and Code OSS `fXrazor/vscode`, same branch name). Nothing is merged yet.
 
 ## 0. Build and automated checks (Windows)
 
-- [ ] Rust: in a checkout of the branch, from `service/`, with a **fresh** `CARGO_TARGET_DIR` (a stale one gives bogus `hcl-edit` E0599 errors), run `cargo test`. Expect everything to pass, including the `focused_save` (14) and `resource_values` (1) unit tests and, in `tests/draft_save.rs`, `focused_save_rewrites_only_changed_values_and_keeps_comments`, `read_resource_values_returns_file_values_without_secrets` and `focused_batch_saves_several_files_under_one_token`. `tests/stage11_state_connections.rs` (it writes and then deletes one generic credential in your Credential Manager). `fixtures.rs` expects 22 Stage 2 fixtures, including `create-architecture-adopt-root-files`. `tests/stdio.rs` now expects the 2 MiB request limit.
+- [ ] Rust: in a checkout of the branch, from `service/`, with a **fresh** `CARGO_TARGET_DIR` (a stale one gives bogus `hcl-edit` E0599 errors), run `cargo test`. Expect everything to pass, including the `focused_save` (14) and `resource_values` (1) unit tests and, in `tests/draft_save.rs`, `focused_save_rewrites_only_changed_values_and_keeps_comments`, `read_resource_values_returns_file_values_without_secrets` and `focused_batch_saves_several_files_under_one_token`. `tests/stage11_state_connections.rs` (it writes and then deletes one generic credential in your Credential Manager, and runs `az account show` once if the Azure CLI is installed). `fixtures.rs` expects 22 Stage 2 fixtures, including `create-architecture-adopt-root-files`. `tests/stdio.rs` now expects the 2 MiB request limit.
 - [ ] Rust: `node docs/protocol/fixtures/check-fixtures.mjs` reports the fixtures consistent.
 - [ ] Code OSS: build with the new service binary staged, then run the electron-main test `src/vs/code/test/electron-main/cloudForgeServiceChannel.test.ts`.
 - [ ] Code OSS: full type-check (`npm run compile` or the usual watch build). This covers `cloudForgeService.contribution.ts`, which couldn't be checked in the cloud.
-- [ ] Studio: `pnpm check` and tests (110 expected) in `extensions/cloudforge/studio`; extension tests (74 expected).
+- [ ] Studio: `pnpm check` and tests (110 expected) in `extensions/cloudforge/studio`; extension tests (75 expected).
 
 Use a test project with at least two architectures and one `.tf` file that has comments, a `tags = local.tags` line, a `lifecycle` block and a `dynamic` block.
 
@@ -95,7 +95,7 @@ Use a test project with at least two architectures and one `.tf` file that has c
 
 ## 9. CloudForge side panel
 
-- [ ] A CloudForge icon appears in the activity bar. Its panel holds Project Status, Projects, CloudForge Graph, Terraform State and Cloud Connections. Projects and CloudForge Graph are no longer in Explorer.
+- [ ] A CloudForge icon appears in the activity bar. Its panel holds Project Status, Projects, CloudForge Graph, Terraform State and Cloud Connections. Projects and CloudForge Graph are still in Explorer too, and both copies stay in step (open, refresh, select).
 - [ ] Project Status lists the project, architecture and revision, resources, checks (click opens Problems) and the state line. If the architecture uses Azure resources and Azure isn't linked, an Azure row shows a warning.
 - [ ] "Open Project Status" opens a tab. Refresh, Open canvas, Run checks, Link and Store key all work from it.
 - [ ] Terraform State, with no backend block and no state file: "Backend local (default)" and "No local state file".
@@ -110,6 +110,18 @@ Use a test project with at least two architectures and one `.tf` file that has c
 - [ ] `%LOCALAPPDATA%\CloudForge\service\cloud-connections.json` holds the bindings and no key. Nothing new appears in the project folder or its git status.
 - [ ] Delete Stored Key removes the credential; Unlink removes the binding and any key.
 - [ ] Close and reopen the project, including after renaming or moving its folder: the links are still there.
+- [ ] The Azure, AWS and Google rows no longer say "not found" when the CLI is installed in its usual place (it used to always say so).
+
+## 10b. Check cloud sign-in
+
+- [ ] With `az login` done and Azure linked to the same tenant and subscription, click the check icon on the Azure row (or "Check sign-in" in the Project Status tab). The row spins, then shows "Signed in" with a green tick; the tooltip shows "Signed in as d…@yourdomain · <subscription name>". The full email, tenant and subscription IDs never appear.
+- [ ] Run `az account set` to another subscription, or link a subscription you can't see: the check says "Signed in elsewhere" or "No access" with a warning icon.
+- [ ] Run `az logout` and check again: "Not signed in". Pick "Type Command in Terminal": a "CloudForge sign-in" terminal opens with `az login` typed but **not** run.
+- [ ] AWS: with a valid profile you get "Signed in as account …1234". With an expired SSO profile you get "Sign-in expired" and the terminal offer types `aws sso login --profile <name>`. With a misspelt profile you get "Profile missing".
+- [ ] Google: after `gcloud auth login` and `gcloud config set project <linked id>` you get "Signed in". Point gcloud at another project and you get "Signed in elsewhere".
+- [ ] Uninstall or rename the CLI folder: "CLI not found". Unplug the network: the check ends within about 25 seconds with "No answer" and CloudForge stays responsive afterwards.
+- [ ] Task Manager shows no `az`, `python`, `aws` or `gcloud` process left after a check.
+- [ ] Linking a provider offers "Check Sign-In" in the confirmation. Changing the link, storing a key or switching project clears the old result.
 
 ## 8. Known gaps (not bugs)
 

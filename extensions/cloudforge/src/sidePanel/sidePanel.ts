@@ -5,17 +5,18 @@
 
 // The CloudForge side panel (activity bar): Project Status, Terraform State and Cloud
 // Connections views, plus the Project Status tab. Everything shown comes from redacted Rust
-// summaries (`summarizeState`, `listCloudConnections`); keys typed here go straight to the
-// service, which writes them to Windows Credential Manager and never returns them.
+// summaries (`summarizeState`, `listCloudConnections`, `checkCloudSignIn`); keys typed here go
+// straight to the service, which writes them to Windows Credential Manager and never returns them.
 
 import { randomBytes } from 'node:crypto';
 import {
-	commands, EventEmitter, l10n, ThemeColor, ThemeIcon, TreeItem, TreeItemCollapsibleState, ViewColumn, window,
+	commands, EventEmitter, l10n, ThemeColor, ThemeIcon, TreeItem, TreeItemCollapsibleState, ViewColumn, window, workspace,
 	type Disposable, type Event, type ExtensionContext, type TreeDataProvider, type WebviewPanel,
 } from 'vscode';
 import {
-	buildStatusHtml, CLOUD_PROVIDERS, describeConnection, describeState, parseCloudConnections, parseStateSummary, parseStatusPageMessage, providerLabel, providersInUse, stateDrift,
-	type CloudConnection, type CloudProvider, type StateSummary,
+	buildStatusHtml, CLOUD_PROVIDERS, describeConnection, describeSignInCheck, describeState, parseCloudConnections, parseSignInCheck, parseStateSummary, parseStatusPageMessage,
+	providerLabel, providersInUse, signInLabel, stateDrift,
+	type CloudConnection, type CloudProvider, type SignInCheck, type StateSummary,
 } from './model';
 
 type ServiceResult<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: { readonly code: string } };
@@ -67,8 +68,12 @@ class SidePanelData implements Disposable {
 	state: StateSummary | undefined;
 	stateError: string | undefined;
 	connections: CloudConnection[] | undefined;
+	/** The last sign-in check per provider, kept for this window and this project only. */
+	readonly signInChecks: Partial<Record<CloudProvider, SignInCheck>> = {};
+	readonly checking = new Set<CloudProvider>();
 	private loading: Promise<void> | undefined;
 	private again = false;
+	private loadedWorkspaceId: string | undefined;
 
 	constructor(private readonly host: SidePanelHost) { }
 
@@ -91,14 +96,45 @@ class SidePanelData implements Disposable {
 		return this.loading;
 	}
 
-	setConnections(value: unknown): void {
+	/** `changed` is the provider whose link or key was just changed: its last check no longer applies. */
+	setConnections(value: unknown, changed?: CloudProvider): void {
 		this.connections = parseCloudConnections(value) ?? this.connections;
+		if (changed) {
+			delete this.signInChecks[changed];
+		}
 		this.changeEmitter.fire();
+	}
+
+	/** Asks the service to run the provider CLI's read-only identity command and compare it with the link. */
+	async checkSignIn(provider: CloudProvider): Promise<SignInCheck | { readonly error: string }> {
+		const workspaceId = this.workspaceId();
+		if (!workspaceId) {
+			return { error: 'INVALID_STATE' };
+		}
+		this.checking.add(provider);
+		this.changeEmitter.fire();
+		try {
+			const result = await this.host.callService<unknown>('checkCloudSignIn', { workspaceId, provider });
+			const check = result.ok ? parseSignInCheck(result.value) : undefined;
+			if (check && this.workspaceId() === workspaceId) {
+				this.signInChecks[provider] = check;
+			}
+			return check ?? { error: result.ok ? 'UNREADABLE' : result.error.code };
+		} finally {
+			this.checking.delete(provider);
+			this.changeEmitter.fire();
+		}
 	}
 
 	private async load(): Promise<void> {
 		const graph = this.host.getGraph();
 		const workspaceId = this.workspaceId();
+		if (workspaceId !== this.loadedWorkspaceId) {
+			this.loadedWorkspaceId = workspaceId;
+			for (const provider of CLOUD_PROVIDERS) {
+				delete this.signInChecks[provider];
+			}
+		}
 		this.state = undefined;
 		this.stateError = undefined;
 		if (graph) {
@@ -182,6 +218,22 @@ class PanelTree implements TreeDataProvider<PanelNode>, Disposable {
 
 const connectionIcon = (provider: CloudProvider) => provider === 'azure' ? 'azure' : 'cloud';
 
+/** Commands a person can run in a terminal to sign in; they are typed but never run for them. */
+function signInCommand(connection: CloudConnection | undefined, check: SignInCheck): string | undefined {
+	if (!connection || check.status === 'ok' || check.status === 'cliMissing' || check.status === 'timedOut') {
+		return undefined;
+	}
+	const binding = connection.binding ?? {};
+	switch (connection.provider) {
+		case 'azure':
+			return check.status === 'mismatch' || check.status === 'noAccess' ? 'az account list --output table' : 'az login';
+		case 'aws':
+			return check.status === 'expired' ? `aws sso login --profile ${binding.profile ?? 'default'}` : `aws configure --profile ${binding.profile ?? 'default'}`;
+		default:
+			return check.status === 'mismatch' && binding.projectId ? `gcloud config set project ${binding.projectId}` : 'gcloud auth login';
+	}
+}
+
 export function activateSidePanel(context: ExtensionContext, host: SidePanelHost): void {
 	const data = new SidePanelData(host);
 	let statusPanel: WebviewPanel | undefined;
@@ -221,10 +273,11 @@ export function activateSidePanel(context: ExtensionContext, host: SidePanelHost
 			if (!used.includes(connection.provider)) {
 				continue;
 			}
+			const check = connection.linked ? data.signInChecks[connection.provider] : undefined;
 			nodes.push(leaf(`status.connection.${connection.provider}`, providerLabel(connection.provider), {
-				description: describeConnection(connection),
-				icon: connection.linked ? 'plug' : 'debug-disconnect',
-				color: connection.linked ? undefined : 'problemsWarningIcon.foreground',
+				description: check ? `${describeConnection(connection)} · ${signInLabel(check.status)}` : describeConnection(connection),
+				icon: connection.linked ? (check && check.status !== 'ok' ? 'warning' : 'plug') : 'debug-disconnect',
+				color: !connection.linked || (check && check.status !== 'ok') ? 'problemsWarningIcon.foreground' : undefined,
 				command: { command: connection.linked ? 'cloudforge.connections.focus' : 'cloudforge.linkCloudConnection', title: l10n.t('Link'), arguments: connection.linked ? [] : [connection.provider] },
 			}));
 		}
@@ -295,18 +348,26 @@ export function activateSidePanel(context: ExtensionContext, host: SidePanelHost
 			return [leaf('connections.loading', l10n.t('Loading…'), { icon: 'loading~spin' })];
 		}
 		const used = providersInUse(host.getGraph()?.nodes.map(node => node.resourceType) ?? []);
-		return data.connections.map(connection => leaf(`connections.${connection.provider}`, providerLabel(connection.provider), {
-			description: describeConnection(connection),
-			icon: connectionIcon(connection.provider),
-			color: !connection.linked && used.includes(connection.provider) ? 'problemsWarningIcon.foreground' : undefined,
-			tooltip: [
-				l10n.t('Sign-in: {0}{1}', connection.signIn, connection.cliFound ? '' : l10n.t(' (not found on PATH)')),
-				connection.linked ? describeConnection(connection) : l10n.t('Not linked to this project'),
-				connection.keyStored ? l10n.t('A key is stored in Windows Credential Manager.') : '',
-			].filter(Boolean).join('\n'),
-			contextValue: `cloudforge.connection.${connection.provider}.${connection.linked ? 'linked' : 'unlinked'}${connection.keyStored ? '.key' : ''}`,
-			command: connection.linked ? undefined : { command: 'cloudforge.linkCloudConnection', title: l10n.t('Link'), arguments: [connection.provider] },
-		}));
+		return data.connections.map(connection => {
+			const check = connection.linked ? data.signInChecks[connection.provider] : undefined;
+			const checking = data.checking.has(connection.provider);
+			const unwell = (!connection.linked && used.includes(connection.provider)) || (check && check.status !== 'ok');
+			return leaf(`connections.${connection.provider}`, providerLabel(connection.provider), {
+				description: checking
+					? `${describeConnection(connection)} · ${l10n.t('checking sign-in…')}`
+					: check ? `${describeConnection(connection)} · ${signInLabel(check.status)}` : describeConnection(connection),
+				icon: checking ? 'loading~spin' : check ? (check.status === 'ok' ? 'pass' : 'warning') : connectionIcon(connection.provider),
+				color: unwell ? 'problemsWarningIcon.foreground' : check?.status === 'ok' ? 'testing.iconPassed' : undefined,
+				tooltip: [
+					l10n.t('Sign-in: {0}{1}', connection.signIn, connection.cliFound ? '' : l10n.t(' (not found in its standard install location)')),
+					connection.linked ? describeConnection(connection) : l10n.t('Not linked to this project'),
+					connection.keyStored ? l10n.t('A key is stored in Windows Credential Manager.') : '',
+					check ? `${describeSignInCheck(check)}${check.status === 'ok' ? '' : `\n${check.detail}`}` : connection.linked ? l10n.t('Use Check Cloud Sign-In to compare your CLI sign-in with this link.') : '',
+				].filter(Boolean).join('\n'),
+				contextValue: `cloudforge.connection.${connection.provider}.${connection.linked ? 'linked' : 'unlinked'}${connection.keyStored ? '.key' : ''}`,
+				command: connection.linked ? undefined : { command: 'cloudforge.linkCloudConnection', title: l10n.t('Link'), arguments: [connection.provider] },
+			});
+		});
 	};
 
 	const statusTree = new PanelTree(data, statusRoots);
@@ -330,6 +391,7 @@ export function activateSidePanel(context: ExtensionContext, host: SidePanelHost
 			state: data.state,
 			stateError: data.stateError,
 			connections: data.connections,
+			signInChecks: data.signInChecks,
 		}, randomBytes(16).toString('base64'), statusPanel.webview.cspSource);
 	};
 
@@ -404,8 +466,13 @@ export function activateSidePanel(context: ExtensionContext, host: SidePanelHost
 			void window.showErrorMessage(l10n.t('CloudForge could not link {0} ({1}).', providerLabel(provider), result.error.code));
 			return;
 		}
-		data.setConnections(result.value);
-		void window.showInformationMessage(l10n.t('{0} is linked to this project. Sign-in stays with {1}.', providerLabel(provider), data.connections?.find(item => item.provider === provider)?.signIn ?? providerLabel(provider)));
+		data.setConnections(result.value, provider);
+		const choice = await window.showInformationMessage(
+			l10n.t('{0} is linked to this project. Sign-in stays with {1}.', providerLabel(provider), data.connections?.find(item => item.provider === provider)?.signIn ?? providerLabel(provider)),
+			l10n.t('Check Sign-In'));
+		if (choice) {
+			await checkSignIn(provider);
+		}
 	};
 
 	const storeKey = async (value?: unknown) => {
@@ -439,7 +506,7 @@ export function activateSidePanel(context: ExtensionContext, host: SidePanelHost
 				: l10n.t('The key was not stored ({0}).', result.error.code));
 			return;
 		}
-		data.setConnections(result.value);
+		data.setConnections(result.value, provider);
 		void window.showInformationMessage(l10n.t('The {0} key is stored in Windows Credential Manager for this project.', providerLabel(provider)));
 	};
 
@@ -463,7 +530,54 @@ export function activateSidePanel(context: ExtensionContext, host: SidePanelHost
 			void window.showErrorMessage(l10n.t('CloudForge could not update the connection ({0}).', result.error.code));
 			return;
 		}
-		data.setConnections(result.value);
+		data.setConnections(result.value, provider);
+	};
+
+	const checkSignIn = async (value?: unknown) => {
+		if (!data.workspaceId()) {
+			void window.showInformationMessage(l10n.t('Open a CloudForge project before checking a cloud sign-in.'));
+			return;
+		}
+		const provider = await pickProvider(value);
+		if (!provider || data.checking.has(provider)) {
+			return;
+		}
+		const connection = data.connections?.find(item => item.provider === provider);
+		if (connection && !connection.linked) {
+			const link = l10n.t('Link {0}', providerLabel(provider));
+			if (await window.showInformationMessage(l10n.t('Link {0} to this project first, so CloudForge knows which account to expect.', providerLabel(provider)), link) === link) {
+				await linkConnection(provider);
+			}
+			return;
+		}
+		const result = await data.checkSignIn(provider);
+		if ('error' in result) {
+			void window.showErrorMessage(result.error === 'INVALID_STATE'
+				? l10n.t('Link {0} to this project before checking its sign-in.', providerLabel(provider))
+				: l10n.t('CloudForge could not check the {0} sign-in ({1}).', providerLabel(provider), result.error));
+			return;
+		}
+		const summary = `${providerLabel(provider)}: ${describeSignInCheck(result)}`;
+		if (result.status === 'ok') {
+			void window.showInformationMessage(summary);
+			return;
+		}
+		const command = signInCommand(connection, result);
+		const typeIt = l10n.t('Type Command in Terminal');
+		const again = l10n.t('Check Again');
+		const choice = await window.showWarningMessage(`${summary}. ${result.detail}`, ...(command ? [typeIt] : []), again);
+		if (choice === again) {
+			await checkSignIn(provider);
+		} else if (choice === typeIt && command) {
+			if (!workspace.isTrusted) {
+				void window.showInformationMessage(l10n.t('Run this in a terminal: {0}', command));
+				return;
+			}
+			// Typed, not run: the person reads it and presses Enter. Sign-in stays with the CLI.
+			const terminal = window.terminals.find(item => item.name === 'CloudForge sign-in') ?? window.createTerminal({ name: 'CloudForge sign-in' });
+			terminal.show();
+			terminal.sendText(command, false);
+		}
 	};
 
 	const openStatus = () => {
@@ -483,6 +597,7 @@ export function activateSidePanel(context: ExtensionContext, host: SidePanelHost
 				case 'refresh': void data.refresh(); break;
 				case 'linkConnection': void linkConnection(message.provider); break;
 				case 'storeKey': void storeKey(message.provider); break;
+				case 'checkSignIn': void checkSignIn(message.provider); break;
 			}
 		});
 		renderStatusPanel();
@@ -511,6 +626,7 @@ export function activateSidePanel(context: ExtensionContext, host: SidePanelHost
 		commands.registerCommand('cloudforge.storeCloudKey', storeKey),
 		commands.registerCommand('cloudforge.deleteCloudKey', (value?: unknown) => removeConnection(value, true)),
 		commands.registerCommand('cloudforge.removeCloudConnection', (value?: unknown) => removeConnection(value)),
+		commands.registerCommand('cloudforge.checkCloudSignIn', (value?: unknown) => checkSignIn(value)),
 		commands.registerCommand('cloudforge.revealStateResource', (nodeId?: unknown) => {
 			const graph = host.getGraph();
 			return graph && typeof nodeId === 'string' && graph.nodes.some(node => node.id === nodeId) ? host.openNodeSource(graph, nodeId) : undefined;

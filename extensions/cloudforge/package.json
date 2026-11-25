@@ -172,6 +172,12 @@
 				"icon": "$(debug-disconnect)"
 			},
 			{
+				"command": "cloudforge.checkCloudSignIn",
+				"title": "%command.checkCloudSignIn%",
+				"category": "%displayName%",
+				"icon": "$(verified)"
+			},
+			{
 				"command": "cloudforge.revealStateResource",
 				"title": "%command.revealStateResource%",
 				"category": "%displayName%"
@@ -366,6 +372,11 @@
 					"command": "cloudforge.linkCloudConnection",
 					"when": "view == cloudforge.connections && viewItem =~ /^cloudforge\\.connection\\./",
 					"group": "inline@1"
+				},
+				{
+					"command": "cloudforge.checkCloudSignIn",
+					"when": "view == cloudforge.connections && viewItem =~ /^cloudforge\\.connection\\.[a-z]+\\.linked/",
+					"group": "inline@0"
 				},
 				{
 					"command": "cloudforge.storeCloudKey",

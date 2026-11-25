@@ -36,5 +36,6 @@
 	"command.storeCloudKey": "Store Key…",
 	"command.deleteCloudKey": "Delete Stored Key",
 	"command.removeCloudConnection": "Unlink Cloud Account",
+	"command.checkCloudSignIn": "Check Cloud Sign-In",
 	"command.revealStateResource": "Open Resource Source"
 }

@@ -5,7 +5,9 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { buildStatusHtml, describeConnection, describeState, escapeHtml, parseCloudConnections, parseStateSummary, parseStatusPageMessage, providersInUse, stateDrift } from '../src/sidePanel/model.ts';
+import {
+	buildStatusHtml, describeConnection, describeSignInCheck, describeState, escapeHtml, parseCloudConnections, parseSignInCheck, parseStateSummary, parseStatusPageMessage, providersInUse, signInLabel, stateDrift,
+} from '../src/sidePanel/model.ts';
 
 const summary = {
 	workspaceId: 'w', architectureId: 'a', sourceRevision: 'a'.repeat(64),
@@ -66,4 +68,30 @@ test('the status page escapes text and accepts only known messages', () => {
 	assert.deepEqual(parseStatusPageMessage({ type: 'linkConnection', provider: 'azure' }), { type: 'linkConnection', provider: 'azure' });
 	assert.equal(parseStatusPageMessage({ type: 'linkConnection', provider: 'oracle' }), undefined);
 	assert.equal(parseStatusPageMessage({ type: 'runShell' }), undefined);
+});
+
+test('sign-in checks are parsed strictly and shown without secrets', () => {
+	assert.equal(parseSignInCheck({ provider: 'azure', status: 'weird', detail: 'x' }), undefined);
+	assert.equal(parseSignInCheck({ provider: 'oracle', status: 'ok', detail: 'x' }), undefined);
+	const ok = parseSignInCheck({ provider: 'azure', status: 'ok', detail: 'Signed in.', signedInAs: 'd…@contoso.com', accountType: 'user', targetName: 'Prod', checkedAt: 1764000000, stderr: 'token=abc' });
+	assert.deepEqual(ok, { provider: 'azure', status: 'ok', detail: 'Signed in.', signedInAs: 'd…@contoso.com', accountType: 'user', targetName: 'Prod', checkedAt: 1764000000 });
+	assert.equal(describeSignInCheck(ok!), 'Signed in as d…@contoso.com · Prod');
+	const expired = parseSignInCheck({ provider: 'aws', status: 'expired', detail: 'Run aws sso login for this profile.' })!;
+	assert.equal(signInLabel(expired.status), 'Sign-in expired');
+	assert.deepEqual(parseStatusPageMessage({ type: 'checkSignIn', provider: 'aws' }), { type: 'checkSignIn', provider: 'aws' });
+	assert.equal(parseStatusPageMessage({ type: 'checkSignIn', provider: 'az login' }), undefined);
+
+	const connections = parseCloudConnections({ connections: [
+		{ provider: 'azure', signIn: 'Azure CLI', cliFound: true, linked: true, keyStored: false, binding: { cloud: 'AzureCloud', tenantId: '…aaaa', subscriptionId: '…eeee' } },
+		{ provider: 'aws', signIn: 'AWS CLI', cliFound: true, linked: true, keyStored: false, binding: { profile: 'dev' } },
+	] });
+	const html = buildStatusHtml({
+		resourceCount: 0, errorCount: 0, warningCount: 0, declaredAddresses: [], providersInUse: ['azure'],
+		connections, signInChecks: { azure: ok!, aws: { ...expired, detail: '<img src=x>' } },
+	}, 'nonce', 'vscode-resource:');
+	assert.match(html, /data-message="checkSignIn" data-provider="azure"/);
+	assert.match(html, /Signed in as d…@contoso.com · Prod/);
+	assert.match(html, /Sign-in expired/);
+	assert.ok(!html.includes('<img src=x>'));
+	assert.match(html, /&lt;img src=x&gt;/);
 });

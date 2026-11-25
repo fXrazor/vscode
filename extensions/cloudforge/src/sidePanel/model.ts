@@ -46,6 +46,21 @@ export interface CloudConnection {
 	readonly binding?: Readonly<Record<string, string>>;
 }
 
+export type SignInStatus = 'ok' | 'mismatch' | 'notSignedIn' | 'noAccess' | 'expired' | 'noProfile' | 'failed' | 'cliMissing' | 'timedOut';
+const SIGN_IN_STATUSES: readonly SignInStatus[] = ['ok', 'mismatch', 'notSignedIn', 'noAccess', 'expired', 'noProfile', 'failed', 'cliMissing', 'timedOut'];
+
+/** The Rust `checkCloudSignIn` result: which account the provider CLI is signed in to, masked. */
+export interface SignInCheck {
+	readonly provider: CloudProvider;
+	readonly status: SignInStatus;
+	readonly detail: string;
+	readonly signedInAs?: string;
+	readonly accountType?: string;
+	readonly targetName?: string;
+	/** Seconds since the Unix epoch. */
+	readonly checkedAt?: number;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -142,6 +157,46 @@ export function parseCloudConnections(value: unknown): CloudConnection[] | undef
 	return rows;
 }
 
+export function parseSignInCheck(value: unknown): SignInCheck | undefined {
+	if (!isRecord(value) || !CLOUD_PROVIDERS.includes(value.provider as CloudProvider) || !SIGN_IN_STATUSES.includes(value.status as SignInStatus)) {
+		return undefined;
+	}
+	const signedInAs = text(value.signedInAs, 128);
+	const accountType = text(value.accountType, 32);
+	const targetName = text(value.targetName, 128);
+	return {
+		provider: value.provider as CloudProvider,
+		status: value.status as SignInStatus,
+		detail: text(value.detail, 512) ?? '',
+		...(signedInAs ? { signedInAs } : {}),
+		...(accountType ? { accountType } : {}),
+		...(targetName ? { targetName } : {}),
+		...(count(value.checkedAt) !== undefined ? { checkedAt: count(value.checkedAt) } : {}),
+	};
+}
+
+/** Short words for a sign-in status, for tree rows and the status tab. */
+export function signInLabel(status: SignInStatus): string {
+	switch (status) {
+		case 'ok': return 'Signed in';
+		case 'mismatch': return 'Signed in elsewhere';
+		case 'notSignedIn': return 'Not signed in';
+		case 'noAccess': return 'No access';
+		case 'expired': return 'Sign-in expired';
+		case 'noProfile': return 'Profile missing';
+		case 'cliMissing': return 'CLI not found';
+		case 'timedOut': return 'No answer';
+		default: return 'Check failed';
+	}
+}
+
+/** One line for a finished check: the status, who is signed in, and the target name when known. */
+export function describeSignInCheck(check: SignInCheck): string {
+	const who = check.signedInAs ? ` as ${check.signedInAs}` : '';
+	const target = check.targetName ? ` · ${check.targetName}` : '';
+	return `${signInLabel(check.status)}${who}${target}`;
+}
+
 export function providerLabel(provider: CloudProvider): string {
 	return provider === 'azure' ? 'Azure' : provider === 'aws' ? 'AWS' : 'Google Cloud';
 }
@@ -225,6 +280,8 @@ export interface StatusPageInput {
 	readonly state?: StateSummary;
 	readonly stateError?: string;
 	readonly connections?: readonly CloudConnection[];
+	/** The last sign-in check for each provider in this session, if any. */
+	readonly signInChecks?: Partial<Readonly<Record<CloudProvider, SignInCheck>>>;
 }
 
 /** Messages the page may post; the extension accepts nothing else. */
@@ -233,7 +290,8 @@ export type StatusPageMessage =
 	| { readonly type: 'validate' }
 	| { readonly type: 'refresh' }
 	| { readonly type: 'linkConnection'; readonly provider: CloudProvider }
-	| { readonly type: 'storeKey'; readonly provider: CloudProvider };
+	| { readonly type: 'storeKey'; readonly provider: CloudProvider }
+	| { readonly type: 'checkSignIn'; readonly provider: CloudProvider };
 
 export function parseStatusPageMessage(value: unknown): StatusPageMessage | undefined {
 	if (typeof value !== 'object' || value === null) {
@@ -247,6 +305,7 @@ export function parseStatusPageMessage(value: unknown): StatusPageMessage | unde
 			return { type: message.type };
 		case 'linkConnection':
 		case 'storeKey':
+		case 'checkSignIn':
 			return message.provider === 'azure' || message.provider === 'aws' || message.provider === 'google'
 				? { type: message.type, provider: message.provider }
 				: undefined;
@@ -309,8 +368,13 @@ export function buildStatusHtml(input: StatusPageInput, nonce: string, cspSource
 			const key = connection.provider !== 'google' && connection.linked
 				? `<button data-message="storeKey" data-provider="${connection.provider}">${connection.keyStored ? 'Replace key' : 'Store key'}</button>`
 				: '';
-			return `<li class="connection"><div><strong>${escapeHtml(providerLabel(connection.provider))}</strong> <span class="muted">${escapeHtml(describeConnection(connection))}</span>${warn}</div>
-				<div class="actions"><button data-message="linkConnection" data-provider="${connection.provider}">${connection.linked ? 'Change' : 'Link'}</button>${key}</div></li>`;
+			const check = connection.linked ? input.signInChecks?.[connection.provider] : undefined;
+			const checked = check
+				? `<div class="check ${check.status === 'ok' ? 'good' : 'bad'}">${escapeHtml(describeSignInCheck(check))}${check.status === 'ok' ? '' : `<div class="muted">${escapeHtml(check.detail)}</div>`}</div>`
+				: '';
+			const checkButton = connection.linked ? `<button data-message="checkSignIn" data-provider="${connection.provider}">Check sign-in</button>` : '';
+			return `<li class="connection"><div><strong>${escapeHtml(providerLabel(connection.provider))}</strong> <span class="muted">${escapeHtml(describeConnection(connection))}</span>${warn}${checked}</div>
+				<div class="actions"><button data-message="linkConnection" data-provider="${connection.provider}">${connection.linked ? 'Change' : 'Link'}</button>${key}${checkButton}</div></li>`;
 		}).join('');
 		connections = card('Cloud connections', `<ul class="connections">${rows}</ul><p class="muted">Sign-in stays with the Azure, AWS and Google CLIs. Keys you store go to Windows Credential Manager and are never shown again.</p>`);
 	}
@@ -332,7 +396,8 @@ h1 { font-size: 20px; margin: 0 0 4px; } h2 { font-size: 14px; margin: 0; } h3 {
 dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 0; font-size: 13px; } dt { color: var(--vscode-descriptionForeground); } dd { margin: 0; }
 ul { margin: 0; padding-left: 18px; font-size: 13px; } .connections { list-style: none; padding: 0; } .connection { display: flex; justify-content: space-between; gap: 10px; padding: 8px 0; border-top: 1px solid var(--vscode-panel-border); } .connection:first-child { border-top: 0; }
 .muted { color: var(--vscode-descriptionForeground); font-size: 12px; } code { font-family: var(--vscode-editor-font-family); font-size: 12px; }
-.actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.actions { display: flex; gap: 6px; flex-wrap: wrap; align-content: flex-start; }
+.check { margin-top: 4px; font-size: 12px; } .check.good { color: var(--vscode-testing-iconPassed, var(--vscode-foreground)); } .check.bad { color: var(--vscode-editorWarning-foreground, var(--vscode-foreground)); }
 button { font: inherit; font-size: 12px; color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground); border: 0; border-radius: 4px; padding: 4px 10px; cursor: pointer; }
 button:hover { background: var(--vscode-button-secondaryHoverBackground); } button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
 </style>
