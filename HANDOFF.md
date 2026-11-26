@@ -1376,3 +1376,19 @@ Delivered from `E:\Orca\CloudForge-Code\dace` (`fxrazor/continue-project-handoff
 
 **Next actions:**
 1. When ready to cut the next combined `CloudForgeSetup-x64.exe` update incorporating all overnight `origin/main` work (Stage 10B/10C mirror import/eviction/integrity, CloudForge side panel, Codex's annotation follow-up + Technical Graph Phase 0, and this cold-launch onboarding fix), run `build/cloudforge/package-win32-x64.ps1` against the latest verified Rust service artifact (`Z:\CFStage\service-b1f57ac\cloudforge-service.exe`).
+
+### Multi-Window Project Support & Windows Taskbar Jump List Fix (2026-11-26)
+
+Implemented on `fxrazor/continue-project-handoff-review` in `E:\Orca\CloudForge-Code\dace` and pushed to `origin/main`. **Zero overlap with Claude (`Z:\CloudForge` untouched) or Codex (`extensions/cloudforge/studio/**` untouched).**
+
+- **Root Cause & Fix for Taskbar "New Window" Opening Bare Electron ([app.ts](src/vs/code/electron-main/app.ts), [workspacesHistoryMainService.ts](src/vs/platform/workspaces/electron-main/workspacesHistoryMainService.ts)):**
+  - Unbuilt dev runs (`scripts\code.bat` / `.build\electron\CloudForge.exe`) shared the installed `CloudForge.Desktop` Windows AppUserModelId and wrote `program: .build\electron\CloudForge.exe -n` into Windows's taskbar Jump List, causing right-click -> **New Window** on the installed CloudForge icon to launch bare Electron (`default_app.asar`).
+  - Appended `.Dev` to `win32AppUserModelId` whenever `!environmentMainService.isBuilt` and skipped `updateWindowsJumpList()` on unbuilt dev runs so dev launches never corrupt the installed CloudForge taskbar Jump List.
+- **Optional Multi-Window CloudForge Projects ([model.ts](extensions/cloudforge/src/project/model.ts), [controller.ts](extensions/cloudforge/src/project/controller.ts), [index.ts](extensions/cloudforge/src/project/index.ts), [package.json](extensions/cloudforge/package.json), [package.nls.json](extensions/cloudforge/package.nls.json)):**
+  - Added setting `cloudforge.projects.openInNewWindow` (`"ask" | "newWindow" | "currentWindow"`, default `"ask"`) so creating a project while another folder is open lets the user open it in a new window (`{ forceNewWindow: true }`) or replace the current window.
+  - Added **CloudForge: Open Project in New Window…** (`cloudforge.openProjectInNewWindow`) in Command Palette and the `CloudForge Project` view menu, automatically detecting a single `.code-workspace` file inside a chosen project folder and opening it in an independent CloudForge window (which receives its own isolated `cloudforge-service.exe` sidecar via `CloudForgeServiceBroker`).
+- **Tests ([cloudForgeServiceChannel.test.ts](src/vs/code/test/electron-main/cloudForgeServiceChannel.test.ts), [projectIntegrations.test.ts](extensions/cloudforge/test/projectIntegrations.test.ts)):**
+  - Verified **97/97** root extension tests, **48/48** Electron-main tests (including dynamic multi-window broker isolation & per-window sidecar teardown), `esbuild.mts`, TS6, TS7, core `src/tsconfig.json` TS7, `oxlint`, and `hygiene`.
+
+**Next actions:**
+1. Cut a fresh `CloudForgeSetup-x64.exe` build whenever ready to ship this Jump List fix, optional multi-window project UX, cold-launch Welcome fix, Stage 10B/10C mirror commands, CloudForge side panel, and Codex's latest Studio updates together.
