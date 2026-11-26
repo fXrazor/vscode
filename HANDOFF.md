@@ -1,5 +1,9 @@
 # CloudForge Code OSS handoff
 
+## Technical Graph rebuild pass 1 (Claude) — 26 November 2026 — read first
+
+Branch `claude/project-thread-2irlth` (from main `5b66f85c`). Studio now mounts a dedicated `TechnicalGraph` (separate React Flow instance, no project dispatch) in Configuration view. It has a frozen evidence-backed graph snapshot (`technicalGraph.ts`); Layers, Scopes and Ownership-tree layouts; schema-style field rows with stable ports; curved, orthogonal and straight routes; an animated selected trace; a Why panel; graph-only pins; and a narrow edit gate so cards can be renamed and opened for editing but never moved or reparented. 169/169 Studio tests pass. Full detail, gaps and the ordered next actions for Codex are in `extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md` under “Technical Graph rebuild, pass 1”. First next action: update `scripts/technical-view-verify.mjs` for the new DOM.
+
 ## Current main integration and agent handoff — 25 November 2026
 
 Dale explicitly authorized finishing this checkpoint and pushing the completed work to **main**. This integration combines main `e9a36e0e73fdf429a0ac1a0cc11474e32ac81e68` with the four Studio commits through `64c01b2b4c31e1f85f459577c0258273f97ca308`. Integration owner: Codex, branch `codex/studio-whiteboard-2`, existing isolated worktree `C:/Users/dalep/.codex/worktrees/infrastructure-studio/CloudForge-Code`. Identify the final integration commit with `git log -1 -- extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md`; successors should start from the latest `origin/main` in their own worktrees.

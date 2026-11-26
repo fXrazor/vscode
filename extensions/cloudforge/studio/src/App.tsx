@@ -10,7 +10,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type CSS
 import type { ReactFlowInstance, Viewport } from '@xyflow/react';
 import {
 	createHistory, historyReducer, type Resource, type BoardItem, type DesignMode,
-	type Position, type Provider, type ResourceKind, type CatalogueEntry, type Architecture
+	type Position, type Provider, type ResourceKind, type CatalogueEntry, type Architecture, type Action
 } from './model.ts';
 import { providerRegions, resourceDefinition, sampleArchitecture } from './fixture.ts';
 import type { CanvasNode } from './ResourceNode.tsx';
@@ -19,6 +19,9 @@ import { ResourceFields } from './ResourceFields.tsx';
 import { ResourceWorkspace } from './ResourceWorkspace.tsx';
 import { ResourceCatalogue } from './ResourceCatalogue.tsx';
 import { DesignCanvas } from './DesignCanvas.tsx';
+import { TechnicalGraph } from './TechnicalGraph.tsx';
+import { defaultGraphPresentation, graphEditAllowed, graphPresentationReducer } from './graphPresentation.ts';
+import { hubSpokeArchitecture } from './graphFixtures.ts';
 import { CodePanel } from './CodePanel.tsx';
 import { ModuleImport, type ModuleReference } from './ModuleImport.tsx';
 import { loadCatalogue, registerServiceTypes } from './catalogue.ts';
@@ -51,7 +54,10 @@ function detectInitialTheme(isHosted: boolean): 'light' | 'dark' {
 
 export function Studio() {
 	const hostBridge = useMemo(() => createHostBridge(), []);
-	const [history, dispatch] = useReducer(historyReducer, undefined, () => createHistory(sampleArchitecture()));
+	const [history, dispatch] = useReducer(historyReducer, undefined, () => createHistory(previewSample()));
+	// Graph presentation (lens, layout, pins, expansion) is never part of architecture history.
+	const [graphPresentation, presentGraph] = useReducer(graphPresentationReducer, defaultGraphPresentation);
+	const graphEdit = useCallback((action: Action) => { if (graphEditAllowed(action)) { dispatch(action); } }, []);
 	const [mode, setMode] = useState<DesignMode>('visual');
 	const modeRef = useRef(mode); modeRef.current = mode;
 	const [theme, setTheme] = useState<'light' | 'dark'>(() => detectInitialTheme(hostBridge.isHosted));
@@ -776,12 +782,15 @@ export function Studio() {
 					}} resizeHandle={<PaneResizeHandle side="library" width={libraryWidth} minimum={346} onCommit={setLibraryWidth} />} />
 				<div className="design-area">
 					<div className="canvas-shell">
+						{mode === 'technical' ? <TechnicalGraph architecture={architecture} theme={theme} presentation={graphPresentation} onPresentation={presentGraph}
+							selectedId={selectedId} onSelect={setSelectedId} onOpenDetails={openDetails} onEdit={graphEdit}
+							onInit={instance => setFlow(instance as never)} viewports={viewport} /> :
 						<DesignCanvas architecture={architecture} mode={mode} theme={theme} onThemeChange={setTheme} selectedId={selectedId} selectedIds={selectedIds} onSelectionChange={setSelectedIds} dispatch={dispatch}
 							onSelect={id => { setSelectedId(id); if (id && inspectorCategory === 'resources' && !architecture.resources.some(resource => resource.id === id)) { setDetailTab('form'); } }} onOpen={openResource} onOpenDetails={openDetails} onInit={setFlow} viewports={viewport}
 							onOpenShapes={openShapes} onAddItem={addItem} onAddResource={addResource}
        onAddCatalogue={(type, provider, position, parentId) => {
         void loadCatalogue(provider).then(snapshot => { const entry = snapshot.entries.find(entry => entry.type === type); if (entry) { addCatalogueResource(entry,provider,position,parentId); } }).catch(() => setMessage('Unable to load the provider catalogue.'));
-       }} />
+       }} />}
 					</div>
 				</div>
 				<aside id="resource-inspector" className="inspector" aria-label="Resource inspector" hidden={!inspectorOpen}>
@@ -840,4 +849,10 @@ export function Studio() {
 			{moduleImportOpen && <ModuleImport onClose={() => setModuleImportOpen(false)} onImport={importModule} />}
 		</div>
 	);
+}
+
+/** Preview-only sample selection; the hosted webview always receives the project from the extension. */
+function previewSample() {
+	try { if (new URLSearchParams(location.search).get('sample') === 'hub-spoke') { return hubSpokeArchitecture(); } } catch { /* Non-browser test environments use the default sample. */ }
+	return sampleArchitecture();
 }
