@@ -60,6 +60,7 @@ export type CloudForgeServiceMethod =
 	| 'summarizeState' | 'listCloudConnections' | 'setCloudConnection' | 'storeCloudKey' | 'removeCloudConnection' | 'checkCloudSignIn'
 	| 'inspectDependencies' | 'listCloudRegions' | 'readModule'
 	| 'diffCatalogueSnapshots' | 'auditExportReadiness' | 'exportPortableBundle'
+	| 'previewProviderUpgrade' | 'applyProviderUpgrade' | 'recoverUpgradeJournal'
 	| 'detectEngines' | 'runEngineValidate' | 'runEnginePlan' | 'runEngineFmt'
 	| 'listMirrorPackages' | 'checkOfflineMirrorReadiness' | 'runEngineInitOffline' | 'extractProviderSchemaFromMirror'
 	| 'importMirrorPackage' | 'evictMirrorPackage' | 'verifyMirrorIntegrity' | 'planMirrorCleanup'

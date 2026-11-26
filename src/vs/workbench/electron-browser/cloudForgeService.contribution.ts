@@ -33,7 +33,7 @@ type CloudForgeServiceMethod =
 	| 'previewDraftSave' | 'applyDraftSave' | 'previewFocusedSave' | 'applyFocusedSave' | 'readResourceValues'
 	| 'previewFocusedSaveBatch' | 'applyFocusedSaveBatch'
 	| 'summarizeState' | 'listCloudConnections' | 'setCloudConnection' | 'storeCloudKey' | 'removeCloudConnection' | 'checkCloudSignIn'
-	| 'inspectDependencies' | 'readModule' | 'auditExportReadiness' | 'exportPortableBundle' | 'runEngineValidate' | 'runEnginePlan' | 'runEngineFmt'
+	| 'inspectDependencies' | 'readModule' | 'auditExportReadiness' | 'exportPortableBundle' | 'previewProviderUpgrade' | 'applyProviderUpgrade' | 'recoverUpgradeJournal' | 'runEngineValidate' | 'runEnginePlan' | 'runEngineFmt'
 	| 'checkOfflineMirrorReadiness' | 'runEngineInitOffline'
 	| 'getLearningRecord' | 'saveLearningRecord' | 'submitProposal' | 'reviewProposal' | 'issueMcpGrant';
 type CloudForgeCatalogueMethod = 'inspectCatalogueSchemaFile' | 'importCatalogueSnapshot' | 'listCatalogueSnapshots' | 'listCatalogueTypes' | 'getResourceFormSchema' | 'getCatalogueCoverage' | 'renderResourceDraft' | 'listCloudRegions' | 'diffCatalogueSnapshots' | 'detectEngines' | 'listMirrorPackages' | 'extractProviderSchemaFromMirror' | 'importMirrorPackage' | 'evictMirrorPackage' | 'verifyMirrorIntegrity' | 'planMirrorCleanup' | 'selectTerraformSkills' | 'listBuiltinSkills' | 'getTopologyBlueprint' | 'listMcpGrants' | 'revokeMcpGrant';
@@ -292,7 +292,9 @@ CommandsRegistry.registerCommand('_cloudforge.callService', async (accessor, met
 		method !== 'previewFocusedSaveBatch' && method !== 'applyFocusedSaveBatch' &&
 		method !== 'summarizeState' && method !== 'listCloudConnections' && method !== 'setCloudConnection' && method !== 'storeCloudKey' && method !== 'removeCloudConnection' && method !== 'checkCloudSignIn' &&
 		method !== 'inspectDependencies' && method !== 'readResourceValues' &&
-		method !== 'readModule' && method !== 'auditExportReadiness' && method !== 'exportPortableBundle' && method !== 'runEngineValidate' &&
+		method !== 'readModule' && method !== 'auditExportReadiness' && method !== 'exportPortableBundle' &&
+		method !== 'previewProviderUpgrade' && method !== 'applyProviderUpgrade' && method !== 'recoverUpgradeJournal' &&
+		method !== 'runEngineValidate' &&
 		method !== 'runEnginePlan' && method !== 'runEngineFmt' && method !== 'checkOfflineMirrorReadiness' && method !== 'runEngineInitOffline' &&
 		method !== 'getLearningRecord' && method !== 'saveLearningRecord' && method !== 'submitProposal' &&
 		method !== 'reviewProposal' && method !== 'issueMcpGrant'
@@ -322,6 +324,8 @@ CommandsRegistry.registerCommand('_cloudforge.callService', async (accessor, met
 		case 'readModule':
 		case 'auditExportReadiness':
 		case 'exportPortableBundle':
+		case 'previewProviderUpgrade':
+		case 'recoverUpgradeJournal':
 		case 'runEngineValidate':
 		case 'runEnginePlan':
 		case 'runEngineFmt':
@@ -342,6 +346,7 @@ CommandsRegistry.registerCommand('_cloudforge.callService', async (accessor, met
 		case 'applyFocusedSave':
 		case 'previewFocusedSaveBatch':
 		case 'applyFocusedSaveBatch':
+		case 'applyProviderUpgrade':
 			if (!isOpaqueId(params.architectureId) || params.architectureId !== activeArchitectureId || typeof params.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(params.expectedSourceRevision)) {
 				return failure('SCOPE_DENIED', 'The requested architecture is not active in this window.');
 			}

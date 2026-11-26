@@ -843,4 +843,74 @@ suite('CloudForgeServiceChannel', () => {
 		});
 		await local.broker.stop();
 	});
+
+	test('validates Stage 8C transactional provider upgrade and journal recovery parameters', async () => {
+		const rev = 'f'.repeat(64);
+		const proposalId = 'upgrade-' + 'a'.repeat(32);
+		assert.deepStrictEqual(validateCloudForgeServiceParams('previewProviderUpgrade', {
+			workspaceId,
+			architectureId: `${workspaceId}-architecture-1`,
+			providerAddress: 'hashicorp/azurerm',
+			targetVersion: '6.0.0',
+			targetConstraint: '~> 6.0',
+			engine: 'openTofu',
+			platforms: ['windows_amd64', 'linux_amd64']
+		}), {
+			workspaceId,
+			architectureId: `${workspaceId}-architecture-1`,
+			providerAddress: 'hashicorp/azurerm',
+			targetVersion: '6.0.0',
+			targetConstraint: '~> 6.0',
+			engine: 'openTofu',
+			platforms: ['windows_amd64', 'linux_amd64']
+		});
+		assert.strictEqual(validateCloudForgeServiceParams('previewProviderUpgrade', {
+			workspaceId,
+			architectureId: `${workspaceId}-architecture-1`,
+			providerAddress: '../escape',
+			targetVersion: '6.0.0'
+		}), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('previewProviderUpgrade', {
+			workspaceId,
+			architectureId: `${workspaceId}-architecture-1`,
+			providerAddress: 'hashicorp/azurerm',
+			targetVersion: '6.0.0-beta1'
+		}), undefined);
+
+		assert.deepStrictEqual(validateCloudForgeServiceParams('applyProviderUpgrade', {
+			workspaceId,
+			architectureId: `${workspaceId}-architecture-1`,
+			expectedSourceRevision: rev,
+			proposalId
+		}), {
+			workspaceId,
+			architectureId: `${workspaceId}-architecture-1`,
+			expectedSourceRevision: rev,
+			proposalId
+		});
+		assert.strictEqual(validateCloudForgeServiceParams('applyProviderUpgrade', {
+			workspaceId,
+			architectureId: `${workspaceId}-architecture-1`,
+			expectedSourceRevision: rev,
+			proposalId: 'not-an-upgrade-id'
+		}), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('applyProviderUpgrade', {
+			workspaceId,
+			architectureId: `${workspaceId}-architecture-1`,
+			proposalId
+		}), undefined);
+
+		assert.deepStrictEqual(validateCloudForgeServiceParams('recoverUpgradeJournal', {
+			workspaceId,
+			architectureId: `${workspaceId}-architecture-1`
+		}), {
+			workspaceId,
+			architectureId: `${workspaceId}-architecture-1`
+		});
+		assert.strictEqual(validateCloudForgeServiceParams('recoverUpgradeJournal', {
+			workspaceId,
+			architectureId: `${workspaceId}-architecture-1`,
+			extra: true
+		}), undefined);
+	});
 });

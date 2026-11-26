@@ -42,6 +42,7 @@ const cloudForgeMethods: ReadonlySet<string> = new Set<CloudForgeServiceMethod>(
 	'inspectDependencies', 'readResourceValues', 'listCloudRegions', 'readModule',
 	'summarizeState', 'listCloudConnections', 'setCloudConnection', 'storeCloudKey', 'removeCloudConnection', 'checkCloudSignIn',
 	'diffCatalogueSnapshots', 'auditExportReadiness', 'exportPortableBundle',
+	'previewProviderUpgrade', 'applyProviderUpgrade', 'recoverUpgradeJournal',
 	'detectEngines', 'runEngineValidate', 'runEnginePlan', 'runEngineFmt',
 	'listMirrorPackages', 'checkOfflineMirrorReadiness', 'runEngineInitOffline', 'extractProviderSchemaFromMirror',
 	'importMirrorPackage', 'evictMirrorPackage', 'verifyMirrorIntegrity', 'planMirrorCleanup',
@@ -798,6 +799,79 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 				...(value.expectedSourceRevision === undefined ? {} : { expectedSourceRevision: value.expectedSourceRevision }),
 				...(value.engine === undefined ? {} : { engine: value.engine }),
 				...(platforms === undefined ? {} : { platforms })
+			};
+		}
+		case 'previewProviderUpgrade': {
+			if (!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'expectedSourceRevision', 'providerAddress', 'targetVersion', 'targetConstraint', 'engine', 'platforms']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId)) {
+				return undefined;
+			}
+			if (value.expectedSourceRevision !== undefined && (typeof value.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(value.expectedSourceRevision))) {
+				return undefined;
+			}
+			if (typeof value.providerAddress !== 'string' || value.providerAddress.length === 0 || value.providerAddress.length > 256) {
+				return undefined;
+			}
+			const addrSegments = value.providerAddress.split('/');
+			if (addrSegments.length < 1 || addrSegments.length > 3 || !addrSegments.every(isSnapshotSegment)) {
+				return undefined;
+			}
+			if (typeof value.targetVersion !== 'string' || value.targetVersion.length === 0 || value.targetVersion.length > 64 || !/^[0-9]+\.[0-9]+\.[0-9]+$/.test(value.targetVersion)) {
+				return undefined;
+			}
+			if (value.targetConstraint !== undefined && (typeof value.targetConstraint !== 'string' || value.targetConstraint.trim().length === 0 || value.targetConstraint.length > 128 || /["\\\u0000-\u001f\u007f]/.test(value.targetConstraint))) {
+				return undefined;
+			}
+			if (value.engine !== undefined && value.engine !== 'openTofu' && value.engine !== 'terraform') {
+				return undefined;
+			}
+			let platforms: string[] | undefined;
+			if (value.platforms !== undefined) {
+				if (!Array.isArray(value.platforms) || value.platforms.length === 0 || value.platforms.length > 8) {
+					return undefined;
+				}
+				platforms = [];
+				for (const item of value.platforms) {
+					if (typeof item !== 'string' || !/^[a-z0-9]{1,32}_[a-z0-9]{1,32}$/.test(item)) {
+						return undefined;
+					}
+					platforms.push(item);
+				}
+			}
+			return {
+				workspaceId: value.workspaceId,
+				architectureId: value.architectureId,
+				providerAddress: value.providerAddress,
+				targetVersion: value.targetVersion,
+				...(value.expectedSourceRevision === undefined ? {} : { expectedSourceRevision: value.expectedSourceRevision }),
+				...(value.targetConstraint === undefined ? {} : { targetConstraint: value.targetConstraint }),
+				...(value.engine === undefined ? {} : { engine: value.engine }),
+				...(platforms === undefined ? {} : { platforms })
+			};
+		}
+		case 'applyProviderUpgrade': {
+			if (
+				!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'expectedSourceRevision', 'proposalId']) ||
+				!isOpaqueId(value.workspaceId) ||
+				!isOpaqueId(value.architectureId) ||
+				typeof value.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(value.expectedSourceRevision) ||
+				typeof value.proposalId !== 'string' || !/^upgrade-[0-9a-f]{32}$/.test(value.proposalId)
+			) {
+				return undefined;
+			}
+			return {
+				workspaceId: value.workspaceId,
+				architectureId: value.architectureId,
+				expectedSourceRevision: value.expectedSourceRevision,
+				proposalId: value.proposalId
+			};
+		}
+		case 'recoverUpgradeJournal': {
+			if (!hasOnlyKeys(value, ['workspaceId', 'architectureId']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId)) {
+				return undefined;
+			}
+			return {
+				workspaceId: value.workspaceId,
+				architectureId: value.architectureId
 			};
 		}
 		case 'checkOfflineMirrorReadiness': {
