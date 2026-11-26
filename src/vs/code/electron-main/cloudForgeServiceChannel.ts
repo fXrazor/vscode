@@ -44,7 +44,7 @@ const cloudForgeMethods: ReadonlySet<string> = new Set<CloudForgeServiceMethod>(
 	'diffCatalogueSnapshots', 'auditExportReadiness',
 	'detectEngines', 'runEngineValidate', 'runEnginePlan',
 	'listMirrorPackages', 'checkOfflineMirrorReadiness', 'runEngineInitOffline', 'extractProviderSchemaFromMirror',
-	'importMirrorPackage', 'downloadProviderPackage', 'evictMirrorPackage', 'verifyMirrorIntegrity', 'planMirrorCleanup'
+	'importMirrorPackage', 'downloadProviderPackage', 'listProviderVersions', 'evictMirrorPackage', 'verifyMirrorIntegrity', 'planMirrorCleanup'
 ]);
 
 /** The service allows `installGit` 10 minutes; the broker waits a little longer for its reply. */
@@ -815,6 +815,26 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 				platform: value.platform,
 				expectedSha256: value.expectedSha256.toLowerCase(),
 				...(value.publisher === undefined ? {} : { publisher: value.publisher.trim() })
+			};
+		}
+		case 'listProviderVersions': {
+			if (!hasOnlyKeys(value, ['address', 'refresh', 'engine']) || typeof value.address !== 'string') {
+				return undefined;
+			}
+			const segments = value.address.split('/');
+			if (segments.length !== 3 || !segments.every(isSnapshotSegment)) {
+				return undefined;
+			}
+			if (value.refresh !== undefined && typeof value.refresh !== 'boolean') {
+				return undefined;
+			}
+			if (value.engine !== undefined && value.engine !== 'openTofu' && value.engine !== 'terraform') {
+				return undefined;
+			}
+			return {
+				address: value.address,
+				...(value.refresh === undefined ? {} : { refresh: value.refresh }),
+				...(value.engine === undefined ? {} : { engine: value.engine })
 			};
 		}
 		case 'downloadProviderPackage': {

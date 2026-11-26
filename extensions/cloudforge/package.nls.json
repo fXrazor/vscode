@@ -75,5 +75,8 @@
 	"command.providers.initOffline": "Initialize Architecture Offline",
 	"command.providers.importSchemaFile": "Import Schema Snapshot File…",
 	"command.providers.importArchive": "Import Downloaded Provider .zip…",
-	"command.providers.downloadMissing": "Download Missing Providers"
+	"command.providers.downloadMissing": "Download Missing Providers",
+	"command.providers.browseOther": "Browse Another Provider…",
+	"command.providers.refreshVersions": "Refresh Versions from Registry",
+	"command.providers.changeVersion": "Download Another Version…"
 }

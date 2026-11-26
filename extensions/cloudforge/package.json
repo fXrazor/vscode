@@ -126,6 +126,24 @@
 				"icon": "$(cloud-download)"
 			},
 			{
+				"command": "cloudforge.providers.browseOther",
+				"title": "%command.providers.browseOther%",
+				"category": "CloudForge",
+				"icon": "$(add)"
+			},
+			{
+				"command": "cloudforge.providers.refreshVersions",
+				"title": "%command.providers.refreshVersions%",
+				"category": "CloudForge",
+				"icon": "$(refresh)"
+			},
+			{
+				"command": "cloudforge.providers.changeVersion",
+				"title": "%command.providers.changeVersion%",
+				"category": "CloudForge",
+				"icon": "$(versions)"
+			},
+			{
 				"command": "cloudforge.showProofStatus",
 				"title": "%command.showProofStatus%",
 				"category": "%displayName%"
@@ -615,6 +633,14 @@
 				{
 					"command": "cloudforge.providers.importArchive",
 					"when": "false"
+				},
+				{
+					"command": "cloudforge.providers.refreshVersions",
+					"when": "false"
+				},
+				{
+					"command": "cloudforge.providers.changeVersion",
+					"when": "false"
 				}
 			],
 			"view/title": [
@@ -874,6 +900,31 @@
 					"command": "cloudforge.providers.importArchive",
 					"when": "view == cloudforge.providers && viewItem =~ /^providerProject\\.download/",
 					"group": "1_more@1"
+				},
+				{
+					"command": "cloudforge.providers.download",
+					"when": "view == cloudforge.providers && viewItem =~ /^providerBrowseVersion\\.download/",
+					"group": "inline@1"
+				},
+				{
+					"command": "cloudforge.providers.download",
+					"when": "view == cloudforge.providers && viewItem =~ /^providerBrowse\\./",
+					"group": "inline@1"
+				},
+				{
+					"command": "cloudforge.providers.refreshVersions",
+					"when": "view == cloudforge.providers && viewItem =~ /^providerBrowse\\./",
+					"group": "inline@2"
+				},
+				{
+					"command": "cloudforge.providers.browseOther",
+					"when": "view == cloudforge.providers && viewItem == providersSectionBrowse",
+					"group": "inline@1"
+				},
+				{
+					"command": "cloudforge.providers.changeVersion",
+					"when": "view == cloudforge.providers && viewItem =~ /^providerProject.*\\.registry/",
+					"group": "inline@3"
 				}
 			],
 			"editor/context": [

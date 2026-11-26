@@ -705,6 +705,15 @@ suite('CloudForgeServiceChannel', () => {
 		assert.strictEqual(validateCloudForgeServiceParams('planMirrorCleanup', { quotaBytes: 1024, workspaceId: 'workspace-1' }), undefined);
 	});
 
+	test('validates listProviderVersions params', () => {
+		const address = 'registry.opentofu.org/hashicorp/aws';
+		assert.deepStrictEqual(validateCloudForgeServiceParams('listProviderVersions', { address }), { address });
+		assert.deepStrictEqual(validateCloudForgeServiceParams('listProviderVersions', { address, refresh: true }), { address, refresh: true });
+		assert.strictEqual(validateCloudForgeServiceParams('listProviderVersions', { address, refresh: 'yes' }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('listProviderVersions', { address: 'https://evil/x/y' }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('listProviderVersions', { address, url: 'x' }), undefined);
+	});
+
 	test('validates downloadProviderPackage params', () => {
 		const address = 'registry.terraform.io/hashicorp/azurerm';
 		assert.deepStrictEqual(validateCloudForgeServiceParams('downloadProviderPackage', { address, version: '3.116.0' }), { address, version: '3.116.0' });

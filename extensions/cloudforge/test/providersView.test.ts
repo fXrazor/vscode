@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { buildProvidersModel, compareVersionsDesc, isProviderAddress, projectNextAction, shortProviderName } from '../src/providers/model.ts';
+import { BROWSE_GROUPS, buildProvidersModel, compareVersionsDesc, isProviderAddress, parseProviderVersions, projectNextAction, shortProviderName } from '../src/providers/model.ts';
 import type { CanvasDependencyReport } from '../src/canvas/protocol.ts';
 
 const AZ = 'registry.terraform.io/hashicorp/azurerm';
@@ -82,4 +82,14 @@ test('provider address validation', () => {
 	assert.equal(isProviderAddress('hashicorp/azurerm'), false);
 	assert.equal(isProviderAddress('registry.terraform.io/../azurerm'), false);
 	assert.equal(isProviderAddress('localhost/a/b'), false);
+});
+
+test('browse list and registry version parsing', () => {
+	const addresses = BROWSE_GROUPS.flatMap(group => group.providers.map(provider => provider.address));
+	assert.equal(new Set(addresses).size, addresses.length, 'no duplicates');
+	assert.ok(addresses.every(isProviderAddress));
+	assert.ok(addresses.every(address => address === address.toLowerCase()));
+	assert.deepEqual(parseProviderVersions({ versions: ['4.12.0', '3.116.0', '../bad', 7], stale: true, refreshedAt: '2026-11-26T00:00:00Z' }), { versions: ['4.12.0', '3.116.0'], stale: true, refreshedAt: '2026-11-26T00:00:00Z' });
+	assert.equal(parseProviderVersions({ versions: 'x', stale: false }), undefined);
+	assert.equal(parseProviderVersions(null), undefined);
 });

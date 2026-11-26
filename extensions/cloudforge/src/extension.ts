@@ -93,7 +93,7 @@ import {
 	type OfflineMirrorHost
 } from './providerMirror/manager';
 import { formatMirrorBytes, formatMirrorPackageKey, parseMirrorInventory } from './providerMirror/model';
-import { buildProvidersModel, isProviderAddress, LOCAL_PLATFORM, shortProviderName, type ProvidersModel } from './providers/model';
+import { buildProvidersModel, isProviderAddress, LOCAL_PLATFORM, parseProviderVersions, shortProviderName, type ProvidersModel } from './providers/model';
 import { ProvidersViewProvider, registryPageUrl, type ProvidersNode } from './providers/providersView';
 
 interface WorkspaceArchitecture {
@@ -2167,6 +2167,37 @@ export function activate(context: ExtensionContext): void {
 		}
 	}));
 	/** Downloads each provider version through the Rust service, then extracts its schema for this PC. */
+	/** Version quick pick from the registry (cached); falls back to typing a version when offline. */
+	async function pickProviderVersion(address: string): Promise<string | undefined> {
+		const loaded = await window.withProgress({ location: ProgressLocation.Window, title: l10n.t('Loading {0} versions…', shortProviderName(address)) }, () => providersView.versionsFor(address));
+		const model = providersView.current;
+		const installed = new Set(model?.installed.find(row => row.address === address)?.versions.map(row => row.version) ?? []);
+		const used = model?.project.find(row => row.address === address)?.version;
+		const typeIt = l10n.t('Type a version…');
+		if (loaded?.versions.length) {
+			const picked = await window.showQuickPick([
+				...loaded.versions.map((version, index) => ({
+					label: version,
+					description: [index === 0 ? l10n.t('latest') : '', version === used ? l10n.t('used by this project') : '', installed.has(version) ? l10n.t('downloaded') : ''].filter(Boolean).join(' · '),
+				})),
+				{ label: typeIt, description: '' },
+			], {
+				title: l10n.t('{0}: choose a version', shortProviderName(address)),
+				placeHolder: loaded.stale ? l10n.t('Offline: showing the last list fetched from the registry') : l10n.t('Older projects can keep older versions side by side'),
+				matchOnDescription: true,
+			});
+			if (!picked || picked.label !== typeIt) {
+				return picked?.label;
+			}
+		}
+		return (await window.showInputBox({
+			title: l10n.t('{0}: version', shortProviderName(address)),
+			prompt: loaded ? undefined : l10n.t('The registry could not be reached. Type an exact version, such as 3.116.0.'),
+			value: used ?? '',
+			validateInput: text => /^\d+\.\d+\.\d+([-+][A-Za-z0-9.-]+)?$/.test(text.trim()) ? undefined : l10n.t('Enter an exact version such as 3.116.0.'),
+		}))?.trim();
+	}
+
 	const providerErrorMessage = (code: string) => code === 'WORKSPACE_UNAVAILABLE'
 		? l10n.t('No usable OpenTofu or Terraform CLI was found on this PC.')
 		: code === 'INVALID_STATE' ? l10n.t('That provider package is in use; try again shortly.') : errorMessage(code);
@@ -2245,6 +2276,9 @@ export function activate(context: ExtensionContext): void {
 		const graph = provider.getGraph();
 		const report = graph ? await inspectArchitectureDependencies(graph.workspaceId, graph.architectureId, graph.sourceRevision) : undefined;
 		return buildProvidersModel({ report, packages: inventory.ok ? inventory.value.packages : [], snapshots });
+	}, async (address, refresh) => {
+		const result = await callService<unknown>('listProviderVersions', { address, ...(refresh ? { refresh: true } : {}) });
+		return result.ok ? parseProviderVersions(result.value) : undefined;
 	});
 	const providersTree = window.createTreeView('cloudforge.providers', { treeDataProvider: providersView, showCollapseAll: true });
 	context.subscriptions.push(
@@ -2256,14 +2290,21 @@ export function activate(context: ExtensionContext): void {
 				: undefined;
 		}),
 		provider.onDidChangeTreeData(() => { void providersView.refresh(); }),
-		commands.registerCommand('cloudforge.providers.refresh', () => providersView.refresh()),
+		commands.registerCommand('cloudforge.providers.refresh', () => { providersView.refreshVersions(); return providersView.refresh(); }),
 		commands.registerCommand('cloudforge.providers.extractSchema', async (node?: ProvidersNode) => {
 			const target = node?.type === 'project' || node?.type === 'version' ? node.row : undefined;
 			await commands.executeCommand('cloudforge.extractMirrorSchema', target?.address && target.version ? { address: target.address, version: target.version } : undefined);
 		}),
 		commands.registerCommand('cloudforge.providers.download', async (node?: ProvidersNode) => {
-			const target = node?.type === 'project' || node?.type === 'version' ? node.row : node?.type === 'provider' ? { address: node.row.address, version: node.row.versions[0]?.version } : undefined;
-			const address = target?.address ?? (await window.showInputBox({
+			// Where the click came from decides what is already known: address, and maybe an exact version.
+			const known: { address?: string; version?: string } =
+				node?.type === 'browseVersion' ? { address: node.address, version: node.version }
+					: node?.type === 'project' && node.row.status === 'notDownloaded' ? { address: node.row.address, version: node.row.version }
+						: node?.type === 'project' || node?.type === 'version' ? { address: node.row.address }
+							: node?.type === 'provider' ? { address: node.row.address }
+								: node?.type === 'browseProvider' ? { address: node.provider.address }
+									: {};
+			const address = known.address ?? (await window.showInputBox({
 				title: l10n.t('Download Provider: Address'),
 				prompt: l10n.t('Full registry address, such as registry.terraform.io/hashicorp/azurerm'),
 				value: 'registry.terraform.io/hashicorp/',
@@ -2272,12 +2313,7 @@ export function activate(context: ExtensionContext): void {
 			if (!address) {
 				return;
 			}
-			const version = (node?.type === 'project' && target?.version) ? target.version : (await window.showInputBox({
-				title: l10n.t('Download Provider: Version of {0}', shortProviderName(address)),
-				prompt: l10n.t('Exact release version, such as 3.116.0. Older projects can use older versions side by side.'),
-				value: target?.version ?? '',
-				validateInput: text => /^\d+\.\d+\.\d+([-+][A-Za-z0-9.-]+)?$/.test(text.trim()) ? undefined : l10n.t('Enter an exact version such as 3.116.0.'),
-			}))?.trim();
+			const version = known.version ?? await pickProviderVersion(address);
 			if (!version) {
 				return;
 			}
@@ -2288,7 +2324,23 @@ export function activate(context: ExtensionContext): void {
 			if (!platforms?.length) {
 				return;
 			}
+			providersView.addBrowseProvider(address);
 			await downloadProviderVersions([{ address, version }], platforms.map(item => item.label));
+		}),
+		commands.registerCommand('cloudforge.providers.changeVersion', (node?: ProvidersNode) => commands.executeCommand('cloudforge.providers.download', node?.type === 'project' && node.row.address ? { type: 'browseProvider', provider: { address: node.row.address, label: node.row.display, description: node.row.display } } : node)),
+		commands.registerCommand('cloudforge.providers.browseOther', async () => {
+			const address = (await window.showInputBox({
+				title: l10n.t('Browse Another Provider'),
+				prompt: l10n.t('Full registry address, such as registry.terraform.io/mongodb/mongodbatlas'),
+				value: 'registry.terraform.io/',
+				validateInput: text => isProviderAddress(text.trim()) ? undefined : l10n.t('Enter hostname/namespace/type.'),
+			}))?.trim().toLowerCase();
+			if (address) {
+				providersView.addBrowseProvider(address);
+			}
+		}),
+		commands.registerCommand('cloudforge.providers.refreshVersions', (node?: ProvidersNode) => {
+			providersView.refreshVersions(node?.type === 'browseProvider' ? node.provider.address : undefined);
 		}),
 		commands.registerCommand('cloudforge.providers.importArchive', (node?: ProvidersNode) => {
 			const target = node?.type === 'project' || node?.type === 'version' ? node.row : undefined;

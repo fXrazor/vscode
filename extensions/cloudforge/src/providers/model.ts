@@ -183,3 +183,58 @@ export function projectNextAction(row: ProjectProviderRow): 'extractSchema' | 'd
 		case 'conflict': return 'review';
 	}
 }
+
+export interface BrowseProvider {
+	readonly address: string;
+	readonly label: string;
+	readonly description: string;
+}
+
+export interface BrowseGroup {
+	readonly id: string;
+	readonly label: string;
+	readonly providers: readonly BrowseProvider[];
+}
+
+/** Common providers for the Browse section; any other address can be added by hand. */
+export const BROWSE_GROUPS: readonly BrowseGroup[] = [
+	{ id: 'cloud', label: 'Cloud platforms', providers: [
+		{ address: 'registry.terraform.io/hashicorp/azurerm', label: 'Azure Resource Manager', description: 'hashicorp/azurerm' },
+		{ address: 'registry.terraform.io/azure/azapi', label: 'Azure API', description: 'azure/azapi' },
+		{ address: 'registry.terraform.io/hashicorp/azuread', label: 'Microsoft Entra ID', description: 'hashicorp/azuread' },
+		{ address: 'registry.terraform.io/hashicorp/aws', label: 'Amazon Web Services', description: 'hashicorp/aws' },
+		{ address: 'registry.terraform.io/hashicorp/google', label: 'Google Cloud', description: 'hashicorp/google' },
+		{ address: 'registry.terraform.io/hashicorp/google-beta', label: 'Google Cloud (beta)', description: 'hashicorp/google-beta' },
+	] },
+	{ id: 'containers', label: 'Containers', providers: [
+		{ address: 'registry.terraform.io/hashicorp/kubernetes', label: 'Kubernetes', description: 'hashicorp/kubernetes' },
+		{ address: 'registry.terraform.io/hashicorp/helm', label: 'Helm', description: 'hashicorp/helm' },
+	] },
+	{ id: 'utility', label: 'Utility', providers: [
+		{ address: 'registry.terraform.io/hashicorp/random', label: 'Random', description: 'hashicorp/random' },
+		{ address: 'registry.terraform.io/hashicorp/null', label: 'Null', description: 'hashicorp/null' },
+		{ address: 'registry.terraform.io/hashicorp/local', label: 'Local', description: 'hashicorp/local' },
+		{ address: 'registry.terraform.io/hashicorp/tls', label: 'TLS', description: 'hashicorp/tls' },
+		{ address: 'registry.terraform.io/hashicorp/time', label: 'Time', description: 'hashicorp/time' },
+		{ address: 'registry.terraform.io/hashicorp/http', label: 'HTTP', description: 'hashicorp/http' },
+		{ address: 'registry.terraform.io/hashicorp/archive', label: 'Archive', description: 'hashicorp/archive' },
+	] },
+	{ id: 'services', label: 'Services', providers: [
+		{ address: 'registry.terraform.io/integrations/github', label: 'GitHub', description: 'integrations/github' },
+		{ address: 'registry.terraform.io/cloudflare/cloudflare', label: 'Cloudflare', description: 'cloudflare/cloudflare' },
+		{ address: 'registry.terraform.io/datadog/datadog', label: 'Datadog', description: 'datadog/datadog' },
+	] },
+];
+
+/** Strict parse of a `listProviderVersions` result. */
+export function parseProviderVersions(value: unknown): { readonly versions: readonly string[]; readonly stale: boolean; readonly refreshedAt?: string } | undefined {
+	if (!value || typeof value !== 'object' || Array.isArray(value)) {
+		return undefined;
+	}
+	const record = value as Record<string, unknown>;
+	if (!Array.isArray(record.versions) || typeof record.stale !== 'boolean') {
+		return undefined;
+	}
+	const versions = record.versions.filter((item): item is string => typeof item === 'string' && /^[A-Za-z0-9._+-]{1,64}$/.test(item)).slice(0, 200);
+	return { versions, stale: record.stale, ...(typeof record.refreshedAt === 'string' ? { refreshedAt: record.refreshedAt.slice(0, 40) } : {}) };
+}

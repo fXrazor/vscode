@@ -35,11 +35,11 @@ type CloudForgeServiceMethod =
 	| 'summarizeState' | 'listCloudConnections' | 'setCloudConnection' | 'storeCloudKey' | 'removeCloudConnection' | 'checkCloudSignIn'
 	| 'inspectDependencies' | 'readModule' | 'auditExportReadiness' | 'runEngineValidate' | 'runEnginePlan'
 	| 'checkOfflineMirrorReadiness' | 'runEngineInitOffline';
-type CloudForgeCatalogueMethod = 'inspectCatalogueSchemaFile' | 'importCatalogueSnapshot' | 'listCatalogueSnapshots' | 'listCatalogueTypes' | 'getResourceFormSchema' | 'getCatalogueCoverage' | 'renderResourceDraft' | 'listCloudRegions' | 'diffCatalogueSnapshots' | 'detectEngines' | 'listMirrorPackages' | 'extractProviderSchemaFromMirror' | 'importMirrorPackage' | 'downloadProviderPackage' | 'evictMirrorPackage' | 'verifyMirrorIntegrity' | 'planMirrorCleanup';
+type CloudForgeCatalogueMethod = 'inspectCatalogueSchemaFile' | 'importCatalogueSnapshot' | 'listCatalogueSnapshots' | 'listCatalogueTypes' | 'getResourceFormSchema' | 'getCatalogueCoverage' | 'renderResourceDraft' | 'listCloudRegions' | 'diffCatalogueSnapshots' | 'detectEngines' | 'listMirrorPackages' | 'extractProviderSchemaFromMirror' | 'importMirrorPackage' | 'downloadProviderPackage' | 'listProviderVersions' | 'evictMirrorPackage' | 'verifyMirrorIntegrity' | 'planMirrorCleanup';
 type CloudForgeProjectMethod = 'createProject' | 'openProject' | 'grantProject' | 'forgetProjectAccess' | 'createWorkspaceFile' | 'inspectRepository' | 'importRepository' | 'removeRepository' | 'createArchitecture' | 'summarizeArchitectures' | 'installGit';
 
 const catalogueMethods: ReadonlySet<string> = new Set<CloudForgeCatalogueMethod>([
-	'inspectCatalogueSchemaFile', 'importCatalogueSnapshot', 'listCatalogueSnapshots', 'listCatalogueTypes', 'getResourceFormSchema', 'getCatalogueCoverage', 'renderResourceDraft', 'listCloudRegions', 'diffCatalogueSnapshots', 'detectEngines', 'listMirrorPackages', 'extractProviderSchemaFromMirror', 'importMirrorPackage', 'downloadProviderPackage', 'evictMirrorPackage', 'verifyMirrorIntegrity', 'planMirrorCleanup'
+	'inspectCatalogueSchemaFile', 'importCatalogueSnapshot', 'listCatalogueSnapshots', 'listCatalogueTypes', 'getResourceFormSchema', 'getCatalogueCoverage', 'renderResourceDraft', 'listCloudRegions', 'diffCatalogueSnapshots', 'detectEngines', 'listMirrorPackages', 'extractProviderSchemaFromMirror', 'importMirrorPackage', 'downloadProviderPackage', 'listProviderVersions', 'evictMirrorPackage', 'verifyMirrorIntegrity', 'planMirrorCleanup'
 ]);
 
 /**
