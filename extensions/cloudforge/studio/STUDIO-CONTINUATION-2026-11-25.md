@@ -127,6 +127,8 @@ Branch `claude/project-thread-2irlth` (unmerged; Antigravity owns merging). Base
 - Menus (`SelectionControls.tsx`): right-click and More share `SelectionMenuBody`: heading with selection count, icons, grouped sections with real separators, key hints as keycaps (⌘/⇧ on Mac), Arrange as a submenu, Delete in danger colour. CSS in `styles.css` (`.canvas-context-*`, `.menu-shortcut`, `.path-picker`, `.dependency-tools`). The old nth-child separator hack is gone.
 - Checks: `npm run check`, 214/214 tests (new dependency style test), loose-connectors-verify 16/16, whiteboard-controls-verify 20/20.
 
+- List, map and object fields (`LiteralFields.tsx`, `editor-refinement.css`): icon remove beside each entry, a dashed Add entry row, a quiet Unset link and a ghost Edit JSON toggle. Accessible names are unchanged ("Remove entry 1", "Add entry to …", "Unset …"). Test: open a subnet's Address prefix or any list/map field.
+
 Test checklist:
 1. Select a connection end, hold Ctrl, drag it over a resource and release: it stays a loose point where you dropped it.
 2. Hold Shift while dragging an end: the line keeps 0°/45°/90° steps.
