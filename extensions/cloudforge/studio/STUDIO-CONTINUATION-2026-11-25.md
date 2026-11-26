@@ -116,6 +116,17 @@ Worktree: `C:/Users/dalep/.codex/worktrees/infrastructure-studio/CloudForge-Code
 
 Dale approved continuing the proposed point-endpoint pass in this chat. No further approval is needed for that plan. Work remains within Studio and handoff documentation; one architecture and one semantic undo history, independent theme/viewport/tool preferences, drawings excluded from Terraform and Rust-owned guarded I/O remain binding.
 
+### Studio pass 9: test view comments, object variables (Claude), 26 November 2026
+
+- Same branch `claude/project-thread-2irlth`, unmerged (Dale is having Antigravity merge it; include commits after 4e46b6f2).
+- Field labels read as sentences with acronyms (`src/fieldLabel.ts`, "Enable DNS hostnames"); raw names stay in tooltips and help. True/false arguments use a Not set / On / Off toggle (`.bool-toggle`, role radiogroup). Add property lists readable names.
+- Resource workspace is larger: up to 1920×1200, code pane defaults to 630px (was 420), right panel `clamp(300px, 27vw, 440px)`.
+- **Object variables:** new variable type `object` (JSON editor). A field binding can carry `path` (`{ variableId, path: ['prod','cidr'] }`), projected as `var.aws_network.prod.cidr`. The Variable picker lists each value inside an object (nested groups as headings), type-checks the leaf against the field, and shows `aws_network › prod › cidr` in the chip. Import reads `var.NAME.a.b` back into a path binding and accepts `object({...})` declarations, keeping the declared constraint in `typeConstraint` so optional()/types are written back unchanged; otherwise the constraint is derived from the default. Missing paths show a field issue. No variables-inside-variables (Terraform can't); use locals for derived values.
+- Estate sample binds vpc-prod/vpc-shared `cidr_block` and `enable_dns_hostnames` to `var.aws_network.<env>.*`.
+- Checks: Studio check pass, test 213/213, technical-view-verify 64/64. `provider-editor-verify` crashes in this container before and after these changes (VMSS help-icon measurement), so it needs a Windows run.
+- **Test checklist:** (1) Estate sample → vpc-prod → focused workspace: code shows `var.aws_network.prod.cidr`. (2) CIDR block → Variable: picker shows aws_network › prod › cidr etc.; text fields can't pick `dns_hostnames` (bool) and vice versa. (3) Pick shared › cidr: code updates; Undo restores. (4) Variables panel: create an Object variable from JSON; variables.tf preview shows `type = object({...})`. (5) Save and reload a project with `var.x.y` in source: binding comes back. (6) Rename a key in the object: the field shows "no longer exists". (7) Bool toggles and labels look right in light and dark.
+- **Open:** a key/value tree editor for object values (currently JSON); editing an imported object's default does not re-derive its kept `typeConstraint`.
+
 ### Technical Graph pass 8: scope spotlight, multi-cloud estate, browser test view (Claude), 26 November 2026
 
 - Branch `claude/project-thread-2irlth` (after PR #3 merged). Not merged to main yet; open a PR from this branch when Dale approves.

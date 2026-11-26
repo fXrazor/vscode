@@ -964,3 +964,8 @@ dialog::backdrop { background: #12152488; backdrop-filter: blur(3px); }
 .bool-toggle button:hover { color: var(--text); }
 .bool-toggle button[aria-checked=true] { color: var(--accent-ink); background: var(--selection); font-weight: 600; box-shadow: 0 1px 2px #0000001a; }
 .bool-toggle button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.variable-picker-list > button.variable-picker-path { padding-top: 6px; padding-bottom: 6px; gap: 2px; border-left: 2px solid var(--border); margin-left: 14px; width: calc(100% - 14px); }
+.variable-picker-list > button.variable-picker-path small { margin-left: auto; font-family: var(--mono, ui-monospace, monospace); font-size: 10px; color: var(--muted); }
+.variable-picker-list > button.variable-picker-path > span:last-child { font-size: 11px; color: var(--muted); }
+.variable-picker .variable-picker-list { display: flex; flex-direction: column; }
+.variable-picker-list > .variable-picker-group { flex: none; margin-left: 14px; padding: 6px 7px 2px; border-left: 2px solid var(--border); font-size: 11px; font-weight: 600; color: var(--muted); }

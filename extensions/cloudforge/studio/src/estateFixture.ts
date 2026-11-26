@@ -104,5 +104,13 @@ export function estateArchitecture(): Architecture {
 		if (name === 'platform') { add('gcp', 'gke', 'google_container_cluster', 'gke-platform', project, [['network', net], ['subnetwork', subnets[0]], ['project', project, 'project_id']]); }
 		else { add('gcp', 'sql', 'google_sql_database_instance', 'sql-analytics', project, [['project', project, 'project_id'], ['private_network', net]]); }
 	}
-	return { name: 'Multi-cloud estate', items: [], connections: [], resources: out, variables: [] };
+	// One object variable shows nested binding: each VPC reads its own values as var.aws_network.<env>.<key>.
+	const awsNetwork = { prod: { cidr: '10.40.0.0/16', dns_hostnames: true }, shared: { cidr: '10.50.0.0/16', dns_hostnames: true } };
+	for (const env of ['prod', 'shared'] as const) {
+		const vpc = out.find(item => item.id === 'vpc-' + env);
+		if (!vpc) { continue; }
+		vpc.settings = { ...vpc.settings, cidr_block: '', enable_dns_hostnames: '' };
+		vpc.fieldBindings = { [bindingKey({ kind: 'setting', name: 'cidr_block' })]: { variableId: 'v-aws-network', path: [env, 'cidr'] }, [bindingKey({ kind: 'setting', name: 'enable_dns_hostnames' })]: { variableId: 'v-aws-network', path: [env, 'dns_hostnames'] } };
+	}
+	return { name: 'Multi-cloud estate', items: [], connections: [], resources: out, variables: [{ id: 'v-aws-network', name: 'aws_network', type: 'object', description: 'AWS network settings per environment', sensitive: false, defaultValue: awsNetwork }] };
 }

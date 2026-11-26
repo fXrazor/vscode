@@ -9,11 +9,13 @@ import { getDef, type AttrDef } from './cloudlab-core/catalog/index.ts';
 import { resourceDefinition } from './fixture.ts';
 import type { TerraformExtraBody } from './additionalTerraform.ts';
 
-export const variableTypes = ['string', 'number', 'bool', 'list(string)', 'map(string)', 'any'] as const;
+export const variableTypes = ['string', 'number', 'bool', 'list(string)', 'map(string)', 'object', 'any'] as const;
 export type VariableValue = string | number | boolean | null | VariableValue[] | { [key: string]: VariableValue };
 export interface VariableDefinition {
 	id: string; name: string; type: typeof variableTypes[number]; description: string;
 	sensitive: boolean; defaultValue?: VariableValue; value?: VariableValue; updatedAt?: string;
+	/** Imported `object({...})` constraint, kept exactly so an import never loses optional() or declared types. */
+	typeConstraint?: string;
 }
 const reserved = new Set(['source', 'version', 'providers', 'count', 'for_each', 'lifecycle', 'depends_on', 'locals']);
 export const isSensitiveProperty = (name: string, declared = false) => declared || /(?:password|secret|token|private[_ ]?key|access[_ ]?key|api[_ ]?key)$/i.test(name);
@@ -24,7 +26,7 @@ export function variableError(variable: VariableDefinition, variables: VariableD
 	for (const value of [variable.defaultValue, variable.value]) {
 		if (value !== undefined && !finiteJson(value)) { return 'Use finite JSON values.'; }
 		if (value === undefined || value === null || variable.type === 'any') { continue; }
-		const valid = variable.type === 'string' ? typeof value === 'string' : variable.type === 'number' ? typeof value === 'number' && Number.isFinite(value) : variable.type === 'bool' ? typeof value === 'boolean' : variable.type === 'list(string)' ? Array.isArray(value) && value.every(item => typeof item === 'string') : typeof value === 'object' && !Array.isArray(value) && Object.values(value).every(item => typeof item === 'string');
+		const valid = variable.type === 'string' ? typeof value === 'string' : variable.type === 'number' ? typeof value === 'number' && Number.isFinite(value) : variable.type === 'bool' ? typeof value === 'boolean' : variable.type === 'object' ? isObjectValue(value) && Object.keys(value).length > 0 && Object.keys(value).every(key => /^[A-Za-z_][A-Za-z0-9_-]*$/.test(key)) : variable.type === 'list(string)' ? Array.isArray(value) && value.every(item => typeof item === 'string') : typeof value === 'object' && !Array.isArray(value) && Object.values(value).every(item => typeof item === 'string');
 		if (!valid) { return 'The default and value must match the selected type.'; }
 	}
 	return undefined;
@@ -60,6 +62,46 @@ export function variableUses(architecture: Architecture): Map<string, Set<string
 	return uses;
 }
 
+export const isObjectValue = (value: VariableValue | undefined): value is { [key: string]: VariableValue } => value !== null && typeof value === 'object' && !Array.isArray(value);
+
+/** Terraform type of a literal value, used to declare object variables from their default. */
+function literalType(value: VariableValue): string {
+	if (typeof value === 'string') { return 'string'; }
+	if (typeof value === 'number') { return 'number'; }
+	if (typeof value === 'boolean') { return 'bool'; }
+	if (Array.isArray(value)) { const types = [...new Set(value.map(literalType))]; return types.length === 1 ? 'list(' + types[0] + ')' : 'list(any)'; }
+	if (isObjectValue(value)) { return 'object({ ' + Object.entries(value).map(([key, item]) => key + ' = ' + literalType(item)).join(', ') + ' })'; }
+	return 'any';
+}
+
+/** The `type =` constraint written for a variable. An object variable takes its shape from its default or value. */
+export function variableTypeConstraint(variable: VariableDefinition): string {
+	if (variable.type !== 'object') { return variable.type; }
+	if (variable.typeConstraint && /^object\s*\(/.test(variable.typeConstraint)) { return variable.typeConstraint; }
+	const sample = variable.defaultValue ?? variable.value;
+	return isObjectValue(sample) ? literalType(sample) : 'object({})';
+}
+
+/** Every attribute path inside an object variable (leaves and nested objects), with its value. */
+export function objectVariablePaths(variable: VariableDefinition): { path: string[]; value: VariableValue }[] {
+	if (variable.type !== 'object') { return []; }
+	const sample = variable.value ?? variable.defaultValue;
+	const out: { path: string[]; value: VariableValue }[] = [];
+	const visit = (value: VariableValue, path: string[]) => {
+		if (path.length) { out.push({ path, value }); }
+		if (isObjectValue(value) && path.length < 6) { for (const [key, item] of Object.entries(value)) { visit(item, [...path, key]); } }
+	};
+	if (isObjectValue(sample)) { visit(sample, []); }
+	return out;
+}
+
+/** The value at an attribute path of an object variable, or undefined when the path does not exist. */
+export function variableValueAt(variable: VariableDefinition, path: readonly string[] | undefined): VariableValue | undefined {
+	let current: VariableValue | undefined = variable.value ?? variable.defaultValue;
+	for (const key of path ?? []) { current = isObjectValue(current) && Object.hasOwn(current, key) ? current[key] : undefined; }
+	return current;
+}
+
 function finiteJson(value: VariableValue): boolean {
  if (typeof value === 'number') { return Number.isFinite(value); }
  if (Array.isArray(value)) { return value.every(finiteJson); }
@@ -76,7 +118,7 @@ function hclValue(value: VariableValue): string {
 }
 
 export function variableDeclarations(variables: VariableDefinition[]): string {
-	return variables.map(variable => `variable ${JSON.stringify(variable.name)} {\n  type = ${variable.type}\n  description = ${hclValue(variable.description)}\n${variable.sensitive ? '  sensitive = true\n  # Sensitive defaults are omitted from this preview.\n' : variable.defaultValue !== undefined ? `  default = ${hclValue(variable.defaultValue)}\n` : ''}}`).join('\n\n');
+	return variables.map(variable => `variable ${JSON.stringify(variable.name)} {\n  type = ${variableTypeConstraint(variable)}\n  description = ${hclValue(variable.description)}\n${variable.sensitive ? '  sensitive = true\n  # Sensitive defaults are omitted from this preview.\n' : variable.defaultValue !== undefined ? `  default = ${hclValue(variable.defaultValue)}\n` : ''}}`).join('\n\n');
 }
 
 export function exportableArchitecture(architecture: Architecture): Architecture {
@@ -111,11 +153,12 @@ export function importVariableDraft(source: string, current: VariableDefinition[
 		if (block.labels.length !== 1 || block.blocks.length || Object.keys(block.attrs).some(key => !['type', 'description', 'default', 'sensitive'].includes(key))) { throw new Error('This variable has validation or advanced attributes that this importer cannot preserve yet. Keep the source unchanged.'); }
 		if (block.attrs.type !== undefined && !isExpr(block.attrs.type)) { throw new Error('Use a Terraform type constraint, not a quoted type name.'); }
 		const base = definition(block.labels[0]);
-		const type = isExpr(block.attrs.type) ? block.attrs.type.$expr.trim() : 'any';
+		const declared = isExpr(block.attrs.type) ? block.attrs.type.$expr.trim() : 'any';
+		const type = /^object\s*\(/.test(declared) ? 'object' : declared;
 		if (!variableTypes.includes(type as VariableDefinition['type'])) { throw new Error('This structural type requires the advanced typed editor.'); }
 		if (block.attrs.description !== undefined && typeof block.attrs.description !== 'string') { throw new Error('Variable descriptions must be text.'); }
 		if (block.attrs.sensitive !== undefined && typeof block.attrs.sensitive !== 'boolean') { throw new Error('Sensitive must be true or false.'); }
-		return { ...base, type: type as VariableDefinition['type'], description: block.attrs.description as string ?? '', sensitive: block.attrs.sensitive === true || base.sensitive, ...(block.attrs.default !== undefined ? { defaultValue: literal(block.attrs.default) } : {}) };
+		return { ...base, type: type as VariableDefinition['type'], ...(type === 'object' ? { typeConstraint: declared } : {}), description: block.attrs.description as string ?? '', sensitive: block.attrs.sensitive === true || base.sensitive, ...(block.attrs.default !== undefined ? { defaultValue: literal(block.attrs.default) } : {}) };
 	});
 	if (!imported.length) { throw new Error('No variable declarations or assignments were found.'); }
 	if (new Set(imported.map(variable => variable.name)).size !== imported.length) { throw new Error('The import contains duplicate variable names.'); }

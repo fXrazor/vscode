@@ -130,7 +130,7 @@ export type Edit =
 	| { type: 'useInheritance'; id: string; target: FieldTarget; enabled: boolean }
 	| { type: 'canvas'; command: CanvasCommand }
 	| { type: 'resizeResource'; id: string; position: Position; iconSize: number }
-	| { type: 'bindVariable'; id: string; target: FieldTarget; variableId?: string }
+	| { type: 'bindVariable'; id: string; target: FieldTarget; variableId?: string; path?: string[] }
 	| { type: 'bindResourceRef'; id: string; target: FieldTarget; refs?: ResourceRefEntry[] }
 	| { type: 'updateConnection'; id: string; patch: Partial<Omit<DesignConnection, 'id' | 'source' | 'target'>> }
 	| { type: 'reverseConnection'; id: string }
@@ -197,10 +197,10 @@ function editArchitecture(architecture: Architecture, action: Edit): Architectur
 			const target = action.target;
 			if (target.kind === 'block' && !findResourceBlock(resource.blocks, target.blockId)) { return architecture; }
 			const variable = architecture.variables?.find(item => item.id === action.variableId);
-			if (action.variableId && (!variable || !acceptsVariable(variable, fieldDefinition(resource, target)))) { return architecture; }
+			if (action.variableId && (!variable || !acceptsVariable(variable, fieldDefinition(resource, target), action.path))) { return architecture; }
 			const key = bindingKey(target); const fieldBindings = { ...resource.fieldBindings }; const resourceRefs = { ...resource.resourceRefs };
-			if (fieldBindings[key]?.variableId === action.variableId && (!action.variableId || !resourceRefs[key])) { return architecture; }
-			if (action.variableId) { fieldBindings[key] = { variableId: action.variableId }; delete resourceRefs[key]; } else { delete fieldBindings[key]; }
+			if (fieldBindings[key]?.variableId === action.variableId && (fieldBindings[key]?.path ?? []).join('.') === (action.path ?? []).join('.') && (!action.variableId || !resourceRefs[key])) { return architecture; }
+			if (action.variableId) { fieldBindings[key] = action.path?.length ? { variableId: action.variableId, path: [...action.path] } : { variableId: action.variableId }; delete resourceRefs[key]; } else { delete fieldBindings[key]; }
 			const blocks = structuredClone(resource.blocks);
 			const settings = { ...resource.settings };
 			if (target.kind === 'setting' && action.variableId) { settings[target.name] ??= ''; }

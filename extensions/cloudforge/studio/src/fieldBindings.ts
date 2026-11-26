@@ -3,14 +3,15 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 import type { Architecture, Resource, ResourceBlock } from './model.ts';
-import { isSensitiveProperty, type VariableDefinition } from './variables.ts';
+import { isObjectValue, isSensitiveProperty, variableValueAt, type VariableDefinition } from './variables.ts';
 import { getDef, type AttrDef } from './cloudlab-core/catalog/index.ts';
 import { resourceDefinition } from './fixture.ts';
 import { inheritedReference, inheritedReferences, resourceAddress } from './resourceHierarchy.ts';
 import { liveSchemaDefinitionTree, liveSchemaOutputs, type LiveSchemaMap } from './liveSchema.ts';
 
 export type FieldTarget = { kind: 'name' } | { kind: 'region' } | { kind: 'setting'; name: string } | { kind: 'block'; blockId: string; name: string };
-export type VariableBinding = { variableId: string };
+/** `path` picks one attribute of an object variable: { variableId, path: ['dns', 'enabled'] } writes var.NAME.dns.enabled. */
+export type VariableBinding = { variableId: string; path?: string[] };
 export type ResourceRefEntry = { resourceId: string; attribute: string };
 export type ResourceRefBinding = { refs: ResourceRefEntry[] };
 export type ResourceRefCandidate = { resource: Resource; attribute: string; expression: string };
@@ -80,7 +81,14 @@ export function fieldDefinition(resource: Resource, target: FieldTarget, liveSch
 	return visit(resource.blocks, attrs);
 }
 
-export function acceptsVariable(variable: VariableDefinition, definition?: Pick<AttrDef, 'type'>): boolean {
+export function acceptsVariable(variable: VariableDefinition, definition?: Pick<AttrDef, 'type'>, path?: readonly string[]): boolean {
+	if (path?.length) {
+		const value = variableValueAt(variable, path);
+		if (value === undefined) { return false; }
+		if (!definition || value === null) { return true; }
+		const kind = typeof value === 'string' ? 'string' : typeof value === 'number' ? 'number' : typeof value === 'boolean' ? 'bool' : Array.isArray(value) ? 'list' : isObjectValue(value) ? 'map' : 'any';
+		return ['string', 'number', 'bool', 'list', 'map'].includes(definition.type) ? definition.type === kind : true;
+	}
 	if (!definition || variable.type === 'any') { return true; }
 	const type = definition.type;
 	return type === 'list' ? variable.type === 'list(string)' : type === 'map' ? variable.type === 'map(string)' : !['string', 'number', 'bool'].includes(type) || variable.type === type;
@@ -89,7 +97,13 @@ export function acceptsVariable(variable: VariableDefinition, definition?: Pick<
 export function variableBindingIssue(binding: VariableBinding | undefined, variables: VariableDefinition[], definition?: Pick<AttrDef, 'type'>): string | undefined {
 	if (!binding) { return undefined; }
 	const variable = variables.find(item => item.id === binding.variableId);
-	return !variable ? 'The bound variable is missing. Choose another variable or a fixed value.' : !acceptsVariable(variable, definition) ? 'Variable type does not match this field.' : undefined;
+	if (variable && binding.path?.length && variableValueAt(variable, binding.path) === undefined) { return 'var.' + variable.name + '.' + binding.path.join('.') + ' no longer exists in the object. Choose another value.'; }
+	return !variable ? 'The bound variable is missing. Choose another variable or a fixed value.' : !acceptsVariable(variable, definition, binding.path) ? 'Variable type does not match this field.' : undefined;
+}
+
+/** The Terraform expression for a variable binding: var.NAME, or var.NAME.a.b for one attribute of an object variable. */
+export function variableBindingExpression(variable: VariableDefinition | undefined, binding: VariableBinding | undefined): string {
+	return variable ? 'var.' + variable.name + (binding?.path?.length ? '.' + binding.path.join('.') : '') : 'Missing variable';
 }
 
 export function boundVariable(architecture: Architecture, resource: Resource, target: FieldTarget) {
@@ -113,7 +127,7 @@ export function fieldExpression(resource: Resource, target: FieldTarget, variabl
 	const binding = resource.fieldBindings?.[key];
 	if (!binding) { return undefined; }
 	const variable = variables?.find(item=>item.id===binding.variableId);
-	return variable ? 'var.'+variable.name : 'Missing variable';
+	return variableBindingExpression(variable, binding);
 }
 
 export function wouldCreateReferenceCycle(architecture: Architecture, consumerId: string, providerId: string): boolean {
@@ -202,8 +216,8 @@ export function resourceRefBindingIssue(binding: ResourceRefBinding | undefined,
 	return undefined;
 }
 
-export function variablePreview(variable: VariableDefinition, sensitiveField = false): string {
+export function variablePreview(variable: VariableDefinition, sensitiveField = false, path?: readonly string[]): string {
 	if (sensitiveField || variable.sensitive) { return 'Sensitive value'; }
-	const value = variable.value !== undefined ? variable.value : variable.defaultValue;
+	const value = path?.length ? variableValueAt(variable, path) : variable.value !== undefined ? variable.value : variable.defaultValue;
 	return value === undefined ? 'Required input · value not set' : typeof value === 'string' ? value || 'Empty string' : JSON.stringify(value);
 }

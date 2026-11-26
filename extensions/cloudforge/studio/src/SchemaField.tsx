@@ -26,7 +26,7 @@ export type FieldResourceReference = {
 /** Literal, input, typed resource reference and inherited modes share the same field in both resource editors. */
 export function SchemaField({ name, value, definition, onChange, onUnset, variables = [], binding, onBind, onManageVariables, inheritance, resourceReference, path, impact, terraform }: {
 	name:string; value:string; definition?:AttrDef; onChange:(value:string)=>void; variables?:VariableDefinition[]; binding?:VariableBinding;
-	onBind?:(variableId?:string)=>void; onManageVariables?:()=>void; inheritance?:FieldInheritance; resourceReference?:FieldResourceReference; path?:string; impact?:FieldImpact;
+	onBind?:(variableId?:string,path?:string[])=>void; onManageVariables?:()=>void; inheritance?:FieldInheritance; resourceReference?:FieldResourceReference; path?:string; impact?:FieldImpact;
 	terraform?: { expression: string; onConfigure?: () => void };
 	onUnset?: () => void;
 }) {
@@ -53,7 +53,7 @@ export function SchemaField({ name, value, definition, onChange, onUnset, variab
 			{onBind && !terraform ? <div className="field-value-mode" role="group" aria-label={name+' value mode'}>
 				<button aria-pressed={!binding&&!reference&&!refBinding} onClick={fixed}>Value</button>
 				{canReference && <ResourceReferencePicker name={name} definition={definition} candidates={resourceReference.candidates} selected={refBinding?.refs ?? []} onSelect={resourceReference.onSelect} />}
-				<VariablePicker onManageVariables={onManageVariables} sensitiveField={isSensitiveProperty(name,definition?.sensitive)} name={name} variables={variables} selectedId={binding?.variableId} definition={definition} onSelect={onBind}/>
+				<VariablePicker onManageVariables={onManageVariables} sensitiveField={isSensitiveProperty(name,definition?.sensitive)} name={name} variables={variables} selectedId={binding?.variableId} selectedPath={binding?.path} definition={definition} onSelect={onBind}/>
 			</div>:<span className="schema-field-type">{definition?.type??'value'}</span>}
 		</div>
 		{terraform ? <div className="terraform-configured" id={id} role="group" aria-labelledby={id+'-label'}><strong>Configured in Terraform</strong><code>{terraform.expression}</code>{terraform.onConfigure && <button type="button" onClick={terraform.onConfigure}>Configure in Terraform</button>}</div> : reference ? <div className="inherited-field" id={id} role="group" aria-labelledby={id+'-label'}>
@@ -72,7 +72,7 @@ export function SchemaField({ name, value, definition, onChange, onUnset, variab
 			})}</div>
 			<code>{definition?.type === 'list' ? '[' + refBinding.refs.map(entry => { const target = resourceReference?.architecture?.resources.find(item => item.id === entry.resourceId); return target ? resourceAddress(target) + '.' + entry.attribute : 'null'; }).join(', ') + ']' : (() => { const target = resourceReference?.architecture?.resources.find(item => item.id === refBinding.refs[0].resourceId); return target ? resourceAddress(target) + '.' + refBinding.refs[0].attribute : 'null'; })()}</code>
 			<button className="inheritance-override" onClick={fixed}>Use own value</button>
-		</div> : binding ? <div className="field-variable-value" id={id} role="group" aria-labelledby={id+'-label'} aria-describedby={id+'-help'}><span className="variable-chip"><Variable size={14}/><span>{variable?.name??'Missing variable'}</span><button aria-label={'Use fixed value for '+name} onClick={()=>onBind?.(undefined)}><X size={12}/></button></span><small>{variable?variablePreview(variable,isSensitiveProperty(name,definition?.sensitive)):'Choose a valid input'}</small></div>
+		</div> : binding ? <div className="field-variable-value" id={id} role="group" aria-labelledby={id+'-label'} aria-describedby={id+'-help'}><span className="variable-chip"><Variable size={14}/><span>{variable?(binding?.path?.length?[variable.name,...binding.path].join(' › '):variable.name):'Missing variable'}</span><button aria-label={'Use fixed value for '+name} onClick={()=>onBind?.(undefined)}><X size={12}/></button></span><small>{variable?variablePreview(variable,isSensitiveProperty(name,definition?.sensitive),binding?.path):'Choose a valid input'}</small></div>
 		: isToggle ? <div className="bool-toggle" id={id} role="radiogroup" aria-labelledby={id+'-label'} aria-describedby={id+'-help'}>{([['','Not set'],['true','On'],['false','Off']] as const).map(([option,text])=><button key={text} type="button" role="radio" aria-checked={value===option} title={option?name+' = '+option:'Leave '+name+' unset (provider default)'} onClick={()=>onChange(option)}>{text}</button>)}</div>
 		: definition?.type==='bool'||definition?.options?.length ? <select {...props}><option value="">Not set</option>{(definition.options??['true','false']).map(option=><option key={option}>{option}</option>)}{value&&!(definition.options??['true','false']).includes(value)&&<option>{value}</option>}</select>
 		: definition?.literalShape && ['object','list','set','map','tuple'].includes(definition.literalShape.kind) ? <LiteralFields value={value} shape={definition.literalShape} name={name} id={id} labelId={id+'-label'} onChange={onChange} onUnset={onUnset}/>

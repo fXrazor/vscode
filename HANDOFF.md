@@ -1,5 +1,9 @@
 # CloudForge Code OSS handoff
 
+## Studio pass 9 (Claude) — 26 November 2026
+
+Object (nested) variables bound as `var.NAME.a.b`, readable field labels, On/Off toggles and a larger resource workspace, on `claude/project-thread-2irlth` (unmerged). See "Studio pass 9" in the [Studio continuation](extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md).
+
 ## Technical Graph pass 8 (Claude) — 26 November 2026
 
 Branch `claude/project-thread-2irlth`, unmerged: scope spotlight, multi-cloud estate sample (126 resources), separated scope clusters, AWS/GCP core icons and a browser test view (`extensions/cloudforge/studio/scripts/build-test-view.mjs`). Details, checks and a test checklist are under "Technical Graph pass 8" in the [Studio continuation](extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md).

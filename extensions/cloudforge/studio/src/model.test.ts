@@ -4,7 +4,8 @@ import { applyTerraformDraft, terraformCode } from './terraformProjection.ts';
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-import { importVariableDraft, exportableArchitecture, variableDeclarations, variableUses, type VariableDefinition } from './variables.ts';
+import { importVariableDraft, exportableArchitecture, objectVariablePaths, variableDeclarations, variableError, variableUses, type VariableDefinition } from './variables.ts';
+import { acceptsVariable } from './fieldBindings.ts';
 import type { BoardItem } from './model.ts';
 import { presentationSvg } from './exportPresentation.ts';
 import { shapeDefinitions } from './shapes.ts';
@@ -544,7 +545,7 @@ test('variable declaration and tfvars imports distinguish defaults, assigned val
 
 test('variable imports refuse unsupported expressions, validations and structural types', () => {
  assert.throws(() => importVariableDraft('input_value = var.other', [], 'tfvars'), /Expression/);
- assert.throws(() => importVariableDraft('variable "x" {\n type = object({ a = string })\n}', [], 'tf'), /structural type/);
+ assert.throws(() => importVariableDraft('variable "x" {\n type = tuple([string, number])\n}', [], 'tf'), /structural type/);
  assert.throws(() => importVariableDraft('variable "x" {\n type = string\n validation {\n condition = true\n error_message = "bad"\n }\n}', [], 'tf'), /advanced attributes/);
 });
 
@@ -715,4 +716,26 @@ test('typed variable feedback rejects wrong values and expressions before a save
  assert.ok(variableInputIssue('','number'));
  assert.equal(variableInputIssue('0','number'),undefined);
  assert.equal(variableInputIssue('','string'),undefined);
+});
+
+test('object variables declare their shape and fields bind one nested value as var.NAME.path', () => {
+	const network = { id: 'input-network', name: 'network', type: 'object' as const, description: 'Shared network settings', sensitive: false, defaultValue: { location: 'uksouth', dns: { servers: ['10.0.0.4'], zone: 'corp.local' } } };
+	assert.match(variableDeclarations([network]), /type = object\(\{ location = string, dns = object\(\{ servers = list\(string\), zone = string \}\) \}\)/);
+	assert.deepEqual(objectVariablePaths(network).map(entry => entry.path.join('.')), ['location', 'dns', 'dns.servers', 'dns.zone']);
+	assert.equal(acceptsVariable(network, { type: 'string' }), false);
+	assert.equal(acceptsVariable(network, { type: 'string' }, ['location']), true);
+	assert.equal(acceptsVariable(network, { type: 'string' }, ['dns', 'servers']), false);
+	assert.equal(acceptsVariable(network, { type: 'list' }, ['dns', 'servers']), true);
+	assert.equal(acceptsVariable(network, { type: 'string' }, ['missing']), false);
+	const architecture = { ...sampleArchitecture(), variables: [network] };
+	const bound = historyReducer(createHistory(architecture), { type: 'bindVariable', id: 'network', target: { kind: 'region' }, variableId: 'input-network', path: ['location'] });
+	assert.match(terraformCode(bound.present, 'network'), /location\s*=\s*var\.network\.location/);
+	assert.deepEqual(bound.present.resources.find(item => item.id === 'network')!.fieldBindings?.[JSON.stringify(['region'])], { variableId: 'input-network', path: ['location'] });
+	assert.ok(variableUses(bound.present).get('network')?.has('network'));
+	assert.equal(historyReducer(bound, { type: 'bindVariable', id: 'network', target: { kind: 'region' }, variableId: 'input-network', path: ['dns', 'servers'] }), bound, 'a list value cannot bind to a text field');
+	assert.equal(variableBindingIssue({ variableId: 'input-network', path: ['gone'] }, [network], { type: 'string' }), 'var.network.gone no longer exists in the object. Choose another value.');
+	assert.equal(variableError({ ...network, defaultValue: ['not', 'an', 'object'] }, []), 'The default and value must match the selected type.');
+	const imported = importVariableDraft('variable "network" {\n  type = object({ location = string })\n  default = { location = "uksouth" }\n}', [], 'tf');
+	assert.equal(imported[0].type, 'object');
+	assert.match(variableDeclarations(imported), /type = object\(\{ location = string \}\)/, 'the imported constraint is written back unchanged');
 });

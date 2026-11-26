@@ -5,7 +5,7 @@ import { getDef, type AttrDef } from './cloudlab-core/catalog/index.ts';
 import { emptyProject, isExpr, isRef, type ArchNode, type Project, type Value } from './cloudlab-core/model.ts';
 import { generate, nodeBlock } from './cloudlab-core/terraform.ts';
 import { blockToConfig, parseHcl, type HclBlock } from './cloudlab-core/hcl.ts';
-import { bindingKey, boundVariable, regionAttribute, fieldAliases as aliases, type FieldTarget } from './fieldBindings.ts';
+import { bindingKey, boundVariable, variableBindingExpression, regionAttribute, fieldAliases as aliases, type FieldTarget } from './fieldBindings.ts';
 import { inheritedReferences } from './resourceHierarchy.ts';
 import { includeAdditionalTerraform, resourceFromTerraform } from './additionalTerraform.ts';
 import type { HostFormSchema } from './liveSchema.ts';
@@ -66,7 +66,8 @@ export function projectTerraform(architecture: Architecture): Projected {
 					? refBind.refs.map(entry => ({ $ref: entry.resourceId, attr: entry.attribute }))
 					: { $ref: refBind.refs[0].resourceId, attr: refBind.refs[0].attribute };
 			}
-			return resource.fieldBindings?.[key] ? { $expr: 'var.' + (boundVariable(architecture, resource, target)?.name ?? 'unresolved_input') } : fallback;
+			const binding = resource.fieldBindings?.[key]; const variable = binding && boundVariable(architecture, resource, target);
+			return binding ? { $expr: variable ? variableBindingExpression(variable, binding) : 'var.unresolved_input' } : fallback;
 		};
 		const node: ArchNode = { id: resource.id, kind: resource.kind === 'module' ? 'module' : 'resource', type: metadata.type,
 			parentId:resource.parentId,

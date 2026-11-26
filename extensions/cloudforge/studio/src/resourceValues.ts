@@ -113,8 +113,15 @@ export function parseResourceValues(value: unknown): { readonly sourceRevision: 
 	return { sourceRevision: value.sourceRevision, resources, variables };
 }
 
+/** `var.NAME` or `var.NAME.a.b` (plain attribute access only; indexes and functions stay Terraform expressions). */
+function variableReference(text: string): { name: string; path: string[] } | undefined {
+	const match = /^var\.([A-Za-z_][A-Za-z0-9_-]*)((?:\.[A-Za-z_][A-Za-z0-9_-]*)*)$/.exec(text.trim());
+	return match ? { name: match[1], path: match[2] ? match[2].slice(1).split('.') : [] } : undefined;
+}
+
 const variableTypeOf = (text: string | undefined): VariableDefinition['type'] => {
 	const compact = (text ?? '').replace(/\s+/g, '');
+	if (/^object\(/.test(compact)) { return 'object'; }
 	return (variableTypes as readonly string[]).includes(compact) ? compact as VariableDefinition['type'] : text === undefined ? 'string' : 'any';
 };
 
@@ -254,11 +261,11 @@ export function hydrateResourceValues(architecture: Architecture, snapshot: Host
 		// A field written as exactly `var.NAME` becomes a canvas variable binding.
 		const bindVariable = (path: readonly string[], target: FieldTarget) => {
 			const found = valueAt(file, path);
-			const name = found?.kind === 'expression' ? /^var\.([A-Za-z_][A-Za-z0-9_-]*)$/.exec(found.text.trim())?.[1] : undefined;
-			const variableId = name ? variableIdByName.get(name) : undefined;
+			const parsed = found?.kind === 'expression' ? variableReference(found.text) : undefined;
+			const variableId = parsed ? variableIdByName.get(parsed.name) : undefined;
 			const key = bindingKey(target);
-			if (variableId && next.fieldBindings?.[key]?.variableId !== variableId) {
-				next.fieldBindings = { ...next.fieldBindings, [key]: { variableId } };
+			if (variableId && (next.fieldBindings?.[key]?.variableId !== variableId || (next.fieldBindings?.[key]?.path ?? []).join('.') !== parsed!.path.join('.'))) {
+				next.fieldBindings = { ...next.fieldBindings, [key]: parsed!.path.length ? { variableId, path: parsed!.path } : { variableId } };
 				touched = true;
 			}
 		};
@@ -344,8 +351,8 @@ export function hydrateResourceValues(architecture: Architecture, snapshot: Host
 						const target: FieldTarget = blockId ? { kind: 'block', blockId, name: definition.name } : definition.name === 'name' ? { kind: 'name' } : ['location', 'region'].includes(definition.name) ? { kind: 'region' } : { kind: 'setting', name: key };
 						const clearBinding = () => { const id = bindingKey(target); if (next.fieldBindings?.[id]) { next.fieldBindings = { ...next.fieldBindings }; delete next.fieldBindings[id]; } if (next.resourceRefs?.[id]) { next.resourceRefs = { ...next.resourceRefs }; delete next.resourceRefs[id]; } };
 						if (field.kind === 'expression' && typeof field.text === 'string' && field.text.length < 128 * 1024) {
-							const variable = /^var\.([A-Za-z_][A-Za-z0-9_-]*)$/.exec(field.text.trim())?.[1];
-							if (variable && variableIdByName.has(variable)) { clearBinding(); next.fieldBindings = { ...next.fieldBindings, [bindingKey(target)]: { variableId: variableIdByName.get(variable)! } }; delete result.extras.attrs[definition.name]; continue; }
+							const reference = variableReference(field.text);
+							if (reference && variableIdByName.has(reference.name)) { clearBinding(); next.fieldBindings = { ...next.fieldBindings, [bindingKey(target)]: reference.path.length ? { variableId: variableIdByName.get(reference.name)!, path: reference.path } : { variableId: variableIdByName.get(reference.name)! } }; delete result.extras.attrs[definition.name]; continue; }
 							try {
 								const parsed = parseHcl('value = ' + field.text);
 								if (!parsed.blocks.length && Object.keys(parsed.attrs).length === 1 && Object.hasOwn(parsed.attrs, 'value')) { clearBinding(); result.extras.attrs[definition.name] = parsed.attrs.value; }
