@@ -36,7 +36,8 @@ export type GraphPresentationAction =
 	| { type: 'pin'; id: string; position: Position }
 	| { type: 'unpin'; id: string }
 	| { type: 'clearPins' }
-	| { type: 'toggleExpanded'; id: string };
+	| { type: 'toggleExpanded'; id: string }
+	| { type: 'restore'; state: Partial<GraphPresentation> };
 
 export function graphPresentationReducer(state: GraphPresentation, action: GraphPresentationAction): GraphPresentation {
 	switch (action.type) {
@@ -44,6 +45,7 @@ export function graphPresentationReducer(state: GraphPresentation, action: Graph
 		case 'pin': return { ...state, pins: { ...state.pins, [action.id]: { x: action.position.x, y: action.position.y } } };
 		case 'unpin': { const pins = { ...state.pins }; delete pins[action.id]; return { ...state, pins }; }
 		case 'clearPins': return { ...state, pins: {} };
+		case 'restore': return { ...defaultGraphPresentation, ...action.state, focus: undefined };
 		case 'toggleExpanded': return { ...state, expanded: state.expanded.includes(action.id) ? state.expanded.filter(id => id !== action.id) : [...state.expanded, action.id] };
 	}
 }
@@ -59,4 +61,31 @@ export function graphEditAllowed(action: Action): boolean {
 		case 'bindVariable': case 'bindResourceRef': case 'useInheritance': return true;
 		default: return false;
 	}
+}
+
+const allowed = {
+	lens: ['all', 'dependencies', 'topology', 'runtime', 'observability', 'security'],
+	layout: ['layers', 'scopes', 'tree', 'bundled'],
+	route: ['curved', 'orthogonal', 'straight'],
+	density: ['auto', 'detailed', 'compact'],
+	overlay: ['none', 'plan', 'order', 'impact'],
+} as const;
+/** The persisted shape: everything except a transient focus. Pins stay graph-local. */
+export function serialiseGraphPresentation(state: GraphPresentation): Omit<GraphPresentation, 'focus'> {
+	const { focus: _focus, ...rest } = state;
+	const pins: Record<string, Position> = {};
+	for (const [id, point] of Object.entries(state.pins).slice(0, 512)) { if (Number.isFinite(point.x) && Number.isFinite(point.y)) { pins[id] = { x: Math.round(point.x), y: Math.round(point.y) }; } }
+	return { ...rest, pins, expanded: state.expanded.slice(0, 512) };
+}
+/** Reads a stored presentation, ignoring unknown values (for example from an older Studio). */
+export function parseGraphPresentation(value: unknown): Partial<GraphPresentation> | undefined {
+	if (!value || typeof value !== 'object') { return undefined; }
+	const raw = value as Record<string, unknown>; const out: Record<string, unknown> = {};
+	for (const [key, values] of Object.entries(allowed)) { if (typeof raw[key] === 'string' && (values as readonly string[]).includes(raw[key] as string)) { out[key] = raw[key]; } }
+	if (raw.spacing === 'auto' || (typeof raw.spacing === 'number' && raw.spacing >= 100 && raw.spacing <= 300)) { out.spacing = raw.spacing; }
+	if (typeof raw.height === 'number' && raw.height >= 100 && raw.height <= 300) { out.height = raw.height; }
+	if (typeof raw.showMembership === 'boolean') { out.showMembership = raw.showMembership; }
+	if (Array.isArray(raw.expanded)) { out.expanded = raw.expanded.filter(id => typeof id === 'string'); }
+	if (raw.pins && typeof raw.pins === 'object') { out.pins = Object.fromEntries(Object.entries(raw.pins as Record<string, Position>).filter(([, point]) => point && Number.isFinite(point.x) && Number.isFinite(point.y)).map(([id, point]) => [id, { x: point.x, y: point.y }])); }
+	return out as Partial<GraphPresentation>;
 }

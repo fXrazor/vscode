@@ -21,7 +21,7 @@ import { ResourceWorkspace } from './ResourceWorkspace.tsx';
 import { ResourceCatalogue } from './ResourceCatalogue.tsx';
 import { DesignCanvas } from './DesignCanvas.tsx';
 import { TechnicalGraph } from './TechnicalGraph.tsx';
-import { defaultGraphPresentation, graphEditAllowed, graphPresentationReducer } from './graphPresentation.ts';
+import { defaultGraphPresentation, graphEditAllowed, graphPresentationReducer, parseGraphPresentation, serialiseGraphPresentation } from './graphPresentation.ts';
 import { hubSpokeArchitecture } from './graphFixtures.ts';
 import { CodePanel } from './CodePanel.tsx';
 import { ModuleImport, type ModuleReference } from './ModuleImport.tsx';
@@ -183,6 +183,10 @@ export function Studio() {
 					}
 					if (typeof incoming.viewState?.inspectorOpen === 'boolean') {
 						setInspectorOpen(incoming.viewState.inspectorOpen);
+					}
+					const storedGraph = parseGraphPresentation(incoming.viewState?.graph);
+					if (storedGraph) {
+						presentGraph({ type: 'restore', state: storedGraph });
 					}
 					if (incoming.viewState?.viewports) {
 						viewport.current = { ...viewport.current, ...incoming.viewState.viewports };
@@ -425,11 +429,12 @@ export function Studio() {
 					inspectorOpen,
 					libraryOpen,
 					viewports: viewport.current,
+					graph: serialiseGraphPresentation(graphPresentation),
 				}),
 			});
 		}, 350);
 		return () => clearTimeout(timer);
-	}, [hostBridge, hostSnapshot, architecture, mode, theme, selectedId, workspaceOpen, inspectorOpen, libraryOpen]);
+	}, [hostBridge, hostSnapshot, architecture, mode, theme, selectedId, workspaceOpen, inspectorOpen, libraryOpen, graphPresentation]);
 
 	const inspectModuleResource = useCallback((moduleName: string) => {
 		if (!hostBridge.isHosted || !hostSnapshot || !moduleName) {

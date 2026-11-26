@@ -10,7 +10,8 @@ import { sampleArchitecture } from './fixture.ts';
 import { createHistory, historyReducer, type Action } from './model.ts';
 import { applyWaves, graphOverlays, lensEdges, matchesQuery, neighbourhood, orderingCycles, portId, projectTechnicalGraph, traceNode } from './technicalGraph.ts';
 import { layerOrder, layoutTechnicalGraph } from './technicalGraphLayout.ts';
-import { defaultGraphPresentation, graphEditAllowed, graphPresentationReducer } from './graphPresentation.ts';
+import { defaultGraphPresentation, graphEditAllowed, graphPresentationReducer, parseGraphPresentation, serialiseGraphPresentation } from './graphPresentation.ts';
+import { buildHostViewState } from './serviceAdapter.ts';
 
 const layout = (architecture = hubSpokeArchitecture(), options: Partial<Parameters<typeof layoutTechnicalGraph>[1]> = {}) => {
 	const snapshot = projectTechnicalGraph(architecture);
@@ -154,4 +155,19 @@ test('spacing: auto opens gaps crossed by many lines, percentages scale, cards n
 		for (const a of boxes) { for (const b of boxes) { if (a.id < b.id) { assert.ok(a.x + a.width <= b.x || b.x + b.width <= a.x || a.y + a.height <= b.y || b.y + b.height <= a.y, a.id + ' overlaps ' + b.id); } } }
 		for (const lane of r.lanes) { for (const id of lane.members ?? []) { assert.ok(r.positions[id].y >= lane.y && r.positions[id].y + r.sizes[id].height <= lane.y + lane.height, id + ' outside ' + lane.id); } }
 	}
+});
+
+test('graph presentation persists under its own key and never as design positions', () => {
+	const architecture = hubSpokeArchitecture();
+	let state = graphPresentationReducer(defaultGraphPresentation, { type: 'set', patch: { lens: 'runtime', layout: 'tree', spacing: 150, height: 200, focus: { id: 'aks', depth: 2 } } });
+	state = graphPresentationReducer(state, { type: 'pin', id: 'aks', position: { x: 9999.4, y: -40.6 } });
+	const stored = serialiseGraphPresentation(state);
+	assert.equal('focus' in stored, false); assert.deepEqual(stored.pins, { aks: { x: 9999, y: -41 } });
+	const view = buildHostViewState({ architecture, mode: 'technical', theme: 'light', selectedId: '', focusedWorkspaceOpen: false, inspectorOpen: false, libraryOpen: false, graph: stored });
+	const aks = architecture.resources.find(resource => resource.id === 'aks')!;
+	assert.deepEqual(view.nodePositions.visual?.aks, { x: Math.round(aks.positions.visual.x), y: Math.round(aks.positions.visual.y) });
+	assert.deepEqual(view.graph?.pins, { aks: { x: 9999, y: -41 } });
+	const restored = graphPresentationReducer(defaultGraphPresentation, { type: 'restore', state: parseGraphPresentation(JSON.parse(JSON.stringify(view.graph)))! });
+	assert.equal(restored.lens, 'runtime'); assert.equal(restored.layout, 'tree'); assert.equal(restored.spacing, 150); assert.equal(restored.focus, undefined);
+	assert.deepEqual(parseGraphPresentation({ lens: 'bogus', spacing: 10, pins: { a: { x: 'no' } } }), { pins: {} });
 });

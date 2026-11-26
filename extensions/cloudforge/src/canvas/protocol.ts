@@ -447,6 +447,47 @@ export interface CanvasViewState {
 	readonly nodePositions: Partial<Record<CanvasViewMode, Readonly<Record<string, CanvasPoint>>>>;
 	readonly checkpoints: readonly ArchitectureCheckpoint[];
 	readonly sampleContext: SampleValidationContext | null;
+	/**
+	 * Technical Graph presentation (lens, layout, spacing, graph-only pins). Stored apart from
+	 * `nodePositions` so the graph can never move a resource in the Architecture design.
+	 */
+	readonly graph?: CanvasGraphViewState;
+}
+
+export interface CanvasGraphViewState {
+	readonly lens: string;
+	readonly layout: string;
+	readonly route: string;
+	readonly density: string;
+	readonly overlay: string;
+	readonly spacing: 'auto' | number;
+	readonly height: number;
+	readonly showMembership: boolean;
+	readonly expanded: readonly string[];
+	readonly pins: Readonly<Record<string, CanvasPoint>>;
+}
+
+const graphEnums = {
+	lens: ['all', 'dependencies', 'topology', 'runtime', 'observability', 'security'],
+	layout: ['layers', 'scopes', 'tree', 'bundled'],
+	route: ['curved', 'orthogonal', 'straight'],
+	density: ['auto', 'detailed', 'compact'],
+	overlay: ['none', 'plan', 'order', 'impact'],
+} as const;
+
+/** Keeps only known graph presentation values; unknown values fall back to the graph defaults. */
+export function sanitizeGraphViewState(value: unknown): CanvasGraphViewState | undefined {
+	if (!isRecord(value)) {
+		return undefined;
+	}
+	const pick = (key: keyof typeof graphEnums): string => {
+		const raw = value[key]; const allowed: readonly string[] = graphEnums[key];
+		return typeof raw === 'string' && allowed.includes(raw) ? raw : allowed[0];
+	};
+	const spacing = value.spacing === 'auto' ? 'auto' : typeof value.spacing === 'number' && Number.isFinite(value.spacing) ? Math.min(300, Math.max(100, Math.round(value.spacing))) : 'auto';
+	const height = typeof value.height === 'number' && Number.isFinite(value.height) ? Math.min(300, Math.max(100, Math.round(value.height))) : 100;
+	const expanded = Array.isArray(value.expanded) ? [...new Set(value.expanded.filter(isOpaqueId))].slice(0, MAX_NODE_POSITIONS) : [];
+	return { lens: pick('lens'), layout: pick('layout'), route: pick('route'), density: pick('density'), overlay: pick('overlay'), spacing, height, showMembership: value.showMembership === true, expanded, pins: sanitizeNodePositionMap(value.pins) ?? {} };
 }
 
 export type CanvasNoticeKind = 'stale' | 'unavailable' | 'info';
@@ -866,6 +907,7 @@ export function sanitizeViewState(value: unknown): CanvasViewState {
 		}
 	}
 
+	const graph = sanitizeGraphViewState(value.graph);
 	const nodePositions: Partial<Record<CanvasViewMode, Readonly<Record<string, CanvasPoint>>>> = {};
 	if (isRecord(value.nodePositions)) {
 		const visualPos = sanitizeNodePositionMap(value.nodePositions.visual);
@@ -991,6 +1033,7 @@ export function sanitizeViewState(value: unknown): CanvasViewState {
 		nodePositions,
 		checkpoints,
 		sampleContext,
+		...(graph ? { graph } : {}),
 	};
 }
 

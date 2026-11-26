@@ -31,6 +31,7 @@ import type {
 	HostPoint,
 	HostValidationRun,
 	HostViewport,
+	HostGraphViewState,
 	HostViewState,
 } from './webviewBridge.ts';
 
@@ -773,6 +774,8 @@ export function buildHostViewState(params: {
 	readonly inspectorOpen: boolean;
 	readonly libraryOpen: boolean;
 	readonly viewports?: Partial<Record<'visual' | 'technical', HostViewport>>;
+	/** Graph presentation, persisted under its own key so pins never become design positions. */
+	readonly graph?: HostGraphViewState;
 }): HostViewState {
 	const visualPositions: Record<string, HostPoint> = {};
 	const technicalPositions: Record<string, HostPoint> = {};
@@ -819,6 +822,7 @@ export function buildHostViewState(params: {
 		},
 		checkpoints: [],
 		sampleContext: null,
+		...(params.graph ? { graph: params.graph } : {}),
 	};
 }
 

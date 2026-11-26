@@ -77,6 +77,21 @@ export interface HostViewState {
 	readonly nodePositions: Partial<Record<'visual' | 'technical', Readonly<Record<string, HostPoint>>>>;
 	readonly checkpoints: readonly unknown[];
 	readonly sampleContext: unknown;
+	/** Technical Graph presentation and graph-only pins; never merged into nodePositions. */
+	readonly graph?: HostGraphViewState;
+}
+
+export interface HostGraphViewState {
+	readonly lens: string;
+	readonly layout: string;
+	readonly route: string;
+	readonly density: string;
+	readonly overlay: string;
+	readonly spacing: 'auto' | number;
+	readonly height: number;
+	readonly showMembership: boolean;
+	readonly expanded: readonly string[];
+	readonly pins: Readonly<Record<string, HostPoint>>;
 }
 
 export interface HostCloudRegion {
