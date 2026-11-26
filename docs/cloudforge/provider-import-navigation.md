@@ -1,5 +1,17 @@
 # Provider archive import navigation
 
+## Follow-up: shared direct import — 26 November 2026
+
+Current source checkpoint **`f4000cd3401f67ac7a4f4dceb5d9b280544b357f`**, same branch/worktree. Dale requested continued work. Refreshed and merged main **`df2168b7270`** first, preserving Claude's list-reference fix and Antigravity's canvas cloning/toolbar work exactly. Only the handoff introduction conflicted; both entries were retained. The separate `cloudforge.importMirrorPackage` command now calls the existing guided manager import, so the Providers view's existing import action also reaches the same five-step Back/review flow. Its prefill/readiness lookup and refresh callbacks are preserved. The direct command retains a blank version suggestion when none is known. Studio source and Providers view files were not edited.
+
+Fresh verification: **131/131 extension tests**, **20/20 installed development-host navigation checks** covering both manager and direct commands, extension and runner/test TypeScript, extension bundle build, and whitespace checks passed. Strict lint passed for the updated test and runner. Full-file lint of `extension.ts` reports one pre-existing `local/code-no-in-operator` warning at its unchanged Providers registry action (also present before this change).
+
+Installed desktop: `48d529c95579b144a1c5fc6836982967a5830772`; development extension SHA-256: `c7becfe8656c2dc24b8ff00c94944bfd90d7f2bc1b4231773f9d556d58e751af`. The isolated QA profile/storage was reused after confirming its previous process had closed. Installed app files were not changed. Evidence: `extensions/cloudforge/studio/output/provider-import-navigation/{results.json,provenance-direct.json,direct-review.png,extension-tests-direct.log}`. An external copy is at `C:/Users/dalep/.codex/visualizations/2026/11/26/01a216e1-525e-74f0-a26e-e7a5d5728866/provider-import-direct/`.
+
+This supersedes the earlier note below that direct-command reuse remained pending. Next: review/integrate this local branch when requested, then continue the authentic archive/native-dialog and populated Providers-view proof. No main push/merge or installer build was performed; no archive selection/import was executed.
+
+## Original manager checkpoint
+
 26 November 2026. Owner: Codex. Branch `codex/provider-import-navigation`, reusing the clean isolated checkout at `C:/Users/dalep/.codex/worktrees/guided-variable-values/CloudForge-Code`, from merged main `e58ba69c4dd`. The earlier `codex/guided-variable-values` checkpoint remains on its own branch.
 
 Dale asked to continue useful development without overlapping Claude's Studio work. Read-only inspection found Claude's JSON Crack, startup, Providers/Get Ready and Studio control updates already implemented, plus Antigravity's Network and connector changes on main. The inspected Claude/Antigravity checkouts were clean. This change completes Back navigation explicitly required by the existing [native provider-package workflow](offline-provider-management-spec.md), whose current import is a forward-only sequence.
