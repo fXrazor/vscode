@@ -116,6 +116,9 @@ html, body, #root { margin: 0; padding: 0; width: 100%; height: 100%; overflow: 
 .literal-control .literal-unset:hover { color: var(--danger); }
 .literal-actions { display: flex; justify-content: flex-end; }
 .literal-entry { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 6px; align-items: end; }
+.variable-collection-input { border: 0; margin: 0; padding: 0; min-width: 0; }
+.variable-collection-input label { display: grid; gap: 8px; min-width: 0; overflow-wrap: anywhere; }
+.variable-collection-input .literal-actions { gap: 6px; flex-wrap: wrap; }
 .literal-entry > .literal-group + .literal-remove { align-self: start; margin-top: 2px; }
 .literal-new-key { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
 .literal-new-key .literal-add { min-width: 72px; }
