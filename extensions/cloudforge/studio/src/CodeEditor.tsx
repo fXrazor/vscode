@@ -14,12 +14,17 @@ type Settings = { editor?: Partial<EditorPreferences> }
 import { defaultEditor, editorPalettes, editorPreferences, type EditorPalette, type EditorPreferences, type EditorTheme } from "./editor-appearance.ts"
 
 type Disposable = { dispose: () => void }
+type EditorRange = { startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number }
+export type RevealCode = { id: number; query?: string }
 interface EditorInstance extends Disposable {
   getValue: () => string
   setValue: (value: string) => void
   updateOptions: (options: Record<string, unknown>) => void
   onDidChangeModelContent: (listener: () => void) => Disposable
-  getModel: () => Disposable | null
+  getModel: () => (Disposable & { findMatches: (text: string, editable: boolean, regex: boolean, matchCase: boolean, separators: string | null, captures: boolean, limit?: number) => { range: EditorRange }[] }) | null
+  setSelection: (range: EditorRange) => void
+  revealRangeInCenter: (range: EditorRange) => void
+  focus: () => void
   addAction: (action: { id: string; label: string; keybindings: number[]; precondition: string; run: () => void }) => Disposable
   getAction: (id: string) => { run: () => Promise<void> } | null
 }
@@ -88,7 +93,7 @@ export function EditorAppearance({ settings, setSettings }: { settings: Settings
   </div>
 }
 
-export function CodeEditor({ value, onChange, settings, label, language = "hcl", readOnly = false, onApply, onDiscard, compact = false }: { value: string; onChange: (value: string) => void; settings: Settings; label: string; language?: string; readOnly?: boolean; onApply?: () => void; onDiscard?: () => void; compact?: boolean }) {
+export function CodeEditor({ value, onChange, settings, label, language = "hcl", readOnly = false, onApply, onDiscard, compact = false, reveal }: { value: string; onChange: (value: string) => void; settings: Settings; label: string; language?: string; readOnly?: boolean; onApply?: () => void; onDiscard?: () => void; compact?: boolean; reveal?: RevealCode }) {
   const element = useRef<HTMLDivElement>(null)
   const instance = useRef<EditorInstance | null>(null)
   const syncing = useRef(false)
@@ -99,6 +104,14 @@ export function CodeEditor({ value, onChange, settings, label, language = "hcl",
   const [generation, setGeneration] = useState(0)
   const prefs = editorPreferences(settings.editor)
   const palette = prefs.theme === "custom" ? prefs.custom : editorPalettes[prefs.theme]
+  useEffect(() => {
+    if (!reveal || state !== "ready") return
+    const editor = instance.current
+    editor?.focus()
+    const matches = reveal.query ? editor?.getModel()?.findMatches(reveal.query, false, false, true, null, false, 2) : undefined
+    const match = matches?.length === 1 ? matches[0] : undefined
+    if (match) { editor?.setSelection(match.range); editor?.revealRangeInCenter(match.range) }
+  }, [reveal?.id, state, generation])
 
   useEffect(() => {
     let cancelled = false

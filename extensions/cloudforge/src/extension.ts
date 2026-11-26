@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { selectLockedSnapshot } from './canvas/lockedCatalogue';
 import {
 	commands,
 	ConfigurationTarget,
@@ -81,7 +82,6 @@ import {
 	parseCatalogueTypes,
 	parseFormCoverage,
 	parseSchemaPreview,
-	selectBestSnapshotForType,
 	type ServicePollEvent
 } from './canvas/serviceAdapters';
 
@@ -690,6 +690,13 @@ export function activate(context: ExtensionContext): void {
 	let lastValidationRunId: string | null = null;
 	let cachedCatalogueSnapshots: readonly CanvasCatalogueSnapshot[] | undefined;
 	const cachedLiveSchemas = new Map<string, FormSchema | null>();
+	const selectedSchemaKeys = new Map<string, string>();
+	const selectedSchemaSnapshots = new Map<string, CanvasCatalogueSnapshot>();
+	const schemaContext = () => {
+		const graph = provider.getGraph();
+		return graph ? JSON.stringify([graph.workspaceId, graph.architectureId, graph.sourceRevision]) : '';
+	};
+	const selectedSchemaKey = (kind: string, typeName: string) => selectedSchemaKeys.get(`${schemaContext()}:${kind}:${typeName}`);
 	const cachedCloudRegions = new Map<'azure' | 'aws' | 'google', CanvasCloudRegionsPayload | null>();
 
 	async function loadCloudRegions(provider: 'azure' | 'aws' | 'google'): Promise<CanvasCloudRegionsPayload | undefined> {
@@ -1056,16 +1063,23 @@ export function activate(context: ExtensionContext): void {
 	}
 
 	async function loadResourceSchema(kind: 'resource' | 'dataSource', typeName: string): Promise<FormSchema | null> {
-		const cacheKey = `${kind}:${typeName}`;
+		const graph = provider.getGraph();
+		if (!graph) { return null; }
+		const context = schemaContext();
+		// The guarded service supplies both requirement addresses and exact lock entries.
+		// Re-read for each selection: the graph's source hash need not include the lock file.
+		const report = await inspectArchitectureDependencies(graph.workspaceId, graph.architectureId, graph.sourceRevision);
+		const snapshots = await loadCatalogueSnapshots();
+		const snap = selectLockedSnapshot(snapshots, typeName, report, graph.sourceRevision);
+		const selectionKey = `${context}:${kind}:${typeName}`;
+		if (schemaContext() !== context) { return null; }
+		if (!snap) { selectedSchemaKeys.delete(selectionKey); return null; }
+		const cacheKey = `${selectionKey}:${snap.address}:${snap.version}:${snap.sha256}`;
+		selectedSchemaKeys.set(selectionKey, cacheKey);
+		selectedSchemaSnapshots.set(cacheKey, snap);
 		const cached = cachedLiveSchemas.get(cacheKey);
 		if (cached !== undefined) {
 			return cached;
-		}
-		const snapshots = await loadCatalogueSnapshots();
-		const snap = selectBestSnapshotForType(snapshots, typeName);
-		if (!snap) {
-			cachedLiveSchemas.set(cacheKey, null);
-			return null;
 		}
 		const result = await callService<unknown>('getResourceFormSchema', {
 			key: {
@@ -1084,6 +1098,7 @@ export function activate(context: ExtensionContext): void {
 		const bundled = lookupBundledSchema({ kind: kind === 'dataSource' ? 'data' : 'resource', resourceType: typeName });
 		let adapted = mapRustFormSchemaToCanvasFormSchema(result.value, bundled) ?? null;
 		if (adapted) {
+			adapted = { ...adapted, selection: { sourceRevision: graph.sourceRevision, address: snap.address, snapshotSha256: snap.sha256, lockedVersionVerified: true } };
 			const coverage = await callService<unknown>('getCatalogueCoverage', {
 				key: { address: snap.address, version: snap.version, formatVersion: snap.formatVersion, sha256: snap.sha256 },
 				kind,
@@ -1341,8 +1356,13 @@ export function activate(context: ExtensionContext): void {
 		},
 		async onRenderResourceDraft(resourceId, draft) {
 			const typeName = typeof draft.typeName === 'string' ? draft.typeName : '';
-			const snap = selectBestSnapshotForType(await loadCatalogueSnapshots(), typeName);
-			if (!snap) {
+			const graph = provider.getGraph();
+			const previousKey = selectedSchemaKey('resource', typeName);
+			if (!graph?.nodes.some(node => node.id === resourceId && node.resourceType === typeName)) { return null; }
+			const schema = await loadResourceSchema('resource', typeName);
+			const currentKey = selectedSchemaKey('resource', typeName);
+			const snap = currentKey ? selectedSchemaSnapshots.get(currentKey) : undefined;
+			if (!schema || !snap || !previousKey || previousKey !== currentKey || provider.getGraph() !== graph) {
 				return null;
 			}
 			const result = await callService<unknown>('renderResourceDraft', {
@@ -1419,11 +1439,14 @@ export function activate(context: ExtensionContext): void {
 			return graph ? toCanvasSnapshot(graph, currentArchitectureName) : undefined;
 		},
 		getCachedSchema(kind, typeName) {
-			return cachedLiveSchemas.get(`${kind}:${typeName}`) ?? undefined;
+			const key = selectedSchemaKey(kind, typeName);
+			return key ? cachedLiveSchemas.get(key) ?? undefined : undefined;
 		},
 		listCachedSchemas() {
 			const out: FormSchema[] = [];
-			for (const schema of cachedLiveSchemas.values()) {
+			for (const [selection, key] of selectedSchemaKeys) {
+				if (!selection.startsWith(schemaContext() + ':')) { continue; }
+				const schema = cachedLiveSchemas.get(key);
 				if (schema) {
 					out.push(schema);
 				}

@@ -7,6 +7,7 @@ import { parseHcl, HclError } from './cloudlab-core/hcl.ts';
 import { isExpr, isRef, type Value } from './cloudlab-core/model.ts';
 import { getDef, type AttrDef } from './cloudlab-core/catalog/index.ts';
 import { resourceDefinition } from './fixture.ts';
+import type { TerraformExtraBody } from './additionalTerraform.ts';
 
 export const variableTypes = ['string', 'number', 'bool', 'list(string)', 'map(string)', 'any'] as const;
 export type VariableValue = string | number | boolean | null | VariableValue[] | { [key: string]: VariableValue };
@@ -33,6 +34,10 @@ export function variableError(variable: VariableDefinition, variables: VariableD
 export function variableUses(architecture: Architecture): Map<string, Set<string>> {
 	const uses = new Map<string, Set<string>>();
 	const values = (blocks: ResourceBlock[]): string[] => blocks.flatMap(block => [...Object.values(block.values), ...values(block.blocks)]);
+	const expressions = (body: TerraformExtraBody | undefined): string[] => {
+		const visit = (value: Value): string[] => isExpr(value) ? [value.$expr] : Array.isArray(value) ? value.flatMap(visit) : value !== null && typeof value === 'object' ? Object.values(value).flatMap(visit) : [];
+		return body ? [...Object.values(body.attrs).flatMap(visit), ...body.blocks.flatMap(block => expressions(block.body))] : [];
+	};
 	for (const resource of architecture.resources) {
 		for (const binding of Object.values(resource.fieldBindings ?? {})) {
 			const variable = architecture.variables?.find(item => item.id === binding.variableId);
@@ -46,7 +51,7 @@ export function variableUses(architecture: Architecture): Map<string, Set<string
     const ids = uses.get(input) ?? new Set<string>(); ids.add(resource.id); uses.set(input, ids);
    }
   }
-		for (const value of [resource.region, ...Object.values(resource.settings), ...values(resource.blocks)]) {
+		for (const value of [resource.region, ...Object.values(resource.settings), ...values(resource.blocks), ...expressions(resource.terraformExtras)]) {
 			for (const match of value.matchAll(/\bvar\.([A-Za-z_][A-Za-z0-9_-]*)/g)) {
 				const ids = uses.get(match[1]) ?? new Set<string>(); ids.add(resource.id); uses.set(match[1], ids);
 			}

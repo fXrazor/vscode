@@ -4,9 +4,11 @@ import { resourceDefinition, providerRegions } from './fixture.ts';
 import { getDef, type AttrDef } from './cloudlab-core/catalog/index.ts';
 import { emptyProject, isExpr, isRef, type ArchNode, type Project, type Value } from './cloudlab-core/model.ts';
 import { generate, nodeBlock } from './cloudlab-core/terraform.ts';
-import { blockToConfig, parseHcl } from './cloudlab-core/hcl.ts';
+import { blockToConfig, parseHcl, type HclBlock } from './cloudlab-core/hcl.ts';
 import { bindingKey, boundVariable, regionAttribute, fieldAliases as aliases, type FieldTarget } from './fieldBindings.ts';
 import { inheritedReferences } from './resourceHierarchy.ts';
+import { includeAdditionalTerraform, resourceFromTerraform } from './additionalTerraform.ts';
+import type { HostFormSchema } from './liveSchema.ts';
 
 type Binding = { path: string[]; target: 'name' | 'region' | 'setting' | 'block'; key: string; blockId?: string; original: string };
 type Projected = { project: Project; bindings: Map<string, Binding[]> };
@@ -46,7 +48,7 @@ function valueFor(text: string, attr?: Pick<AttrDef, 'type'>): Value {
 	if (/^var\.[A-Za-z_][A-Za-z0-9_-]*$/.test(text)) { return { $expr: text }; }
 	if (attr?.type === 'number') { const number = Number(text); if (text.trim() && Number.isFinite(number)) { return number; } }
 	if (attr?.type === 'bool') { if (['true', 'Enabled'].includes(text)) { return true; } if (['false', 'Disabled'].includes(text)) { return false; } }
-	if (attr?.type === 'list' || attr?.type === 'map') { try { return JSON.parse(text) as Value; } catch { return attr.type === 'list' ? [text] : text; } }
+	if (attr?.type === 'list' || attr?.type === 'map' || attr?.type === 'json') { try { return JSON.parse(text) as Value; } catch { return attr.type === 'list' ? [text] : text; } }
 	return text;
 }
 
@@ -74,7 +76,7 @@ export function projectTerraform(architecture: Architecture): Projected {
 		else {
 			if (!def || def.attributes.some(attr => attr.name === 'name')) { node.config.name = resolve({ kind: 'name' }, resource.name); list.push({ path: ['name'], target: 'name', key: 'name', original: resource.name }); }
 			const regionField = regionAttribute(resource);
-			if (regionField) { node.config[regionField] = resolve({ kind: 'region' }, regionCode(resource.region)); list.push({ path: [regionField], target: 'region', key: regionField, original: resource.region }); }
+			if (regionField && (resource.region.trim() || resource.fieldBindings?.[bindingKey({ kind: 'region' })])) { node.config[regionField] = resolve({ kind: 'region' }, regionCode(resource.region)); list.push({ path: [regionField], target: 'region', key: regionField, original: resource.region }); }
 			for (const [key, text] of Object.entries(resource.settings)) {
 				const path = (resource.catalogue ? key : aliases[key] ?? key.toLowerCase().replace(/\s+/g, '_')).split('.');
 				const attr = attribute(def?.attributes, path) ?? resource.catalogue?.fields.find(field => field.name === key);
@@ -109,21 +111,21 @@ export function terraformCode(architecture: Architecture, resourceId?: string, f
 	const { project } = projectTerraform(architecture);
 	const node = project.nodes.find(node => node.id === resourceId);
 	if (node) {
-		return nodeBlock(project, node);
+		return includeAdditionalTerraform(nodeBlock(project, node), architecture.resources.filter(resource => resource.id === node.id));
 	}
 	const files = generate(project).files;
 	if (fileName) {
 		if (files[fileName]) {
-			return files[fileName];
+			return includeAdditionalTerraform(files[fileName], architecture.resources);
 		}
-		return files['main.tf'] ?? '# No resources in ' + fileName + '.\n';
+		return includeAdditionalTerraform(files['main.tf'] ?? '# No resources in ' + fileName + '.\n', architecture.resources);
 	}
 	const resourceFiles = projectResourceFiles(architecture);
 	if (resourceFiles.length <= 1) {
-		return files[resourceFiles[0] ?? 'main.tf'] ?? '# No resources in this architecture.\n';
+		return includeAdditionalTerraform(files[resourceFiles[0] ?? 'main.tf'] ?? '# No resources in this architecture.\n', architecture.resources);
 	}
 	return resourceFiles
-		.map(file => files[file] ? `# --- ${file} ---\n${files[file].trimEnd()}` : '')
+		.map(file => files[file] ? `# --- ${file} ---\n${includeAdditionalTerraform(files[file], architecture.resources).trimEnd()}` : '')
 		.filter(Boolean)
 		.join('\n\n') + '\n';
 }
@@ -134,17 +136,28 @@ function leafPaths(value: Value, path: string[] = []): string[][] {
 }
 
 /** Reject edits we cannot represent rather than silently losing unsupported HCL. */
-export function applyTerraformDraft(architecture: Architecture, code: string, resourceId?: string): Resource[] {
+export function applyTerraformDraft(architecture: Architecture, code: string, resourceId?: string, options?: { allowAdditional?: boolean; schema?: HostFormSchema }): Resource[] {
 	const { project, bindings } = projectTerraform(architecture); const before = terraformCode(architecture, resourceId);
 	const originalComments = new Set(before.split('\n').filter(line => line.trim().startsWith('#')).map(line => line.trim()));
 	if (code.includes('/*') || code.split('\n').some(line => /^\s*(#|\/\/)/.test(line) && !originalComments.has(line.trim())) || /\S\s+(#|\/\/)/.test(code)) { throw new Error('Keep new comments in native source files. This preview cannot preserve custom source comments; your draft is retained.'); }
 	const file = parseHcl(code); const expected = resourceId ? project.nodes.filter(node => node.id === resourceId) : project.nodes;
+	const needsAdditional = (block: HclBlock): boolean => block.blocks.some(child => child.labels.length > 0 || ['dynamic', 'lifecycle'].includes(child.type) || needsAdditional(child));
+	if (!options?.allowAdditional && file.blocks.some(needsAdditional)) { throw new Error('Use the resource-scoped Terraform editor to review additional configuration. Your draft is retained.'); }
 	if (new Set(expected.map(node => node.type + '.' + node.name)).size !== expected.length || new Set(file.blocks.map(block => block.type + '.' + block.labels.join('.'))).size !== file.blocks.length) { throw new Error('Resolve duplicate Terraform identifiers before applying code.'); }
 	if (file.blocks.length !== expected.length || Object.keys(file.attrs).length) { throw new Error('Adding or removing resource blocks in code is not supported yet. Your draft is retained.'); }
 	return expected.map(node => {
 		if (node.kind === 'module') { throw new Error('Module code apply requires the typed module contract. Your draft is retained.'); }
 		const block = file.blocks.find(block => block.type === 'resource' && block.labels[0] === node.type && block.labels[1] === node.name);
 		if (!block) { throw new Error('Resource type and Terraform identifier must stay unchanged in this editor.'); }
+		if (options?.allowAdditional && resourceId) {
+			const resource = architecture.resources.find(resource => resource.id === node.id)!;
+			const next = resourceFromTerraform(resource, block, parseHcl(before).blocks[0], options.schema);
+			const projected = parseHcl(terraformCode({ ...architecture, resources: architecture.resources.map(resource => resource.id === next.id ? next : resource) }, next.id)).blocks[0];
+			const normalize = (value: unknown): unknown => Array.isArray(value) ? value.map(normalize) : value !== null && typeof value === 'object' ? Object.fromEntries(Object.entries(value).sort(([left], [right]) => left.localeCompare(right)).map(([key, child]) => [key, normalize(child)])) : value;
+			const semanticBlock = (value: HclBlock): unknown => ({ type: value.type, labels: value.labels, attrs: normalize(value.attrs), blocks: [...value.blocks].sort((left, right) => left.type.localeCompare(right.type)).map(semanticBlock) });
+			if (JSON.stringify(semanticBlock(projected)) !== JSON.stringify(semanticBlock(block))) { throw new Error('This Terraform cannot be preserved exactly in the resource model. The unapplied draft is retained.'); }
+			return next;
+		}
 		const repeats = new Set<string>(); const collect = (attrs: AttrDef[]) => attrs.forEach(attr => { if (attr.repeat) { repeats.add(attr.name); } collect(attr.children ?? []); }); collect(getDef(node.type)?.attributes ?? []);
 		const config = blockToConfig(block, repeats); const fields = bindings.get(node.id)!;
 		const baseline = blockToConfig(parseHcl(nodeBlock(project,node)).blocks[0],repeats);

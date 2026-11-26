@@ -7,7 +7,7 @@ import { isSensitiveProperty, type VariableDefinition } from './variables.ts';
 import { getDef, type AttrDef } from './cloudlab-core/catalog/index.ts';
 import { resourceDefinition } from './fixture.ts';
 import { inheritedReference, inheritedReferences, resourceAddress } from './resourceHierarchy.ts';
-import { liveSchemaAttributes, liveSchemaBlocks, liveSchemaOutputs, type LiveSchemaMap } from './liveSchema.ts';
+import { liveSchemaDefinitionTree, liveSchemaOutputs, type LiveSchemaMap } from './liveSchema.ts';
 
 export type FieldTarget = { kind: 'name' } | { kind: 'region' } | { kind: 'setting'; name: string } | { kind: 'block'; blockId: string; name: string };
 export type VariableBinding = { variableId: string };
@@ -68,21 +68,11 @@ export function fieldDefinition(resource: Resource, target: FieldTarget, liveSch
 	const curatedAttrs = getDef(typeName)?.attributes ?? [];
 	const live = liveSchemas?.[typeName];
 	const attrs: AttrDef[] = live
-		? [
-			...liveSchemaAttributes(live, curatedAttrs),
-			...liveSchemaBlocks(live, curatedAttrs).map(block => ({
-				name: block.type,
-				type: 'block' as const,
-				description: block.description ?? '',
-				required: block.required,
-				repeat: block.max > 1,
-				children: block.attributes ?? [],
-			})),
-		]
+		? liveSchemaDefinitionTree(live, curatedAttrs)
 		: curatedAttrs;
 	const lookup = (attributes: AttrDef[], path: string[]): AttrDef | undefined => { const field = attributes.find(item => item.name === path[0]); return path.length > 1 ? lookup(field?.children ?? [], path.slice(1)) : field; };
 	if (target.kind === 'name' || target.kind === 'region') { return { name: target.kind, type: 'string', description: '' }; }
-	if (target.kind === 'setting') { const field = lookup(attrs, resource.catalogue ? [target.name] : fieldPath(target.name)); const descriptor = resource.catalogue?.fields.find(field => field.name === target.name); return field ?? (descriptor ? { ...descriptor, description: descriptor.description ?? '' } : undefined); }
+	if (target.kind === 'setting') { const field = lookup(attrs, resource.catalogue ? [target.name] : fieldPath(target.name)); const descriptor = resource.catalogue?.fields.find(field => field.name === target.name); return field ?? (!live && descriptor ? { ...descriptor, description: descriptor.description ?? '' } : undefined); }
 	const visit = (blocks: ResourceBlock[], attributes: AttrDef[]): AttrDef | undefined => {
 		for (const block of blocks) { const definition = attributes.find(item => item.name === block.type); if (block.id === target.blockId) { return lookup(definition?.children ?? [], fieldPath(target.name)); } const found = visit(block.blocks, definition?.children ?? []); if (found) { return found; } }
 		return undefined;

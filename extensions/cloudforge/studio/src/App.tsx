@@ -7,7 +7,9 @@ import { endpointElementId, remapEndpoint } from './connectionEndpoints.ts';
 import { VariablePanel } from './VariablePanel.tsx';
 import { exportableArchitecture } from './variables.ts';
 import type { ShapeId } from './shapes.ts';
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
+import { catalogRevision, clearFormAttributes, ensureTypes, subscribeCatalog } from './cloudlab-core/catalog/index.ts';
+import { registerLiveFormSchema } from './providerCatalogue.ts';
 import type { ReactFlowInstance, Viewport } from '@xyflow/react';
 import {
 	createHistory, historyReducer, type Resource, type BoardItem, type DesignMode,
@@ -91,6 +93,7 @@ export function Studio() {
 	/** The canvas state and file names of the last successful save, adopted into the next baseline. */
 	const savedFilesRef = useRef<{ readonly state: Architecture; readonly files: ReadonlySet<string> } | null>(null);
 	const hostGraphRef = useRef<HostGraphSnapshot | null>(null);
+	const sourceValuesRef = useRef<ReturnType<typeof parseResourceValues>>(undefined);
 	const [hasSourceById, setHasSourceById] = useState<Readonly<Record<string, boolean>>>({});
 	const [hostNotice, setHostNotice] = useState<HostNotice | null>(null);
 	const [liveSchemas, setLiveSchemas] = useState<LiveSchemaMap>({});
@@ -128,6 +131,16 @@ export function Studio() {
 	const viewport = useRef<Partial<Record<DesignMode, Viewport>>>({});
 	const variablesButton = useRef<HTMLButtonElement>(null);
 	const architecture = history.present;
+	// Provider definitions are metadata. Loading them never enters semantic project history.
+	const providerMetadataRevision = useSyncExternalStore(subscribeCatalog, catalogRevision);
+	const catalogueTypes = [...new Set(architecture.resources.filter(resource => resource.kind !== 'module').map(resource => resourceDefinition(resource).type))].sort().join(',');
+	useEffect(() => { void ensureTypes(catalogueTypes.split(',').filter(Boolean)); }, [catalogueTypes]);
+	useEffect(() => {
+		const graph = hostGraphRef.current, base = hostBaselineRef.current, values = sourceValuesRef.current;
+		if (!graph || !base || !values || values.sourceRevision !== graph.sourceRevision) { return; }
+		const hydrated = hydrateResourceValues(base, graph, values.resources, values.variables);
+		if (hydrated !== base) { dispatch({ type: 'rebase', architecture: hydrated, base }); setHostBaseline(hydrated); hostBaselineRef.current = hydrated; }
+	}, [providerMetadataRevision]);
 	const selected = architecture.resources.find(resource => resource.id === selectedId);
 	const workspaceResource = architecture.resources.find(resource=>resource.id===workspaceResourceId);
 	const openDetails = useCallback((id:string)=>{setSelectedId(id);setWorkspaceResourceId(id);setWorkspaceOpen(true);},[]);
@@ -153,6 +166,11 @@ export function Studio() {
 		const unsubscribe = hostBridge.subscribe(incoming => {
 			switch (incoming.type) {
 				case 'graph': {
+					sourceValuesRef.current = undefined;
+					clearFormAttributes();
+					setLiveSchemas({});
+					setSchemaPreviews({});
+					requestedSchemasRef.current.clear();
 					const sameArch = hostArchitectureIdRef.current === incoming.graph.architectureId;
 					hostArchitectureIdRef.current = incoming.graph.architectureId;
 					// Project from what the files said last time, not from the canvas: unsaved canvas edits
@@ -231,6 +249,7 @@ export function Studio() {
 						break;
 					}
 					const hydrated = hydrateResourceValues(base, graph, parsed.resources, parsed.variables);
+					sourceValuesRef.current = parsed;
 					if (hydrated !== base) {
 						dispatch({ type: 'rebase', architecture: hydrated, base });
 						setHostBaseline(hydrated);
@@ -243,7 +262,11 @@ export function Studio() {
 					break;
 				case 'liveSchema':
 					if (incoming.schema) {
+						registerLiveFormSchema(incoming.schema);
 						setLiveSchemas(prev => ({ ...prev, [incoming.typeName]: incoming.schema! }));
+					} else {
+						clearFormAttributes(incoming.typeName);
+						setLiveSchemas(prev => { const next = { ...prev }; delete next[incoming.typeName]; return next; });
 					}
 					break;
 				case 'cloudRegions':
@@ -401,7 +424,7 @@ export function Studio() {
 		}
 		requestedSchemasRef.current.add(typeName);
 		hostBridge.post({ type: 'requestSchema', kind: 'resource', typeName });
-	}, [hostBridge, selected, liveSchemas]);
+	}, [hostBridge, selected, liveSchemas, hostSnapshot]);
 
 	// Mirror selection back to the extension host's native CloudForge Graph tree.
 	useEffect(() => {
@@ -830,7 +853,7 @@ export function Studio() {
       ) : selected ? (
 						<>
        {detailTab === 'form' && <div>
-							<ResourceFields resource={selected} dispatch={dispatch} architecture={architecture} liveSchemas={liveSchemas} cloudRegions={hostCloudRegions} moduleInspection={hostBridge.isHosted && hostSnapshot && selected.kind === 'module' ? { loading: !!moduleInspections[selected.name]?.loading, inspection: moduleInspections[selected.name]?.inspection ?? null, error: moduleInspections[selected.name]?.error, onInspect: () => inspectModuleResource(selected.name) } : undefined} hasSource={hostBridge.isHosted && !!hasSourceById[selected.id]} onOpenSource={hostBridge.isHosted ? () => hostBridge.post({ type: 'openSource', nodeId: selected.id }) : undefined} onRevealResource={openResource} onManageVariables={()=>{setInspectorCategory('variables');setDetailTab('form');requestAnimationFrame(()=>variablesButton.current?.focus());}} />
+							<ResourceFields resource={selected} dispatch={dispatch} architecture={architecture} liveSchemas={liveSchemas} cloudRegions={hostCloudRegions} moduleInspection={hostBridge.isHosted && hostSnapshot && selected.kind === 'module' ? { loading: !!moduleInspections[selected.name]?.loading, inspection: moduleInspections[selected.name]?.inspection ?? null, error: moduleInspections[selected.name]?.error, onInspect: () => inspectModuleResource(selected.name) } : undefined} hasSource={hostBridge.isHosted && !!hasSourceById[selected.id]} onOpenSource={hostBridge.isHosted ? () => hostBridge.post({ type: 'openSource', nodeId: selected.id }) : undefined} onRevealResource={openResource} onConfigureTerraform={()=>{setDetailTab('code');setInspectorOpen(true);}} onManageVariables={()=>{setInspectorCategory('variables');setDetailTab('form');requestAnimationFrame(()=>variablesButton.current?.focus());}} />
 							<div className="inspector-section"><h3>Connections</h3>
 								<p>{architecture.connections.filter(connection => endpointElementId(connection.target) === selected.id).length} incoming · {architecture.connections.filter(connection => endpointElementId(connection.source) === selected.id).length} outgoing</p>
 								<span className="muted">Design relationships</span>
@@ -853,7 +876,7 @@ export function Studio() {
 				</aside>
 			</div>
 			{message&&<div className="studio-action-status" role="status">{message}</div>}<footer className="sr-only"><span>{hostBridge.isHosted ? (hostSnapshot ? 'Connected · rev ' + hostSnapshot.sourceRevision.slice(0, 8) : 'Connecting') : (history.past.length ? 'Modified draft' : 'Original sample') + ' · In-memory preview'}</span></footer>
-			{workspaceResource && <ResourceWorkspace open={workspaceOpen} resource={workspaceResource} architecture={architecture} dispatch={dispatch} liveSchemas={liveSchemas} cloudRegions={hostCloudRegions} moduleInspection={hostBridge.isHosted && hostSnapshot && workspaceResource.kind === 'module' ? { loading: !!moduleInspections[workspaceResource.name]?.loading, inspection: moduleInspections[workspaceResource.name]?.inspection ?? null, error: moduleInspections[workspaceResource.name]?.error, onInspect: () => inspectModuleResource(workspaceResource.name) } : undefined} hostDiagnostics={hostFindings} hasSource={hostBridge.isHosted && !!hasSourceById[workspaceResource.id]} onOpenSource={hostBridge.isHosted ? () => hostBridge.post({ type: 'openSource', nodeId: workspaceResource.id }) : undefined} onSaveFile={hostBridge.isHosted && hostSnapshot ? file => openDraftSave(file) : undefined} onNavigate={id=>{setWorkspaceResourceId(id);setSelectedId(id);}} onClose={() => setWorkspaceOpen(false)} />}
+			{workspaceResource && <ResourceWorkspace open={workspaceOpen} resource={workspaceResource} schemaPreview={schemaPreviews[workspaceResource.id]} onRequestSchemaPreview={hostBridge.isHosted ? (resourceId, draft) => hostBridge.post({ type: 'renderResourceDraft', resourceId, draft }) : undefined} architecture={architecture} dispatch={dispatch} liveSchemas={liveSchemas} cloudRegions={hostCloudRegions} moduleInspection={hostBridge.isHosted && hostSnapshot && workspaceResource.kind === 'module' ? { loading: !!moduleInspections[workspaceResource.name]?.loading, inspection: moduleInspections[workspaceResource.name]?.inspection ?? null, error: moduleInspections[workspaceResource.name]?.error, onInspect: () => inspectModuleResource(workspaceResource.name) } : undefined} hostDiagnostics={hostFindings} hasSource={hostBridge.isHosted && !!hasSourceById[workspaceResource.id]} onOpenSource={hostBridge.isHosted ? () => hostBridge.post({ type: 'openSource', nodeId: workspaceResource.id }) : undefined} onSaveFile={hostBridge.isHosted && hostSnapshot ? file => openDraftSave(file) : undefined} onNavigate={id=>{setWorkspaceResourceId(id);setSelectedId(id);}} onClose={() => setWorkspaceOpen(false)} />}
 			{hostBridge.isHosted && <SaveAllDialog open={saveAllOpen} fileNames={saveAllFiles} busy={saving} preview={saveAllPreview} error={saveAllError} onRefreshPreview={requestSaveAll} onReviewFile={file => { setSaveAllOpen(false); openDraftSave(file); }} onApply={applySaveAll} onClose={() => setSaveAllOpen(false)} />}
 			{hostBridge.isHosted && <DraftSaveDialog open={saveDialogOpen} fileName={saveFileName} projectFiles={hostSnapshot ? projectResourceFiles(architecture) : undefined} contents={saveContents} busy={saving} preview={savePreview} error={saveError} onFileNameChange={setSaveFileName} onSelectProjectFile={selectDraftSaveProjectFile} onRefreshPreview={refreshDraftSavePreview} onApply={applyHostDraftSave} onClose={() => setSaveDialogOpen(false)} />}
 			{moduleImportOpen && <ModuleImport onClose={() => setModuleImportOpen(false)} onImport={importModule} />}
