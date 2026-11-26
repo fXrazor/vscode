@@ -104,9 +104,10 @@ export function ConnectionOverlays({ architecture, mode, selectedId, showLabels,
 				return <g key={link.id} className="react-flow__edge loose-connection" data-id={link.id} role="group" aria-roledescription="design connection" tabIndex={0} aria-label={'Design connection: ' + (link.label || 'canvas link')}
 					onClick={event => { event.stopPropagation(); onSelect(link.id); }}>
 					<defs><marker id={marker} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill={colour}/></marker></defs>
-					<path className="react-flow__edge-path" d={path} fill="none" stroke={colour} strokeWidth={link.width ?? 1.5} strokeDasharray={active ? '6 4' : connectionDash(link)} strokeLinecap="round" markerStart={link.startArrow ? `url(#${marker})` : undefined} markerEnd={link.endArrow === false ? undefined : `url(#${marker})`}/>
+					{active && <path className="connection-selection-halo" d={path} fill="none" stroke="var(--accent)" strokeOpacity={0.22} strokeWidth={(link.width ?? 1.5) + 8} strokeLinecap="round" pointerEvents="none"/>}
+						<path className="react-flow__edge-path" d={path} fill="none" stroke={colour} strokeWidth={link.width ?? 1.5} strokeDasharray={connectionDash(link)} strokeLinecap="round" markerStart={link.startArrow ? `url(#${marker})` : undefined} markerEnd={link.endArrow === false ? undefined : `url(#${marker})`}/>
 					<path className="loose-connection-hit" d={path} fill="none" stroke="transparent" strokeWidth={20 / zoom}/>
-					{link.label && (showLabels || active) && <g className="loose-connection-label"><rect x={labelX - (link.label.length * font * 0.6 + 12) / 2} y={textY - font * 0.7} width={link.label.length * font * 0.6 + 12} height={font * 1.4} rx={3} fill="var(--panel-solid)"/><text x={labelX} y={textY} textAnchor="middle" dominantBaseline="middle" fill={link.labelColor ?? 'var(--text)'} fontSize={font}>{link.label}</text></g>}
+					{link.label && (showLabels || active || labelIsAuthored(link)) && <g className="loose-connection-label"><rect x={labelX - (link.label.length * font * 0.6 + 12) / 2} y={textY - font * 0.7} width={link.label.length * font * 0.6 + 12} height={font * 1.4} rx={3} fill="var(--panel-solid)"/><text x={labelX} y={textY} textAnchor="middle" dominantBaseline="middle" fill={link.labelColor ?? 'var(--text)'} fontSize={font}>{link.label}</text></g>}
 				</g>;
 			})}
 		</svg>
@@ -134,6 +135,9 @@ export function ConnectionOverlays({ architecture, mode, selectedId, showLabels,
 		</div>}
 	</ViewportPortal>;
 }
+
+/** A label someone typed stays visible; only the automatic service edge-kind labels hide until hover or Show labels. */
+export const labelIsAuthored = (link: DesignConnection) => !!link.label && (!link.origin || link.label !== link.origin.edgeKind);
 
 const modifierKeys = (event: { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }) => ({ free: event.ctrlKey || event.metaKey, straight: event.shiftKey });
 

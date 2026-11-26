@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 import { shapeDefinitions, type ShapeId } from './shapes.ts';
 import { DesignEdge, type DesignEdgeType } from './DesignEdge.tsx';
-import { ConnectionOverlays } from './ConnectionOverlays.tsx';
+import { ConnectionOverlays, labelIsAuthored } from './ConnectionOverlays.tsx';
 import { DependencyTools, dependencyStyle } from './DependencyTools.tsx';
 import { ConnectionCreate } from './ConnectionCreate.tsx';
 import { canConnect, connectionAnchor } from './designConnections.ts';
@@ -197,7 +197,7 @@ export const DesignCanvas = memo(function DesignCanvas({
 		type: 'design' as const, selected: connection.id === selectedConnectionId, hidden: !showConnections,
 		markerStart: connection.startArrow ? { type: MarkerType.ArrowClosed, color: connection.stroke ?? '#7565bd', width: 15, height: 15 } : undefined,
 		markerEnd: connection.endArrow === false ? undefined : { type: MarkerType.ArrowClosed, color: connection.stroke ?? '#7565bd', width: 15, height: 15 },
-		data: { connection, showLabel: showLabels }, ariaLabel: 'Design connection: ' + (connection.label || endpointElementId(connection.source) + ' to ' + endpointElementId(connection.target))
+		data: { connection, showLabel: showLabels || labelIsAuthored(connection) }, ariaLabel: 'Design connection: ' + (connection.label || endpointElementId(connection.source) + ' to ' + endpointElementId(connection.target))
 	})), ...dependencies.map(dependency=>{
 		const active=selectedIds.includes(dependency.source)||selectedIds.includes(dependency.target);
 			return {...dependency,sourceHandle:'output',targetHandle:'input',type:'design' as const,hidden:!showConnections||!active&&!allDependencies&&dependency.id!==selectedDependency?.id,animated:false,className:'infrastructure-dependency',selected:dependency.id===selectedDependency?.id,data:{connection:{...dependency,source:elementEndpoint(dependency.source),target:elementEndpoint(dependency.target),pattern:'dotted' as const,...dependencyStyle(architecture,dependency.id),label:dependency.fields.join(', '),endArrow:false},showLabel:showLabels||active||dependency.id===selectedDependency?.id,dependency:true},ariaLabel:'Inherited dependency: '+dependency.fields.join(', ')};
@@ -457,7 +457,7 @@ export const DesignCanvas = memo(function DesignCanvas({
 				<label title="Snap to aligned edges and centres, or to equal spacing between neighbours, within 6 screen pixels. Grid snapping takes precedence."><input type="checkbox" checked={guides} onChange={event => {setGuides(event.target.checked);setGuideLines([]);}} />Alignment guides</label>
 				<label><input type="checkbox" checked={showConnections} onChange={event => setShowConnections(event.target.checked)} />Show connections</label>
 				<label><input type="checkbox" checked={allDependencies} onChange={event=>setAllDependencies(event.target.checked)}/>All inherited dependencies</label>
-				<label><input type="checkbox" checked={showLabels} onChange={event => setShowLabels(event.target.checked)} />Always show connection labels</label>
+				<label><input type="checkbox" checked={showLabels} onChange={event => setShowLabels(event.target.checked)} />Show automatic and dependency labels</label>
 				<button aria-pressed={minimap} onClick={() => setMinimap(value => !value)}>Minimap</button>
 				<details className="canvas-shortcuts"><summary>Keyboard shortcuts</summary><p>Ctrl / Cmd + click: extend selection<br/>Shift + drag: select an area<br/>Arrows: move 1 px; Shift + arrows: 10 px<br/>Enter: edit; Escape: clear selection<br/>V: select; H: pan; P: pen; T: text; N: note<br/>[ and ]: rotate drawings 15° (Shift: 1°)<br/>F: focus selection; Space + drag: pan<br/>Alt + F10: move to the selection toolbar; Escape: back to the canvas<br/>Copy, duplicate, group and layer actions are in the selection menu.</p></details>
 			</div></details>
