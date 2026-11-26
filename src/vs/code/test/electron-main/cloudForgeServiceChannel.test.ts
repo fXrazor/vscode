@@ -728,6 +728,33 @@ suite('CloudForgeServiceChannel', () => {
 		assert.strictEqual(validateCloudForgeServiceParams('listProviderVersions', { address, url: 'x' }), undefined);
 	});
 
+	test('validates Template Library params', () => {
+		assert.deepStrictEqual(validateCloudForgeServiceParams('listTemplates', {}), {});
+		assert.deepStrictEqual(
+			validateCloudForgeServiceParams('listTemplates', { query: 'hub spoke', providers: ['azure'], difficulties: ['advanced'], sort: 'name', offset: 0, limit: 20 }),
+			{ query: 'hub spoke', sort: 'name', offset: 0, limit: 20, providers: ['azure'], difficulties: ['advanced'] }
+		);
+		assert.strictEqual(validateCloudForgeServiceParams('listTemplates', { sort: 'popularity' }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('listTemplates', { limit: 0 }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('listTemplates', { limit: 201 }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('listTemplates', { providers: ['Azure'] }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('listTemplates', { providers: 'azure' }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('listTemplates', { query: 'x'.repeat(201) }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('listTemplates', { url: 'https://evil' }), undefined);
+
+		assert.deepStrictEqual(validateCloudForgeServiceParams('getTemplateDetails', { templateId: 'cloudforge.azure.hub-spoke' }), { templateId: 'cloudforge.azure.hub-spoke' });
+		assert.deepStrictEqual(validateCloudForgeServiceParams('getTemplateDetails', { templateId: 'cloudforge.azure.hub-spoke', version: '1.0.0' }), { templateId: 'cloudforge.azure.hub-spoke', version: '1.0.0' });
+		assert.strictEqual(validateCloudForgeServiceParams('getTemplateDetails', { templateId: '../etc' }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('getTemplateDetails', { templateId: 'single' }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('getTemplateDetails', { templateId: 'cloudforge.azure.hub-spoke', version: 'latest' }), undefined);
+
+		const scoped = { workspaceId: 'workspace-1', architectureId: 'architecture-1', templateId: 'cloudforge.azure.basic-vnet' };
+		assert.deepStrictEqual(validateCloudForgeServiceParams('checkTemplateCompatibility', scoped), scoped);
+		assert.strictEqual(validateCloudForgeServiceParams('checkTemplateCompatibility', { ...scoped, expectedSourceRevision: 'abc' }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('checkTemplateCompatibility', { workspaceId: 'workspace-1', templateId: 'cloudforge.azure.basic-vnet' }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('checkTemplateCompatibility', { ...scoped, rootPath: 'C:/x' }), undefined);
+	});
+
 	test('validates downloadProviderPackage params', () => {
 		const address = 'registry.terraform.io/hashicorp/azurerm';
 		assert.deepStrictEqual(validateCloudForgeServiceParams('downloadProviderPackage', { address, version: '3.116.0' }), { address, version: '3.116.0' });

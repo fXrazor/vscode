@@ -44,7 +44,8 @@ const cloudForgeMethods: ReadonlySet<string> = new Set<CloudForgeServiceMethod>(
 	'diffCatalogueSnapshots', 'auditExportReadiness',
 	'detectEngines', 'runEngineValidate', 'runEnginePlan',
 	'listMirrorPackages', 'checkOfflineMirrorReadiness', 'runEngineInitOffline', 'extractProviderSchemaFromMirror',
-	'importMirrorPackage', 'downloadProviderPackage', 'listProviderVersions', 'evictMirrorPackage', 'verifyMirrorIntegrity', 'planMirrorCleanup'
+	'importMirrorPackage', 'downloadProviderPackage', 'listProviderVersions', 'evictMirrorPackage', 'verifyMirrorIntegrity', 'planMirrorCleanup',
+	'listTemplates', 'getTemplateDetails', 'checkTemplateCompatibility'
 ]);
 
 /** The service allows `installGit` 10 minutes; the broker waits a little longer for its reply. */
@@ -95,6 +96,21 @@ const serviceErrorMessages: Readonly<Record<string, string>> = {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+const templateListSorts: ReadonlySet<string> = new Set(['recommended', 'name', 'difficulty', 'resources']);
+const templateListFacets = ['providers', 'categories', 'templateTypes', 'difficulties', 'certifications', 'sources'] as const;
+
+function isTemplateId(value: unknown): value is string {
+	return typeof value === 'string' && value.length <= 128 && /^[a-z0-9]+(-[a-z0-9]+)*(\.[a-z0-9]+(-[a-z0-9]+)*)+$/.test(value);
+}
+
+function isTemplateVersion(value: unknown): value is string {
+	return typeof value === 'string' && value.length <= 64 && /^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$/.test(value);
+}
+
+function isFacetList(value: unknown): value is string[] {
+	return Array.isArray(value) && value.length <= 32 && value.every(item => typeof item === 'string' && /^[a-z0-9-]{1,64}$/.test(item));
 }
 
 function hasOnlyKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
@@ -819,6 +835,62 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 				platform: value.platform,
 				expectedSha256: value.expectedSha256.toLowerCase(),
 				...(value.publisher === undefined ? {} : { publisher: value.publisher.trim() })
+			};
+		}
+		case 'listTemplates': {
+			if (!hasOnlyKeys(value, ['query', 'sort', 'offset', 'limit', ...templateListFacets])) {
+				return undefined;
+			}
+			if (value.query !== undefined && (typeof value.query !== 'string' || value.query.length > 200)) {
+				return undefined;
+			}
+			if (value.sort !== undefined && (typeof value.sort !== 'string' || !templateListSorts.has(value.sort))) {
+				return undefined;
+			}
+			if (value.offset !== undefined && (!Number.isInteger(value.offset) || (value.offset as number) < 0 || (value.offset as number) > 100_000)) {
+				return undefined;
+			}
+			if (value.limit !== undefined && (!Number.isInteger(value.limit) || (value.limit as number) < 1 || (value.limit as number) > 200)) {
+				return undefined;
+			}
+			const result: Record<string, unknown> = {};
+			for (const key of ['query', 'sort', 'offset', 'limit'] as const) {
+				if (value[key] !== undefined) {
+					result[key] = value[key];
+				}
+			}
+			for (const facet of templateListFacets) {
+				if (value[facet] !== undefined) {
+					if (!isFacetList(value[facet])) {
+						return undefined;
+					}
+					result[facet] = [...value[facet] as string[]];
+				}
+			}
+			return result;
+		}
+		case 'getTemplateDetails': {
+			if (!hasOnlyKeys(value, ['templateId', 'version']) || !isTemplateId(value.templateId) || (value.version !== undefined && !isTemplateVersion(value.version))) {
+				return undefined;
+			}
+			return { templateId: value.templateId, ...(value.version === undefined ? {} : { version: value.version }) };
+		}
+		case 'checkTemplateCompatibility': {
+			if (!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'expectedSourceRevision', 'templateId', 'version']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId) || !isTemplateId(value.templateId)) {
+				return undefined;
+			}
+			if (value.expectedSourceRevision !== undefined && (typeof value.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(value.expectedSourceRevision))) {
+				return undefined;
+			}
+			if (value.version !== undefined && !isTemplateVersion(value.version)) {
+				return undefined;
+			}
+			return {
+				workspaceId: value.workspaceId,
+				architectureId: value.architectureId,
+				templateId: value.templateId,
+				...(value.expectedSourceRevision === undefined ? {} : { expectedSourceRevision: value.expectedSourceRevision }),
+				...(value.version === undefined ? {} : { version: value.version })
 			};
 		}
 		case 'listProviderVersions': {

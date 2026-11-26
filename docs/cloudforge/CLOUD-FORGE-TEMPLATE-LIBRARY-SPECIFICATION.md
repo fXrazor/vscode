@@ -313,6 +313,16 @@ azure-hub-spoke-network-1.2.0.cftemplate.zip
 
 Why not generate Terraform dynamically from the resource catalogue? Studio's `terraformProjection.ts` already generates HCL from the canvas, but it covers the curated resource kinds and Studio's own representation, while templates need to carry arbitrary valid HCL (modules, `for_each`, dynamic blocks) that the canvas preserves through `terraformExtras`. Embedding HCL is the only option that guarantees the template means exactly what was tested. The canvas remains a projection, so there is still one source of truth.
 
+### Phase 2 implementation notes (26 November 2026)
+
+Changes from the text above, made while building slices 1–2 (CloudForge `claude/project-thread-2dm0k0`):
+
+- **Stored-only ZIP.** Template packages (`.cftemplate.zip`) contain uncompressed entries only, so the Rust service needs no inflate crate. Project bundles (`.cloudforge.zip`) keep deflate and are still read by Studio. Revisit if packages grow.
+- **Unknown manifest fields are ignored** (not rejected) so a 1.x reader can open later 1.y packages; an unknown major is refused. §2.4's "deny unknown fields" is superseded.
+- **Built-ins keep their original constraints.** The hub-spoke and AKS blueprints still declare AzureRM `~> 4.0`, so `checkTemplateCompatibility` reports a lock conflict against an AzureRM 5.14.0 project. This is deliberate (decision 6): ranges widen only after validation in Phase 4. Migrated built-ins are marked `experimental` until then.
+- **Built-in collection = 12 templates:** the basic-vnet example, the 6 Stage 12A blueprints (now including the AWS Transit Gateway landing zone added on main) and 5 former extension starters. The TS `TEMPLATE_LIBRARY` Azure Hub Network was dropped as superseded. The extension's TS copies are removed in Phase 3 when the UI switches to the service.
+- **Local module folders** in packages are refused for now (`MODULE_LOCAL_UNSUPPORTED`); packages hold one level of `terraform/` files.
+
 ### 2.5 Terraform and OpenTofu compatibility
 
 **Rules [Proposed]:**

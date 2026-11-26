@@ -34,12 +34,12 @@ type CloudForgeServiceMethod =
 	| 'previewFocusedSaveBatch' | 'applyFocusedSaveBatch'
 	| 'summarizeState' | 'listCloudConnections' | 'setCloudConnection' | 'storeCloudKey' | 'removeCloudConnection' | 'checkCloudSignIn'
 	| 'inspectDependencies' | 'readModule' | 'auditExportReadiness' | 'runEngineValidate' | 'runEnginePlan'
-	| 'checkOfflineMirrorReadiness' | 'runEngineInitOffline';
-type CloudForgeCatalogueMethod = 'inspectCatalogueSchemaFile' | 'importCatalogueSnapshot' | 'listCatalogueSnapshots' | 'listCatalogueTypes' | 'getResourceFormSchema' | 'getCatalogueCoverage' | 'renderResourceDraft' | 'listCloudRegions' | 'diffCatalogueSnapshots' | 'detectEngines' | 'listMirrorPackages' | 'extractProviderSchemaFromMirror' | 'importMirrorPackage' | 'downloadProviderPackage' | 'listProviderVersions' | 'evictMirrorPackage' | 'verifyMirrorIntegrity' | 'planMirrorCleanup';
+	| 'checkOfflineMirrorReadiness' | 'runEngineInitOffline' | 'checkTemplateCompatibility';
+type CloudForgeCatalogueMethod = 'inspectCatalogueSchemaFile' | 'importCatalogueSnapshot' | 'listCatalogueSnapshots' | 'listCatalogueTypes' | 'getResourceFormSchema' | 'getCatalogueCoverage' | 'renderResourceDraft' | 'listCloudRegions' | 'diffCatalogueSnapshots' | 'detectEngines' | 'listMirrorPackages' | 'extractProviderSchemaFromMirror' | 'importMirrorPackage' | 'downloadProviderPackage' | 'listProviderVersions' | 'evictMirrorPackage' | 'verifyMirrorIntegrity' | 'planMirrorCleanup' | 'listTemplates' | 'getTemplateDetails';
 type CloudForgeProjectMethod = 'createProject' | 'openProject' | 'grantProject' | 'forgetProjectAccess' | 'createWorkspaceFile' | 'inspectRepository' | 'importRepository' | 'removeRepository' | 'createArchitecture' | 'summarizeArchitectures' | 'installGit';
 
 const catalogueMethods: ReadonlySet<string> = new Set<CloudForgeCatalogueMethod>([
-	'inspectCatalogueSchemaFile', 'importCatalogueSnapshot', 'listCatalogueSnapshots', 'listCatalogueTypes', 'getResourceFormSchema', 'getCatalogueCoverage', 'renderResourceDraft', 'listCloudRegions', 'diffCatalogueSnapshots', 'detectEngines', 'listMirrorPackages', 'extractProviderSchemaFromMirror', 'importMirrorPackage', 'downloadProviderPackage', 'listProviderVersions', 'evictMirrorPackage', 'verifyMirrorIntegrity', 'planMirrorCleanup'
+	'inspectCatalogueSchemaFile', 'importCatalogueSnapshot', 'listCatalogueSnapshots', 'listCatalogueTypes', 'getResourceFormSchema', 'getCatalogueCoverage', 'renderResourceDraft', 'listCloudRegions', 'diffCatalogueSnapshots', 'detectEngines', 'listMirrorPackages', 'extractProviderSchemaFromMirror', 'importMirrorPackage', 'downloadProviderPackage', 'listProviderVersions', 'evictMirrorPackage', 'verifyMirrorIntegrity', 'planMirrorCleanup', 'listTemplates', 'getTemplateDetails'
 ]);
 
 /**
@@ -291,7 +291,8 @@ CommandsRegistry.registerCommand('_cloudforge.callService', async (accessor, met
 		method !== 'summarizeState' && method !== 'listCloudConnections' && method !== 'setCloudConnection' && method !== 'storeCloudKey' && method !== 'removeCloudConnection' && method !== 'checkCloudSignIn' &&
 		method !== 'inspectDependencies' && method !== 'readResourceValues' &&
 		method !== 'readModule' && method !== 'auditExportReadiness' && method !== 'runEngineValidate' &&
-		method !== 'runEnginePlan' && method !== 'checkOfflineMirrorReadiness' && method !== 'runEngineInitOffline'
+		method !== 'runEnginePlan' && method !== 'checkOfflineMirrorReadiness' && method !== 'runEngineInitOffline' &&
+		method !== 'checkTemplateCompatibility'
 	) {
 		return failure('INVALID_PARAMS', 'The CloudForge request is invalid.');
 	}
@@ -321,6 +322,7 @@ CommandsRegistry.registerCommand('_cloudforge.callService', async (accessor, met
 		case 'runEnginePlan':
 		case 'checkOfflineMirrorReadiness':
 		case 'runEngineInitOffline':
+		case 'checkTemplateCompatibility':
 			if (!isOpaqueId(params.architectureId) || params.architectureId !== activeArchitectureId || (params.expectedSourceRevision !== undefined && (typeof params.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(params.expectedSourceRevision)))) {
 				return failure('SCOPE_DENIED', 'The requested architecture is not active in this window.');
 			}

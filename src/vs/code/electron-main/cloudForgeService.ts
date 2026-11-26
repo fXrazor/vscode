@@ -62,7 +62,8 @@ export type CloudForgeServiceMethod =
 	| 'diffCatalogueSnapshots' | 'auditExportReadiness'
 	| 'detectEngines' | 'runEngineValidate' | 'runEnginePlan'
 	| 'listMirrorPackages' | 'checkOfflineMirrorReadiness' | 'runEngineInitOffline' | 'extractProviderSchemaFromMirror'
-	| 'importMirrorPackage' | 'evictMirrorPackage' | 'verifyMirrorIntegrity' | 'planMirrorCleanup';
+	| 'importMirrorPackage' | 'downloadProviderPackage' | 'listProviderVersions' | 'evictMirrorPackage' | 'verifyMirrorIntegrity' | 'planMirrorCleanup'
+	| 'listTemplates' | 'getTemplateDetails' | 'checkTemplateCompatibility';
 
 export class CloudForgeServiceError extends Error {
 	constructor(readonly code: string, readonly kind?: string) {
