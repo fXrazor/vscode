@@ -20,7 +20,7 @@ export type CanvasCommand =
 	| { kind: 'group'; ids: string[]; id: string }
 	| { kind: 'ungroup'; ids: string[] }
 	| { kind: 'arrange'; ids: string[]; direction: 'front' | 'forward' | 'backward' | 'back' }
-	| { kind: 'duplicate'; fragment: Architecture; idMap: Record<string, string>; offset: number }
+	| { kind: 'duplicate'; fragment: Architecture; idMap: Record<string, string>; offset: number; offsetY?: number }
 	/** Multi-object resize in one undo step, keeping the chosen corner fixed (top-left by default). */
 	| { kind: 'resize'; ids: string[]; mode: DesignMode; scale?: number; match?: 'width' | 'height' | 'size'; anchor?: ResizeAnchor }
 	/** Rotate drawings about their centres: `angle` sets an absolute angle, `by` turns each one. Resources stay upright. */
@@ -212,10 +212,11 @@ export function applyCanvasCommand(architecture: Architecture, command: CanvasCo
 		}
 		case 'duplicate': {
 			const fragment = command.fragment; const idMap = command.idMap;
+			const dx = command.offset; const dy = command.offsetY ?? command.offset;
 			const source = canvasElements(fragment); const newIds = source.map(item => idMap[item.id]);
-			if (newIds.some(id => !id || byId.has(id)) || new Set(newIds).size !== newIds.length || !Number.isFinite(command.offset)) { return architecture; }
+			if (newIds.some(id => !id || byId.has(id)) || new Set(newIds).size !== newIds.length || !Number.isFinite(dx) || !Number.isFinite(dy)) { return architecture; }
 			const names = new Set(architecture.resources.map(resource => resource.name)); const terraformNames = new Set(architecture.resources.map(resource => resource.terraformName ?? resource.name));
-			const offset = (positions: Record<DesignMode, Position>) => Object.fromEntries(Object.entries(positions).map(([mode, position]) => [mode, { x: position.x + command.offset, y: position.y + command.offset }])) as Record<DesignMode, Position>;
+			const offset = (positions: Record<DesignMode, Position>) => Object.fromEntries(Object.entries(positions).map(([mode, position]) => [mode, { x: position.x + dx, y: position.y + dy }])) as Record<DesignMode, Position>;
 			const resources = structuredClone(fragment.resources).map(resource => {
 				let index = 1; let name = resource.name + '-copy'; while (names.has(name)) { name = resource.name + '-copy-' + ++index; } names.add(name);
 				const base = (resource.terraformName ?? resource.name).replace(/[^A-Za-z0-9_-]/g, '_').replace(/^(?=[0-9-])/, '_');
@@ -228,10 +229,10 @@ export function applyCanvasCommand(architecture: Architecture, command: CanvasCo
 			const items = structuredClone(fragment.items).map(item => ({ ...item, id: idMap[item.id], canvasLocked: false, positions: offset(item.positions), members: item.members.map(id => idMap[id]).filter(Boolean) }));
 			const groups = (fragment.groups ?? []).map(group => ({ ...group, id: idMap[group.id], members: group.members.map(id => idMap[id]).filter(Boolean) })).filter(group => group.id && group.members.length > 1);
 			const connections = fragment.connections.flatMap(link => {
-				const source = remapEndpoint(link.source, idMap, command.offset); const target = remapEndpoint(link.target, idMap, command.offset);
+				const source = remapEndpoint(link.source, idMap, dx, dy); const target = remapEndpoint(link.target, idMap, dx, dy);
 				if (!source || !target) { return []; }
 				const sourceId = endpointElementId(source); const targetId = endpointElementId(target);
-				const waypoint = link.waypoint ? { x: link.waypoint.x + command.offset, y: link.waypoint.y + command.offset } : undefined;
+				const waypoint = link.waypoint ? { x: link.waypoint.x + dx, y: link.waypoint.y + dy } : undefined;
 				return [{ ...link, id: idMap[link.id] ?? (sourceId && targetId ? sourceId + '-' + targetId : link.id + '-copy'), source, target, ...(waypoint ? { waypoint } : {}) }];
 			});
 			if ((!source.length && !connections.length) || new Set(connections.map(link => link.id)).size !== connections.length || connections.some(link => architecture.connections.some(existing => existing.id === link.id))) { return architecture; }

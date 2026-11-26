@@ -88,6 +88,7 @@ export const DesignCanvas = memo(function DesignCanvas({
 	const [snap, setSnap] = useState(false);
 	const [guides, setGuides] = useState(true);
 	const [guideLines, setGuideLines] = useState<GuideLine[]>([]);
+	const altCloneDrag = useRef(false);
 	const [hand, setHand] = useState(false);
 	const [pen, setPen] = useState(false);
 	const resizeBoxes = resizeSelectionBoxes(architecture, selectedIds, mode);
@@ -282,15 +283,34 @@ export const DesignCanvas = memo(function DesignCanvas({
 		const placement=visualResourcePlacement(architecture,node.data.resource,target?.id);
 		return {...placement,target:target?.id,visualParentId:target?.id??null};
 	}
-	function commitDrag(moved: CanvasNode[], event?:{clientX:number;clientY:number}) {
+	function commitDrag(moved: CanvasNode[], event?:{clientX:number;clientY:number;altKey?:boolean}) {
+		const altClone = altCloneDrag.current || !!event?.altKey;
+		altCloneDrag.current = false;
 		if (mode !== 'visual') { setNodes(displayNodes); return; }
 		const current = new Map((flow?.getNodes() ?? nodes).map(node => [node.id, node]));
 		moved.forEach(node => current.set(node.id, node));
 		if (guides && !snap) { guidedNodes([...current.values()], moved.map(node=>node.id)).nodes.forEach(node=>current.set(node.id,node)); }
 		setGuideLines([]);
-		const placement=moved.length===1&&event?placementAt(moved[0],event):undefined;
 		const positions = Object.fromEntries(moved.map(node => [node.id, absolutePosition(current.get(node.id)!, current)]));
 		setDropFeedback(undefined);
+		if (altClone && moved.length > 0) {
+			const lead = moved[0];
+			const original = canvasElements(architecture).find(item => item.id === lead.id);
+			const nextPos = positions[lead.id];
+			if (original && nextPos) {
+				const dx = Math.round((nextPos.x - original.positions[mode].x) * 10) / 10;
+				const dy = Math.round((nextPos.y - original.positions[mode].y) * 10) / 10;
+				setNodes(displayNodes);
+				if (Math.hypot(dx, dy) >= 2) {
+					const fragment = selectionFragment(architecture, moved.map(node => node.id), [], mode);
+					const idMap = Object.fromEntries([...canvasElements(fragment), ...(fragment.groups ?? []), ...fragment.connections].map(item => [item.id, crypto.randomUUID()]));
+					dispatch({ type: 'canvas', command: { kind: 'duplicate', fragment, idMap, offset: dx, offsetY: dy } });
+					onSelectionChange(canvasElements(fragment).map(item => idMap[item.id]));
+				}
+				return;
+			}
+		}
+		const placement=moved.length===1&&event?placementAt(moved[0],event):undefined;
 		if(placement&&!placement.ok){setNodes(displayNodes);setDropFeedback({ok:false,reason:placement.reason});return;}
 		if(placement){dispatch({type:'placeResource',id:moved[0].id,parentId:placement.parentId,visualParentId:placement.visualParentId,mode,positions});}
 		else{dispatch({ type: 'canvas', command: { kind: 'move', mode, positions } });}
@@ -427,9 +447,10 @@ export const DesignCanvas = memo(function DesignCanvas({
 					setSelectedConnectionId(''); setDependencyPick({ id: edge.id, left: Math.max(12, Math.min(event.clientX - area.left + 12, area.width - 372)), top: Math.max(12, Math.min(event.clientY - area.top + 12, area.height - 236)) });
 				}else{setDependencyPick(undefined); setSelectedConnectionId(edge.id); onSelect('');} }}
 				onNodeDoubleClick={(_, node) => { if (node.type === 'resource') { onOpenDetails(node.id); } }}
-				onNodeDragStart={(_, node, moved) => { autoFit.current = { at: 0 }; onSelectionChange(expandGroups(architecture, (moved.length ? moved : [node]).map(item=>item.id))); }}
-				onNodeDrag={(event,node,moved)=>{if(moved.length<=1&&'clientX' in event){setDropFeedback(placementAt(node,event));}}}
+				onNodeDragStart={(event, node, moved) => { autoFit.current = { at: 0 }; altCloneDrag.current = 'altKey' in event && !!event.altKey; onSelectionChange(expandGroups(architecture, (moved.length ? moved : [node]).map(item=>item.id))); }}
+				onNodeDrag={(event,node,moved)=>{if(!altCloneDrag.current&&moved.length<=1&&'clientX' in event){setDropFeedback(placementAt(node,event));}}}
 				onNodeDragStop={(event, node, moved) => commitDrag(moved.length ? moved : [node], 'clientX' in event ? event : undefined)}
+				onSelectionDragStart={event => { altCloneDrag.current = 'altKey' in event && !!event.altKey; }}
 				onSelectionDragStop={(event, moved) => commitDrag(moved,'clientX' in event?event:undefined)}
 				onMoveEnd={(_, next) => { viewports.current[mode] = next; setZoom(next.zoom); }}
 				onViewportChange={next => { setZoom(next.zoom); }}

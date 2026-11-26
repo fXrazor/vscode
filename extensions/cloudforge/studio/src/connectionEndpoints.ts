@@ -64,8 +64,8 @@ export function normaliseArchitectureConnections(architecture: ArchitectureInput
 	return changed ? { ...architecture, connections } : architecture as Architecture;
 }
 
-export function remapEndpoint(endpoint: DesignEndpoint, ids: Record<string, string>, offset: number): DesignEndpoint | undefined {
+export function remapEndpoint(endpoint: DesignEndpoint, ids: Record<string, string>, offsetX: number, offsetY = offsetX): DesignEndpoint | undefined {
 	const value = normaliseEndpoint(endpoint);
 	if (!value) { return undefined; }
-	return value.kind === 'point' ? pointEndpoint({ x: value.position.x + offset, y: value.position.y + offset }) : ids[value.elementId] ? { ...value, elementId: ids[value.elementId] } : undefined;
+	return value.kind === 'point' ? pointEndpoint({ x: value.position.x + offsetX, y: value.position.y + offsetY }) : ids[value.elementId] ? { ...value, elementId: ids[value.elementId] } : undefined;
 }

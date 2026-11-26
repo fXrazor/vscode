@@ -1,5 +1,11 @@
 # Studio continuation checkpoint — 25 November 2026
 
+## Alt+Drag direct clone & 1024px floating selection toolbar fix — 26 November 2026
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `e58ba69c4dd`, owner Antigravity.
+- **Scope:** added independent `(offset, offsetY)` support to `duplicate` (`src/canvasOperations.ts`, `src/connectionEndpoints.ts`), wired **Alt+Drag** element/multi-selection cloning in `src/DesignCanvas.tsx` (1 atomic Undo/Redo step, originals untouched, unique Terraform identifiers, shifted loose endpoints & waypoints), tightened `.selection-anchor .selection-controls` padding in `src/styles.css` to resolve a `1024×768` overlap regression, and added tests in `src/model.test.ts`.
+- **Fresh checks:** Studio `tsc --noEmit` **PASS**, **232/232** Studio tests (0 skipped), Studio `build` + `esbuild.webview.mts` **PASS**, `oxlint` & `hygiene` **PASS**, Windows Edge `whiteboard-controls-verify.mjs` **20/20 PASS** + `Alt+Drag` clone & 1-step Undo **PASS** (0 browser errors).
+
 ## Draggable connector bend / waypoint midpoint handles — 26 November 2026
 
 - **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `48d529c9557`, owner Antigravity.
