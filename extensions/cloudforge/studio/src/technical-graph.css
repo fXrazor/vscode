@@ -122,7 +122,7 @@
 .tg-zoom button { width: 26px; height: 26px; min-height: 0; padding: 0; display: grid; place-items: center; border: 0; background: none; border-radius: 5px; color: var(--text); cursor: pointer; }
 .tg-zoom button:hover { background: var(--hover); }
 .tg-zoom span { min-width: 40px; text-align: center; font-variant-numeric: tabular-nums; }
-.tg-why { position: absolute; top: 62px; right: 14px; z-index: 6; width: min(320px, calc(100% - 28px)); max-height: calc(100% - 140px); overflow: auto; padding: 12px 14px; border-radius: 10px; background: var(--surface); border: 1px solid var(--border); box-shadow: 0 10px 30px -14px #0006; font-size: 12px; color: var(--text); }
+.tg-why { position: absolute; top: auto; bottom: 56px; right: 14px; z-index: 6; width: min(320px, calc(100% - 28px)); max-height: calc(100% - 180px); overflow: auto; padding: 12px 14px; border-radius: 10px; background: var(--surface); border: 1px solid var(--border); box-shadow: 0 10px 30px -14px #0006; font-size: 12px; color: var(--text); }
 .tg-why header { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 8px; }
 .tg-why header strong { display: block; font-size: 13.5px; } .tg-why header code { font-size: 10.5px; color: var(--muted); word-break: break-all; }
 .tg-why dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0 0 8px; } .tg-why dt { color: var(--muted); } .tg-why dd { margin: 0; }
@@ -338,3 +338,6 @@
 .tg-scope-pick.is-active { border-color: var(--accent); color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
 @media (max-width: 1600px) { .tg-layouts button span { display: none; } .tg-layouts button { padding: 0 7px; } }
 @media (max-width: 1440px) { .tg-spread { font-size: 0 !important; gap: 4px !important; } .tg-spread output { font-size: 11px; } }
+
+/* The relationships panel sits bottom right, above the zoom controls, so toolbar menus and the scope picker never cover it; the minimap steps aside while it is open. */
+:has(> .tg-why) .react-flow__minimap { display: none; }
