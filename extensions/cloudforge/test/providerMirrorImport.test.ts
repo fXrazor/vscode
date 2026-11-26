@@ -118,3 +118,16 @@ test('native import validation preserves existing identifier syntax and rejects 
 		for (const value of invalid) { assert.equal(isMirrorImportFieldValid(field, value), false); }
 	}
 });
+
+test('direct import keeps a blank suggested version and the selected readiness platform', async () => {
+	const expected = { address, version: '5.14.0', platform: 'linux_amd64', expectedSha256: digest };
+	const script = scripted([
+		forward[0],
+		{ step: 'version', initial: '', result: { action: 'next', value: '5.14.0' } },
+		{ step: 'platform', initial: 'linux_amd64', result: 'linux_amd64' },
+		forward[3],
+		{ step: 'review', initial: expected, result: 'import' },
+	]);
+	assert.deepEqual(await collectReviewedMirrorImport(script.prompts, { address, version: '', platform: 'linux_amd64' }), expected);
+	script.complete();
+});
