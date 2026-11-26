@@ -27,6 +27,8 @@ export interface GraphPresentation {
 	density: 'auto' | 'detailed' | 'compact';
 	/** Card badge overlay: plan actions, Terraform apply waves or configured dependents. */
 	overlay: 'none' | 'plan' | 'order' | 'impact';
+	/** Spotlight one scope (resource group, VNet, VPC, project …): everything outside it greys out. */
+	spotlight?: string;
 	/** Show only the neighbourhood of one resource. */
 	focus?: { id: string; depth: number };
 	/** 'auto' opens gaps crossed by many lines; a percentage scales all spacing. */
@@ -53,7 +55,7 @@ export function graphPresentationReducer(state: GraphPresentation, action: Graph
 		case 'pin': return { ...state, pins: { ...state.pins, [action.id]: { x: action.position.x, y: action.position.y } } };
 		case 'unpin': { const pins = { ...state.pins }; delete pins[action.id]; return { ...state, pins }; }
 		case 'clearPins': return { ...state, pins: {} };
-		case 'restore': return { ...defaultGraphPresentation, ...action.state, focus: undefined };
+		case 'restore': return { ...defaultGraphPresentation, ...action.state, focus: undefined, spotlight: undefined };
 		case 'toggleCollapsed': return { ...state, collapsed: state.collapsed.includes(action.id) ? state.collapsed.filter(id => id !== action.id) : [...state.collapsed, action.id] };
 		case 'toggleExpanded': return { ...state, expanded: state.expanded.includes(action.id) ? state.expanded.filter(id => id !== action.id) : [...state.expanded, action.id] };
 	}
@@ -80,8 +82,8 @@ const allowed = {
 	overlay: ['none', 'plan', 'order', 'impact'],
 } as const;
 /** The persisted shape: everything except a transient focus. Pins stay graph-local. */
-export function serialiseGraphPresentation(state: GraphPresentation): Omit<GraphPresentation, 'focus'> {
-	const { focus: _focus, ...rest } = state;
+export function serialiseGraphPresentation(state: GraphPresentation): Omit<GraphPresentation, 'focus' | 'spotlight'> {
+	const { focus: _focus, spotlight: _spotlight, ...rest } = state;
 	const pins: Record<string, Position> = {};
 	for (const [id, point] of Object.entries(state.pins).slice(0, 512)) { if (Number.isFinite(point.x) && Number.isFinite(point.y)) { pins[id] = { x: Math.round(point.x), y: Math.round(point.y) }; } }
 	return { ...rest, pins, expanded: state.expanded.slice(0, 512), collapsed: state.collapsed.slice(0, 512) };

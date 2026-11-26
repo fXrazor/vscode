@@ -120,7 +120,7 @@ export interface TechnicalGraphSnapshot {
 	readonly coverage: { readonly documented: number; readonly unreviewed: number; readonly unknownRegion: number };
 }
 
-const scopeTypes = new Set(['azurerm_resource_group', 'azurerm_virtual_network', 'azurerm_subnet', 'aws_vpc', 'aws_subnet', 'google_compute_network', 'google_compute_subnetwork', 'kubernetes_namespace_v1']);
+const scopeTypes = new Set(['azurerm_resource_group', 'azurerm_virtual_network', 'azurerm_subnet', 'aws_vpc', 'aws_subnet', 'google_compute_network', 'google_compute_subnetwork', 'kubernetes_namespace_v1', 'kubernetes_namespace', 'google_project', 'google_folder', 'aws_organizations_account', 'aws_organizations_organizational_unit', 'azurerm_management_group']);
 const kindLayer: Record<Resource['kind'], InfrastructureLayer> = { network: 'network', subnet: 'network', gateway: 'network', cluster: 'compute', compute: 'compute', storage: 'data', database: 'data', monitor: 'monitoring', group: 'scope', module: 'application', generic: 'unknown' };
 
 function deepFreeze<T>(value: T): T {

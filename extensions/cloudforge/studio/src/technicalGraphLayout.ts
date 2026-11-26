@@ -83,14 +83,17 @@ function gridLayout(snapshot: TechnicalGraphSnapshot, nodes: readonly GraphNode[
 	// Scope view: one column per top-level ownership root. Scope containers themselves head their column.
 	const columnOf = (node: GraphNode) => byScope ? (node.scopePath[0] ?? (node.isScope && !node.scope ? node.id : '__unscoped')) : '__all';
 	const columnIds = [...new Set(nodes.map(columnOf))].sort((a, b) => (a === '__unscoped' ? 1 : 0) - (b === '__unscoped' ? 1 : 0));
-	const perLine = byScope ? Math.max(2, Math.ceil(m.perLine / Math.max(1, columnIds.length)) + 1) : m.perLine;
+	// Scope view: each column wraps its busiest layer into a roughly square block (cards are wider
+	// than tall, so about two rows per extra column), so a large resource group reads as one block.
+	const busiest = new Map(columnIds.map(column => [column, Math.max(1, ...layerOrder.map(layer => nodes.filter(node => node.layer === layer && columnOf(node) === column).length))]));
+	const perLineOf = (column: string) => byScope ? Math.max(2, Math.min(m.perLine, Math.ceil(Math.sqrt(busiest.get(column)! * 1.6)))) : Math.max(m.perLine, Math.min(14, Math.ceil(Math.sqrt(busiest.get(column)! * 1.6))));
 	const layers = layerOrder.filter(layer => nodes.some(node => node.layer === layer));
 	// Lines: per layer, per column, wrapped at perLine.
 	type Line = { layer: InfrastructureLayer; column: string; ids: string[] };
 	const lines: Line[] = [];
 	for (const layer of layers) { for (const column of columnIds) {
 		const ids = nodes.filter(node => node.layer === layer && columnOf(node) === column).map(node => node.id);
-		for (let i = 0; i < ids.length; i += perLine) { lines.push({ layer, column, ids: ids.slice(i, i + perLine) }); }
+		const perLine = perLineOf(column); for (let i = 0; i < ids.length; i += perLine) { lines.push({ layer, column, ids: ids.slice(i, i + perLine) }); }
 	} }
 	const ordered = orderBands(lines.map(line => line.ids), edges);
 	lines.forEach((line, i) => { line.ids = centreHubs(ordered[i], snapshot); });

@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 import { elementEndpoint } from './connectionEndpoints.ts';
+import { coreIcon } from './coreIcons.ts';
 import type { Architecture, Resource, ResourceKind, Provider } from './model.ts';
 
 export const resourceTypes: Record<ResourceKind, {
@@ -61,7 +62,7 @@ const alternateResources: Record<Exclude<Provider, 'azure'>, Record<ResourceKind
 
 export function resourceDefinition(resource: Pick<Resource, 'kind' | 'provider'> & Partial<Pick<Resource, 'catalogue'>>) {
 	const base = resourceTypes[resource.kind];
- if (resource.catalogue) { return { ...base, ...resource.catalogue, description: resource.catalogue.label, defaults: {} }; }
+ if (resource.catalogue) { return { ...base, ...resource.catalogue, icon: coreIcon(resource.catalogue.type, resource.catalogue.icon), description: resource.catalogue.label, defaults: {} }; }
 	if (resource.provider === 'azure') { return base; }
 	const [label, type, icon] = alternateResources[resource.provider][resource.kind];
 	return { ...base, label, type, icon, description: label + ' in ' + providerNames[resource.provider] + '.', defaults: {} };

@@ -309,3 +309,20 @@
 .tg-spread input[type="range"] { height: 16px; margin: 0 2px; }
 @media (max-width: 1360px) { .tg-spread input[type="range"] { width: 76px; } }
 @media (max-width: 1180px) { .tg-spread input[type="range"] { width: 60px; } .tg-spread output { display: none; } }
+
+/* Scope spotlight: everything outside the chosen scope greys out in every layout. */
+.tg-card.is-outside { opacity: .22; filter: grayscale(1); }
+.react-flow__edge.is-outside { opacity: .12; }
+.tg-bundle-leaf.is-outside, .tg-force-node.is-outside { opacity: .16; filter: grayscale(1); }
+.tg-bundle-path.is-outside, .tg-force-link.is-outside { opacity: .05; }
+.tg-force-hull.is-outside { opacity: .25; filter: grayscale(1); }
+.tg-force-hull.is-lit path { stroke-width: 2; stroke-dasharray: none; fill: color-mix(in srgb, var(--accent) 7%, transparent); stroke: color-mix(in srgb, var(--accent) 55%, transparent); }
+.tg-force-hull text.is-clickable { cursor: pointer; pointer-events: auto; }
+.tg-force-hull text.is-clickable:hover { fill: var(--accent); text-decoration: underline; }
+.tg-scope-pick select { max-width: 170px; }
+@media (max-width: 1360px) { .tg-scope-pick select { max-width: 120px; } }
+.tg-scope-pick { position: absolute; top: 66px; right: 14px; z-index: 8; display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted); background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 3px 4px 3px 9px; box-shadow: 0 2px 8px -6px #0004; }
+.tg-scope-pick select { border: 0; background: transparent; color: var(--text); font: inherit; font-size: 12px; }
+.tg-scope-pick.is-active { border-color: var(--accent); color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
+@media (max-width: 1600px) { .tg-layouts button span { display: none; } .tg-layouts button { padding: 0 7px; } }
+@media (max-width: 1440px) { .tg-spread { font-size: 0 !important; gap: 4px !important; } .tg-spread output { font-size: 11px; } }
