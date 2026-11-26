@@ -1,5 +1,12 @@
 # CloudForge Code OSS handoff
 
+## Packaged CloudForge Installer Upgrade (`930b9d7af51`) — 26 November 2026
+
+- **Staged installer:** `Z:/CFStage/CloudForgeSetup-x64-930b9d7af51.exe` (`329,087,007` bytes, SHA-256 `259ea68dae705aa127cd127a5794667b065cf039d661f9f27d8ddb68d27a1c83`) built from clean detached checkout `Z:/CFStage/Code` at desktop commit `930b9d7af51e2a4fdf814d9679e5fb74485b8e05`.
+- **Bundled Rust service:** commit `f6ccff1af12a8c60911b8e9977f7127700d2df5c`, protocol `1`, `x64`, `4,847,104` bytes, SHA-256 `ee20be59e58febef29b01877ae117914605284ae94d69871ed89fdfa31ba35ba` (unsigned dev binary, `ServiceSigned: false`); bundled `ms-vscode.js-debug@1.140.1` VSIX SHA-256 `7accf7857ea4f4717b6211a2b75f5b434faf477033203a8919b6d26b6abc1897`.
+- **Included features since `d8c253fd95b`:** Claude PR #3 dedicated `TechnicalGraph.tsx` (Layers, Scopes, Tidy Tree, Bundled radial, Barnes-Hut Network force graph, Spread dial, cluster hulls, ghost inputs, Exposure lens, SVG/PNG export), Technical Graph Phases 1/2/4/5 (immutable contract, lenses, tracing, 5 cloud topology patterns, boundaries, `WhyPanel` evidence), Codex's 4,271 signed executable provider schemas (AzureRM 5.14.0, AWS 6.73.0, Google 8.10.0) with lock-aware selection & nested literal editor, Native Offline Provider-Package Manager (`CloudForge: Manage Offline Provider Packages…`) + truthful-state fixes, and hosted icon double-prefix 404 fix.
+- **Installed upgrade verification:** silently upgraded `%LOCALAPPDATA%\Programs\CloudForge\CloudForge.exe`; verified `product.json` (`nameLong: "CloudForge"`, `commit: "930b9d7af51e2a4fdf814d9679e5fb74485b8e05"`), passed `node build/cloudforge/serviceArtifact.ts --verify` on the installed app directory, and verified installed `extension.js`, `studio.js`, `studio.css`, and all three signed provider-form JSON bundles (`azurerm`, `aws`, `google`).
+
 ## Offline Provider-Package Native Manager, Hosted Icon Bugfix & Windows Edge Verification — 26 November 2026
 
 - **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review` (pushed to `origin/main` atop `fc7a6e675aa`, zero edits to `TechnicalGraph.tsx` / `technicalGraphForce.ts` / `technical-graph.css` so Claude's auto-resuming `claude/project-thread-2irlth` thread has zero overlap), owner Antigravity.
