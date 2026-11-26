@@ -25,6 +25,8 @@ import {
 } from 'vscode';
 import { registerCloudForgeMcpProvider } from './mcpProvider';
 import { registerCloudForgeChatParticipant } from './chatParticipant';
+import { detectCursorResourceAddress, registerLearningEditorProviders } from './editorNotes';
+import { ProposalDiffProvider } from './proposalDiff';
 import {
 	buildExternalMcpConfigSnippet,
 	buildLearningStudioHtml,
@@ -340,6 +342,11 @@ export function activateLearning(context: ExtensionContext, host: LearningHost):
 
 	const treeProvider = new CloudForgeLearnTreeProvider(store, mcp.enabled);
 	const treeView = window.createTreeView('cloudforge.learn', { treeDataProvider: treeProvider });
+	const diffProvider = new ProposalDiffProvider();
+	const editorNotesDisposable = registerLearningEditorProviders({
+		getRecord: () => store.record,
+		onDidChangeRecord: store.onDidChange
+	});
 
 	let panel: WebviewPanel | undefined;
 	let activeTab: LearningStudioTab = 'proposals';
@@ -710,6 +717,13 @@ export function activateLearning(context: ExtensionContext, host: LearningHost):
 				case 'rejectProposal':
 					void rejectProposal(msg.proposalId);
 					break;
+				case 'diffProposalFile': {
+					const proposal = store.record?.proposals.find(p => p.proposalId === msg.proposalId);
+					if (proposal) {
+						void diffProvider.openFileDiff(proposal, msg.fileName);
+					}
+					break;
+				}
 				case 'proposeBlueprint':
 					void proposeBlueprint(msg.blueprintId, msg.prefix, msg.region, msg.cidrBaseOctet);
 					break;
@@ -750,6 +764,8 @@ export function activateLearning(context: ExtensionContext, host: LearningHost):
 		store,
 		mcp.disposable,
 		chatDisposable,
+		diffProvider,
+		editorNotesDisposable,
 		treeProvider,
 		treeView,
 		host.onDidChangeGraph(() => {
@@ -758,6 +774,43 @@ export function activateLearning(context: ExtensionContext, host: LearningHost):
 		store.onDidChange(() => renderPanel()),
 		commands.registerCommand('cloudforge.openLearningStudio', (tab?: LearningStudioTab, category?: SkillCategory | 'all') => {
 			openLearningStudio(tab, category);
+		}),
+		commands.registerCommand('cloudforge.addResourceNote', async (explicitAddress?: string) => {
+			const graph = host.getGraph();
+			if (!graph) {
+				void window.showInformationMessage(l10n.t('Open a CloudForge architecture before adding a resource note.'));
+				return;
+			}
+			const detected = typeof explicitAddress === 'string' && explicitAddress.trim().length > 0
+				? explicitAddress.trim()
+				: detectCursorResourceAddress();
+			const address = detected ?? await window.showInputBox({
+				title: l10n.t('CloudForge: Resource Address'),
+				prompt: l10n.t('Enter the Terraform resource address (for example azurerm_virtual_network.hub)'),
+				placeHolder: 'azurerm_virtual_network.hub'
+			});
+			if (!address || !/^[A-Za-z0-9._\-\[\]"]+$/.test(address.trim())) {
+				return;
+			}
+			const trimmedAddress = address.trim();
+			const existing = store.record?.notes[trimmedAddress];
+			const why = await window.showInputBox({
+				title: l10n.t('Why does {0} exist?', trimmedAddress),
+				value: existing?.why ?? '',
+				placeHolder: l10n.t('Short architectural rationale for this resource')
+			});
+			if (why === undefined) {
+				return;
+			}
+			const userNote = await window.showInputBox({
+				title: l10n.t('Personal study note for {0} (optional)', trimmedAddress),
+				value: existing?.userNote ?? '',
+				placeHolder: l10n.t('Press Enter to skip or leave unchanged')
+			});
+			if (userNote === undefined) {
+				return;
+			}
+			await saveResourceNoteFromStudio(trimmedAddress, why.trim() || undefined, userNote.trim() || undefined);
 		}),
 		commands.registerCommand('cloudforge.refreshLearning', async () => {
 			await store.refresh();

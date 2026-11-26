@@ -371,6 +371,12 @@
 				"title": "%command.revokeMcpGrants%",
 				"category": "%displayName%",
 				"icon": "$(debug-disconnect)"
+			},
+			{
+				"command": "cloudforge.addResourceNote",
+				"title": "%command.addResourceNote%",
+				"category": "%displayName%",
+				"icon": "$(note)"
 			}
 		],
 		"mcpServerDefinitionProviders": [
@@ -783,6 +789,11 @@
 					"command": "cloudforge.explainResource",
 					"when": "resourceLangId == terraform || resourceLangId == hcl",
 					"group": "cloudforge@2"
+				},
+				{
+					"command": "cloudforge.addResourceNote",
+					"when": "resourceLangId == terraform || resourceLangId == hcl",
+					"group": "cloudforge@3"
 				}
 			]
 		},

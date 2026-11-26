@@ -168,6 +168,7 @@ export type LearningStudioMessage =
 	| { readonly type: 'filterSkills'; readonly category: SkillCategory | 'all' }
 	| { readonly type: 'applyProposal'; readonly proposalId: string }
 	| { readonly type: 'rejectProposal'; readonly proposalId: string }
+	| { readonly type: 'diffProposalFile'; readonly proposalId: string; readonly fileName: string }
 	| { readonly type: 'proposeBlueprint'; readonly blueprintId: string; readonly prefix?: string; readonly region?: string; readonly cidrBaseOctet?: number }
 	| { readonly type: 'saveTask'; readonly title: string; readonly mode: LearningMode; readonly objective: string; readonly newRequirement?: string }
 	| { readonly type: 'toggleRequirement'; readonly requirementId: string }
@@ -630,6 +631,14 @@ export function parseLearningStudioMessage(raw: unknown): LearningStudioMessage 
 			const proposalId = str(raw.proposalId, 128);
 			return proposalId ? { type: raw.type, proposalId } : undefined;
 		}
+		case 'diffProposalFile': {
+			const proposalId = str(raw.proposalId, 128);
+			const fileName = str(raw.fileName, 128);
+			if (!proposalId || !fileName || fileName.startsWith('.') || fileName.includes('/') || fileName.includes('\\') || fileName.includes('..') || !fileName.toLowerCase().endsWith('.tf') || fileName.length <= 3) {
+				return undefined;
+			}
+			return { type: 'diffProposalFile', proposalId, fileName };
+		}
 		case 'proposeBlueprint': {
 			const blueprintId = str(raw.blueprintId, 64);
 			if (!blueprintId || !/^[a-z0-9-]+$/.test(blueprintId)) {
@@ -696,6 +705,37 @@ export function parseLearningStudioMessage(raw: unknown): LearningStudioMessage 
 		default:
 			return undefined;
 	}
+}
+
+export function formatLearningNoteHoverMarkdown(
+	address: string,
+	note: ResourceNote | undefined,
+	linkedRequirements: readonly LearningRequirement[]
+): string | undefined {
+	if (!note && linkedRequirements.length === 0) {
+		return undefined;
+	}
+	const lines: string[] = [`$(note) **CloudForge Learning Note** — \`${address}\``];
+	if (note?.why) {
+		lines.push(`\n**Why:** ${note.why}`);
+	}
+	if (note?.userNote) {
+		lines.push(`\n**Note:** ${note.userNote}`);
+	}
+	if (linkedRequirements.length > 0) {
+		lines.push('\n**Lab requirements:**');
+		for (const req of linkedRequirements) {
+			const mark = req.status === 'addressed' ? '✓' : '○';
+			lines.push(`- ${mark} ${req.text}`);
+		}
+	}
+	const safeDocs = (note?.docs ?? []).filter(doc => doc.url.startsWith('https://'));
+	if (safeDocs.length > 0) {
+		lines.push('\n**Docs:** ' + safeDocs.map(doc => `[${doc.label}](${doc.url})`).join(' · '));
+	}
+	const editArgs = encodeURIComponent(JSON.stringify([address]));
+	lines.push(`\n[Edit note](command:cloudforge.addResourceNote?${editArgs}) · [Open Learning Studio](command:cloudforge.openLearningStudio?%5B%22task%22%5D)`);
+	return lines.join('\n');
 }
 
 function escapeHtml(value: string): string {
@@ -822,7 +862,10 @@ export function buildLearningStudioHtml(state: LearningStudioViewState, nonce: s
 					: '';
 				const filesHtml = proposal.files.map(file => `
 					<details class="file-preview">
-						<summary><code>${escapeHtml(file.fileName)}</code>${file.rationale ? ` <span class="muted">${escapeHtml(file.rationale)}</span>` : ''}</summary>
+						<summary class="file-summary">
+							<span><code>${escapeHtml(file.fileName)}</code>${file.rationale ? ` <span class="muted">${escapeHtml(file.rationale)}</span>` : ''}</span>
+							<button type="button" class="mini-btn" data-action="diffProposalFile" data-id="${escapeHtml(proposal.proposalId)}" data-file="${escapeHtml(file.fileName)}">Open diff</button>
+						</summary>
 						<pre><code>${escapeHtml(file.contents)}</code></pre>
 					</details>`).join('');
 				const actionsHtml = proposal.status === 'pending'
@@ -1074,6 +1117,17 @@ export function buildLearningStudioHtml(state: LearningStudioViewState, nonce: s
 		padding: 6px 10px;
 	}
 	.file-preview summary { cursor: pointer; }
+	.file-summary { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+	.mini-btn {
+		padding: 2px 8px;
+		font-size: 11px;
+		border-radius: 4px;
+		border: 1px solid var(--vscode-panel-border, rgba(128,128,128,.35));
+		background: transparent;
+		color: var(--vscode-foreground);
+		cursor: pointer;
+	}
+	.mini-btn:hover { background: var(--vscode-list-hoverBackground); }
 	.file-preview pre {
 		margin: 8px 0 2px;
 		padding: 10px;
@@ -1172,6 +1226,10 @@ export function buildLearningStudioHtml(state: LearningStudioViewState, nonce: s
 			vscode.postMessage({ type: 'filterSkills', category: target.getAttribute('data-category') });
 		} else if (action === 'applyProposal' || action === 'rejectProposal') {
 			vscode.postMessage({ type: action, proposalId: target.getAttribute('data-id') });
+		} else if (action === 'diffProposalFile') {
+			event.preventDefault();
+			event.stopPropagation();
+			vscode.postMessage({ type: 'diffProposalFile', proposalId: target.getAttribute('data-id'), fileName: target.getAttribute('data-file') });
 		} else if (action === 'toggleRequirement') {
 			vscode.postMessage({ type: 'toggleRequirement', requirementId: target.getAttribute('data-id') });
 		} else if (action === 'proposeBlueprint') {

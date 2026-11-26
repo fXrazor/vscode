@@ -8,6 +8,7 @@ import test from 'node:test';
 import {
 	buildExternalMcpConfigSnippet,
 	buildLearningStudioHtml,
+	formatLearningNoteHoverMarkdown,
 	parseChatTopologyArgs,
 	parseIssuedMcpGrant,
 	parseLearningRecord,
@@ -281,4 +282,34 @@ test('renders Task & Notes tab with escaped task objective, checklist, and resou
 	assert.ok(html.includes('Create hub VNet'));
 	assert.ok(html.includes('Core transit VNet'));
 	assert.ok(html.includes('data-action="toggleRequirement"'));
+});
+
+test('validates diffProposalFile messages and formats in-editor learning note hover markdown', () => {
+	assert.deepEqual(parseLearningStudioMessage({ type: 'diffProposalFile', proposalId: 'prop-1', fileName: 'network.tf' }), {
+		type: 'diffProposalFile',
+		proposalId: 'prop-1',
+		fileName: 'network.tf'
+	});
+	assert.equal(parseLearningStudioMessage({ type: 'diffProposalFile', proposalId: 'prop-1', fileName: '../escape.tf' }), undefined);
+	assert.equal(parseLearningStudioMessage({ type: 'diffProposalFile', proposalId: 'prop-1', fileName: 'secrets.tfvars' }), undefined);
+
+	const hoverMd = formatLearningNoteHoverMarkdown(
+		'azurerm_virtual_network.hub',
+		{
+			why: 'Central transit hub for peered spokes.',
+			userNote: 'Keep /16 address space.',
+			docs: [
+				{ label: 'Azure VNet Docs', url: 'https://learn.microsoft.com/en-us/azure/virtual-network/' },
+				{ label: 'Blocked Link', url: 'http://insecure.example.com' }
+			]
+		},
+		[{ id: 'req-1', text: 'Provision hub VNet', status: 'addressed', linkedAddresses: ['azurerm_virtual_network.hub'] }]
+	);
+	assert.ok(hoverMd);
+	assert.ok(hoverMd.includes('Central transit hub for peered spokes.'));
+	assert.ok(hoverMd.includes('✓ Provision hub VNet'));
+	assert.ok(hoverMd.includes('[Azure VNet Docs](https://learn.microsoft.com/en-us/azure/virtual-network/)'));
+	assert.ok(!hoverMd.includes('insecure.example.com'));
+	assert.ok(hoverMd.includes('command:cloudforge.addResourceNote'));
+	assert.equal(formatLearningNoteHoverMarkdown('azurerm_subnet.app', undefined, []), undefined);
 });
