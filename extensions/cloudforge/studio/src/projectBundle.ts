@@ -21,6 +21,8 @@ import { exportableArchitecture } from './variables.ts';
 import { projectTerraform, projectResourceFiles } from './terraformProjection.ts';
 import { generate } from './cloudlab-core/terraform.ts';
 import { readZip, writeZip, ZipError, type ZipEntry } from './zipArchive.ts';
+import { remapEndpoint } from './connectionEndpoints.ts';
+import { resourceAddress, terraformIdentifier } from './resourceHierarchy.ts';
 import type { VariableDefinition, VariableValue } from './variables.ts';
 
 export const BUNDLE_FORMAT = 'cloudforge.project-bundle';
@@ -319,4 +321,81 @@ export function toBase64(bytes: Uint8Array): string {
 	let binary = '';
 	for (let i = 0; i < bytes.length; i += 0x8000) { binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000)); }
 	return btoa(binary);
+}
+
+export interface LayoutResult {
+	readonly architecture: Architecture;
+	readonly matched: number;
+	readonly unmatched: number;
+	readonly drawings: number;
+	readonly connectors: number;
+}
+
+/**
+ * Lays a bundled canvas over the architecture Rust created from the bundle's Terraform: resources
+ * are matched by Terraform address (falling back to a unique identifier), take the bundle's
+ * positions, sizes and labels, and drawings, design connectors, groups and layer order come along.
+ * Graph-derived structure (resources, parentage, service edges) is never replaced.
+ */
+export function applyBundleLayout(current: Architecture, bundled: Architecture): LayoutResult {
+	const byAddress = new Map<string, Resource>();
+	const byIdentifier = new Map<string, Resource[]>();
+	for (const resource of current.resources) {
+		byAddress.set(resourceAddress(resource), resource);
+		const identifier = terraformIdentifier(resource);
+		byIdentifier.set(identifier, [...(byIdentifier.get(identifier) ?? []), resource]);
+	}
+	const ids: Record<string, string> = {};
+	const used = new Set<string>();
+	for (const resource of bundled.resources) {
+		const direct = current.resources.find(item => item.id === resource.id);
+		const match = direct ?? byAddress.get(resourceAddress(resource)) ?? (byIdentifier.get(terraformIdentifier(resource))?.length === 1 ? byIdentifier.get(terraformIdentifier(resource))![0] : undefined);
+		if (match && !used.has(match.id)) {
+			ids[resource.id] = match.id;
+			used.add(match.id);
+		}
+	}
+	const taken = new Set([...current.resources.map(item => item.id), ...current.items.map(item => item.id)]);
+	const items: BoardItem[] = [];
+	for (const item of bundled.items) {
+		const id = taken.has(item.id) ? crypto.randomUUID() : item.id;
+		ids[item.id] = id;
+		taken.add(id);
+		items.push({ ...item, id, members: [] });
+	}
+	const remap = (id: string) => ids[id];
+	const resources = current.resources.map(resource => {
+		const source = bundled.resources.find(item => ids[item.id] === resource.id);
+		if (!source) { return resource; }
+		const visualParentId = source.visualParentId === null ? null : source.visualParentId ? remap(source.visualParentId) : undefined;
+		return {
+			...resource,
+			positions: { visual: { ...source.positions.visual }, technical: { ...source.positions.technical } },
+			...(source.containerSize ? { containerSize: { ...source.containerSize } } : {}),
+			...(source.iconSize ? { iconSize: source.iconSize } : {}),
+			...(source.label ? { label: source.label } : {}),
+			...(source.iconOverride ? { iconOverride: source.iconOverride } : {}),
+			...(visualParentId !== undefined ? { visualParentId } : {}),
+		};
+	});
+	const finalItems = items.map((item, index) => ({ ...item, members: bundled.items[index].members.map(remap).filter((id): id is string => !!id) }));
+	const existingConnections = new Set(current.connections.map(connection => connection.id));
+	const connections: DesignConnection[] = [...current.connections];
+	for (const connection of bundled.connections) {
+		if (connection.origin?.kind === 'service') { continue; }
+		const source = remapEndpoint(connection.source, ids, 0);
+		const target = remapEndpoint(connection.target, ids, 0);
+		if (!source || !target) { continue; }
+		connections.push({ ...connection, id: existingConnections.has(connection.id) ? crypto.randomUUID() : connection.id, source, target });
+	}
+	const groups = [...(current.groups ?? []), ...(bundled.groups ?? []).map(group => ({ ...group, id: crypto.randomUUID(), members: group.members.map(remap).filter((id): id is string => !!id) })).filter(group => group.members.length)];
+	const layerOrder = bundled.layerOrder ? [...(current.layerOrder ?? []), ...bundled.layerOrder.map(remap).filter((id): id is string => !!id && !(current.layerOrder ?? []).includes(id))] : current.layerOrder;
+	const matched = Object.keys(ids).filter(id => bundled.resources.some(resource => resource.id === id)).length;
+	return {
+		architecture: { ...current, resources, items: [...current.items, ...finalItems], connections, ...(groups.length ? { groups } : {}), ...(layerOrder ? { layerOrder } : {}) },
+		matched,
+		unmatched: bundled.resources.length - matched,
+		drawings: finalItems.length,
+		connectors: connections.length - current.connections.length,
+	};
 }

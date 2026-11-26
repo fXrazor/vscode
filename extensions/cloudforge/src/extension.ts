@@ -2673,6 +2673,9 @@ export function activate(context: ExtensionContext): void {
 		openTemplates() {
 			const graph = provider.getGraph();
 			canvas.openTemplates(graph ? toCanvasSnapshot(graph, currentArchitectureName) : undefined);
+		},
+		seedBundleLayout(architectureId, architecture) {
+			canvas.seedBundleLayout(architectureId, architecture);
 		}
 	});
 

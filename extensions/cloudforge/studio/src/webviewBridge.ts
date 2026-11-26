@@ -422,6 +422,7 @@ export type HostInboundMessage =
 	| { readonly type: 'openExport' }
 	| { readonly type: 'openTemplates' }
 	| { readonly type: 'exportResult'; readonly ok: boolean; readonly message: string }
+	| { readonly type: 'applyBundleLayout'; readonly architecture: unknown }
 	| { readonly type: 'focusModeChanged'; readonly active: boolean };
 
 export type HostOutboundMessage =

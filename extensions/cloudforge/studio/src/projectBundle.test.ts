@@ -122,3 +122,24 @@ test('hosted import merges as one undo step and refuses duplicates', async () =>
 	assert.equal(again, merged, 'a second import of the same bundle is a no-op');
 	assert.equal(historyReducer(merged, { type: 'undo' }).present.resources.length, 0);
 });
+
+test('bundle layout lands on graph resources by Terraform address', async () => {
+	const { applyBundleLayout } = await import('./projectBundle.ts');
+	const bundled = withExtras();
+	// The graph Rust builds from the bundle's Terraform: same addresses, new ids, default positions.
+	const graph: Architecture = {
+		name: 'imported',
+		resources: bundled.resources.map((resource, index) => ({ ...resource, id: 'node-' + index, terraformName: resource.terraformName ?? resource.name.replace(/[^A-Za-z0-9_-]/g, '_'), positions: { visual: { x: index * 10, y: 0 }, technical: { x: index * 10, y: 0 } }, label: undefined, containerSize: undefined, visualParentId: undefined })),
+		items: [], connections: [],
+	};
+	const result = applyBundleLayout(graph, bundled);
+	assert.equal(result.matched, bundled.resources.length);
+	assert.equal(result.unmatched, 0);
+	assert.equal(result.drawings, bundled.items.length);
+	for (const [index, resource] of bundled.resources.entries()) {
+		assert.deepEqual(result.architecture.resources[index].positions, resource.positions);
+		assert.equal(result.architecture.resources[index].id, 'node-' + index, 'graph ids are kept');
+	}
+	const designConnections = bundled.connections.filter(connection => connection.origin?.kind !== 'service').length;
+	assert.equal(result.connectors, designConnections);
+});

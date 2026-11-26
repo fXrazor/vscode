@@ -8,6 +8,7 @@ import {
 	EventEmitter,
 	FileType,
 	l10n,
+	QuickPickItemKind,
 	RelativePattern,
 	Uri,
 	window,
@@ -15,8 +16,10 @@ import {
 	type Disposable,
 	type Event,
 	type ExtensionContext,
+	type QuickPickItem,
 	type WorkspaceFolder
 } from 'vscode';
+import { BundleReadError, bundleArchitectureName, readProjectBundle, type BundleContents } from './projectBundle';
 import { isValidArchitectureName, validateImportSelections, type ImportSelection, type ImportSelectionError } from '../importSelections';
 import { findProjectRootTerraformFiles, findTerraformImportCandidates } from '../terraformDetection';
 import { ensureGit, repositoryRemote } from './git';
@@ -57,6 +60,8 @@ export interface GraphHost {
 	validateArchitecture?(): Promise<void>;
 	planArchitecture?(): Promise<void>;
 	openTemplates?(): void;
+	/** Hands a project bundle's canvas model to the canvas for one architecture. */
+	seedBundleLayout?(architectureId: string, architecture: unknown): void;
 }
 
 interface PendingClone {
@@ -255,9 +260,7 @@ export class ProjectController implements Disposable {
 			available: item.available,
 		}));
 		picks.push(
-			{ label: `$(add) ${l10n.t('New Architecture…')}`, description: l10n.t('Create under architectures/'), pickType: 'action', action: 'create' },
-			{ label: `$(library) ${l10n.t('New Architecture from Template…')}`, description: l10n.t('Browse offline Azure / AWS / GCP templates'), pickType: 'action', action: 'template' },
-			{ label: `$(repo-clone) ${l10n.t('Clone Repository into Project…')}`, description: l10n.t('GitHub, GitLab, Bitbucket, or URL'), pickType: 'action', action: 'clone' },
+			{ label: `$(add) ${l10n.t('Add Architecture…')}`, description: l10n.t('Blank, template, folder or repo, clone, or project bundle'), pickType: 'action', action: 'create' },
 		);
 		const picked = await window.showQuickPick(picks, {
 			title: l10n.t('Switch CloudForge Architecture ({0})', project.displayName),
@@ -268,13 +271,7 @@ export class ProjectController implements Disposable {
 			return;
 		}
 		if (picked.pickType === 'action') {
-			if (picked.action === 'create') {
-				await this.createArchitecture();
-			} else if (picked.action === 'template') {
-				this.graph.openTemplates?.();
-			} else {
-				await this.cloneRepository();
-			}
+			await this.addArchitecture();
 			return;
 		}
 		if (!picked.available) {
@@ -679,7 +676,7 @@ export class ProjectController implements Disposable {
 	 * Asks the Rust service to create `architectures/<name>/` with its marker and starter files, then
 	 * opens the new architecture. The extension never writes the folder itself.
 	 */
-	private async createArchitectureInService(workspaceId: string, name: string, files?: readonly { readonly fileName: string; readonly contents: string }[], adoptRootFiles?: readonly string[]): Promise<void> {
+	private async createArchitectureInService(workspaceId: string, name: string, files?: readonly { readonly fileName: string; readonly contents: string }[], adoptRootFiles?: readonly string[], beforeOpen?: (architectureId: string) => void): Promise<string | undefined> {
 		const result = await callProjectService('createArchitecture', {
 			workspaceId,
 			name,
@@ -688,7 +685,7 @@ export class ProjectController implements Disposable {
 		});
 		const project = this.handleProjectChange(result);
 		if (!project || !result.ok) {
-			return;
+			return undefined;
 		}
 		const notRemoved = (result.value as { notRemoved?: unknown }).notRemoved;
 		if (Array.isArray(notRemoved) && notRemoved.length > 0) {
@@ -699,8 +696,102 @@ export class ProjectController implements Disposable {
 		const created = project.architectures.find(item => item.architectureId === createdId)
 			?? project.architectures.find(item => item.displayName.toLowerCase() === name.toLowerCase());
 		if (created) {
+			beforeOpen?.(created.architectureId);
 			await this.openArchitecture(created.architectureId);
 		}
+		return created?.architectureId;
+	}
+
+	/**
+	 * One entry point for every way to add an architecture: start new, a template, a folder or repo
+	 * already in the window, a clone, or a portable project bundle.
+	 */
+	async addArchitecture(): Promise<void> {
+		type Choice = 'blank' | 'template' | 'folder' | 'clone' | 'bundle';
+		const items: (QuickPickItem & { readonly choice?: Choice })[] = [
+			{ label: l10n.t('Start'), kind: QuickPickItemKind.Separator },
+			{ label: `$(add) ${l10n.t('Blank architecture')}`, description: l10n.t('A new folder under architectures/ with a starter main.tf'), choice: 'blank' },
+			{ label: `$(library) ${l10n.t('From a template')}`, description: l10n.t('Azure, AWS and Google Cloud starting points, offline'), choice: 'template' },
+			{ label: l10n.t('Bring existing Terraform'), kind: QuickPickItemKind.Separator },
+			{ label: `$(folder-opened) ${l10n.t('From a folder or repo in this window')}`, description: l10n.t('Read in place; CloudForge does not change its files'), choice: 'folder' },
+			{ label: `$(repo-clone) ${l10n.t('Clone a repository')}`, description: l10n.t('GitHub, GitLab, Bitbucket or a URL'), choice: 'clone' },
+			{ label: `$(package) ${l10n.t('From a project bundle (.zip)')}`, description: l10n.t('A .cloudforge.zip exported from CloudForge Studio'), choice: 'bundle' },
+		];
+		const picked = await window.showQuickPick(items, {
+			title: l10n.t('Add Architecture'),
+			placeHolder: this.project ? l10n.t('How do you want to start?') : l10n.t('Open or create a CloudForge project first'),
+		});
+		switch (picked?.choice) {
+			case 'blank': await this.createArchitecture(); break;
+			case 'template': this.graph.openTemplates?.(); break;
+			case 'folder': await commands.executeCommand('cloudforge.importRepository'); break;
+			case 'clone': await this.cloneRepository(); break;
+			case 'bundle': await this.createArchitectureFromBundle(); break;
+		}
+	}
+
+	/**
+	 * Creates a writable local architecture from a `.cloudforge.zip`: Rust writes the bundle's
+	 * Terraform through `createArchitecture`, then Studio lays the bundle's canvas over the graph.
+	 */
+	async createArchitectureFromBundle(bundleUri?: Uri): Promise<void> {
+		const project = this.project;
+		if (!project || !this.projectFolder()) {
+			void window.showInformationMessage(l10n.t('Open a CloudForge project before adding an architecture from a bundle.'));
+			return;
+		}
+		const target = bundleUri ?? (await window.showOpenDialog({
+			title: l10n.t('Open CloudForge Project Bundle'),
+			canSelectMany: false,
+			openLabel: l10n.t('Add Architecture'),
+			filters: { [l10n.t('CloudForge Project Bundle')]: ['zip'] },
+		}))?.[0];
+		if (!target) {
+			return;
+		}
+		let bundle: BundleContents;
+		try {
+			bundle = readProjectBundle(Buffer.from(await workspace.fs.readFile(target)));
+		} catch (error) {
+			void window.showErrorMessage(error instanceof BundleReadError ? error.message : l10n.t('Unable to read that bundle.'));
+			return;
+		}
+		const existingNames = new Set(project.architectures.map(item => item.displayName.toLowerCase()));
+		const rawName = await window.showInputBox({
+			title: l10n.t('Add Architecture from Bundle'),
+			prompt: l10n.t('{0} · {1} Terraform files. Name the new architecture (created under architectures/<name>/).', bundle.name, bundle.terraformFiles.length),
+			value: bundleArchitectureName(bundle.name, existingNames),
+			validateInput: value => {
+				const trimmed = value.trim();
+				if (!isValidArchitectureName(trimmed)) {
+					return l10n.t('Use a valid Windows folder name.');
+				}
+				return existingNames.has(trimmed.toLowerCase()) ? l10n.t('An architecture with that name already exists.') : undefined;
+			}
+		});
+		if (rawName === undefined) {
+			return;
+		}
+		const created = await this.createArchitectureInService(project.workspaceId, rawName.trim(), bundle.terraformFiles, undefined, architectureId => {
+			this.graph.seedBundleLayout?.(architectureId, bundle.architecture);
+		});
+		if (!created) {
+			return;
+		}
+		await this.graph.openCanvas?.(false);
+		const notes = [
+			...(bundle.skippedFiles.length ? [l10n.t('Not copied: {0}.', bundle.skippedFiles.slice(0, 6).join(', ') + (bundle.skippedFiles.length > 6 ? '…' : ''))] : []),
+			...bundle.warnings,
+		];
+		const providers = l10n.t('Check Providers');
+		void window.showInformationMessage(
+			l10n.t('Added {0} from the bundle.', rawName.trim()) + (notes.length ? ' ' + notes.join(' ') : ''),
+			providers
+		).then(choice => {
+			if (choice === providers) {
+				void commands.executeCommand('cloudforge.providers.focus');
+			}
+		});
 	}
 
 	/** Creates a new local architecture under architectures/<name>/ initialized from a curated offline template. */

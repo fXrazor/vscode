@@ -665,6 +665,11 @@ export type ExtensionToWebviewMessage =
 	| {
 		readonly type: 'focusModeChanged';
 		readonly active: boolean;
+	}
+	| {
+		/** Canvas model from an imported project bundle, laid over the new architecture once. */
+		readonly type: 'applyBundleLayout';
+		readonly architecture: unknown;
 	};
 
 export type WebviewToExtensionMessage =

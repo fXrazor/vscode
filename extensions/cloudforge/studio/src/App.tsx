@@ -46,7 +46,7 @@ import { projectResourceFiles } from './terraformProjection.ts';
 import { DraftSaveDialog } from './DraftSaveDialog.tsx';
 import { SaveAllDialog } from './SaveAllDialog.tsx';
 import { downloadSvg, presentationSvg } from './exportPresentation.ts';
-import { buildProjectBundle, bundleConflicts, readProjectBundle, toBase64 } from './projectBundle.ts';
+import { applyBundleLayout, buildProjectBundle, bundleConflicts, parseBundledArchitecture, readProjectBundle, toBase64 } from './projectBundle.ts';
 
 function detectInitialTheme(isHosted: boolean): 'light' | 'dark' {
 	if (!isHosted || typeof document === 'undefined') {
@@ -133,6 +133,20 @@ export function Studio() {
 	const viewport = useRef<Partial<Record<DesignMode, Viewport>>>({});
 	const variablesButton = useRef<HTMLButtonElement>(null);
 	const architecture = history.present;
+	// A bundle imported through Add Architecture: lay its canvas over the graph once it has loaded.
+	const pendingBundleLayout = useRef<Architecture | null>(null);
+	const [pendingLayoutTick, setPendingLayoutTick] = useState(0);
+	useEffect(() => {
+		const bundled = pendingBundleLayout.current;
+		if (!bundled || !history.present.resources.length) {
+			return;
+		}
+		pendingBundleLayout.current = null;
+		const result = applyBundleLayout(history.present, bundled);
+		dispatch({ type: 'applyContent', architecture: result.architecture });
+		setMessage('Restored the bundle layout: ' + result.matched + ' resources placed, ' + result.drawings + ' drawings, ' + result.connectors + ' connectors' + (result.unmatched ? '; ' + result.unmatched + ' could not be matched to the Terraform' : '') + '.');
+		requestAnimationFrame(() => requestAnimationFrame(() => { void flow?.fitView({ padding: 0.18 }); }));
+	}, [history.present, pendingLayoutTick, flow]);
 	// Provider definitions are metadata. Loading them never enters semantic project history.
 	const providerMetadataRevision = useSyncExternalStore(subscribeCatalog, catalogRevision);
 	const catalogueTypes = [...new Set(architecture.resources.filter(resource => resource.kind !== 'module').map(resource => resourceDefinition(resource).type))].sort().join(',');
@@ -402,6 +416,14 @@ export function Studio() {
 					setShapesOpen(false);
 					setLibraryOpen(true);
 					setLibraryTab('templates');
+					break;
+				case 'applyBundleLayout':
+					try {
+						pendingBundleLayout.current = parseBundledArchitecture(incoming.architecture).architecture;
+						setPendingLayoutTick(tick => tick + 1);
+					} catch {
+						setMessage('The bundle layout could not be read; the Terraform was imported without it.');
+					}
 					break;
 				case 'exportResult':
 					setMessage(incoming.message);

@@ -172,6 +172,18 @@
 				"icon": "$(window)"
 			},
 			{
+				"command": "cloudforge.addArchitecture",
+				"title": "%command.addArchitecture%",
+				"category": "%displayName%",
+				"icon": "$(add)"
+			},
+			{
+				"command": "cloudforge.addArchitectureFromBundle",
+				"title": "%command.addArchitectureFromBundle%",
+				"category": "%displayName%",
+				"icon": "$(package)"
+			},
+			{
 				"command": "cloudforge.createArchitecture",
 				"title": "%command.createArchitecture%",
 				"category": "%displayName%",
@@ -655,7 +667,7 @@
 					"group": "navigation@0"
 				},
 				{
-					"command": "cloudforge.createArchitecture",
+					"command": "cloudforge.addArchitecture",
 					"when": "view =~ /^cloudforge\\.(panel\\.)?projects$/ && cloudforge.projectOpen",
 					"group": "navigation@1"
 				},

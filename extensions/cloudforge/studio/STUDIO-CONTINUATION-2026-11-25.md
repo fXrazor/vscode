@@ -139,6 +139,10 @@ Worktree: `C:/Users/dalep/.codex/worktrees/infrastructure-studio/CloudForge-Code
 
 Dale approved continuing the proposed point-endpoint pass in this chat. No further approval is needed for that plan. Work remains within Studio and handoff documentation; one architecture and one semantic undo history, independent theme/viewport/tool preferences, drawings excluded from Terraform and Rust-owned guarded I/O remain binding.
 
+### Bundle layout on a new architecture — Claude, 26 November 2026
+
+Same branch. When the extension creates an architecture from a `.cloudforge.zip` (Add Architecture › From bundle), it posts `{ type: 'applyBundleLayout', architecture }` after the first `graph`. `App.tsx` keeps it in `pendingBundleLayout` and, once the hosted graph is present, runs `applyBundleLayout(current, bundled)` from `projectBundle.ts` and dispatches the new `applyContent` edit (one undo step, `fitResourceContainers` applied). Matching: id, then `resourceAddress`, then a unique `terraformIdentifier`; graph ids are kept, endpoints are remapped with `remapEndpoint`, service-origin connectors are skipped because the graph already derives them. A status message reports matched/unmatched resources. Test: "bundle layout lands on graph resources by Terraform address".
+
 ### Portable project bundle (.cloudforge.zip) — Claude, 26 November 2026
 
 Branch `claude/project-thread-8qd376` (from main `10cf5df6`), not merged. Dale asked for Export to produce the whole project as a portable zip, like Brainboard. **Export › Project bundle (.zip)** and **Export › Import project bundle…** are in the topbar Export menu and the compact menu.

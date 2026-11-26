@@ -150,6 +150,8 @@ export type Edit =
 	| { type: 'insert'; architecture: Architecture }
 	/** Merge an imported project bundle: elements, connectors, groups, layer order and new variables, as one undo step. */
 	| { type: 'mergeArchitecture'; architecture: Architecture }
+	/** Swap in a precomputed architecture (bundle layout restore) as one undo step. */
+	| { type: 'applyContent'; architecture: Architecture }
 	| { type: 'delete'; id: string }
 	| { type: 'addItem'; item: BoardItem }
 	/** Drop a connector on empty canvas: create the drawing there and link to it, as one undo step. */
@@ -369,6 +371,8 @@ function editArchitecture(architecture: Architecture, action: Edit): Architectur
 		case 'move': return applyCanvasCommand(architecture,{kind:'move',mode:action.mode,positions:{[action.id]:action.position}});
 		case 'insert':
    return fitResourceContainers({ ...architecture, resources: [...architecture.resources, ...action.architecture.resources], items: [...architecture.items, ...action.architecture.items], connections: [...architecture.connections, ...action.architecture.connections] });
+  case 'applyContent':
+			return fitResourceContainers(action.architecture);
   case 'mergeArchitecture': {
 			const taken = new Set([...architecture.resources.map(item => item.id), ...architecture.items.map(item => item.id)]);
 			const incoming = action.architecture;
