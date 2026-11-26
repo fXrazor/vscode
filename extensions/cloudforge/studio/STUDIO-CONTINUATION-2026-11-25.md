@@ -1,5 +1,17 @@
 # Studio continuation checkpoint — 25 November 2026
 
+## Current reconciliation and installed editor continuation — 26 November 2026
+
+Codex inspected Claude's merged Studio sources and this ledger against **`origin/main df2168b72700c6ca0956e15888ee3789212a51c0`**. Continue from local **`codex/studio-handoff-verification`**, source checkpoint **`1a3a54740e68fdc5f1602deb52550e0d53d7ad88`**, in `C:/Users/dalep/.codex/worktrees/guided-variable-values/CloudForge-Code`. It starts directly from current main; the separate native-import and guided-variable checkpoints remain on their own branches. No main push/merge is implied.
+
+**Already implemented:** Claude's mixed Value/Variable/Reference list entries, object-variable paths, four-sided ports, unified Miro edit bars, styled literal/code actions and wider resource workspace. PR #6 fixes existing NIC references opening in the entry editor. Antigravity's later main changes add manual bend waypoints, gradual Network sizing, Alt+Drag duplication, module drill-down and service-edge provenance. Their older pending entries below are historical, not instructions to recreate them. Alt+Drag is ordinary duplication; connected-copy handles and arbitrary perimeter attachment positions remain separate backlog items. Add Architecture from a bundle is also implemented; source-bundle/thumbnail follow-ups remain distinct.
+
+**Newly fixed:** mixed-list variable bindings were missing from `variableUses()`. A variable used only by a list appeared unused and could be renamed/deleted, leaving its list binding unresolved. The usage scan now includes list-entry bindings, including object-variable leaves and repeated entries, feeding the existing UI, rename and delete guards. No new binding model, renderer/layout or reference semantics were introduced. The regression failed before the fix and passed after it.
+
+**Fresh proof:** **233/233 Studio tests**, Studio and runner TypeScript, staged minified media build, targeted strict lint and whitespace checks passed. **22/22 installed editor assertions** passed using real Code OSS, the current development extension/media and packaged Rust service: existing NIC entries + variable addition, usage/deletion protection, separate semantic Undo steps, additional Terraform review, truthful unavailable provider validation, expression preservation through form edits and Undo/Redo, guarded preview/Cancel, an explicit fixture-only save, unrelated-block preservation and rehydration after refresh. [Exact provenance, reproduction, screenshots and limits](research/installed-provider-verification.md#studio-editor-continuation-after-claudes-merged-passes--26-november-2026).
+
+**Next:** review/integrate the local checkpoint when requested; then finish live schema import/render and AWS/Google installed journeys, provider validation of recorded examples/additional configuration, and the remaining native archive/service proof. This pass does not prove arbitrary HCL hydration, provider semantic validation, deployment behavior or a new installer. Preserve the master Technical Graph contract and historical ledgers below.
+
 ## Alt+Drag direct clone & 1024px floating selection toolbar fix — 26 November 2026
 
 - **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `e58ba69c4dd`, owner Antigravity.

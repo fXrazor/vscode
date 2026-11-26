@@ -1,5 +1,9 @@
 # CloudForge Code OSS handoff
 
+## Studio handoff reconciliation and mixed-list variable protection — Codex local checkpoint — 26 November 2026
+
+Source **`1a3a54740e68fdc5f1602deb52550e0d53d7ad88`**, branch `codex/studio-handoff-verification`, worktree `C:/Users/dalep/.codex/worktrees/guided-variable-values/CloudForge-Code`, from merged main `df2168b7270`. Inspected Claude's current Studio and reconciled the canonical continuation so implemented mixed lists/object paths/Miro controls/PR #6 are not recreated. Installed testing found list-only variable usage missing from rename/delete protection; `variableUses()` now includes mixed-list variable entries. Regression failed before/passed after; **233/233 Studio tests**, TypeScript, staged media build, strict targeted lint and **22/22 installed editor checks** passed. Checks cover list/variable Undo, additional Terraform review/preservation, guarded fixture-only save and refresh. Claude's layout/rendering remains unchanged. [Exact evidence and remaining work](extensions/cloudforge/studio/research/installed-provider-verification.md#studio-editor-continuation-after-claudes-merged-passes--26-november-2026); continue from the [single canonical Studio handoff](extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md). Local/unmerged; no installer or cloud operation. Other local feature branches remain separate.
+
 ## Miro-style Alt+Drag clone & compact 1024px selection toolbar fix — 26 November 2026
 
 - **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `e58ba69c4dd`, owner Antigravity. Zero overlap with unmerged Claude branches (`2dm0k0`, `ksv8z9`) or Rust.

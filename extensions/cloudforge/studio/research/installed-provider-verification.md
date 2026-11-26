@@ -1,5 +1,39 @@
 # Installed provider workflow verification — 26 November 2026
 
+## Studio editor continuation after Claude's merged passes — 26 November 2026
+
+Dale asked to inspect Claude's current Studio and continue the handoff. Codex compared merged main **`df2168b72700c6ca0956e15888ee3789212a51c0`**, the pass 9/10 ledger and the resource/variable/list implementations. Claude's PR #6, mixed entries and object-variable paths are in the tested source, along with Antigravity's subsequent canvas/Technical Graph work. Older ledger entries describing those capabilities as pending are superseded by the reconciliation at the top of the canonical Studio continuation.
+
+Source checkpoint **`1a3a54740e68fdc5f1602deb52550e0d53d7ad88`**, branch **`codex/studio-handoff-verification`**, worktree **`C:/Users/dalep/.codex/worktrees/guided-variable-values/CloudForge-Code`**, based directly on merged main. Other worktrees were inspected read-only. Existing native-import (`codex/provider-import-navigation`) and guided-variable (`codex/guided-variable-values`) work remains separately committed and is not included in this checkpoint.
+
+The installed inspection found an actual follow-up bug: the mixed-list UI could bind a variable, but `variableUses()` only scanned whole-field bindings and expression text. A list-only variable therefore showed **0 resource uses**, leaving rename/delete unguarded. The seven-line production change scans `resourceRefs[*].items` for variable entries as well. Existing guards then work for scalar variables and object leaves, with one use per resource even if several list entries reuse it. The focused regression failed before the fix and passed after it; removing entries and Undo are covered. Existing list rendering, fields, styling, reference eligibility and canonical architecture are preserved.
+
+The new [installed runner](../scripts/installed-studio-editor-verify.ts) passed **22/22** with the actual Workbench, development extension/media and packaged Rust service. It exercises the current mixed NIC reference editor, variable creation and list binding, correct use count/disabled Delete, shared Undo, additional expression review, unavailable provider-validation wording, form/code preservation, Undo/Redo, guarded preview and Cancel, explicit guarded save to the owned fixture, exact preservation of all other original Terraform blocks, and source rehydration after refresh. No bridge responses, grants, architecture state or service inventory were mocked. Guest-frame controls are scoped to the top active dialog; Radix tabs receive their mousedown activation. Text fields use native input/change events and Monaco's own text-buffer change event. This is functional installed development-extension proof, not pointer hit-testing or a new packaged release.
+
+Fixture: three disposable AzureRM resources, locked to **5.14.0** using the original signed-capture lockfile. The VMSS starts at **12 instances**. The only saved change adds `tags = merge({ owner = "qa" }, { stage = "test" })` to that VMSS. Its temporary instance-count and variable/list edits are undone before save. The provider's semantics of this expression and the fixture's deployability were not validated. The UI explicitly reports that additional Terraform has not been validated by the provider. No Terraform engine, init, plan, apply, provider execution, credentials or cloud operation ran.
+
+| Installed artifact | Verified identity |
+| --- | --- |
+| Code OSS desktop | `48d529c95579b144a1c5fc6836982967a5830772` |
+| Packaged Rust service / protocol | `68cbe03e5425fa0d55db9cd7144a1178ef38fe77` / `1` |
+| Service executable SHA-256 | `20ffe53c7c30f140a1016c6f04aa485055d461584a6e35f0e4ef1b4db50dae87`, matched its installed manifest |
+| Development extension SHA-256 | `ad1ccc3f1bca8d982f0a51b5b09b38d8b49e2bfc40e30532ba86200a7c2d9a4f` |
+
+The owned QA root is `extensions/cloudforge/studio/output/studio-continuation-installed/`. `asset-provenance.json` records the current Studio JS/CSS, extension, service and lock hashes. `editor-results.json` records the passing runner hash, check list and source revision before checkpointing; its tested source contents were committed as `1a3a54740e6`. Screenshots: `mixed-list.png`, `additional-guarded-save.png`, `additional-after-refresh.png`; exact source snapshots: `before-main.tf` / `after-main.tf`. A copy is preserved outside this worktree at `C:/Users/dalep/.codex/visualizations/2026/11/26/01a216e1-525e-74f0-a26e-e7a5d5728866/studio-editor-continuation/` with a SHA-256 manifest. The earlier unpatched pass is retained locally under `baseline-proof/` and is not the deletion-protection evidence.
+
+Fresh source checks: **233/233 Studio tests**, `corepack pnpm run check`, standalone runner TypeScript, minified Studio media staging and strict targeted oxlint passed. Node **24.22.1**, pinned pnpm **12.16.0**; dependencies belonged to this checkout. Lint used the external executable/configuration fallback documented below against explicit changed files, without sharing application dependencies or disabling rules.
+
+Reproduce with a fresh disposable fixture and `before-main.tf` beneath the owned QA root, the authentic capture lockfile, and the isolated development-host launch described below. Open the fixture through **CloudForge: Open Workspace** and close the extra Workbench chat sidebar so all three fixture nodes fit. Stage this checkout's extension and minified Studio media first, preserving installed files. From Studio:
+
+```powershell
+$env:PLAYWRIGHT_DIR = 'Z:/CloudForge-Code'
+node scripts/installed-studio-editor-verify.ts
+```
+
+The runner intentionally refuses a fixture already modified by an earlier completed run. Use fresh owned source/profile/storage for a rerun; do not point it at a user's project. The QA host uses isolated profile, extensions, shared data, LOCALAPPDATA and APPDATA. No installed files or installer were changed.
+
+Next: integrate only when requested; finish live snapshot-import/render states, AWS/Google installed coverage, engine validation of captured examples and additional configuration, and the authentic native-archive workflow from the existing mirror handoff. Sensitive variable exports, all object-leaf combinations and arbitrary HCL are not exhaustively proven by this run. The historical results below describe their earlier tested revisions.
+
 Codex continued after Dale's explicit request to resume development. Integration owner: Codex. Worktree: `C:/Users/dalep/.codex/worktrees/release-readiness/CloudForge-Code`; branch: `codex/provider-installed-verification`; product source baseline: `930b9d7af51e2a4fdf814d9679e5fb74485b8e05`. This phase adds a repeatable installed integration runner and evidence, without changing production UI, Rust, the protocol, installer, or other worktrees.
 
 ## Fresh installed results
