@@ -156,7 +156,7 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme
 	const visibleEdges = useMemo(() => lensEdges(snapshot, presentation.lens, presentation.showMembership), [snapshot, presentation.lens, presentation.showMembership]);
 	const expanded = useMemo(() => new Set(presentation.expanded), [presentation.expanded]);
 	const focusSet = useMemo(() => presentation.focus && snapshot.nodes.some(node => node.id === presentation.focus!.id) ? neighbourhood(visibleEdges, presentation.focus.id, presentation.focus.depth) : undefined, [presentation.focus, snapshot, visibleEdges]);
-	const layout = useMemo(() => layoutTechnicalGraph(snapshot, { layout: presentation.layout, expanded, compact: false, pins: presentation.pins, edges: visibleEdges, visible: focusSet }), [snapshot, presentation.layout, expanded, presentation.pins, visibleEdges, focusSet]);
+	const layout = useMemo(() => layoutTechnicalGraph(snapshot, { layout: presentation.layout, expanded, compact: false, pins: presentation.pins, edges: visibleEdges, visible: focusSet, spacing: presentation.spacing }), [snapshot, presentation.layout, expanded, presentation.pins, visibleEdges, focusSet, presentation.spacing]);
 	const impact = useMemo(() => Object.fromEntries(snapshot.nodes.map(node => [node.id, traceNode(visibleEdges.filter(edge => edge.ordering), node.id).downstream.size])), [snapshot, visibleEdges]);
 	const badgeFor = useCallback((node: GraphNode): CardData['badge'] => {
 		if (presentation.overlay === 'plan') {
@@ -242,12 +242,12 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme
 	useEffect(() => {
 		// Refit when the layout kind or the set of resources changes, not on every edit or pin.
 		if (!flow) { return; }
-		const key = presentation.layout + ':' + (presentation.focus ? presentation.focus.id + '/' + presentation.focus.depth : '') + ':' + snapshot.nodes.map(node => node.id).join(',');
+		const key = presentation.layout + ':' + presentation.spacing + ':' + (presentation.focus ? presentation.focus.id + '/' + presentation.focus.depth : '') + ':' + snapshot.nodes.map(node => node.id).join(',');
 		if (lastFit.current === key) { return; }
 		const first = !lastFit.current; lastFit.current = key;
 		const saved = first ? viewports?.current?.technical : undefined;
 		requestAnimationFrame(() => { if (saved) { void flow.setViewport(saved); } else { void flow.fitView({ padding: fitPadding, maxZoom: 1, duration: first ? 0 : 280 }); } });
-	}, [flow, presentation.layout, presentation.focus, snapshot.nodes, viewports]);
+	}, [flow, presentation.layout, presentation.spacing, presentation.focus, snapshot.nodes, viewports]);
 
 	function handleKeys(event: ReactKeyboardEvent) {
 		const target = event.target as HTMLElement;
@@ -292,6 +292,8 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme
 				<option value="layers">Layers</option><option value="scopes">Scopes</option><option value="tree">Ownership tree</option></select></label>
 					<label>Routes<select aria-label="Route style" value={presentation.route} onChange={event => onPresentation({ type: 'set', patch: { route: event.target.value as RouteStyle } })}>
 				<option value="curved">Curved</option><option value="orthogonal">Orthogonal</option><option value="straight">Straight</option></select></label>
+					<label>Spacing<select aria-label="Graph spacing" value={String(presentation.spacing)} onChange={event => onPresentation({ type: 'set', patch: { spacing: event.target.value === 'auto' ? 'auto' : Number(event.target.value) } })}>
+						<option value="auto">Auto (by line density)</option><option value="100">100%</option><option value="125">125%</option><option value="150">150%</option><option value="200">200%</option></select></label>
 					<label>Detail<select aria-label="Card detail" value={presentation.density} onChange={event => onPresentation({ type: 'set', patch: { density: event.target.value as GraphPresentation['density'] } })}>
 				<option value="auto">Auto</option><option value="detailed">Detailed</option><option value="compact">Compact</option></select></label>
 					<button className="tg-text-button" aria-pressed={presentation.showMembership} title="Show resource group membership as lines (otherwise shown on each card)" onClick={() => onPresentation({ type: 'set', patch: { showMembership: !presentation.showMembership } })}>Membership</button>

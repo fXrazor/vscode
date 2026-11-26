@@ -13,7 +13,7 @@ import type { Position } from './model.ts';
 
 export type GraphLayoutKind = 'layers' | 'scopes' | 'tree';
 export type GraphSize = { width: number; height: number };
-export interface GraphLane { id: string; label: string; x: number; y: number; width: number; height: number; kind: 'layer' | 'scope' }
+export interface GraphLane { id: string; label: string; x: number; y: number; width: number; height: number; kind: 'layer' | 'scope'; members?: string[] }
 export interface GraphLayoutResult { positions: Record<string, Position>; sizes: Record<string, GraphSize>; lanes: GraphLane[]; columns: GraphLane[] }
 
 /** Engineering reading order: scope, then the network a workload lands in, the controls on it, the workload, its data and telemetry. */
@@ -62,12 +62,15 @@ function centreHubs(band: string[], snapshot: TechnicalGraphSnapshot): string[] 
 	return band;
 }
 
-interface Options { layout: GraphLayoutKind; expanded: ReadonlySet<string>; compact: boolean; pins: Readonly<Record<string, Position>>; visible?: ReadonlySet<string>; edges: readonly GraphEdge[] }
+/** `auto` opens gaps that many lines cross; a number scales all spacing (100 = default). */
+export type GraphSpacing = 'auto' | number;
+interface Options { layout: GraphLayoutKind; expanded: ReadonlySet<string>; compact: boolean; pins: Readonly<Record<string, Position>>; visible?: ReadonlySet<string>; edges: readonly GraphEdge[]; spacing?: GraphSpacing }
 
 export function layoutTechnicalGraph(snapshot: TechnicalGraphSnapshot, options: Options): GraphLayoutResult {
 	const nodes = snapshot.nodes.filter(node => !options.visible || options.visible.has(node.id));
 	const sizes: Record<string, GraphSize> = Object.fromEntries(nodes.map(node => [node.id, graphNodeSize(node, options.expanded.has(node.id), options.compact)]));
 	const result = options.layout === 'tree' ? treeLayout(nodes, sizes) : gridLayout(snapshot, nodes, sizes, options.edges, options.layout === 'scopes');
+	spread(result, options.edges, options.spacing ?? 'auto');
 	for (const [id, pin] of Object.entries(options.pins)) { if (result.positions[id]) { result.positions[id] = { x: pin.x, y: pin.y }; } }
 	return result;
 }
@@ -111,10 +114,10 @@ function gridLayout(snapshot: TechnicalGraphSnapshot, nodes: readonly GraphNode[
 			bandHeight.set(column, cy - y);
 		}
 		const height = Math.max(0, ...bandHeight.values()) - m.gapY;
-		lanes.push({ id: 'lane:' + layer, label: layerLabels[layer], kind: 'layer', x: 0, y: top, width: m.gutter + totalWidth + 40, height: m.bandHeader + height + 18 });
+		lanes.push({ id: 'lane:' + layer, label: layerLabels[layer], kind: 'layer', members: nodes.filter(node => node.layer === layer).map(node => node.id), x: 0, y: top, width: m.gutter + totalWidth + 40, height: m.bandHeader + height + 18 });
 		y += height + m.bandGap;
 	}
-	const columns: GraphLane[] = byScope ? columnIds.map(column => ({ id: 'column:' + column, label: column === '__unscoped' ? 'No ownership scope' : label(column), kind: 'scope', x: columnX.get(column)! - 20, y: 0, width: columnWidth.get(column)! + 40, height: y - m.bandGap + 10 })) : [];
+	const columns: GraphLane[] = byScope ? columnIds.map(column => ({ id: 'column:' + column, label: column === '__unscoped' ? 'No ownership scope' : label(column), kind: 'scope', members: nodes.filter(node => columnOf(node) === column).map(node => node.id), x: columnX.get(column)! - 20, y: 0, width: columnWidth.get(column)! + 40, height: y - m.bandGap + 10 })) : [];
 	void byId;
 	return { positions, sizes, lanes, columns };
 }
@@ -160,4 +163,45 @@ function treeLayout(nodes: readonly GraphNode[], sizes: Record<string, GraphSize
 	};
 	let left = 0; for (const root of roots) { place(root, left, 0); left += box.get(root)!.width + m.columnGap; }
 	return { positions, sizes, lanes: [], columns: [] };
+}
+
+/** Extra vertical room for a gap, from the number of lines that cross it. */
+export function densityGap(crossing: number): number { return Math.min(220, Math.max(0, crossing - 3) * 9); }
+
+/**
+ * Spread a computed layout. A percentage scales all gaps about the origin. `auto` keeps the default
+ * scale and opens each horizontal gap between rows by the number of lines crossing it (lines that
+ * stay within a row route underneath it, so they count for the gap below). Lanes are refitted.
+ */
+function spread(result: GraphLayoutResult, edges: readonly GraphEdge[], spacing: GraphSpacing) {
+	const ids = Object.keys(result.positions); if (!ids.length) { return; }
+	const scale = spacing === 'auto' ? 1 : Math.max(1, Math.min(3, spacing / 100));
+	if (scale !== 1) { for (const id of ids) { const p = result.positions[id]; result.positions[id] = { x: p.x * scale, y: p.y * scale }; } }
+	if (spacing === 'auto') {
+		const tops = [...new Set(ids.map(id => Math.round(result.positions[id].y)))].sort((a, b) => a - b);
+		const rowOf = (id: string) => tops.indexOf(Math.round(result.positions[id].y));
+		const crossing = new Array(Math.max(0, tops.length - 1)).fill(0);
+		for (const edge of edges) {
+			if (!(edge.source in result.positions) || !(edge.target in result.positions)) { continue; }
+			const a = rowOf(edge.source); const b = rowOf(edge.target);
+			if (a === b) { if (a < crossing.length) { crossing[a]++; } continue; }
+			for (let k = Math.min(a, b); k < Math.max(a, b); k++) { crossing[k]++; }
+		}
+		const shift = tops.map((_, index) => crossing.slice(0, index).reduce((sum, count) => sum + densityGap(count), 0));
+		for (const id of ids) { const p = result.positions[id]; result.positions[id] = { x: p.x, y: p.y + shift[rowOf(id)] }; }
+	}
+	if (scale === 1 && spacing !== 'auto') { return; }
+	const right = Math.max(...ids.map(id => result.positions[id].x + result.sizes[id].width));
+	const bottom = Math.max(...ids.map(id => result.positions[id].y + result.sizes[id].height));
+	for (const lane of result.lanes) {
+		const members = (lane.members ?? []).filter(id => result.positions[id]); if (!members.length) { continue; }
+		const top = Math.min(...members.map(id => result.positions[id].y)) - graphMetrics.bandHeader;
+		const end = Math.max(...members.map(id => result.positions[id].y + result.sizes[id].height));
+		Object.assign(lane, { y: top, height: end - top + 18, width: right + 40 });
+	}
+	for (const column of result.columns) {
+		const members = (column.members ?? []).filter(id => result.positions[id]); if (!members.length) { continue; }
+		const left = Math.min(...members.map(id => result.positions[id].x)) - 20;
+		Object.assign(column, { x: left, width: Math.max(...members.map(id => result.positions[id].x + result.sizes[id].width)) - left + 20, height: bottom + 10 - column.y });
+	}
 }

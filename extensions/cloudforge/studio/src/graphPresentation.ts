@@ -24,8 +24,10 @@ export interface GraphPresentation {
 	overlay: 'none' | 'plan' | 'order' | 'impact';
 	/** Show only the neighbourhood of one resource. */
 	focus?: { id: string; depth: number };
+	/** 'auto' opens gaps crossed by many lines; a percentage scales all spacing. */
+	spacing: 'auto' | number;
 }
-export const defaultGraphPresentation: GraphPresentation = { lens: 'all', layout: 'layers', route: 'curved', pins: {}, expanded: [], showMembership: false, density: 'auto', overlay: 'none' };
+export const defaultGraphPresentation: GraphPresentation = { lens: 'all', layout: 'layers', route: 'curved', pins: {}, expanded: [], showMembership: false, density: 'auto', overlay: 'none', spacing: 'auto' };
 
 export type GraphPresentationAction =
 	| { type: 'set'; patch: Partial<Omit<GraphPresentation, 'pins' | 'expanded'>> }

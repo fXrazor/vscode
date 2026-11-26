@@ -141,3 +141,17 @@ test('apply waves follow ordering edges, overlays join plan by address, and focu
 	assert.ok(matchesQuery(snapshot.nodes.find(node => node.id === 'aks')!, 'KUBERNETES_cluster'));
 	assert.ok(!matchesQuery(snapshot.nodes.find(node => node.id === 'kv')!, 'aks'));
 });
+
+test('spacing: auto opens gaps crossed by many lines, percentages scale, cards never overlap', () => {
+	const snapshot = projectTechnicalGraph(hubSpokeArchitecture()); const edges = lensEdges(snapshot, 'all', false);
+	const run = (spacing: 'auto' | number) => layoutTechnicalGraph(snapshot, { layout: 'layers', expanded: new Set(), compact: false, pins: {}, edges, spacing });
+	const extent = (r: ReturnType<typeof run>) => ({ w: Math.max(...Object.entries(r.positions).map(([id, p]) => p.x + r.sizes[id].width)), h: Math.max(...Object.entries(r.positions).map(([id, p]) => p.y + r.sizes[id].height)) });
+	const base = extent(run(100)); const auto = extent(run('auto')); const wide = extent(run(150));
+	assert.ok(auto.h > base.h && auto.w === base.w);
+	assert.ok(wide.h > base.h * 1.3 && wide.w > base.w * 1.3);
+	for (const r of [run('auto'), run(150), run(70)]) {
+		const boxes = Object.entries(r.positions).map(([id, p]) => ({ id, ...p, ...r.sizes[id] }));
+		for (const a of boxes) { for (const b of boxes) { if (a.id < b.id) { assert.ok(a.x + a.width <= b.x || b.x + b.width <= a.x || a.y + a.height <= b.y || b.y + b.height <= a.y, a.id + ' overlaps ' + b.id); } } }
+		for (const lane of r.lanes) { for (const id of lane.members ?? []) { assert.ok(r.positions[id].y >= lane.y && r.positions[id].y + r.sizes[id].height <= lane.y + lane.height, id + ' outside ' + lane.id); } }
+	}
+});

@@ -53,6 +53,8 @@ Branch `claude/project-thread-2irlth` in fXrazor/vscode, based on main `5b66f85c
 - **Toolbar**: Find, Lens, Overlay and a **View** popover (Layout, Routes, Detail, Membership), so the bar never wraps. Card action icons appear only on hover or selection, so names get the room.
 - Tests: `applyWaves`, `graphOverlays` (address join, `[n]` folding, unmatched count, data skipped), `neighbourhood`, focus layout and `matchesQuery`. **170/170 Studio tests pass.**
 
+**Density spacing (Dale's annotation):** `GraphPresentation.spacing` is `'auto' | number` and lives in the View popover. In **Auto** (the default), `spread()` in `technicalGraphLayout.ts` counts the lines crossing each gap between card rows (same-row lines count for the gap below, because they route underneath) and adds `densityGap(n) = min(220, max(0, n−3)·9)` px. A percentage (100–200%) scales all positions about the origin and is clamped at ≥100% so cards can't overlap. Lanes and scope columns are refitted to their members after spreading. Tested: auto is taller than 100% at the same width, 150% is larger in both directions, and there are no overlaps and no card outside its lane. A future refinement could also widen horizontal gaps for dense fan-in to a single card.
+
 **Engineer needs still open, in priority order for Codex:**
 - (a) **Destroy/replace blast preview**: when the plan overlay shows replace/delete, highlight configured dependents of those nodes.
 - (b) **External and unknown nodes**: references to `data.*`, `var.*`, remote state and module outputs that have no card should appear as small ghost nodes.
