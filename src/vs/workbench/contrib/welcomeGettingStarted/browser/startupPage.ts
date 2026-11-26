@@ -234,6 +234,10 @@ export class StartupPageRunnerContribution extends Disposable implements IWorkbe
 	}
 
 	private tryShowOnboarding(): void {
+		if (this.productService.applicationName === 'cloudforge' || this.productService.applicationName === 'cloudforge-proof') {
+			return; // CloudForge opens its own branded Welcome experience without the VS Code / Copilot sign-in modal
+		}
+
 		if (this.environmentService.skipWelcome) {
 			return; // skip welcome flag is set
 		}
