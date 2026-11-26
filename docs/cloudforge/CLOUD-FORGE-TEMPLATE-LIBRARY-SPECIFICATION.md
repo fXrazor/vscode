@@ -1,6 +1,6 @@
 # CloudForge Template & Architecture Library — Specification
 
-**Status:** Draft for approval · research and design only, no application code
+**Status:** Checkpoint 1 approved by Dale on 26 November 2026 (all Appendix B recommendations accepted). Phase 2 in progress from main.
 **Date:** 26 November 2026 · **Author:** Claude, for Dale
 **Repositories inspected:** `fXrazor/vscode` (Code OSS + CloudForge extension and Studio) and `fXrazor/CloudForge` (Rust service, `design.md`), both at branch `claude/project-thread-8qd376` (vscode `83d07623`, CloudForge `2c6f0bc`), which carries the unmerged bundle, Providers view, Add Architecture and Get Ready work on top of main.
 **Spec branch:** `claude/project-thread-2dm0k0` in both repositories.
@@ -863,7 +863,7 @@ flowchart TD
 
 ## Appendix A. Architectural decision records
 
-Each ADR: context → decision → consequences. All **Proposed**, pending Checkpoint 1 or 2.
+Each ADR: context → decision → consequences. **Accepted by Dale on 26 November 2026** (ADR-001 to ADR-010). ADR-006 accepted with signing from the start.
 
 **ADR-001 Distribution: hybrid built-in + external `cloudforge-templates`, federated-ready.**
 Context: offline-first desktop app, design.md requires bundled offline templates, desire for independent template releases. Decision: §2.1. Consequences: two repos to maintain; template releases independent of installers; signing key management needed.
@@ -896,6 +896,26 @@ Consequences: authors publish a template major per provider major when needed; u
 Consequences: users run Get Ready explicitly; template validation that needs `init` runs only in CI.
 
 ## Appendix B. Open questions for Dale
+
+### Decisions recorded 26 November 2026
+
+Dale accepted every recommendation below. `claude/project-thread-8qd376` was merged to main in both repos (fXrazor/vscode#5, fXrazor/CloudForge#1), so Q5 is resolved and Phase 2 starts from main.
+
+| # | Decision |
+| --- | --- |
+| 1 | Create **public** `fXrazor/cloudforge-templates`, at Checkpoint 2 (not before). |
+| 2 | Activity-bar label **Templates**, page title **Template Library**. |
+| 3 | Official templates licensed **MIT**. |
+| 4 | **Sign** the official index with Ed25519 (`ed25519-dalek` crate approved) plus SHA-256 everywhere. |
+| 5 | Start Phase 2 from main (branch merged). |
+| 6 | Test on AzureRM **5.14.0**; declare `>= 4.0, < 6.0` only where the HCL is verified on both. |
+| 7 | Built-in collection ≈8–12 templates, ≤ 2 MiB. |
+| 8 | **Trivy** as primary CI scanner, plus secret scanning. |
+| 9 | Costs: author-written, dated estimates only. |
+| 10 | Community publishing out of v1. |
+| 11 | Add `service/` to the Graphify wrapper scope in Phase 5. |
+
+### Original questions
 
 Blocking for Checkpoint 1 (⚑) or 2 (◆):
 
