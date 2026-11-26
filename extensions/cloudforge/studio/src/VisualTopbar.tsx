@@ -55,7 +55,7 @@ export function VisualTopbar({ mode, onMode, architecture, name, onRename, onTec
     <button aria-label="Configuration" title="Infrastructure Configuration View" aria-pressed={mode === 'technical'} onClick={onTechnical}><Waypoints /></button>
    </div>
    <button aria-label="Toggle light or dark theme" onClick={onTheme}>{theme === 'dark' ? <Sun /> : <Moon />}</button>
-   <details className="shell-export"><summary aria-label="Export architecture"><Download /><span>Export</span></summary><div>
+   <details className="shell-export" onKeyDown={event => { if (event.key === 'Escape') { event.currentTarget.open = false; event.currentTarget.querySelector('summary')?.focus(); } }}><summary aria-label="Export architecture"><Download /><span>Export</span></summary><div onClick={event => { const menu = event.currentTarget.parentElement as HTMLDetailsElement; menu.open = false; menu.querySelector('summary')?.focus(); }}>
     <button onClick={onExport}>Graph JSON</button>
     <button onClick={() => { if (host?.onExportArtifact) { host.onExportArtifact('svg'); } else { void exportPresentation(architecture, 'svg'); } }}>SVG image</button>
     <button onClick={() => { if (host?.onExportArtifact) { host.onExportArtifact('png'); } else { void exportPresentation(architecture, 'png'); } }}>PNG image</button>
@@ -68,7 +68,7 @@ export function VisualTopbar({ mode, onMode, architecture, name, onRename, onTec
    {host?.isHosted && host.sourceRevision && host.isDirty && <button disabled={host.saving} onClick={host.onSaveDraft}>Preview and save Terraform draft</button>}
    {host?.isHosted && host.onToggleFocusMode && <button aria-pressed={!!host.focusMode} onClick={host.onToggleFocusMode}>{host.focusMode ? 'Exit Canvas Focus Mode' : 'Focus Canvas (Full Screen)'}</button>}
    <button disabled={!revisions} onClick={onUndo}>Undo</button><button disabled={!canRedo} onClick={onRedo}>Redo</button>
-   <button aria-expanded={libraryOpen} onClick={onToggleLibrary}>{libraryOpen?'Hide':'Show'} resource library</button><button aria-expanded={inspectorOpen} onClick={onToggleInspector}>{inspectorOpen?'Hide':'Show'} resource inspector</button><button onClick={onIssues}>Local checks · {errors} errors · {warnings} warnings</button>
+   <button aria-expanded={libraryOpen} onClick={onToggleLibrary}>{libraryOpen?'Hide':'Show'} resource library</button><button aria-expanded={inspectorOpen} onClick={onToggleInspector}>{inspectorOpen?'Hide':'Show'} resource inspector</button><button onClick={onIssues}>{host?.isHosted ? 'Checks' : 'Local checks'} · {errors} {errors === 1 ? 'error' : 'errors'} · {warnings} {warnings === 1 ? 'warning' : 'warnings'}</button>
    <button onClick={() => onMode('visual')}>Architecture view</button><button onClick={onTechnical}>Configuration view</button>
    <button onClick={onTheme}>Switch to {theme === 'dark' ? 'light' : 'dark'} theme</button>
    <button onClick={onExport}>Export graph JSON</button><button onClick={() => { if (host?.onExportArtifact) { host.onExportArtifact('svg'); } else { void exportPresentation(architecture, 'svg'); } }}>Export SVG</button>

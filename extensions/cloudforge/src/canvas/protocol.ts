@@ -1113,7 +1113,7 @@ export function parseWebviewMessage(value: unknown): WebviewToExtensionMessage |
 			const names = new Set<string>();
 			let total = 0;
 			for (const file of value.files) {
-				if (typeof file !== 'object' || file === null || Array.isArray(file) || 'type' in file) {
+				if (typeof file !== 'object' || file === null || Array.isArray(file) || Object.hasOwn(file, 'type')) {
 					return undefined;
 				}
 				const parsed = parseWebviewMessage({ ...file, type: 'requestDraftSavePreview' });

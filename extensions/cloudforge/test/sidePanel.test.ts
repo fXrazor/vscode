@@ -94,4 +94,11 @@ test('sign-in checks are parsed strictly and shown without secrets', () => {
 	assert.match(html, /Sign-in expired/);
 	assert.ok(!html.includes('<img src=x>'));
 	assert.match(html, /&lt;img src=x&gt;/);
+
+	const checkingHtml = buildStatusHtml({
+		resourceCount: 0, errorCount: 0, warningCount: 0, declaredAddresses: [], providersInUse: ['azure'],
+		connections, checking: ['azure'],
+	}, 'nonce', 'vscode-resource:');
+	assert.match(checkingHtml, /data-message="checkSignIn" data-provider="azure" disabled aria-busy="true">Checking…<\/button>/);
+	assert.match(checkingHtml, /Checking CLI sign-in…/);
 });

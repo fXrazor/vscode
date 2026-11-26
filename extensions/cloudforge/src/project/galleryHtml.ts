@@ -190,7 +190,7 @@ button { font: inherit; font-size: 13px; line-height: 20px; font-weight: 500; cu
 		if (message && message.type === 'state') {
 			state = message;
 			document.getElementById('title').textContent = message.projectName || 'Architectures';
-			document.getElementById('crumbs').textContent = 'Projects / ' + (message.projectName || '');
+			document.getElementById('crumbs').textContent = message.projectName ? 'Projects / ' + message.projectName : 'Projects';
 			render();
 		}
 	});

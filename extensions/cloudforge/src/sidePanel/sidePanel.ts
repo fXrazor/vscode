@@ -106,10 +106,10 @@ class SidePanelData implements Disposable {
 	}
 
 	/** Asks the service to run the provider CLI's read-only identity command and compare it with the link. */
-	async checkSignIn(provider: CloudProvider): Promise<SignInCheck | { readonly error: string }> {
+	async checkSignIn(provider: CloudProvider): Promise<{ readonly ok: true; readonly check: SignInCheck } | { readonly ok: false; readonly error: string }> {
 		const workspaceId = this.workspaceId();
 		if (!workspaceId) {
-			return { error: 'INVALID_STATE' };
+			return { ok: false, error: 'INVALID_STATE' };
 		}
 		this.checking.add(provider);
 		this.changeEmitter.fire();
@@ -119,7 +119,7 @@ class SidePanelData implements Disposable {
 			if (check && this.workspaceId() === workspaceId) {
 				this.signInChecks[provider] = check;
 			}
-			return check ?? { error: result.ok ? 'UNREADABLE' : result.error.code };
+			return check ? { ok: true, check } : { ok: false, error: result.ok ? 'UNREADABLE' : result.error.code };
 		} finally {
 			this.checking.delete(provider);
 			this.changeEmitter.fire();
@@ -137,25 +137,30 @@ class SidePanelData implements Disposable {
 		}
 		this.state = undefined;
 		this.stateError = undefined;
-		if (graph) {
-			const result = await this.host.callService<unknown>('summarizeState', {
-				workspaceId: graph.workspaceId, architectureId: graph.architectureId, expectedSourceRevision: graph.sourceRevision,
-			});
-			if (result.ok) {
-				this.state = parseStateSummary(result.value);
+		// Fetch state summary and cloud connections concurrently to avoid a serial IPC waterfall.
+		const [stateResult, connResult] = await Promise.all([
+			graph
+				? this.host.callService<unknown>('summarizeState', {
+					workspaceId: graph.workspaceId,
+					architectureId: graph.architectureId,
+					expectedSourceRevision: graph.sourceRevision,
+				})
+				: Promise.resolve(undefined),
+			workspaceId
+				? this.host.callService<unknown>('listCloudConnections', { workspaceId })
+				: Promise.resolve(undefined),
+		]);
+		if (stateResult) {
+			if (stateResult.ok) {
+				this.state = parseStateSummary(stateResult.value);
 				this.stateError = this.state ? undefined : l10n.t('The state summary was not readable.');
 			} else {
-				this.stateError = result.error.code === 'STALE_SOURCE'
+				this.stateError = stateResult.error.code === 'STALE_SOURCE'
 					? l10n.t('The files changed. Refresh to read the state again.')
-					: l10n.t('The state summary is not available ({0}).', result.error.code);
+					: l10n.t('The state summary is not available ({0}).', stateResult.error.code);
 			}
 		}
-		if (workspaceId) {
-			const result = await this.host.callService<unknown>('listCloudConnections', { workspaceId });
-			this.connections = result.ok ? parseCloudConnections(result.value) : undefined;
-		} else {
-			this.connections = undefined;
-		}
+		this.connections = connResult?.ok ? parseCloudConnections(connResult.value) : undefined;
 		this.changeEmitter.fire();
 	}
 
@@ -392,6 +397,7 @@ export function activateSidePanel(context: ExtensionContext, host: SidePanelHost
 			stateError: data.stateError,
 			connections: data.connections,
 			signInChecks: data.signInChecks,
+			checking: [...data.checking],
 		}, randomBytes(16).toString('base64'), statusPanel.webview.cspSource);
 	};
 
@@ -442,6 +448,9 @@ export function activateSidePanel(context: ExtensionContext, host: SidePanelHost
 				return;
 			}
 			const label = await ask(title, l10n.t('Label (optional, for example Production)'), { value: existing.label, optional: true });
+			if (label === undefined) {
+				return;
+			}
 			binding = { cloud, tenantId, subscriptionId, ...(clientId ? { clientId } : {}), ...(label ? { label } : {}) };
 		} else if (provider === 'aws') {
 			const profile = await ask(title, l10n.t('AWS CLI profile (from aws configure or aws configure sso)'), { value: existing.profile ?? 'default', validate: name => /^[A-Za-z0-9_.-]{1,64}$/.test(name) });
@@ -450,6 +459,9 @@ export function activateSidePanel(context: ExtensionContext, host: SidePanelHost
 				return;
 			}
 			const label = await ask(title, l10n.t('Label (optional)'), { value: existing.label, optional: true });
+			if (label === undefined) {
+				return;
+			}
 			binding = { profile, ...(region ? { region } : {}), ...(label ? { label } : {}) };
 		} else {
 			const projectId = await ask(title, l10n.t('Google Cloud project ID (sign in first with gcloud auth application-default login)'), { value: existing.projectId, validate: id => /^[a-z][a-z0-9-]{4,28}[a-z0-9]$/.test(id), invalid: l10n.t('Use the project ID, not its name.') });
@@ -459,6 +471,9 @@ export function activateSidePanel(context: ExtensionContext, host: SidePanelHost
 				return;
 			}
 			const label = await ask(title, l10n.t('Label (optional)'), { value: existing.label, optional: true });
+			if (label === undefined) {
+				return;
+			}
 			binding = { projectId, ...(configuration ? { configuration } : {}), ...(region ? { region } : {}), ...(label ? { label } : {}) };
 		}
 		const result = await host.callService<unknown>('setCloudConnection', { workspaceId, provider, binding });
@@ -551,21 +566,22 @@ export function activateSidePanel(context: ExtensionContext, host: SidePanelHost
 			return;
 		}
 		const result = await data.checkSignIn(provider);
-		if ('error' in result) {
+		if (!result.ok) {
 			void window.showErrorMessage(result.error === 'INVALID_STATE'
 				? l10n.t('Link {0} to this project before checking its sign-in.', providerLabel(provider))
 				: l10n.t('CloudForge could not check the {0} sign-in ({1}).', providerLabel(provider), result.error));
 			return;
 		}
-		const summary = `${providerLabel(provider)}: ${describeSignInCheck(result)}`;
-		if (result.status === 'ok') {
+		const check = result.check;
+		const summary = `${providerLabel(provider)}: ${describeSignInCheck(check)}`;
+		if (check.status === 'ok') {
 			void window.showInformationMessage(summary);
 			return;
 		}
-		const command = signInCommand(connection, result);
+		const command = signInCommand(connection, check);
 		const typeIt = l10n.t('Type Command in Terminal');
 		const again = l10n.t('Check Again');
-		const choice = await window.showWarningMessage(`${summary}. ${result.detail}`, ...(command ? [typeIt] : []), again);
+		const choice = await window.showWarningMessage(`${summary}. ${check.detail}`, ...(command ? [typeIt] : []), again);
 		if (choice === again) {
 			await checkSignIn(provider);
 		} else if (choice === typeIt && command) {

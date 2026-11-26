@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 import { endpointElementId, type DesignEndpoint } from './connectionEndpoints.ts';
-import { useEffect, useRef, useState, type CSSProperties, type Dispatch } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch } from 'react';
 import * as Tabs from '@radix-ui/react-tabs';
 import { ArrowLeft, Code2, PanelRight, Variable, X, SlidersHorizontal, CircleCheck, TriangleAlert, Unplug, Layers, ChevronRight, CircleHelp, FileCode2 } from 'lucide-react';
 import type { Action, Architecture, Resource } from './model.ts';
@@ -15,14 +15,16 @@ import { architectureDiagnostics, type Diagnostic } from './diagnostics.ts';
 import { explicitResourceReferences, inheritedReferences } from './resourceHierarchy.ts';
 import { focusResourceField } from './IssuesPanel.tsx';
 import { PaneResizeHandle } from './PaneResizeHandle.tsx';
-import type { LiveSchemaMap } from './liveSchema.ts';
+import type { HostFormSchema, LiveSchemaMap } from './liveSchema.ts';
+import type { ResourceDraft, SchemaPreview } from './resourceDraft.ts';
 import type { HostCloudRegionsPayload } from './webviewBridge.ts';
 
 /** One resource, one form and one architecture; code and context are computed projections. */
-export function ResourceWorkspace({ resource, architecture, dispatch, open, onClose, onNavigate, liveSchemas, cloudRegions, moduleInspection, hostDiagnostics, hasSource, onOpenSource, onSaveFile }: {
+export function ResourceWorkspace({ resource, architecture, dispatch, open, onClose, onNavigate, liveSchemas, liveSchema, schemaPreview, onRequestSchemaPreview, cloudRegions, moduleInspection, hostDiagnostics, hasHostChecks, hasSource, onOpenSource, onSaveFile }: {
 	resource: Resource; architecture: Architecture; dispatch: Dispatch<Action>; open: boolean;
 	onClose: () => void; onNavigate: (id: string) => void;
-	liveSchemas?: LiveSchemaMap; cloudRegions?: Readonly<Partial<Record<'azure' | 'aws' | 'google', HostCloudRegionsPayload>>>; moduleInspection?: ResourceModuleInspectionProps; hostDiagnostics?: readonly Diagnostic[]; hasSource?: boolean; onOpenSource?: () => void; onSaveFile?: (fileName: string) => void;
+	liveSchemas?: LiveSchemaMap; liveSchema?: HostFormSchema; schemaPreview?: SchemaPreview | null; onRequestSchemaPreview?: (resourceId: string, draft: ResourceDraft) => void;
+	cloudRegions?: Readonly<Partial<Record<'azure' | 'aws' | 'google', HostCloudRegionsPayload>>>; moduleInspection?: ResourceModuleInspectionProps; hostDiagnostics?: readonly Diagnostic[]; hasHostChecks?: boolean; hasSource?: boolean; onOpenSource?: () => void; onSaveFile?: (fileName: string) => void;
 }) {
 	const dialog = useRef<HTMLDialogElement>(null);
 	const backdropPress = useRef(false);
@@ -41,23 +43,44 @@ export function ResourceWorkspace({ resource, architecture, dispatch, open, onCl
 		return () => { element?.close(); previous?.focus(); };
 	}, [open]);
 	const metadata = resourceDefinition(resource);
-	const incoming = architecture.connections.filter(link => endpointElementId(link.target) === resource.id);
-	const outgoing = architecture.connections.filter(link => endpointElementId(link.source) === resource.id);
-	const issues = [
+	const resourceById = useMemo(() => new Map(architecture.resources.map(item => [item.id, item])), [architecture.resources]);
+	const itemById = useMemo(() => new Map(architecture.items.map(item => [item.id, item])), [architecture.items]);
+	const { incoming, outgoing } = useMemo(() => {
+		const incomingLinks = [];
+		const outgoingLinks = [];
+		for (const link of architecture.connections) {
+			if (endpointElementId(link.target) === resource.id) { incomingLinks.push(link); }
+			if (endpointElementId(link.source) === resource.id) { outgoingLinks.push(link); }
+		}
+		return { incoming: incomingLinks, outgoing: outgoingLinks };
+	}, [architecture.connections, resource.id]);
+	const issues = useMemo(() => [
 		...(hostDiagnostics ?? []).filter(item => item.resourceId === resource.id),
 		...architectureDiagnostics(architecture, liveSchemas).filter(item => item.resourceId === resource.id),
-	];
-	const inherited = inheritedReferences(architecture, resource);
-	const inheritedSources = [...new Set(inherited.map(reference => reference.source.id))].map(id => ({ id, references: inherited.filter(reference => reference.source.id === id) }));
-	const explicitRefs = explicitResourceReferences(architecture, resource);
-	const explicitSources = [...new Set(explicitRefs.map(reference => reference.source.id))].map(id => ({ id, references: explicitRefs.filter(reference => reference.source.id === id) }));
-	const children = architecture.resources.filter(item => item.parentId === resource.id);
-	const boundIds = new Set(Object.values(resource.fieldBindings ?? {}).map(binding => binding.variableId));
+	], [hostDiagnostics, architecture, liveSchemas, resource.id]);
+	const inheritedSources = useMemo(() => {
+		const grouped = new Map<string, ReturnType<typeof inheritedReferences>>();
+		for (const reference of inheritedReferences(architecture, resource)) {
+			const list = grouped.get(reference.source.id);
+			if (list) { list.push(reference); } else { grouped.set(reference.source.id, [reference]); }
+		}
+		return [...grouped.entries()].map(([id, references]) => ({ id, references }));
+	}, [architecture, resource]);
+	const explicitSources = useMemo(() => {
+		const grouped = new Map<string, ReturnType<typeof explicitResourceReferences>>();
+		for (const reference of explicitResourceReferences(architecture, resource)) {
+			const list = grouped.get(reference.source.id);
+			if (list) { list.push(reference); } else { grouped.set(reference.source.id, [reference]); }
+		}
+		return [...grouped.entries()].map(([id, references]) => ({ id, references }));
+	}, [architecture, resource]);
+	const children = useMemo(() => architecture.resources.filter(item => item.parentId === resource.id), [architecture.resources, resource.id]);
+	const boundIds = useMemo(() => new Set(Object.values(resource.fieldBindings ?? {}).map(binding => binding.variableId)), [resource.fieldBindings]);
 	function linkedElement(endpoint: DesignEndpoint | string) {
 		const id = endpointElementId(endpoint);
 		if (!id) { return <span className="field-help">Loose canvas endpoint</span>; }
-		const linked = architecture.resources.find(item => item.id === id);
-		const drawing = architecture.items.find(item => item.id === id);
+		const linked = resourceById.get(id);
+		const drawing = itemById.get(id);
 		return linked ? <button className="workspace-link" onClick={() => onNavigate(id)}><img src={'./assets/' + resourceDefinition(linked).icon} alt="" /><span><strong>{linked.label || linked.name}</strong><small>{resourceDefinition(linked).label}</small></span><ChevronRight size={14} /></button> : <div className="workspace-link"><span>{drawing?.text || 'Drawing'}<small>Visual annotation</small></span></div>;
 	}
 	function outsideDialog(x: number, y: number) {
@@ -74,7 +97,7 @@ export function ResourceWorkspace({ resource, architecture, dispatch, open, onCl
 		<header className="workspace-header">
 			<button type="button" className="quiet-button workspace-back" onClick={onClose}><ArrowLeft size={16} /><span>Back to canvas</span></button>
 			<div className="workspace-identity"><img src={'./assets/' + metadata.icon} alt="" /><div><h2 id="resource-workspace-title">{resource.label || resource.name}</h2><span>{providerNames[resource.provider]} · {metadata.label}</span></div></div>
-			<button className={'workspace-check-summary' + (issues.length ? ' has-findings' : '')} onClick={() => showContext('checks')} aria-label="Review local resource checks">{issues.length ? <TriangleAlert size={14} /> : <CircleCheck size={14} />}<span>{issues.length ? issues.length + ' to review' : 'Local checks clear'}</span></button>
+			<button className={'workspace-check-summary' + (issues.length ? ' has-findings' : '')} onClick={() => showContext('checks')} aria-label="Review resource checks">{issues.length ? <TriangleAlert size={14} /> : <CircleCheck size={14} />}<span>{issues.length ? issues.length + ' to review' : hasHostChecks ? 'Checks clear' : 'Local checks clear'}</span></button>
 			<div className="workspace-layout-actions">
 				{hasSource && onOpenSource && <button type="button" title="Open Terraform source in editor" aria-label="Open Terraform source" onClick={onOpenSource}><FileCode2 size={16} /></button>}
 				<button type="button" title={codeOpen ? 'Hide Terraform pane' : 'Show Terraform pane'} aria-label="Toggle Terraform pane" aria-pressed={codeOpen} onClick={() => setCodeOpen(value => !value)}><Code2 size={16} /></button>
@@ -85,7 +108,7 @@ export function ResourceWorkspace({ resource, architecture, dispatch, open, onCl
 		<p className="sr-only" id="resource-workspace-description">Edit this resource's Terraform and parameters. Close with Escape, the close button, or the background. Closing preserves edits and unapplied code.</p>
 		<div className="workspace-mobile-tabs" role="group" aria-label="Node details view">{['code', 'parameters', 'context'].map(tab => <button key={tab} aria-pressed={mobileTab === tab} onClick={() => { setMobileTab(tab); if (tab === 'code') { setCodeOpen(true); } if (tab === 'context') { setContextOpen(true); } }}>{tab === 'code' ? 'Terraform' : tab === 'parameters' ? 'Parameters' : 'Context'}</button>)}</div>
 		<div className="workspace-columns">
-			<section className="workspace-code" aria-label="Node Terraform pane"><CodePanel resource={resource} architecture={architecture} dispatch={dispatch} compact hidden={!open || !codeOpen} hasSource={hasSource} onOpenSource={onOpenSource} onSaveFile={onSaveFile} /><PaneResizeHandle side="workspace-code" width={codeWidth} minimum={280} onCommit={setCodeWidth} /></section>
+			<section className="workspace-code" aria-label="Node Terraform pane"><CodePanel resource={resource} architecture={architecture} dispatch={dispatch} liveSchema={liveSchema} schemaPreview={schemaPreview} onRequestSchemaPreview={onRequestSchemaPreview} compact hidden={!open || !codeOpen} hasSource={hasSource} onOpenSource={onOpenSource} onSaveFile={onSaveFile} /><PaneResizeHandle side="workspace-code" width={codeWidth} minimum={280} onCommit={setCodeWidth} /></section>
 			<section className="workspace-parameters" aria-label="Node parameters">
 				<div className="workspace-pane-heading"><SlidersHorizontal size={17} /><div><h3>Parameters</h3><p>Changes update this resource and its Terraform draft.</p></div></div>
 				<ResourceFields resource={resource} architecture={architecture} dispatch={dispatch} liveSchemas={liveSchemas} cloudRegions={cloudRegions} moduleInspection={moduleInspection} hasSource={hasSource} onOpenSource={onOpenSource} onRevealResource={onNavigate} onManageVariables={() => { showContext('variables'); requestAnimationFrame(() => variablesTab.current?.focus()); }} />
@@ -103,9 +126,9 @@ export function ResourceWorkspace({ resource, architecture, dispatch, open, onCl
 				</Tabs.Content>
 				<Tabs.Content value="variables" forceMount hidden={contextTab !== 'variables'}><VariablePanel architecture={architecture} dispatch={dispatch} code={false} /></Tabs.Content>
 				<Tabs.Content value="checks">
-					<h3>Local configuration checks</h3>
-					{issues.length ? <ul className="workspace-issues">{issues.map(issue => <li key={issue.id}><button className="workspace-issue-link" onClick={() => { setMobileTab('parameters'); requestAnimationFrame(() => focusResourceField(dialog.current?.querySelector('.workspace-parameters') ?? null, issue.path)); }}><TriangleAlert size={14} /><span>{issue.message}</span><ChevronRight size={13} /></button></li>)}</ul> : <p className="local-check-clear"><CircleCheck size={17} />No issues found by local checks.</p>}
-					<p className="context-boundary">These checks use the resource catalogue. Terraform and cloud provider validation have not run.</p>
+					<h3>{hasHostChecks ? 'Configuration checks' : 'Local configuration checks'}</h3>
+					{issues.length ? <ul className="workspace-issues">{issues.map(issue => <li key={issue.id}><button className="workspace-issue-link" onClick={() => { setMobileTab('parameters'); requestAnimationFrame(() => focusResourceField(dialog.current?.querySelector('.workspace-parameters') ?? null, issue.path)); }}><TriangleAlert size={14} /><span>{issue.message}</span><ChevronRight size={13} /></button></li>)}</ul> : <p className="local-check-clear"><CircleCheck size={17} />{hasHostChecks ? 'No issues found by current checks.' : 'No issues found by local checks.'}</p>}
+					<p className="context-boundary">{hasHostChecks ? 'Includes live service or CLI validation alongside resource catalogue checks.' : 'These checks use the resource catalogue. Terraform and cloud provider validation have not run.'}</p>
 					<details className="workspace-context-guide"><summary>Cost estimate</summary><p>Not estimated. A pricing service is not connected.</p></details>
 				</Tabs.Content>
 			</Tabs.Root></aside>

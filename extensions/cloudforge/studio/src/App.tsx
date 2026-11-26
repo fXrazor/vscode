@@ -32,7 +32,7 @@ import { resourcePlacement } from './resourceHierarchy.ts';
 import { workflowTemplate } from './workflowTemplate.ts';
 import { createHostBridge, type HostCloudRegionsPayload, type HostDependencyReport, type HostDetectedEngine, type HostDraftSaveError, type HostDraftSavePreview, type HostEngineInitOfflineReport, type HostEnginePlanReport, type HostEngineValidateReport, type HostSaveAllPreview, type HostExportAuditReport, type HostGraphSnapshot, type HostModuleInspection, type HostNotice, type HostOfflineMirrorReadiness, type HostValidationRun } from './webviewBridge.ts';
 import type { LiveSchemaMap } from './liveSchema.ts';
-import { parseSchemaPreview, type SchemaPreview } from './resourceDraft.ts';
+import { parseSchemaPreview, type ResourceDraft, type SchemaPreview } from './resourceDraft.ts';
 import { hydrateResourceValues, parseResourceValues } from './resourceValues.ts';
 import { buildDraftSavePayload, buildHostViewState, changedFilePayloads, refreshPrevious, adoptSavedFiles, defaultTargetTfFile, projectGraphSnapshotToArchitecture, projectHostDiagnostics, sanitizeDraftTfFileName } from './serviceAdapter.ts';
 import { projectResourceFiles } from './terraformProjection.ts';
@@ -136,6 +136,21 @@ export function Studio() {
 		() => detectedEngines.find(item => item.status === 'available')?.engine,
 		[detectedEngines]
 	);
+	const { errorCount, warningCount } = useMemo(() => {
+		let errors = 0;
+		let warnings = 0;
+		for (const item of findings) {
+			if (item.severity === 'error') {
+				errors += 1;
+			} else if (item.severity === 'warning') {
+				warnings += 1;
+			}
+		}
+		return { errorCount: errors, warningCount: warnings };
+	}, [findings]);
+	const requestSchemaPreview = useCallback((resourceId: string, draft: ResourceDraft) => {
+		hostBridge.post({ type: 'renderResourceDraft', resourceId, draft });
+	}, [hostBridge]);
 
 	useEffect(() => {
 		if (!hostBridge.isHosted) {
@@ -738,7 +753,7 @@ export function Studio() {
 		<div className={'studio ' + mode + ' theme-' + theme + (!libraryOpen ? ' library-closed' : '') + (!inspectorOpen ? ' inspector-closed' : '') + (resourceEditing ? ' resource-editing' : '') + (resourceEditing && detailTab === 'code' ? ' details-code' : '')}
 			style={{ '--library-width': libraryWidth + 'px', '--inspector-width': (resourceEditing ? detailsWidth : inspectorWidth) + 'px', '--details-width':detailsWidth+'px' } as CSSProperties}>
 			<VisualTopbar architecture={architecture} mode={mode} onMode={switchMode} name={architecture.name} revisions={history.past.length}
-     libraryOpen={libraryOpen} inspectorOpen={inspectorOpen} errors={findings.filter(item=>item.severity==='error').length} warnings={findings.filter(item=>item.severity==='warning').length} onIssues={showIssues}
+     libraryOpen={libraryOpen} inspectorOpen={inspectorOpen} errors={errorCount} warnings={warningCount} onIssues={showIssues}
      onUndo={() => dispatch({ type: 'undo' })} onRedo={() => dispatch({ type: 'redo' })} canRedo={!!history.future.length}
      theme={theme} onTheme={() => setTheme(value => value === 'light' ? 'dark' : 'light')}
 				onRename={name => dispatch({ type: 'renameArchitecture', name })}
@@ -823,12 +838,12 @@ export function Studio() {
 					) : <div className="empty-inspector"><h2>Select an element</h2><p>Choose a resource, note, text, shape or frame on the canvas.</p></div>}
      </>}
      <div className="variable-container" hidden={inspectorCategory !== 'variables' || detailTab === 'issues'}><VariablePanel architecture={architecture} dispatch={dispatch} code={detailTab === 'code'}/></div>
-     <CodePanel resource={selected} architecture={architecture} dispatch={dispatch} liveSchema={selected ? liveSchemas[resourceDefinition(selected).type] : undefined} schemaPreview={selected ? schemaPreviews[selected.id] : undefined} onRequestSchemaPreview={hostBridge.isHosted ? (resourceId, draft) => hostBridge.post({ type: 'renderResourceDraft', resourceId, draft }) : undefined} hidden={!inspectorOpen || detailTab !== 'code' || inspectorCategory !== 'resources'} hasSource={hostBridge.isHosted && !!selected && !!hasSourceById[selected.id]} onOpenSource={hostBridge.isHosted && selected ? () => hostBridge.post({ type: 'openSource', nodeId: selected.id }) : undefined} onSaveFile={hostBridge.isHosted && hostSnapshot ? file => openDraftSave(file) : undefined} />
+     <CodePanel resource={selected} architecture={architecture} dispatch={dispatch} liveSchema={selected ? liveSchemas[resourceDefinition(selected).type] : undefined} schemaPreview={selected ? schemaPreviews[selected.id] : undefined} onRequestSchemaPreview={hostBridge.isHosted ? requestSchemaPreview : undefined} hidden={!inspectorOpen || detailTab !== 'code' || inspectorCategory !== 'resources'} hasSource={hostBridge.isHosted && !!selected && !!hasSourceById[selected.id]} onOpenSource={hostBridge.isHosted && selected ? () => hostBridge.post({ type: 'openSource', nodeId: selected.id }) : undefined} onSaveFile={hostBridge.isHosted && hostSnapshot ? file => openDraftSave(file) : undefined} />
      </div>
 				</aside>
 			</div>
 			{message&&<div className="studio-action-status" role="status">{message}</div>}<footer className="sr-only"><span>{hostBridge.isHosted ? (hostSnapshot ? 'Connected · rev ' + hostSnapshot.sourceRevision.slice(0, 8) : 'Connecting') : (history.past.length ? 'Modified draft' : 'Original sample') + ' · In-memory preview'}</span></footer>
-			{workspaceResource && <ResourceWorkspace open={workspaceOpen} resource={workspaceResource} architecture={architecture} dispatch={dispatch} liveSchemas={liveSchemas} cloudRegions={hostCloudRegions} moduleInspection={hostBridge.isHosted && hostSnapshot && workspaceResource.kind === 'module' ? { loading: !!moduleInspections[workspaceResource.name]?.loading, inspection: moduleInspections[workspaceResource.name]?.inspection ?? null, error: moduleInspections[workspaceResource.name]?.error, onInspect: () => inspectModuleResource(workspaceResource.name) } : undefined} hostDiagnostics={hostFindings} hasSource={hostBridge.isHosted && !!hasSourceById[workspaceResource.id]} onOpenSource={hostBridge.isHosted ? () => hostBridge.post({ type: 'openSource', nodeId: workspaceResource.id }) : undefined} onSaveFile={hostBridge.isHosted && hostSnapshot ? file => openDraftSave(file) : undefined} onNavigate={id=>{setWorkspaceResourceId(id);setSelectedId(id);}} onClose={() => setWorkspaceOpen(false)} />}
+			{workspaceResource && <ResourceWorkspace open={workspaceOpen} resource={workspaceResource} architecture={architecture} dispatch={dispatch} liveSchemas={liveSchemas} liveSchema={liveSchemas[resourceDefinition(workspaceResource).type]} schemaPreview={schemaPreviews[workspaceResource.id]} onRequestSchemaPreview={hostBridge.isHosted ? requestSchemaPreview : undefined} cloudRegions={hostCloudRegions} moduleInspection={hostBridge.isHosted && hostSnapshot && workspaceResource.kind === 'module' ? { loading: !!moduleInspections[workspaceResource.name]?.loading, inspection: moduleInspections[workspaceResource.name]?.inspection ?? null, error: moduleInspections[workspaceResource.name]?.error, onInspect: () => inspectModuleResource(workspaceResource.name) } : undefined} hostDiagnostics={hostFindings} hasHostChecks={!!(validationRun || engineReport)} hasSource={hostBridge.isHosted && !!hasSourceById[workspaceResource.id]} onOpenSource={hostBridge.isHosted ? () => hostBridge.post({ type: 'openSource', nodeId: workspaceResource.id }) : undefined} onSaveFile={hostBridge.isHosted && hostSnapshot ? file => openDraftSave(file) : undefined} onNavigate={id=>{setWorkspaceResourceId(id);setSelectedId(id);}} onClose={() => setWorkspaceOpen(false)} />}
 			{hostBridge.isHosted && <SaveAllDialog open={saveAllOpen} fileNames={saveAllFiles} busy={saving} preview={saveAllPreview} error={saveAllError} onRefreshPreview={requestSaveAll} onReviewFile={file => { setSaveAllOpen(false); openDraftSave(file); }} onApply={applySaveAll} onClose={() => setSaveAllOpen(false)} />}
 			{hostBridge.isHosted && <DraftSaveDialog open={saveDialogOpen} fileName={saveFileName} projectFiles={hostSnapshot ? projectResourceFiles(architecture) : undefined} contents={saveContents} busy={saving} preview={savePreview} error={saveError} onFileNameChange={setSaveFileName} onSelectProjectFile={selectDraftSaveProjectFile} onRefreshPreview={refreshDraftSavePreview} onApply={applyHostDraftSave} onClose={() => setSaveDialogOpen(false)} />}
 			{moduleImportOpen && <ModuleImport onClose={() => setModuleImportOpen(false)} onImport={importModule} />}

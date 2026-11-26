@@ -2,6 +2,7 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
+import { useMemo } from 'react';
 import { CircleCheck, TriangleAlert, CircleAlert, ChevronRight, ShieldCheck, Terminal, FileCode2, Crosshair, RotateCw, FileDiff, HardDriveDownload } from 'lucide-react';
 import type { Architecture } from './model.ts';
 import { isStaleDiagnostic, type Diagnostic } from './diagnostics.ts';
@@ -39,6 +40,23 @@ const sourceBadgeLabel: Record<NonNullable<Diagnostic['source']>, string> = {
 
 /** The inspector owns the sole vertical scroll area; every issue opens its source field. */
 export function IssuesPanel({architecture,findings,onReveal,host}:{architecture:Architecture;findings:Diagnostic[];onReveal:(finding:Diagnostic)=>void;host?:IssuesHostContext}) {
+	const resourceNameById = useMemo(
+		() => new Map(architecture.resources.map(resource => [resource.id, resource.name])),
+		[architecture.resources]
+	);
+	const grouped = useMemo(() => {
+		const errors: Diagnostic[] = [];
+		const warnings: Diagnostic[] = [];
+		for (const item of findings) {
+			if (item.severity === 'error') { errors.push(item); }
+			else if (item.severity === 'warning') { warnings.push(item); }
+		}
+		return [
+			{ severity: 'error' as const, label: 'Errors', items: errors },
+			{ severity: 'warning' as const, label: 'Warnings', items: warnings },
+		];
+	}, [findings]);
+	const hostBusy = !!(host?.validating || host?.planning || host?.initializingOffline);
 	const summary = host?.engineReport
 		? (host.engineReport.engine === 'openTofu' ? 'OpenTofu ' : 'Terraform ') + host.engineReport.engineVersion + ' validate -json ' + (host.engineReport.valid ? 'passed' : 'reported findings') + ' (' + host.engineReport.durationMs + ' ms).'
 		: host?.validationRun
@@ -46,9 +64,9 @@ export function IssuesPanel({architecture,findings,onReveal,host}:{architecture:
 			: 'Checks use bundled resource metadata. Terraform and cloud provider validation have not run.';
 	return <section className="issues-panel"><h2>{host?.isHosted ? 'Checks & validation' : 'Local checks'}</h2><p className="field-help">{summary}</p>
 		{host?.isHosted && <div className="issues-host-actions">
-			{host.onRunValidation && <button type="button" className="quiet-button" disabled={host.validating || host.planning || !host.hasWorkspace} title={host.hasWorkspace ? 'Run Rust service validation' : 'Open an architecture in CloudForge Project to validate'} onClick={host.onRunValidation}><ShieldCheck size={14} /><span>{host.validating ? 'Validating…' : 'Validate'}</span></button>}
-			{host.availableEngine && host.onRunEngineValidate && <button type="button" className="quiet-button" disabled={host.validating || host.planning || !host.hasWorkspace} title={host.hasWorkspace ? 'Run CLI validate -json' : 'Open an architecture in CloudForge Project to validate'} onClick={host.onRunEngineValidate}><Terminal size={14} /><span>{host.availableEngine === 'openTofu' ? 'OpenTofu' : 'Terraform'} validate</span></button>}
-			{host.availableEngine && host.onRunEnginePlan && <button type="button" className="quiet-button" disabled={host.validating || host.planning || !host.hasWorkspace} title={host.hasWorkspace ? 'Run strictly local, credential-free CLI plan (-refresh=false)' : 'Open an architecture in CloudForge Project to plan'} onClick={host.onRunEnginePlan}><FileDiff size={14} /><span>{host.planning ? 'Planning…' : (host.availableEngine === 'openTofu' ? 'OpenTofu' : 'Terraform') + ' plan'}</span></button>}
+			{host.onRunValidation && <button type="button" className="quiet-button" disabled={hostBusy || !host.hasWorkspace} title={host.hasWorkspace ? 'Run Rust service validation' : 'Open an architecture in CloudForge Project to validate'} onClick={host.onRunValidation}><ShieldCheck size={14} /><span>{host.validating ? 'Validating…' : 'Validate'}</span></button>}
+			{host.availableEngine && host.onRunEngineValidate && <button type="button" className="quiet-button" disabled={hostBusy || !host.hasWorkspace} title={host.hasWorkspace ? 'Run CLI validate -json' : 'Open an architecture in CloudForge Project to validate'} onClick={host.onRunEngineValidate}><Terminal size={14} /><span>{host.availableEngine === 'openTofu' ? 'OpenTofu' : 'Terraform'} validate</span></button>}
+			{host.availableEngine && host.onRunEnginePlan && <button type="button" className="quiet-button" disabled={hostBusy || !host.hasWorkspace} title={host.hasWorkspace ? 'Run strictly local, credential-free CLI plan (-refresh=false)' : 'Open an architecture in CloudForge Project to plan'} onClick={host.onRunEnginePlan}><FileDiff size={14} /><span>{host.planning ? 'Planning…' : (host.availableEngine === 'openTofu' ? 'OpenTofu' : 'Terraform') + ' plan'}</span></button>}
 		</div>}
 		{host?.isHosted && host.enginePlanReport && (
 			<details className="workspace-readiness-card" open>
@@ -149,7 +167,7 @@ export function IssuesPanel({architecture,findings,onReveal,host}:{architecture:
 			</details>
 		)}
 		{!findings.length&&<p className="issues-clear"><CircleCheck size={16}/>{host?.engineReport?.valid ? 'CLI validation and local checks passed.' : 'No issues found by current checks.'}</p>}
-		{(['error','warning'] as const).map(severity=>{const items=findings.filter(item=>item.severity===severity);return items.length?<div key={severity}><h3>{severity==='error'?'Errors':'Warnings'} <span>{items.length}</span></h3>{items.map(item=><IssueEntry key={item.id} item={item} architecture={architecture} onReveal={onReveal} host={host}/>)}</div>:null;})}
+		{grouped.map(group=>group.items.length?<div key={group.severity}><h3>{group.label} <span>{group.items.length}</span></h3>{group.items.map(item=><IssueEntry key={item.id} item={item} architecture={architecture} resourceNameById={resourceNameById} hostBusy={hostBusy} onReveal={onReveal} host={host}/>)}</div>:null)}
 	</section>;
 }
 
@@ -157,8 +175,8 @@ export function IssuesPanel({architecture,findings,onReveal,host}:{architecture:
  * One diagnostic: the card reveals its (first) target; extra actions jump to each target of a
  * multi-resource finding, open the reported source line, or re-run the check when it is stale.
  */
-function IssueEntry({item,architecture,onReveal,host}:{item:Diagnostic;architecture:Architecture;onReveal:(finding:Diagnostic)=>void;host?:IssuesHostContext}) {
-	const name=(id:string)=>architecture.resources.find(resource=>resource.id===id)?.name;
+function IssueEntry({item,architecture,resourceNameById,hostBusy,onReveal,host}:{item:Diagnostic;architecture:Architecture;resourceNameById:ReadonlyMap<string,string>;hostBusy:boolean;onReveal:(finding:Diagnostic)=>void;host?:IssuesHostContext}) {
+	const name=(id:string)=>resourceNameById.get(id);
 	const stale=isStaleDiagnostic(item,architecture,host?.sourceRevision);
 	const rerun=item.source==='cli'?host?.onRunEngineValidate:item.source==='validation'?host?.onRunValidation:undefined;
 	const targets=item.targets&&item.targets.length>1?item.targets:[];
@@ -169,7 +187,7 @@ function IssueEntry({item,architecture,onReveal,host}:{item:Diagnostic;architect
 		{(targets.length>0||(location&&host?.onOpenLocation&&!stale)||(stale&&rerun))&&<div className="issue-actions">
 			{targets.map(target=><button type="button" className="quiet-button" key={target.resourceId} disabled={!name(target.resourceId)} onClick={()=>onReveal({...item,resourceId:target.resourceId,path:target.path,targets:undefined})}><Crosshair size={13}/><span>{name(target.resourceId)??'Missing resource'}{target.path?' · '+target.path:''}</span></button>)}
 			{location&&host?.onOpenLocation&&!stale&&<button type="button" className="quiet-button" onClick={()=>host.onOpenLocation?.(item)}><FileCode2 size={13}/><span>Open {location}</span></button>}
-			{stale&&rerun&&<button type="button" className="quiet-button" disabled={host?.validating} onClick={rerun}><RotateCw size={13}/><span>Run checks again</span></button>}
+			{stale&&rerun&&<button type="button" className="quiet-button" disabled={hostBusy} onClick={rerun}><RotateCw size={13}/><span>Run checks again</span></button>}
 		</div>}
 	</div>;
 }

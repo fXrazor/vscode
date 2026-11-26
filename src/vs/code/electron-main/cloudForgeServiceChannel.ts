@@ -561,7 +561,7 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 			const names = new Set<string>();
 			let total = 0;
 			for (const file of value.files) {
-				if (!isRecord(file) || 'workspaceId' in file || 'architectureId' in file || 'expectedSourceRevision' in file) {
+				if (!isRecord(file) || Object.hasOwn(file, 'workspaceId') || Object.hasOwn(file, 'architectureId') || Object.hasOwn(file, 'expectedSourceRevision')) {
 					return undefined;
 				}
 				const checked = validateCloudForgeServiceParams('previewFocusedSave', {

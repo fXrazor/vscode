@@ -282,6 +282,8 @@ export interface StatusPageInput {
 	readonly connections?: readonly CloudConnection[];
 	/** The last sign-in check for each provider in this session, if any. */
 	readonly signInChecks?: Partial<Readonly<Record<CloudProvider, SignInCheck>>>;
+	/** Providers whose CLI sign-in check is currently running. */
+	readonly checking?: readonly CloudProvider[];
 }
 
 /** Messages the page may post; the extension accepts nothing else. */
@@ -369,10 +371,15 @@ export function buildStatusHtml(input: StatusPageInput, nonce: string, cspSource
 				? `<button data-message="storeKey" data-provider="${connection.provider}">${connection.keyStored ? 'Replace key' : 'Store key'}</button>`
 				: '';
 			const check = connection.linked ? input.signInChecks?.[connection.provider] : undefined;
-			const checked = check
-				? `<div class="check ${check.status === 'ok' ? 'good' : 'bad'}">${escapeHtml(describeSignInCheck(check))}${check.status === 'ok' ? '' : `<div class="muted">${escapeHtml(check.detail)}</div>`}</div>`
+			const isChecking = connection.linked && (input.checking?.includes(connection.provider) ?? false);
+			const checked = isChecking
+				? '<div class="check muted" aria-live="polite">Checking CLI sign-in…</div>'
+				: check
+					? `<div class="check ${check.status === 'ok' ? 'good' : 'bad'}">${escapeHtml(describeSignInCheck(check))}${check.status === 'ok' ? '' : `<div class="muted">${escapeHtml(check.detail)}</div>`}</div>`
+					: '';
+			const checkButton = connection.linked
+				? `<button data-message="checkSignIn" data-provider="${connection.provider}"${isChecking ? ' disabled aria-busy="true"' : ''}>${isChecking ? 'Checking…' : 'Check sign-in'}</button>`
 				: '';
-			const checkButton = connection.linked ? `<button data-message="checkSignIn" data-provider="${connection.provider}">Check sign-in</button>` : '';
 			return `<li class="connection"><div><strong>${escapeHtml(providerLabel(connection.provider))}</strong> <span class="muted">${escapeHtml(describeConnection(connection))}</span>${warn}${checked}</div>
 				<div class="actions"><button data-message="linkConnection" data-provider="${connection.provider}">${connection.linked ? 'Change' : 'Link'}</button>${key}${checkButton}</div></li>`;
 		}).join('');
@@ -387,19 +394,21 @@ export function buildStatusHtml(input: StatusPageInput, nonce: string, cspSource
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Project Status</title>
 <style nonce="${nonce}">
-body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); background: var(--vscode-editor-background); margin: 0; padding: 24px 32px; }
-h1 { font-size: 20px; margin: 0 0 4px; } h2 { font-size: 14px; margin: 0; } h3 { font-size: 12px; margin: 16px 0 6px; text-transform: uppercase; letter-spacing: .04em; color: var(--vscode-descriptionForeground); }
-.top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
+* { box-sizing: border-box; }
+body { font-family: "Mona Sans", var(--vscode-font-family), "Segoe UI", sans-serif; color: var(--vscode-foreground); background: var(--vscode-editor-background); margin: 0; padding: 28px 36px 40px; font-size: 13px; line-height: 20px; }
+h1 { font-size: 20px; line-height: 28px; font-weight: 600; margin: 0 0 2px; } h2 { font-size: 14px; line-height: 20px; font-weight: 600; margin: 0; } h3 { font-size: 12px; line-height: 18px; font-weight: 600; margin: 16px 0 6px; color: var(--vscode-descriptionForeground); }
+.top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; max-width: 1200px; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; max-width: 1200px; }
-.card { border: 1px solid var(--vscode-panel-border); border-radius: 8px; padding: 14px 16px; background: var(--vscode-sideBar-background); }
-.card header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.card { border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border)); border-radius: 10px; padding: 16px 18px; background: var(--vscode-editorWidget-background, var(--vscode-sideBar-background)); }
+.card header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
 dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 0; font-size: 13px; } dt { color: var(--vscode-descriptionForeground); } dd { margin: 0; }
-ul { margin: 0; padding-left: 18px; font-size: 13px; } .connections { list-style: none; padding: 0; } .connection { display: flex; justify-content: space-between; gap: 10px; padding: 8px 0; border-top: 1px solid var(--vscode-panel-border); } .connection:first-child { border-top: 0; }
+ul { margin: 0; padding-left: 18px; font-size: 13px; } .connections { list-style: none; padding: 0; } .connection { display: flex; justify-content: space-between; gap: 10px; padding: 10px 0; border-top: 1px solid var(--vscode-panel-border); } .connection:first-child { border-top: 0; }
 .muted { color: var(--vscode-descriptionForeground); font-size: 12px; } code { font-family: var(--vscode-editor-font-family); font-size: 12px; }
 .actions { display: flex; gap: 6px; flex-wrap: wrap; align-content: flex-start; }
 .check { margin-top: 4px; font-size: 12px; } .check.good { color: var(--vscode-testing-iconPassed, var(--vscode-foreground)); } .check.bad { color: var(--vscode-editorWarning-foreground, var(--vscode-foreground)); }
-button { font: inherit; font-size: 12px; color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground); border: 0; border-radius: 4px; padding: 4px 10px; cursor: pointer; }
-button:hover { background: var(--vscode-button-secondaryHoverBackground); } button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
+button { font: inherit; font-size: 12px; font-weight: 500; color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground); border: 1px solid transparent; border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+button:hover:not(:disabled) { background: var(--vscode-button-secondaryHoverBackground); } button:disabled { opacity: 0.6; cursor: default; } button:focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-offset: 2px; }
+@media (max-width: 760px) { body { padding: 20px; } .grid { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>

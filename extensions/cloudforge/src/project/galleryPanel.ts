@@ -38,6 +38,7 @@ export class ProjectGalleryPanel implements Disposable {
 	private summaries: Map<string, ArchitectureSummary> | undefined;
 	private summaryFor: string | undefined;
 	private loading = false;
+	private reloadPending = false;
 	private readonly subscriptions: Disposable[] = [];
 
 	constructor(private readonly controller: ProjectController) {
@@ -57,6 +58,7 @@ export class ProjectGalleryPanel implements Disposable {
 		}
 		if (this.panel) {
 			this.panel.reveal();
+			this.post();
 			return;
 		}
 		const panel = window.createWebviewPanel('cloudforge.projectGallery', l10n.t('Architectures'), ViewColumn.Active, {
@@ -66,10 +68,14 @@ export class ProjectGalleryPanel implements Disposable {
 		});
 		this.panel = panel;
 		panel.webview.html = buildGalleryHtml({ nonce: randomBytes(16).toString('base64'), cspSource: panel.webview.cspSource });
-		panel.onDidDispose(() => {
-			this.panel = undefined;
-		}, undefined, this.subscriptions);
-		panel.webview.onDidReceiveMessage(value => this.handle(parseMessage(value)), undefined, this.subscriptions);
+		const messageSub = panel.webview.onDidReceiveMessage(value => this.handle(parseMessage(value)));
+		const disposeSub = panel.onDidDispose(() => {
+			if (this.panel === panel) {
+				this.panel = undefined;
+			}
+			messageSub.dispose();
+			disposeSub.dispose();
+		});
 	}
 
 	private async handle(message: GalleryMessage | undefined): Promise<void> {
@@ -98,19 +104,29 @@ export class ProjectGalleryPanel implements Disposable {
 	}
 
 	private async load(): Promise<void> {
-		const project = this.controller.current;
-		if (!project || this.loading) {
+		if (!this.controller.current) {
+			return;
+		}
+		if (this.loading) {
+			this.reloadPending = true;
 			return;
 		}
 		this.loading = true;
 		try {
-			const result = await callProjectService('summarizeArchitectures', { workspaceId: project.workspaceId });
-			if (this.controller.current?.workspaceId !== project.workspaceId) {
-				return;
-			}
-			// A failed summary still shows the cards, marked unavailable, rather than an error dialog.
-			this.summaries = (result.ok ? parseArchitectureSummaries(result.value, project.workspaceId) : undefined) ?? new Map();
-			this.summaryFor = project.workspaceId;
+			do {
+				this.reloadPending = false;
+				const project = this.controller.current;
+				if (!project) {
+					break;
+				}
+				const result = await callProjectService('summarizeArchitectures', { workspaceId: project.workspaceId });
+				if (this.controller.current?.workspaceId !== project.workspaceId) {
+					continue;
+				}
+				// A failed summary still shows the cards, marked unavailable, rather than an error dialog.
+				this.summaries = (result.ok ? parseArchitectureSummaries(result.value, project.workspaceId) : undefined) ?? new Map();
+				this.summaryFor = project.workspaceId;
+			} while (this.reloadPending);
 		} finally {
 			this.loading = false;
 		}
@@ -130,7 +146,12 @@ export class ProjectGalleryPanel implements Disposable {
 			edited: relativeTime(card.lastModified, now),
 		}));
 		this.panel.title = l10n.t('Architectures · {0}', project.displayName);
-		void this.panel.webview.postMessage({ type: 'state', projectName: project.displayName, cards });
+		void this.panel.webview.postMessage({
+			type: 'state',
+			projectName: project.displayName,
+			activeId: this.controller.activeArchitectureId,
+			cards,
+		});
 	}
 
 	dispose(): void {

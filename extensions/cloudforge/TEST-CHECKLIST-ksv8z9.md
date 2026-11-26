@@ -126,4 +126,3 @@ Use a test project with at least two architectures and one `.tf` file that has c
 ## 8. Known gaps (not bugs)
 
 - Moving a resource between files works only through Save all (both files in one save); the single-file save still keeps the old block.
-- The schema check appears in the inspector's Code tab, not in the focused workspace's code pane.

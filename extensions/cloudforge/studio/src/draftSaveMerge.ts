@@ -34,3 +34,15 @@ export function describeMerge(merge: HostDraftSaveMerge): string[] {
 	}
 	return lines;
 }
+
+const findingDescriptions: Readonly<Record<string, string>> = {
+	SENSITIVE_LITERAL: 'Possible hard-coded secret — replace with a variable reference',
+	TFVARS_FILE: 'Variable values file present in repository',
+	STATE_FILE: 'Terraform state file present in repository',
+	PROVIDER_CACHE: 'Local provider cache (.terraform) present in repository',
+};
+
+/** Plain-language label for a save-preview security/hygiene finding code. */
+export function describeSaveFinding(code: string): string {
+	return findingDescriptions[code] ?? code.replaceAll('_', ' ').toLowerCase();
+}
