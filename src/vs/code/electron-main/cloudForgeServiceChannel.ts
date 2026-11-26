@@ -45,7 +45,7 @@ const cloudForgeMethods: ReadonlySet<string> = new Set<CloudForgeServiceMethod>(
 	'previewProviderUpgrade', 'applyProviderUpgrade', 'recoverUpgradeJournal',
 	'detectEngines', 'runEngineValidate', 'runEnginePlan', 'runEngineFmt',
 	'listMirrorPackages', 'checkOfflineMirrorReadiness', 'runEngineInitOffline', 'extractProviderSchemaFromMirror',
-	'importMirrorPackage', 'evictMirrorPackage', 'verifyMirrorIntegrity', 'planMirrorCleanup',
+	'importMirrorPackage', 'listProviderVersions', 'downloadProviderPackage', 'evictMirrorPackage', 'verifyMirrorIntegrity', 'planMirrorCleanup',
 	'selectTerraformSkills', 'listBuiltinSkills', 'getTopologyBlueprint',
 	'getLearningRecord', 'saveLearningRecord', 'submitProposal', 'reviewProposal',
 	'issueMcpGrant', 'listMcpGrants', 'revokeMcpGrant'
@@ -61,6 +61,8 @@ const engineInitOfflineTimeoutMs = 125 * 1000;
 const extractMirrorSchemaTimeoutMs = 245 * 1000;
 /** Stage 10B `importMirrorPackage` streams & verifies large provider ZIP archives; wait 65 s. */
 const importMirrorPackageTimeoutMs = 65 * 1000;
+/** Stage 10C `downloadProviderPackage` mirrors provider archives over HTTPS; wait 5 min. */
+const downloadProviderPackageTimeoutMs = 5 * 60 * 1000;
 const maxPathLength = 32767;
 const maxNameLength = 255;
 const maxRemoteBytes = 2048;
@@ -89,6 +91,7 @@ const serviceErrorMessages: Readonly<Record<string, string>> = {
 	CONSENT_REQUIRED: 'CloudForge needs your permission to read this project.',
 	ALREADY_EXISTS: 'A CloudForge project or workspace file with that name already exists.',
 	SCHEMA_UNAVAILABLE: 'The requested provider schema snapshot or resource type is not available.',
+	REGISTRY_UNAVAILABLE: 'The provider registry could not be reached, or it has no release for that version and platform.',
 	CANCELLED: 'The CloudForge request was cancelled.',
 	SERVICE_UNAVAILABLE: 'The CloudForge service is unavailable.',
 	SERVICE_ERROR: 'The CloudForge service could not complete the request.'
@@ -726,8 +729,7 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 		}
 		case 'auditExportReadiness':
 		case 'runEngineValidate':
-		case 'runEnginePlan':
-		case 'runEngineInitOffline': {
+		case 'runEnginePlan': {
 			if (!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'expectedSourceRevision', 'engine']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId)) {
 				return undefined;
 			}
@@ -742,6 +744,27 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 				architectureId: value.architectureId,
 				...(value.expectedSourceRevision === undefined ? {} : { expectedSourceRevision: value.expectedSourceRevision }),
 				...(value.engine === undefined ? {} : { engine: value.engine })
+			};
+		}
+		case 'runEngineInitOffline': {
+			if (!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'expectedSourceRevision', 'engine', 'createLockFile']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId)) {
+				return undefined;
+			}
+			if (value.expectedSourceRevision !== undefined && (typeof value.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(value.expectedSourceRevision))) {
+				return undefined;
+			}
+			if (value.engine !== undefined && value.engine !== 'openTofu' && value.engine !== 'terraform') {
+				return undefined;
+			}
+			if (value.createLockFile !== undefined && typeof value.createLockFile !== 'boolean') {
+				return undefined;
+			}
+			return {
+				workspaceId: value.workspaceId,
+				architectureId: value.architectureId,
+				...(value.expectedSourceRevision === undefined ? {} : { expectedSourceRevision: value.expectedSourceRevision }),
+				...(value.engine === undefined ? {} : { engine: value.engine }),
+				...(value.createLockFile === undefined ? {} : { createLockFile: value.createLockFile })
 			};
 		}
 		case 'runEngineFmt': {
@@ -919,6 +942,57 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 			return {
 				address: value.address,
 				version: value.version,
+				...(value.engine === undefined ? {} : { engine: value.engine })
+			};
+		}
+		case 'listProviderVersions': {
+			if (!hasOnlyKeys(value, ['address', 'refresh', 'engine']) || typeof value.address !== 'string') {
+				return undefined;
+			}
+			const segments = value.address.split('/');
+			if (segments.length !== 3 || !segments.every(isSnapshotSegment)) {
+				return undefined;
+			}
+			if (value.refresh !== undefined && typeof value.refresh !== 'boolean') {
+				return undefined;
+			}
+			if (value.engine !== undefined && value.engine !== 'openTofu' && value.engine !== 'terraform') {
+				return undefined;
+			}
+			return {
+				address: value.address,
+				...(value.refresh === undefined ? {} : { refresh: value.refresh }),
+				...(value.engine === undefined ? {} : { engine: value.engine })
+			};
+		}
+		case 'downloadProviderPackage': {
+			if (!hasOnlyKeys(value, ['address', 'version', 'platforms', 'engine']) || typeof value.address !== 'string' || !isSnapshotSegment(value.version)) {
+				return undefined;
+			}
+			const segments = value.address.split('/');
+			if (segments.length !== 3 || !segments.every(isSnapshotSegment)) {
+				return undefined;
+			}
+			if (value.engine !== undefined && value.engine !== 'openTofu' && value.engine !== 'terraform') {
+				return undefined;
+			}
+			let platforms: string[] | undefined;
+			if (value.platforms !== undefined) {
+				if (!Array.isArray(value.platforms) || value.platforms.length === 0 || value.platforms.length > 8) {
+					return undefined;
+				}
+				platforms = [];
+				for (const item of value.platforms) {
+					if (typeof item !== 'string' || !/^[a-z0-9]{1,32}_[a-z0-9]{1,32}$/.test(item)) {
+						return undefined;
+					}
+					platforms.push(item);
+				}
+			}
+			return {
+				address: value.address,
+				version: value.version,
+				...(platforms === undefined ? {} : { platforms }),
 				...(value.engine === undefined ? {} : { engine: value.engine })
 			};
 		}
@@ -1494,9 +1568,11 @@ export class CloudForgeServiceBroker implements IServerChannel<string> {
 						? engineInitOfflineTimeoutMs
 						: method === 'extractProviderSchemaFromMirror'
 							? extractMirrorSchemaTimeoutMs
-							: method === 'importMirrorPackage' || method === 'verifyMirrorIntegrity'
-								? importMirrorPackageTimeoutMs
-								: undefined;
+							: method === 'downloadProviderPackage'
+								? downloadProviderPackageTimeoutMs
+								: method === 'importMirrorPackage' || method === 'verifyMirrorIntegrity'
+									? importMirrorPackageTimeoutMs
+									: undefined;
 			let value = await service.call(method, request.params, timeoutMs);
 			if (method === 'createProject') {
 				value = completeCreateProject(value, request.params.parentPath);

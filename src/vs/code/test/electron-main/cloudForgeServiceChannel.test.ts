@@ -913,4 +913,54 @@ suite('CloudForgeServiceChannel', () => {
 			extra: true
 		}), undefined);
 	});
+
+	test('validates listProviderVersions, downloadProviderPackage, and runEngineInitOffline createLockFile parity', () => {
+		assert.deepStrictEqual(validateCloudForgeServiceParams('listProviderVersions', {
+			address: 'registry.opentofu.org/hashicorp/azurerm',
+			refresh: true,
+			engine: 'openTofu'
+		}), {
+			address: 'registry.opentofu.org/hashicorp/azurerm',
+			refresh: true,
+			engine: 'openTofu'
+		});
+		assert.strictEqual(validateCloudForgeServiceParams('listProviderVersions', { address: 'hashicorp/azurerm' }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('listProviderVersions', { address: 'registry.opentofu.org/hashicorp/azurerm', refresh: 'yes' }), undefined);
+
+		assert.deepStrictEqual(validateCloudForgeServiceParams('downloadProviderPackage', {
+			address: 'registry.opentofu.org/hashicorp/azurerm',
+			version: '5.14.0',
+			platforms: ['windows_amd64', 'linux_amd64'],
+			engine: 'openTofu'
+		}), {
+			address: 'registry.opentofu.org/hashicorp/azurerm',
+			version: '5.14.0',
+			platforms: ['windows_amd64', 'linux_amd64'],
+			engine: 'openTofu'
+		});
+		assert.strictEqual(validateCloudForgeServiceParams('downloadProviderPackage', {
+			address: 'registry.opentofu.org/hashicorp/azurerm',
+			version: '../escape'
+		}), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('downloadProviderPackage', {
+			address: 'registry.opentofu.org/hashicorp/azurerm',
+			version: '5.14.0',
+			platforms: []
+		}), undefined);
+
+		assert.deepStrictEqual(validateCloudForgeServiceParams('runEngineInitOffline', {
+			workspaceId,
+			architectureId: `${workspaceId}-architecture-1`,
+			createLockFile: true
+		}), {
+			workspaceId,
+			architectureId: `${workspaceId}-architecture-1`,
+			createLockFile: true
+		});
+		assert.strictEqual(validateCloudForgeServiceParams('runEngineInitOffline', {
+			workspaceId,
+			architectureId: `${workspaceId}-architecture-1`,
+			createLockFile: 'true'
+		}), undefined);
+	});
 });
