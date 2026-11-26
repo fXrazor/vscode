@@ -71,8 +71,6 @@ const GraphCard = memo(function GraphCard({ data, selected }: NodeProps<CardNode
 			</div>
 			<div className="tg-card-actions nodrag">
 				{node.inCycle && <span className="tg-badge tg-badge-danger" title="Part of a configured reference cycle"><AlertTriangle size={12} /></span>}
-				{!!data.overlay?.errors && <span className="tg-badge tg-badge-danger tg-count" title={data.overlay.messages.filter(item => item.severity === 'error').map(item => item.message).join('\n')}><AlertCircle size={11} />{data.overlay.errors}</span>}
-				{!data.overlay?.errors && !!data.overlay?.warnings && <span className="tg-badge tg-badge-warning tg-count" title={data.overlay.messages.map(item => item.message).join('\n')}><AlertTriangle size={11} />{data.overlay.warnings}</span>}
 				{pinned && <button className="tg-icon-button" aria-label={'Unpin ' + node.label} title="Unpin (graph only)" onClick={event => { event.stopPropagation(); data.onUnpin(node.id); }}><PinOff size={12} /></button>}
 				<button className="tg-icon-button" aria-label={'Rename ' + node.label} title="Rename" onClick={event => { event.stopPropagation(); setEditing(true); }}><Pencil size={12} /></button>
 				<button className="tg-icon-button" aria-label={'Edit configuration of ' + node.label} title="Edit configuration" onClick={event => { event.stopPropagation(); data.onEdit(node.id); }}><Maximize2 size={12} /></button>
@@ -80,6 +78,10 @@ const GraphCard = memo(function GraphCard({ data, selected }: NodeProps<CardNode
 		</div>
 		{data.badge && <span className={'tg-overlay-badge tg-tone-' + data.badge.tone} title={data.badge.title}>{data.badge.text}</span>}
 		<div className="tg-chips">
+			<span className="tg-issues">
+				{!!data.overlay?.errors && <span className="tg-badge tg-badge-danger tg-count" title={data.overlay.messages.filter(item => item.severity === 'error').map(item => item.message).join('\n')}><AlertCircle size={11} />{data.overlay.errors}</span>}
+				{!data.overlay?.errors && !!data.overlay?.warnings && <span className="tg-badge tg-badge-warning tg-count" title={data.overlay.messages.map(item => item.message).join('\n')}><AlertTriangle size={11} />{data.overlay.warnings}</span>}
+			</span>
 			{node.region.known ? <span className="tg-chip">{node.region.value}</span> : <span className="tg-chip tg-chip-unknown" title="No region value in this draft">region unknown</span>}
 			{compact && node.ports.length > 0 && <span className="tg-chip">{node.ports.length} input{node.ports.length === 1 ? '' : 's'}</span>}
 			{node.sourceFile && <span className="tg-chip" title={node.sourceFile + (node.sourceLine ? ':' + node.sourceLine : '')}>{node.sourceFile.split(/[\\/]/).pop()}{node.sourceLine ? ':' + node.sourceLine : ''}</span>}
@@ -96,10 +98,12 @@ const GraphCard = memo(function GraphCard({ data, selected }: NodeProps<CardNode
 	</div>;
 });
 
+/** `default_node_pool[0].vnet_subnet_id` → `vnet_subnet_id`; the full path stays in the tooltip. */
+const leafField = (field: string) => field.split('.').pop()!.replace(/\[\d+\]$/, '');
 function PortRow({ port, traced }: { port: GraphPort; traced: boolean }) {
-	return <li className={'tg-row tg-cat-' + port.category + (traced ? ' is-traced' : '')} title={categoryNames[port.category] + ': ' + port.field + ' → ' + port.peerLabel}>
+	return <li className={'tg-row tg-cat-' + port.category + (traced ? ' is-traced' : '')} title={categoryNames[port.category] + ': ' + port.field + ' ← ' + port.peerLabel}>
 		<Handle type="target" id={port.id} position={HandlePosition.Left} className="tg-row-handle" isConnectable={false} />
-		<span className="tg-row-dot" /><code>{port.field}</code><span className="tg-row-peer">{port.peerLabel}</span>
+		<span className="tg-row-dot" /><code>{leafField(port.field)}</code><span className="tg-row-peer">{port.peerLabel}</span>
 	</li>;
 }
 
@@ -284,7 +288,7 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme
 			const sourceLabel = snapshot.nodes.find(node => node.id === edge.source)?.label ?? edge.source;
 			return { id: edge.id, type: 'graph', source: edge.source, target: edge.target, sourceHandle, targetHandle, selectable: true, deletable: false, focusable: true,
 				ariaLabel: categoryNames[edge.category] + ' from ' + (snapshot.nodes.find(node => node.id === edge.source)?.label ?? edge.source) + ' to ' + (snapshot.nodes.find(node => node.id === edge.target)?.label ?? edge.target),
-				markerEnd: { type: 'arrowclosed' as never, width: 16, height: 16, color: 'var(--tg-edge-' + edge.category + ')' },
+				markerEnd: { type: 'arrowclosed' as never, width: targetHandle === 'in' || targetHandle.startsWith('in-') ? 16 : 11, height: targetHandle === 'in' || targetHandle.startsWith('in-') ? 16 : 11, color: 'var(--tg-edge-' + edge.category + ')' },
 				data: { edge, route: presentation.route, state, animate: !reducedMotion && !!trace && (state === 'trace' || edge.id === selectedEdgeId), label: sourceLabel + ' → ' + [...new Set(edge.evidence.map(item => item.field))].join(', ') + ' · ' + categoryNames[edge.category] } };
 		});
 		for (const input of snapshot.inputs) {
