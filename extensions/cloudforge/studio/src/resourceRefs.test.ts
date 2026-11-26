@@ -108,3 +108,27 @@ test('Nested block subnet_id reference overrides inheritance, rejects invalid/cy
 	const vmDiags = architectureDiagnostics(afterDeleteNic.present).filter(d => d.resourceId === vm.id);
 	assert.ok(vmDiags.some(d => d.message.includes('referenced resource is missing')), JSON.stringify(vmDiags));
 });
+
+test('uncurated catalogue types infer reference targets from *_id and *_ids argument names', () => {
+	const base = sampleArchitecture();
+	const template = base.resources.find(r => r.name === 'vm-application')!;
+	const nic = base.resources.find(r => r.name === 'nic-application')!;
+	const legacyVm = {
+		...template, id: 'legacy-vm', name: 'legacy-vm', settings: {}, resourceRefs: {}, fieldBindings: {},
+		catalogue: { type: 'azurerm_virtual_machine', label: 'Virtual machine', service: 'Compute', category: 'Compute', icon: '', curated: false, fields: [
+			{ name: 'network_interface_ids', type: 'list', description: 'NICs.' },
+			{ name: 'availability_set_id', type: 'string', description: 'Availability set.' },
+			{ name: 'tenant_id', type: 'string', description: 'Tenant.' },
+		] },
+	} as unknown as typeof template;
+	const architecture = { ...base, resources: [...base.resources, legacyVm] };
+
+	const nics = fieldDefinition(legacyVm, { kind: 'setting', name: 'network_interface_ids' });
+	assert.deepEqual(nics?.refTypes, ['azurerm_network_interface']);
+	assert.equal(nics?.refInferred, true);
+	assert.deepEqual(eligibleReferenceTargets(architecture, legacyVm, nics).map(item => item.resource.id), [nic.id]);
+	assert.deepEqual(fieldDefinition(legacyVm, { kind: 'setting', name: 'availability_set_id' })?.refTypes, ['azurerm_availability_set']);
+	assert.equal(fieldDefinition(legacyVm, { kind: 'setting', name: 'tenant_id' })?.refTypes, undefined);
+	// Curated definitions keep their own reference metadata.
+	assert.equal(fieldDefinition(template, { kind: 'setting', name: 'network_interface_ids' })?.refInferred, undefined);
+});

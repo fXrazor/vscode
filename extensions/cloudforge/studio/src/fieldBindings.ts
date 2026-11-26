@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 import type { Architecture, Resource, ResourceBlock } from './model.ts';
+import { withInferredReferenceTypes } from './referenceInference.ts';
 import { isExpr, type Value } from './cloudlab-core/model.ts';
 import { isObjectValue, isSensitiveProperty, variableValueAt, type VariableDefinition } from './variables.ts';
 import { getDef, type AttrDef } from './cloudlab-core/catalog/index.ts';
@@ -84,9 +85,9 @@ export function fieldDefinition(resource: Resource, target: FieldTarget, liveSch
 		: curatedAttrs;
 	const lookup = (attributes: AttrDef[], path: string[]): AttrDef | undefined => { const field = attributes.find(item => item.name === path[0]); return path.length > 1 ? lookup(field?.children ?? [], path.slice(1)) : field; };
 	if (target.kind === 'name' || target.kind === 'region') { return { name: target.kind, type: 'string', description: '' }; }
-	if (target.kind === 'setting') { const field = lookup(attrs, resource.catalogue ? [target.name] : fieldPath(target.name)); const descriptor = resource.catalogue?.fields.find(field => field.name === target.name); return field ?? (!live && descriptor ? { ...descriptor, description: descriptor.description ?? '' } : undefined); }
+	if (target.kind === 'setting') { const field = lookup(attrs, resource.catalogue ? [target.name] : fieldPath(target.name)); const descriptor = resource.catalogue?.fields.find(field => field.name === target.name); return withInferredReferenceTypes(typeName, field ?? (!live && descriptor ? { ...descriptor, description: descriptor.description ?? '' } : undefined)); }
 	const visit = (blocks: ResourceBlock[], attributes: AttrDef[]): AttrDef | undefined => {
-		for (const block of blocks) { const definition = attributes.find(item => item.name === block.type); if (block.id === target.blockId) { return lookup(definition?.children ?? [], fieldPath(target.name)); } const found = visit(block.blocks, definition?.children ?? []); if (found) { return found; } }
+		for (const block of blocks) { const definition = attributes.find(item => item.name === block.type); if (block.id === target.blockId) { return withInferredReferenceTypes(typeName, lookup(definition?.children ?? [], fieldPath(target.name))); } const found = visit(block.blocks, definition?.children ?? []); if (found) { return found; } }
 		return undefined;
 	};
 	return visit(resource.blocks, attrs);

@@ -30,6 +30,8 @@ export interface AttrDef {
   options?: string[];
   /** Resource types this argument may point at (makes relationship lines). */
   refTypes?: string[];
+  /** refTypes guessed from the argument name rather than curated (see referenceInference.ts). */
+  refInferred?: boolean;
   /** Which exported attribute of the referenced resource is used (default "id"). */
   refAttr?: string;
   /** Value is a CIDR (or list of CIDRs) and gets network validation. */
