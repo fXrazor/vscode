@@ -41,7 +41,7 @@ export function SchemaField({ name, value, definition, onChange, onUnset, variab
 	const refBinding = !mixed && resourceReference?.binding?.refs.length ? resourceReference.binding : undefined;
 	const literalEntries = (() => { if (!scalarList) { return undefined; } if (!value.trim()) { return []; } try { const parsed = JSON.parse(value); return Array.isArray(parsed) && parsed.every(item => typeof item === 'string' || typeof item === 'number') ? parsed.map(item => ({ kind: 'value' as const, value: String(item) })) : undefined; } catch { return undefined; } })();
 	const entries = mixed ?? literalEntries;
-	const canReference = !!resourceReference && !!definition?.refTypes?.length && !isSensitiveProperty(name, definition.sensitive);
+	const canReference = !!resourceReference && !!definition?.refTypes?.length && !isSensitiveProperty(name, definition.sensitive) && (!definition.refInferred || resourceReference.candidates.length > 0 || !!resourceReference.binding?.refs.length);
 	const issue = terraform ? undefined : reference
 		? undefined
 		: mixed ? list?.issue
