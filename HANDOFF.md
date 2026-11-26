@@ -1,5 +1,9 @@
 # CloudForge Code OSS handoff
 
+## Native provider-import Back navigation — Codex local checkpoint — 26 November 2026
+
+Source **`c7d595cd7c771d418a07d9199e71fbd45e4c02e4`**, branch `codex/provider-import-navigation`, worktree `C:/Users/dalep/.codex/worktrees/guided-variable-values/CloudForge-Code`, base merged main `e58ba69c4dd`. Completes the existing manager's guided import with standard Back buttons, retained unaccepted edits, restored platform selection, explicit 5/5 review and clean cancellation. All **130/130 extension tests**, TypeScript, bundle build and strict targeted lint passed; **13/13 installed Workbench navigation checks** passed using the isolated development extension. No Studio source, Providers view, extension wiring, broker or Rust edits. Prior guided-variable checkpoint is preserved on its own branch. [Exact ownership, provenance, screenshots, reproduction, limits and next action](docs/cloudforge/provider-import-navigation.md). Local and unmerged; actual archive selection/import was not executed. Integrate only when requested, then coordinate reuse in the separate direct Providers import command.
+
 ## Draggable connector bend waypoints & packaged CloudForge upgrade (`48d529c9557`) — 26 November 2026
 
 - **Packaged & installed Windows upgrade (`48d529c9557`):**
