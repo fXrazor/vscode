@@ -44,6 +44,7 @@ try {
 				await page.getByLabel(label, { exact: true }).selectOption(value);
 				await page.getByLabel('View options', { exact: true }).click(); await page.waitForTimeout(500);
 			};
+			const layoutTo = async id => { await page.getByRole('radio', { name: { layers: 'Layers', scopes: 'Scopes', tree: 'Ownership tree', bundled: 'Bundled' }[id], exact: true }).click(); await page.waitForTimeout(500); };
 			const noOverlap = async () => {
 				const boxes = await page.locator('.react-flow__node-card').evaluateAll(nodes => nodes.map(node => { const box = node.getBoundingClientRect(); return { id: node.dataset.id, x: box.x, y: box.y, w: box.width, h: box.height }; }));
 				for (const a of boxes) { for (const b of boxes) { if (a.id < b.id) { assert.ok(a.x + a.w <= b.x + 0.5 || b.x + b.w <= a.x + 0.5 || a.y + a.h <= b.y + 0.5 || b.y + b.h <= a.y + 0.5, a.id + ' overlaps ' + b.id); } } }
@@ -57,13 +58,13 @@ try {
 			await page.locator('main.technical-graph').waitFor();
 			assert.equal(await page.locator('.react-flow__node-card').count(), original.resources.length); pass('every resource is a graph card');
 			await view('Card detail', 'detailed');
-			for (const layout of ['layers', 'scopes', 'tree']) { await view('Graph layout', layout); assert.ok(await noOverlap() > 0); }
-			await view('Graph layout', 'bundled');
+			for (const layout of ['layers', 'scopes', 'tree']) { await layoutTo(layout); assert.ok(await noOverlap() > 0); }
+			await layoutTo('bundled');
 			assert.equal(await page.locator('.tg-bundle-leaf').count(), original.resources.length);
 			await page.getByRole('button', { name: 'snet-aks-nodes', exact: true }).click();
 			assert.ok(await page.locator('.tg-bundle-path.is-uses, .tg-bundle-path.is-used-by').count() > 0); pass('bundled view shows every resource and highlights its relationships');
 			await page.keyboard.press('Escape');
-			await view('Graph layout', 'layers'); pass('layers, scopes and tree layouts have no overlapping cards');
+			await layoutTo('layers'); pass('layers, scopes and tree layouts have no overlapping cards');
 			assert.ok(await page.locator('.react-flow__node-card[data-id="aks"] .tg-row').count() >= 3); pass('AKS shows its configured input rows');
 			// Drag AKS far away: a graph pin appears and the project is unchanged.
 			const card = page.locator('.react-flow__node-card[data-id="aks"]'); const box = await card.boundingBox();

@@ -13,13 +13,13 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from 'react';
 import {
 	Background, BackgroundVariant, BaseEdge, EdgeLabelRenderer, Handle, MiniMap, Position as HandlePosition, ReactFlow,
-	getBezierPath, getSmoothStepPath, getStraightPath,
+	getBezierPath, getSmoothStepPath, getStraightPath, useViewport,
 	type Edge, type EdgeProps, type Node, type NodeProps, type OnNodesChange, type ReactFlowInstance, type Viewport,
 } from '@xyflow/react';
-import { AlertCircle, AlertTriangle, ChevronDown, Crosshair, FileCode2, Search, SlidersHorizontal, X, ChevronUp, Maximize2, Minus, Pencil, Pin, PinOff, Plus, RotateCcw, Scan } from 'lucide-react';
+import { AlertCircle, AlertTriangle, Rows3, Columns3, Network, Orbit, ChevronDown, Crosshair, FileCode2, Search, SlidersHorizontal, X, ChevronUp, Maximize2, Minus, Pencil, Pin, PinOff, Plus, RotateCcw, Scan } from 'lucide-react';
 import type { Action, Architecture, DesignMode } from './model.ts';
 import { applyWaves, graphLenses, graphOverlays, layerLabels, lensEdges, matchesQuery, neighbourhood, projectTechnicalGraph, traceNode, type NodeOverlay, type PlanAction, type GraphCategory, type GraphEdge, type GraphNode, type GraphPort, type GraphInput, type TechnicalGraphSnapshot } from './technicalGraph.ts';
-import { inputSize, layoutTechnicalGraph, placeInputs, visiblePortCount, type GraphLane } from './technicalGraphLayout.ts';
+import { inputSize, layoutTechnicalGraph, placeInputs, treeConnector, visiblePortCount, type GraphLane } from './technicalGraphLayout.ts';
 import { graphEditAllowed, type GraphPresentation, type GraphPresentationAction, type RouteStyle } from './graphPresentation.ts';
 import { relationshipNames } from './infrastructureRelationships.ts';
 import { graphIcons, technicalGraphSvg } from './technicalGraphExport.ts';
@@ -33,10 +33,16 @@ type GhostNode = Node<GhostData, 'ghost'>;
 type CardNode = Node<CardData, 'card'>;
 type LaneNode = Node<LaneData, 'lane'>;
 type GraphFlowNode = CardNode | LaneNode | GhostNode;
-type EdgeData = { edge?: GraphEdge; tree?: boolean; input?: boolean; route: RouteStyle; state: 'normal' | 'trace' | 'dim' | 'selected'; animate: boolean; label: string };
+type EdgeData = { edge?: GraphEdge; tree?: boolean; input?: boolean; /** Precomputed path (tree connectors). */ d?: string; route: RouteStyle; state: 'normal' | 'trace' | 'dim' | 'selected'; animate: boolean; label: string };
 type GraphFlowEdge = Edge<EdgeData, 'graph'>;
 
 export const categoryNames: Record<GraphCategory, string> = relationshipNames;
+const graphLayouts = [
+	{ id: 'layers', label: 'Layers', short: 'Layers', icon: Rows3, hint: 'rows in reading order: scope, network, security, identity, compute, data, monitoring' },
+	{ id: 'scopes', label: 'Scopes', short: 'Scopes', icon: Columns3, hint: 'one column per resource group or other ownership root' },
+	{ id: 'tree', label: 'Ownership tree', short: 'Tree', icon: Network, hint: 'configured parentage as a top-down tree' },
+	{ id: 'bundled', label: 'Bundled', short: 'Bundled', icon: Orbit, hint: 'radial hierarchical edge bundling' },
+] as const;
 const categoryOrder: GraphCategory[] = ['ownership', 'attachment', 'execution', 'reference', 'runtime', 'observability', 'unclassified'];
 
 const GraphCard = memo(function GraphCard({ data, selected }: NodeProps<CardNode>) {
@@ -119,7 +125,7 @@ function GraphRoute(props: EdgeProps<GraphFlowEdge>) {
 	const route = data?.route ?? 'curved';
 	const under = sourcePosition === HandlePosition.Bottom && targetPosition === HandlePosition.Bottom && Math.abs(sourceY - targetY) < 40;
 	const dip = Math.max(sourceY, targetY) + 36 + Math.min(90, Math.abs(targetX - sourceX) * 0.12);
-	const [path, labelX, labelY] = under ? [route === 'orthogonal' ? `M ${sourceX} ${sourceY} L ${sourceX} ${dip} L ${targetX} ${dip} L ${targetX} ${targetY}` : `M ${sourceX} ${sourceY} C ${sourceX} ${dip}, ${targetX} ${dip}, ${targetX} ${targetY}`, (sourceX + targetX) / 2, dip - 4] as [string, number, number]
+	const [path, labelX, labelY] = data?.d ? [data.d, sourceX, sourceY] as [string, number, number] : under ? [route === 'orthogonal' ? `M ${sourceX} ${sourceY} L ${sourceX} ${dip} L ${targetX} ${dip} L ${targetX} ${targetY}` : `M ${sourceX} ${sourceY} C ${sourceX} ${dip}, ${targetX} ${dip}, ${targetX} ${targetY}`, (sourceX + targetX) / 2, dip - 4] as [string, number, number]
 		: route === 'straight' ? getStraightPath({ sourceX, sourceY, targetX, targetY })
 		: route === 'orthogonal' ? getSmoothStepPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, borderRadius: 12, offset: 18 })
 			: getBezierPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, curvature: 0.32 });
@@ -296,7 +302,7 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme
 		if (presentation.layout === 'tree') {
 			for (const node of snapshot.nodes) {
 				const parent = [...node.scopePath].reverse().find(id => cardIds.has(id));
-				if (parent && cardIds.has(node.id)) { graphEdges.push({ id: 'tree:' + parent + ':' + node.id, type: 'graph', source: parent, target: node.id, sourceHandle: 'out', targetHandle: 'in', selectable: false, focusable: false, deletable: false, zIndex: -1, data: { tree: true, route: presentation.route, state: trace && !(trace.upstream.has(node.id) || node.id === selectedId) ? 'dim' : 'normal', animate: false, label: 'Configured parent' } }); }
+				if (parent && cardIds.has(node.id)) { const connector = treeConnector({ ...layout.positions[parent], ...layout.sizes[parent] }, { ...layout.positions[node.id], ...layout.sizes[node.id] }); graphEdges.push({ id: 'tree:' + parent + ':' + node.id, type: 'graph', source: parent, target: node.id, sourceHandle: 'out', targetHandle: connector.side === 'top' ? 'in' : 'in-left', selectable: false, focusable: false, deletable: false, zIndex: -1, data: { tree: true, d: connector.d, route: presentation.route, state: trace && !(trace.upstream.has(node.id) || node.id === selectedId) ? 'dim' : 'normal', animate: false, label: 'Configured parent' } }); }
 			}
 		}
 		return graphEdges;
@@ -354,6 +360,7 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme
 			onMoveEnd={(_, viewport) => { if (viewports?.current) { viewports.current.technical = viewport; } }}
 			nodesConnectable={false} edgesFocusable elementsSelectable deleteKeyCode={null} selectionKeyCode={null} multiSelectionKeyCode={null}
 			minZoom={0.08} maxZoom={2.5} proOptions={{ hideAttribution: true }} onlyRenderVisibleElements={snapshot.nodes.length > 300}>
+			<LaneRuler lanes={[...(inputLayout.lane ? [inputLayout.lane] : []), ...layout.lanes.filter(lane => lane.kind === 'layer')]} />
 			<Background variant={BackgroundVariant.Dots} gap={24} size={1} color="var(--grid-pattern)" bgColor="var(--canvas)" />
 			{snapshot.nodes.length > 40 && <MiniMap pannable zoomable nodeColor={node => node.type === 'lane' ? 'transparent' : 'var(--tg-mini)'} />}
 		</ReactFlow>}
@@ -364,12 +371,13 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme
 			<div className="tg-segment" role="radiogroup" aria-label="Lens">
 				{graphLenses.map(lens => <button key={lens.id} role="radio" aria-checked={presentation.lens === lens.id} title={lens.hint} onClick={() => onPresentation({ type: 'set', patch: { lens: lens.id } })}>{lens.label}</button>)}
 			</div>
+			<div className="tg-segment tg-layouts" role="radiogroup" aria-label="Graph layout">
+				{graphLayouts.map(item => <button key={item.id} role="radio" aria-checked={presentation.layout === item.id} aria-label={item.label} title={item.label + ' · ' + item.hint} onClick={() => onPresentation({ type: 'set', patch: { layout: item.id } })}><item.icon size={15} strokeWidth={1.8} /><span>{item.short}</span></button>)}
+			</div>
 			<label>Overlay<select aria-label="Card overlay" value={presentation.overlay} onChange={event => onPresentation({ type: 'set', patch: { overlay: event.target.value as GraphPresentation['overlay'] } })}>
-				<option value="none">None</option><option value="plan">Plan actions{plan ? '' : ' (no plan)'}</option><option value="order">Apply order</option><option value="impact">Dependents</option></select></label>
+				<option value="none">No overlay</option><option value="plan">Plan actions{plan ? '' : ' (no plan)'}</option><option value="order">Apply order</option><option value="impact">Dependents</option></select></label>
 			<details className="tg-view-menu"><summary className="tg-text-button" aria-label="View options"><SlidersHorizontal size={13} />View</summary>
 				<div className="tg-view-panel">
-					<label>Layout<select aria-label="Graph layout" value={presentation.layout} onChange={event => onPresentation({ type: 'set', patch: { layout: event.target.value as GraphPresentation['layout'] } })}>
-				<option value="layers">Layers</option><option value="scopes">Scopes</option><option value="tree">Ownership tree</option><option value="bundled">Bundled (radial)</option></select></label>
 					<label>Routes<select aria-label="Route style" value={presentation.route} onChange={event => onPresentation({ type: 'set', patch: { route: event.target.value as RouteStyle } })}>
 				<option value="curved">Curved</option><option value="orthogonal">Orthogonal</option><option value="straight">Straight</option></select></label>
 					<label>Spacing<select aria-label="Graph spacing" value={String(presentation.spacing)} onChange={event => onPresentation({ type: 'set', patch: { spacing: event.target.value === 'auto' ? 'auto' : Number(event.target.value) } })}>
@@ -484,5 +492,24 @@ function BundledGraph({ snapshot, edges, visible, selectedId, query, onSelect, o
 			})}
 		</svg>
 		<div className="tg-bundle-key" aria-hidden="true"><span className="is-uses">uses (prerequisite)</span><span className="is-used-by">used by (dependent)</span><span>scroll to zoom · drag to pan</span></div>
+	</div>;
+}
+
+/**
+ * Screen-space lane labels. In-canvas labels shrink with zoom and become unreadable at fit; these
+ * stay 11px, stick to the top of their lane while it scrolls, and never overlap cards.
+ */
+function LaneRuler({ lanes }: { lanes: readonly GraphLane[] }) {
+	const { x, y, zoom } = useViewport();
+	const top = 64; const bottom = 56;
+	return <div className="tg-ruler" aria-hidden="true">
+		{lanes.map(lane => {
+			const laneTop = lane.y * zoom + y; const laneBottom = (lane.y + lane.height) * zoom + y;
+			// Sits on the lane's top border like a tab (the gap there is empty), then sticks below the toolbar.
+			const labelTop = Math.min(Math.max(laneTop - 10, top), laneBottom - 26);
+			if (laneBottom < top + 10 || laneTop > (typeof window === 'undefined' ? 2000 : window.innerHeight) - bottom || labelTop < laneTop - 11) { return null; }
+			const kind = lane.kind === 'inputs' ? 'inputs' : lane.id.replace(/^lane:/, '');
+			return <span key={lane.id} className={'tg-ruler-label tg-layer-' + kind} style={{ top: labelTop, left: Math.max(12, lane.x * zoom + x + 8) }}>{lane.label}{lane.members?.length ? <em>{lane.members.length}</em> : null}</span>;
+		})}
 	</div>;
 }

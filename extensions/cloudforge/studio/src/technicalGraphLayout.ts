@@ -227,5 +227,30 @@ export function placeInputs(inputs: readonly { id: string; consumers: readonly {
 	for (const item of placed) { const x = Math.max(item.centre - inputSize.width / 2, cursor); positions[item.id] = { x: Math.round(x), y: Math.round(y) }; cursor = x + inputSize.width + gap; }
 	const xs = Object.values(positions).map(p => p.x);
 	const minX = Math.min(...xs, ...boxes.map(box => box.x)); const maxX = Math.max(...xs.map(x => x + inputSize.width), ...boxes.map(box => box.x + box.width));
-	return { positions, lane: { id: 'lane:inputs', kind: 'inputs', label: 'Inputs · var. local. data.', x: minX - graphMetrics.gutter, y: y - graphMetrics.bandHeader, width: maxX - minX + graphMetrics.gutter + 40, height: inputSize.height + graphMetrics.bandHeader + 18 } };
+	return { positions, lane: { id: 'lane:inputs', kind: 'inputs', label: 'Inputs', x: minX - graphMetrics.gutter, y: y - graphMetrics.bandHeader, width: maxX - minX + graphMetrics.gutter + 40, height: inputSize.height + graphMetrics.bandHeader + 18 } };
+}
+
+/** Rounded orthogonal polyline through points (org-chart style connectors). */
+export function elbowPath(points: readonly Position[], radius = 8): string {
+	let d = `M ${points[0].x} ${points[0].y}`;
+	for (let i = 1; i < points.length - 1; i++) {
+		const prev = points[i - 1]; const at = points[i]; const next = points[i + 1];
+		const r = Math.min(radius, Math.hypot(at.x - prev.x, at.y - prev.y) / 2, Math.hypot(next.x - at.x, next.y - at.y) / 2);
+		const a = { x: at.x - Math.sign(at.x - prev.x) * r, y: at.y - Math.sign(at.y - prev.y) * r };
+		const b = { x: at.x + Math.sign(next.x - at.x) * r, y: at.y + Math.sign(next.y - at.y) * r };
+		d += ` L ${a.x} ${a.y} Q ${at.x} ${at.y} ${b.x} ${b.y}`;
+	}
+	const last = points.at(-1)!; return d + ` L ${last.x} ${last.y}`;
+}
+/**
+ * Ownership-tree connector: a bus just below the parent, then a straight drop to first-row
+ * children, or a comb spine in the column gap into the side of wrapped leaf rows. Never crosses a card.
+ */
+export function treeConnector(parent: Position & GraphSize, child: Position & GraphSize): { d: string; side: 'top' | 'left' } {
+	const m = graphMetrics; const vGap = m.bandGap + 24;
+	const parentX = parent.x + parent.width / 2; const parentBottom = parent.y + parent.height; const bus = parentBottom + vGap / 2;
+	const firstRow = child.y <= parentBottom + vGap + 1;
+	if (firstRow || child.y < parentBottom) { const childX = child.x + child.width / 2; return { side: 'top', d: Math.abs(childX - parentX) < 1 ? `M ${parentX} ${parentBottom} L ${childX} ${child.y}` : elbowPath([{ x: parentX, y: parentBottom }, { x: parentX, y: bus }, { x: childX, y: bus }, { x: childX, y: child.y }]) }; }
+	const spine = child.x - m.gapX / 2; const entry = child.y + Math.min(40, child.height / 2);
+	return { side: 'left', d: elbowPath([{ x: parentX, y: parentBottom }, { x: parentX, y: bus }, { x: spine, y: bus }, { x: spine, y: entry }, { x: child.x, y: entry }]) };
 }

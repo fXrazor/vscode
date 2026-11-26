@@ -7,7 +7,7 @@
 	--tg-edge-runtime: #2d6ad3;
 	--tg-edge-observability: #3b8a57;
 	--tg-edge-unclassified: #9aa0b2;
-	--tg-edge-tree: #b9bfd0;
+	--tg-edge-tree: #a3aabd;
 	--tg-lane: #eceef4aa;
 	--tg-edge-input: #8a7fb8;
 	--tg-lane-line: #dfe2ec;
@@ -21,7 +21,7 @@
 	--tg-edge-runtime: #79a7f2;
 	--tg-edge-observability: #7fc99a;
 	--tg-edge-unclassified: #7d8297;
-	--tg-edge-tree: #4b5068;
+	--tg-edge-tree: #5d637c;
 	--tg-lane: #20222daa;
 	--tg-edge-input: #a99ee0;
 	--tg-lane-line: #31344a;
@@ -84,7 +84,7 @@
 .technical-graph .tg-edge { stroke: var(--tg-cat); stroke-width: 1.5; fill: none; opacity: .72; transition: opacity .18s ease, stroke-width .18s ease; }
 .technical-graph .tg-edge.tg-cat-reference, .technical-graph .tg-edge.tg-cat-unclassified { stroke-dasharray: 6 4; }
 .technical-graph .tg-edge.tg-cat-observability { stroke-dasharray: 2 4; stroke-linecap: round; }
-.technical-graph .tg-edge.tg-cat-tree { stroke-width: 1.25; opacity: .9; }
+.technical-graph .tg-edge.tg-cat-tree { stroke-width: 1.6; opacity: 1; stroke-linejoin: round; }
 .technical-graph .tg-edge-dim { opacity: .12; }
 .technical-graph .tg-edge-trace, .technical-graph .tg-edge-selected { opacity: 1; stroke-width: 2.25; }
 .technical-graph .tg-edge-selected { stroke-width: 2.75; }
@@ -228,3 +228,20 @@
 .tg-bundle-key { position: absolute; left: 16px; bottom: 64px; display: flex; gap: 14px; font-size: 11.5px; color: var(--muted); background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; }
 .tg-bundle-key .is-uses::before, .tg-bundle-key .is-used-by::before { content: ""; display: inline-block; width: 18px; height: 3px; border-radius: 2px; margin-right: 6px; vertical-align: middle; background: #2d6ad3; }
 .tg-bundle-key .is-used-by::before { background: #d2582a; }
+
+/* Layout switcher: icon + short label; labels drop below 1360px so the bar never wraps. */
+.tg-layouts button { display: inline-flex; align-items: center; gap: 6px; }
+.tg-layouts svg { flex: none; }
+@media (max-width: 1360px) { .tg-layouts button span { display: none; } .tg-layouts button { padding: 0 7px; } }
+/* Find collapses to an icon below 1280px and opens on focus. */
+@media (max-width: 1280px) { .tg-search input { width: 0; transition: width .16s ease; } .tg-search:focus-within input, .tg-search input:not(:placeholder-shown) { width: 150px; } }
+
+/* Screen-space lane labels (LaneRuler). */
+.tg-ruler { position: absolute; inset: 0; pointer-events: none; z-index: 4; overflow: hidden; }
+.tg-ruler-label { position: absolute; display: inline-flex; align-items: center; gap: 6px; height: 20px; box-shadow: 0 1px 3px #1a1b2614; padding: 0 8px 0 7px; border-radius: 10px; font-size: 10.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); background: color-mix(in srgb, var(--surface) 88%, transparent); border: 1px solid var(--border); backdrop-filter: blur(4px); white-space: nowrap; }
+.tg-ruler-label::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--tg-layer, var(--tg-edge-input)); }
+.tg-ruler-label em { font-style: normal; font-weight: 600; letter-spacing: 0; color: var(--muted); opacity: .8; }
+.technical-graph .tg-lane-layer span, .technical-graph .tg-lane-inputs span { display: none; }
+.technical-graph.is-compact-view .tg-ghost code { font-size: 17px; }
+.technical-graph.is-compact-view .tg-ghost span { display: none; }
+.technical-graph.is-compact-view .tg-ghost { border-width: 2.5px; }

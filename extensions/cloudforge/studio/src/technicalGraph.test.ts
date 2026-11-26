@@ -9,7 +9,7 @@ import { hubSpokeArchitecture } from './graphFixtures.ts';
 import { sampleArchitecture } from './fixture.ts';
 import { createHistory, historyReducer, type Action } from './model.ts';
 import { applyWaves, graphOverlays, lensEdges, matchesQuery, neighbourhood, orderingCycles, portId, projectTechnicalGraph, traceNode } from './technicalGraph.ts';
-import { inputSize, layerOrder, layoutTechnicalGraph, placeInputs } from './technicalGraphLayout.ts';
+import { inputSize, layerOrder, layoutTechnicalGraph, placeInputs, treeConnector } from './technicalGraphLayout.ts';
 import { defaultGraphPresentation, graphEditAllowed, graphPresentationReducer, parseGraphPresentation, serialiseGraphPresentation } from './graphPresentation.ts';
 import { buildHostViewState } from './serviceAdapter.ts';
 import { technicalGraphSvg } from './technicalGraphExport.ts';
@@ -251,4 +251,25 @@ test('bundled view places every resource on the circle grouped by layer and bund
 	assert.match(basisPath([[0, 0], [10, 10], [20, 0]]), /^M 0 0 C .* L 20 0$/);
 	const focused = bundleLayout(snapshot, edges, { visible: new Set(['aks', 'snet-aks']) });
 	assert.equal(focused.leaves.length, 2);
+});
+
+test('ownership-tree connectors are orthogonal and never pass through another card', () => {
+	const snapshot = projectTechnicalGraph(hubSpokeArchitecture());
+	const layout = layoutTechnicalGraph(snapshot, { layout: 'tree', expanded: new Set(), compact: false, pins: {}, edges: snapshot.edges });
+	const box = (id: string) => ({ ...layout.positions[id], ...layout.sizes[id] });
+	let checked = 0;
+	for (const node of snapshot.nodes) {
+		const parent = [...node.scopePath].reverse().find(id => id !== node.id && layout.positions[id]); if (!parent) { continue; }
+		const { d } = treeConnector(box(parent), box(node.id));
+		const numbers = [...d.matchAll(/-?\d+(?:\.\d+)?/g)].map(match => Number(match[0]));
+		const points = []; for (let i = 0; i < numbers.length; i += 2) { points.push({ x: numbers[i], y: numbers[i + 1] }); }
+		for (let i = 1; i < points.length; i++) {
+			for (let t = 0.1; t < 1; t += 0.1) {
+				const x = points[i - 1].x + (points[i].x - points[i - 1].x) * t; const y = points[i - 1].y + (points[i].y - points[i - 1].y) * t;
+				for (const other of snapshot.nodes) { if (other.id === parent || other.id === node.id) { continue; } const b = box(other.id); assert.ok(!(x > b.x + 1 && x < b.x + b.width - 1 && y > b.y + 1 && y < b.y + b.height - 1), `${parent}→${node.id} crosses ${other.id}`); }
+			}
+		}
+		checked++;
+	}
+	assert.ok(checked > 20);
 });
