@@ -1,5 +1,19 @@
 # CloudForge Code OSS handoff
 
+## Studio Technical Graph Rebuild — Phase 1 — 26 November 2026
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review` (pushed to `origin/main` from base `cf455878505`), owner Antigravity.
+- **Scope (purely additive — zero edits to `App.tsx`, `DesignCanvas.tsx`, `model.ts`, `serviceAdapter.ts`, `product.json`, Rust, or installer scripts):**
+  - Added [technicalGraphContract.ts](extensions/cloudforge/studio/src/technicalGraphContract.ts) and [technicalGraphContract.test.ts](extensions/cloudforge/studio/src/technicalGraphContract.test.ts), wired into `extensions/cloudforge/studio/package.json` `"test"`, and updated [STUDIO-CONTINUATION-2026-11-25.md](extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md).
+  - Delivers the deeply immutable (`deepFreeze`) `TechnicalGraphProjection` contract (`projectionVersion: 1`), explicit HCL reference extraction over existing `FileResourceValues` payloads, structural ownership vs visual grouping separation, bounded peer-keyed `attachmentPorts` (`${nodeId}:${direction}:${field}:${peerNodeId}`) with overflow counts, `sourceRevision`-checked schema/lock/plan/validate overlays (flagging stale revisions and opaque/redacted/unreviewed/Kubernetes-manifest unknowns honestly), Tarjan SCC cycle detection, evidence-backed hub-spoke pattern projection, capability audit, and completely isolated `TechnicalGraphPresentationState` reducers that never mutate `Architecture`, `Resource.positions`, Terraform, Modified state, or project Undo.
+- **Fresh verification (26 November 2026):**
+  - Studio `check` (`tsc --noEmit`): **PASS**
+  - Studio `test`: **166/166 PASS** (0 skipped; +6 Phase 1 tests)
+  - Studio `build` + `node extensions/cloudforge/esbuild.webview.mts`: **PASS**
+  - `node build/oxlint.ts` + `node --experimental-strip-types build/hygiene.ts`: **PASS**
+  - Extension Node tests (`CLOUDFORGE_REPO=Z:/CloudForge`): **97/97 PASS** (0 skipped)
+- **Next action:** **Phase 2 of the Technical Graph rebuild** — engineering inspection workflows (upstream/downstream path tracing, evidence & unknown disclosure, bounded attachment rows, route-style comparison) consuming `projectTechnicalGraph` without mutating the canonical model, before extracting the dedicated `TechnicalGraph` renderer in Phase 3.
+
 ## Current main integration and agent handoff — 25 November 2026
 
 Dale explicitly authorized finishing this checkpoint and pushing the completed work to **main**. This integration combines main `e9a36e0e73fdf429a0ac1a0cc11474e32ac81e68` with the four Studio commits through `64c01b2b4c31e1f85f459577c0258273f97ca308`. Integration owner: Codex, branch `codex/studio-whiteboard-2`, existing isolated worktree `C:/Users/dalep/.codex/worktrees/infrastructure-studio/CloudForge-Code`. Identify the final integration commit with `git log -1 -- extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md`; successors should start from the latest `origin/main` in their own worktrees.

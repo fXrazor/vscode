@@ -2,6 +2,31 @@
 
 ## Current handoff — read first
 
+### Technical Graph Rebuild — Phase 1 completed (26 November 2026)
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review` (pushed to `origin/main` from base `cf455878505`), integration owner Antigravity. Resolve the commit with `git log -1 -- extensions/cloudforge/studio/src/technicalGraphContract.ts`.
+- **Files added/changed (strictly additive — zero edits to `App.tsx`, `DesignCanvas.tsx`, `model.ts`, or `serviceAdapter.ts`):**
+  - `extensions/cloudforge/studio/src/technicalGraphContract.ts`
+  - `extensions/cloudforge/studio/src/technicalGraphContract.test.ts`
+  - `extensions/cloudforge/studio/package.json` (added `src/technicalGraphContract.test.ts` to `"test"`)
+  - `extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md` and root `HANDOFF.md`
+- **What Phase 1 delivers:**
+  - Deeply immutable (`deepFreeze`) `TechnicalGraphProjection` (`projectionVersion: 1`, `sourceRevision`, `graphStatus`, `nodes`, `edges`, `patterns`, `cycles`, `capabilities`) projected purely from the canonical `Architecture` plus existing host payloads (`FileResourceValues`, `LiveSchemaMap`, `HostDependencyReport`, `HostEnginePlanReport`, `HostEngineValidateReport`, `HostGraphSnapshot`). Zero new backend APIs; zero inferred links from type compatibility or proximity.
+  - Strict separation of `structuralParentId` (provider-backed `ownership` edge ONLY) from `visualGroupId` (`visualParentId`), plus deterministic peer-keyed `attachmentPorts` (`${nodeId}:${direction}:${field}:${peerNodeId}`) bounded by `maxAttachmentPortsPerNode` with explicit `attachmentOverflowCount`.
+  - `extractFileExpressionEvidence()` extracts explicit HCL references from Rust `readResourceValues` payloads (`FileResourceValues`) while honestly recording `redacted-value`, `opaque-expression`, `unreviewed-type`, `unverified-schema-version`, `partial-source-graph`, `stale-plan`, `stale-validate`, `missing-provider-lock`, and `kubernetes-manifest-unmapped` unknowns.
+  - Revision-bound schema version provenance (`live-matched | locked-only | bundled-fallback | unknown`), `sourceRevision`-checked plan/validate overlays (marking mismatched revisions `stale`), Tarjan SCC ordering cycle detection (`detectOrderingCycles`), evidence-backed hub-spoke pattern projection (`documentedHubSpokes` over both canonical bindings and source expressions), and `TechnicalGraphCapabilityAudit`.
+  - Completely isolated `TechnicalGraphPresentationState` (`pins`, `routeStyle`, `density`, `collapsedGroupIds`, `hiddenCategories`, `selectedNodeId`, `tracedNodeId`) with immutable reducers (`setGraphNodePin`, `clearGraphNodePins`, `setGraphRouteStyle`, `setGraphDensity`, `toggleGraphCollapsedGroup`, `setGraphHiddenCategories`, `setGraphSelection`, `pruneGraphPresentationState`) that NEVER touch `Architecture`, `Resource.positions`, `parentId`, `visualParentId`, container sizes, Terraform, Modified state, or project Undo.
+- **Fresh verification (26 November 2026):**
+  - `corepack pnpm --dir extensions/cloudforge/studio run check` (`tsc --noEmit`): **PASS**
+  - `corepack pnpm --dir extensions/cloudforge/studio run test`: **166/166 PASS** (0 skipped; 6 new Phase 1 contract tests covering zero-mutation deep-freeze invariant, structural vs visual grouping + bounded peer-keyed ports, `FileResourceValues` expression extraction + explicit unknowns, schema version + current/stale plan & validate revision binding, Tarjan SCC cycles + pin pruning, multi-provider AWS/GCP/K8s + positive/negative hub-spoke patterns)
+  - `corepack pnpm --dir extensions/cloudforge/studio run build` & `node extensions/cloudforge/esbuild.webview.mts`: **PASS**
+  - `node build/oxlint.ts` & `node --experimental-strip-types build/hygiene.ts` on all touched files: **PASS**
+  - Extension Node tests (`CLOUDFORGE_REPO=Z:/CloudForge`): **97/97 PASS** (0 skipped)
+  - Note: `research:verify` was not re-verified in this fresh worktree because `output/provider-research/` is gitignored; prior 88/88 hash verification remains inherited from the main integration entry below. No Rust, protocol, dependency, or Windows installer changes were made in this slice.
+- **Remaining Phase 1 / Phase 2 gaps & exact next action:**
+  - AWS research source version applicability (`6.73.1` vs research revision) and Kubernetes Terraform provider adapter remain explicitly flagged as unknowns (`unverified-schema-version`, `kubernetes-manifest-unmapped`) until version-matched live schemas or a dedicated K8s adapter are supplied.
+  - **Exact next action — Phase 2 (Engineering workflows & visual direction):** wire `projectTechnicalGraph` into a read-only contextual inspection/trace lens (dependency path tracing, upstream/downstream configured impact, unknown/plan/cycle disclosure, source navigation, bounded attachment-row design, and curved vs orthogonal vs straight route comparison) verified across light/dark and 1360×860 / 1024×768 before extracting the dedicated `TechnicalGraph` renderer in Phase 3.
+
 Canonical Studio checkpoint: this file. Dale requested consolidation on 25 November 2026; the earlier Claude continuation and Codex whiteboard continuation are retained below as historical evidence. Use the current queue here instead of historical branch commands or pending-approval notes.
 
 Worktree: `C:/Users/dalep/.codex/worktrees/infrastructure-studio/CloudForge-Code`. Branch: `codex/studio-whiteboard-2`. Integration owner: Codex. Initial revision for this continuation: `5963df26af39f3f65365304025df8fa70773ff9d`. Historical starting baseline: Studio check/build passed, **111/111** Node tests and two Edge suites 20/20. Use the main integration verification below for the current merged result.
