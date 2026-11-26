@@ -9,7 +9,7 @@ import { DependencyTools, dependencyStyle } from './DependencyTools.tsx';
 import { ConnectionCreate } from './ConnectionCreate.tsx';
 import { canConnect, connectionAnchor } from './designConnections.ts';
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type RefObject, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { canvasElements, expandGroups, resizeSelectionBoxes, sceneOrder, selectionFragment, type TextAppearance } from './canvasOperations.ts';
+import { canvasElements, connectedElementIds, expandGroups, resizeSelectionBoxes, sceneOrder, selectionFragment, stickyClusterFromText, type TextAppearance } from './canvasOperations.ts';
 import { applyUniformSpacing, layoutSelection, type Alignment } from './selectionGeometry.ts';
 import { CanvasActionMenu, SelectionControls, resizable, type SelectionAction } from './SelectionControls.tsx';
 import { SelectionResizeHandle } from './SelectionResizeHandle.tsx';
@@ -263,11 +263,12 @@ export const DesignCanvas = memo(function DesignCanvas({
 			return {...dependency,sourceHandle:'output',targetHandle:'input',type:'design' as const,hidden:!showConnections||!active&&!allDependencies&&dependency.id!==selectedDependency?.id,animated:false,className:'infrastructure-dependency',selected:dependency.id===selectedDependency?.id,data:{connection:{...dependency,source:elementEndpoint(dependency.source),target:elementEndpoint(dependency.target),pattern:'dotted' as const,...dependencyStyle(architecture,dependency.id),label:dependency.fields.join(', '),endArrow:false},showLabel:showLabels||active||dependency.id===selectedDependency?.id,dependency:true},ariaLabel:'Inherited dependency: '+dependency.fields.join(', ')};
 		})], [architecture.connections, selectedConnectionId, showConnections, showLabels, dependencies, mode, allDependencies, selectedIds, architecture.dependencyStyles, selectedDependency]);
 
-	function createItem(kind: BoardItem['kind']) {
+	function createItem(kind: BoardItem['kind'], shape?: ShapeId) {
 		if (mode !== 'visual') { return; }
 		const rectangle = bounds.current?.getBoundingClientRect();
 		if (flow && rectangle) {
-			onAddItem(kind, flow.screenToFlowPosition({ x: rectangle.x + rectangle.width / 2, y: rectangle.y + rectangle.height / 2 }));
+			const def = shape ? shapeDefinitions.find(item => item.id === shape) : undefined;
+			onAddItem(kind, flow.screenToFlowPosition({ x: rectangle.x + rectangle.width / 2, y: rectangle.y + rectangle.height / 2 }), def?.label, shape);
 		}
 	}
 
@@ -302,6 +303,10 @@ export const DesignCanvas = memo(function DesignCanvas({
 		const ids = expandGroups(architecture, selectedIds);
 		if (action === 'clear') { repeatStep.current = null; onSelectionChange([]); setSelectedConnectionId(''); setDependencyPick(undefined); setCreatingConnection(false); setAdditiveSelection(false); bounds.current?.focus(); }
 		else if (action === 'selectAll') { repeatStep.current = null; onSelectionChange(canvasElements(architecture).map(item => item.id)); }
+		else if (action === 'selectConnected') {
+			const connected = connectedElementIds(architecture, ids);
+			if (connected.length) { repeatStep.current = null; onSelectionChange(connected); }
+		}
 		else if (action === 'selectSimilar') {
 			const boardKinds = new Set(architecture.items.filter(item => ids.includes(item.id)).map(item => item.kind));
 			const resourceKeys = new Set(architecture.resources.filter(item => ids.includes(item.id)).map(item => item.catalogue?.type ?? item.kind));
@@ -448,7 +453,12 @@ export const DesignCanvas = memo(function DesignCanvas({
 			return;
 		}
 		if (mod) {
-			if (key === 'a') { action = 'selectAll'; } else if (key === 'c') { action = event.altKey ? 'copyStyle' : 'copy'; } else if (key === 'v') { action = event.altKey ? 'pasteStyle' : 'paste'; }
+			if (key === 'a') { action = 'selectAll'; } else if (key === 'c') { action = event.altKey ? 'copyStyle' : 'copy'; } else if (key === 'v') {
+				if (event.altKey) { action = 'pasteStyle'; }
+				else if (clipboard.current) { action = 'paste'; }
+				// When no internal canvas copy is buffered, let native onPaste turn external text lines into Miro sticky notes!
+			}
+			else if (key === '0') { event.preventDefault(); event.stopPropagation(); autoFit.current = { at: 0 }; void flow?.zoomTo(1, { duration: 180 }); return; }
 			else if (key === 'd') { action = 'duplicate'; } else if (key === 'g') { action = event.shiftKey ? 'ungroup' : 'group'; }
 			else if (key === 'f' && event.altKey) { action = 'frameSelection'; }
 			else if (key === 'f' && !event.altKey) {
@@ -499,6 +509,15 @@ export const DesignCanvas = memo(function DesignCanvas({
 			const step = (event.shiftKey ? 1 : 15) * (event.key === ']' ? 1 : -1);
 			event.preventDefault(); event.stopPropagation(); dispatch({ type: 'canvas', command: { kind: 'rotate', ids: selectedIds, by: step } }); return;
 		}
+		else if (event.shiftKey && event.code === 'Digit1') { event.preventDefault(); event.stopPropagation(); autoFit.current = { at: 0 }; fitConnectionsAndNodes(); return; }
+		else if (event.shiftKey && event.code === 'Digit2') { action = 'fit'; }
+		else if (event.shiftKey && event.code === 'Digit0') { event.preventDefault(); event.stopPropagation(); autoFit.current = { at: 0 }; void flow?.zoomTo(1, { duration: 180 }); return; }
+		else if (event.key === '+' || event.key === '=') { event.preventDefault(); event.stopPropagation(); autoFit.current = { at: 0 }; void flow?.zoomIn({ duration: 140 }); return; }
+		else if (event.key === '-') { event.preventDefault(); event.stopPropagation(); autoFit.current = { at: 0 }; void flow?.zoomOut({ duration: 140 }); return; }
+		else if (key === 'r' && !event.shiftKey && !event.altKey) { createItem('shape', 'rectangle'); }
+		else if (key === 'o' && !event.shiftKey && !event.altKey) { createItem('shape', 'ellipse'); }
+		else if (key === 'd' && !event.shiftKey && !event.altKey) { createItem('shape', 'diamond'); }
+		else if (key === 'l' && !event.shiftKey && !event.altKey && mode === 'visual') { setSelectedConnectionId(''); setConnectionSourceId(selectedId); onSelect(''); setCreatingConnection(value => !value); }
 		else if (key === 't') { createItem('text'); } else if (key === 'n') { createItem('note'); }
 		if (action) { event.preventDefault(); event.stopPropagation(); run(action); }
 	}
@@ -506,6 +525,19 @@ export const DesignCanvas = memo(function DesignCanvas({
 	return (
 		<CanvasActionMenu architecture={architecture} ids={selectedIds} hasClipboard={hasClipboard} hasStyleClipboard={hasStyleClipboard} run={run} container={bounds.current} readOnly={false}>
 		<main ref={bounds} tabIndex={0} className="canvas" aria-label="Visual design canvas" onKeyDownCapture={handleKeys}
+			onPaste={event => {
+				const target = event.target as HTMLElement;
+				if (mode !== 'visual' || target.closest('input, textarea, select, [contenteditable="true"]')) { return; }
+				const text = event.clipboardData?.getData('text/plain');
+				const rectangle = bounds.current?.getBoundingClientRect();
+				if (!text?.trim() || !flow || !rectangle) { return; }
+				const origin = flow.screenToFlowPosition({ x: rectangle.x + rectangle.width / 2, y: rectangle.y + rectangle.height / 2 });
+				const created = stickyClusterFromText(text, origin, () => crypto.randomUUID());
+				if (!created.length) { return; }
+				event.preventDefault();
+				dispatch({ type: 'canvas', command: { kind: 'addItems', items: created } });
+				onSelectionChange(created.map(item => item.id));
+			}}
 			onContextMenuCapture={event => {
 				const node = (event.target as HTMLElement).closest<HTMLElement>('.react-flow__node');
 				if (node?.dataset.id && !selectedIds.includes(node.dataset.id)) { onSelectionChange(expandGroups(architecture, [node.dataset.id])); }
@@ -639,7 +671,7 @@ export const DesignCanvas = memo(function DesignCanvas({
 				<label><input type="checkbox" checked={allDependencies} onChange={event=>setAllDependencies(event.target.checked)}/>All inherited dependencies</label>
 				<label><input type="checkbox" checked={showLabels} onChange={event => setShowLabels(event.target.checked)} />Show automatic and dependency labels</label>
 				<button aria-pressed={minimap} onClick={() => setMinimap(value => !value)}>Minimap</button>
-				<details className="canvas-shortcuts"><summary>Keyboard shortcuts</summary><p>Ctrl / Cmd + F: find on canvas<br/>Ctrl / Cmd + click: extend selection<br/>Shift + drag: select an area; Alt + drag: clone<br/>Ctrl / Cmd + D: duplicate (repeats last move)<br/>Ctrl / Cmd + Arrows: spawn connected shape / note<br/>Ctrl / Cmd + Alt + C / V: copy / paste style<br/>Ctrl / Cmd + Alt + F: wrap selection in frame<br/>Tab / Shift + Tab on sticky note: spawn adjacent note<br/>PageUp / PageDown: step between frames<br/>Arrows: move 1 px; Shift + arrows: 10 px<br/>Enter: edit; Escape: clear selection<br/>V: select; H: pan; P: pen; T: text; N: note<br/>[ and ]: rotate drawings 15° (Shift: 1°)<br/>F: focus selection; Space + drag: pan<br/>Alt + F10: move to the selection toolbar; Escape: back to the canvas<br/>Copy, duplicate, group and layer actions are in the selection menu.</p></details>
+				<details className="canvas-shortcuts"><summary>Keyboard shortcuts</summary><p>Ctrl / Cmd + F: find on canvas<br/>Shift + 1 / 2 / 0: fit all / selection / 100%; + / -: zoom<br/>Ctrl / Cmd + V (text lines): paste as sticky-note cluster<br/>Ctrl / Cmd + click: extend selection<br/>Shift + drag: select an area; Alt + drag: clone<br/>Ctrl / Cmd + D: duplicate (repeats last move)<br/>Ctrl / Cmd + Arrows: spawn connected shape / note<br/>Ctrl / Cmd + Alt + C / V: copy / paste style<br/>Ctrl / Cmd + Alt + F: wrap selection in frame<br/>Tab / Shift + Tab on sticky note: spawn adjacent note<br/>PageUp / PageDown: step between frames<br/>Arrows: move 1 px; Shift + arrows: 10 px<br/>Enter: edit; Escape: clear selection<br/>V: select; H: pan; P: pen; T: text; N: note; R/O/D: shapes; L: connect<br/>[ and ]: rotate drawings 15° (Shift: 1°)<br/>F: focus selection; Space + drag: pan<br/>Alt + F10: move to the selection toolbar; Escape: back to the canvas<br/>Copy, duplicate, group and layer actions are in the selection menu.</p></details>
 			</div></details>
 			{dropFeedback&&<div className={'container-drop-status '+(dropFeedback.ok?'valid':'invalid')} role="status">{dropFeedback.reason}</div>}
 			<div className="canvas-navigation" role="group" aria-label="Zoom and navigation">

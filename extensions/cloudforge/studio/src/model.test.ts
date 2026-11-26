@@ -16,7 +16,7 @@ import { sampleArchitecture } from './fixture.ts';
 import { additionalBlocks, blockDefinitions, fieldIssue, resourceFormIssues } from './formDefinition.ts';
 import { connectionDash, connectionPath } from './connectionGeometry.ts';
 import { canConnect, connectionAnchor, connectableElements } from './designConnections.ts';
-import { applyCanvasCommand, expandGroups, sceneOrder, selectionFragment } from './canvasOperations.ts';
+import { applyCanvasCommand, connectedElementIds, expandGroups, sceneOrder, selectionFragment, stickyClusterFromText } from './canvasOperations.ts';
 import { applyUniformSpacing, detectSpacingLayout, layoutSelection, selectionUnitBoxes, selectionUnits } from './selectionGeometry.ts';
 import type { Architecture, Action } from './model.ts';
 import { bindingKey, variableBindingIssue, variablePreview, type FieldTarget } from './fieldBindings.ts';
@@ -920,4 +920,32 @@ test('Miro Switch Type (convertItem) and Quick-Add Connected Copy (spawnConnecte
 	history = historyReducer(history, { type: 'undo' });
 	assert.equal(history.present.items.length, 1);
 	assert.equal(history.present.connections.length, 0);
+});
+
+test('Miro paste-lines-as-sticky-notes cluster and Select Connected traverse subgraphs atomically', () => {
+	let seq = 0;
+	const notes = stickyClusterFromText('- Ingress gateway\n- Auth service\n1. Order API\n2. Postgres DB\n\n', { x: 400, y: 300 }, () => 'p-' + (++seq));
+	assert.equal(notes.length, 4);
+	assert.deepEqual(notes.map(n => n.text), ['Ingress gateway', 'Auth service', 'Order API', 'Postgres DB']);
+	// 2x2 grid: row 0 shares Y, row 1 shares Y, col 0 shares X
+	assert.equal(notes[0].positions.visual.y, notes[1].positions.visual.y);
+	assert.equal(notes[2].positions.visual.y, notes[3].positions.visual.y);
+	assert.equal(notes[0].positions.visual.x, notes[2].positions.visual.x);
+
+	const base: Architecture = { name: 'PasteCluster', resources: [], items: [], connections: [] };
+	let history = historyReducer(createHistory(base), { type: 'canvas', command: { kind: 'addItems', items: notes } });
+	assert.equal(history.present.items.length, 4);
+	assert.equal(history.past.length, 1);
+	assert.equal(historyReducer(history, { type: 'undo' }).present.items.length, 0);
+
+	// Select Connected BFS across p-1 -> p-2 -> p-3 leaves disconnected p-4 unselected
+	const linked: Architecture = {
+		...history.present,
+		connections: [
+			{ id: 'e1', source: elementEndpoint('p-1'), target: elementEndpoint('p-2') },
+			{ id: 'e2', source: elementEndpoint('p-3'), target: elementEndpoint('p-2') },
+		],
+	};
+	assert.deepEqual(connectedElementIds(linked, ['p-1']).sort(), ['p-1', 'p-2', 'p-3']);
+	assert.deepEqual(connectedElementIds(linked, ['p-4']), ['p-4']);
 });

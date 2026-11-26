@@ -1,5 +1,11 @@
 # Studio continuation checkpoint — 25 November 2026
 
+## Miro Paste Lines → Sticky-Note Grid, Select Connected, Quick-Insert Keys & Zoom Shortcuts — 26 November 2026
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `aaa47c3b948`, owner Antigravity.
+- **Scope:** added `stickyClusterFromText()` + `addItems` command for pasting multi-line/bulleted text into a tidy pastel sticky-note grid in 1 Undo step (`src/canvasOperations.ts`, `src/DesignCanvas.tsx`), `connectedElementIds()` + **Select connected** menu action (`src/canvasOperations.ts`, `src/SelectionControls.tsx`, `src/DesignCanvas.tsx`), and Miro shortcuts `R`/`O`/`D`/`L` + `Shift+1/2/0` + `Ctrl+0` + `+`/`-`. Covered in `src/model.test.ts`.
+- **Fresh checks:** Studio `tsc --noEmit` **PASS**, **240/240** Studio tests (0 skipped), Studio `build` + `esbuild.webview.mts` + `oxlint` **PASS**, real Windows Edge live check of pasted sticky cluster + Undo, `R` + `Ctrl+Arrow` + `Select connected`, and `Shift+0` zoom **PASS** (0 browser errors).
+
 ## Miro Quick Colour Swatches, Switch Type, Board Quick Find (`Ctrl+F`) & `Ctrl+Arrow` Connected-Copy — 26 November 2026
 
 - **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `124d787df57`, owner Antigravity.

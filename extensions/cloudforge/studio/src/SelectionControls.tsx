@@ -2,7 +2,7 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-import { ArrowDownToLine, ArrowUpToLine, BoxSelect, BringToFront, ChevronRight, ClipboardPaste, Copy, CopyPlus, Focus, Frame, Group, Layers, LayoutGrid, Lock, LockKeyhole, LockOpen, Maximize2, Paintbrush, SendToBack, Sparkles, Trash2, Ungroup, X, type LucideIcon } from 'lucide-react';
+import { ArrowDownToLine, ArrowUpToLine, BoxSelect, BringToFront, ChevronRight, ClipboardPaste, Copy, CopyPlus, Focus, Frame, Group, Layers, LayoutGrid, Lock, LockKeyhole, LockOpen, Maximize2, Network, Paintbrush, SendToBack, Sparkles, Trash2, Ungroup, X, type LucideIcon } from 'lucide-react';
 import * as ContextMenu from '@radix-ui/react-context-menu';
 import { Fragment, type Dispatch, type ReactNode } from 'react';
 import type { Action, Architecture } from './model.ts';
@@ -16,7 +16,7 @@ import { isResourceContainer } from './resourceHierarchy.ts';
 import type { DesignMode } from './model.ts';
 import { selectionUnits } from './selectionGeometry.ts';
 
-export type SelectionAction = 'copy' | 'paste' | 'duplicate' | 'copyStyle' | 'pasteStyle' | 'selectSimilar' | 'frameSelection' | 'fitFrame' | 'delete' | 'lock' | 'unlock' | 'group' | 'ungroup' | 'front' | 'forward' | 'backward' | 'back' | 'fit' | 'edit' | 'selectAll' | 'clear' | `align-${string}` | `size-${string}`;
+export type SelectionAction = 'copy' | 'paste' | 'duplicate' | 'copyStyle' | 'pasteStyle' | 'selectSimilar' | 'selectConnected' | 'frameSelection' | 'fitFrame' | 'delete' | 'lock' | 'unlock' | 'group' | 'ungroup' | 'front' | 'forward' | 'backward' | 'back' | 'fit' | 'edit' | 'selectAll' | 'clear' | `align-${string}` | `size-${string}`;
 type MenuSection = 'edit' | 'clipboard' | 'structure' | 'arrange' | 'view' | 'danger';
 export type SelectionMenuAction = { id: SelectionAction; label: string; enabled: boolean; shortcut?: string; section: MenuSection; icon: LucideIcon };
 export function selectionActions(architecture: Architecture, ids: string[], hasClipboard: boolean, hasStyleClipboard = false): SelectionMenuAction[] {
@@ -44,7 +44,8 @@ export function selectionActions(architecture: Architecture, ids: string[], hasC
 		{ id: 'align-tidy', label: 'Tidy up spacing', enabled: units > 1 && editable, section: 'arrange', icon: LayoutGrid },
 		{ id: 'front', label: 'Bring to front', enabled: canLayer, section: 'arrange', icon: BringToFront }, { id: 'forward', label: 'Bring forward', enabled: canLayer, section: 'arrange', icon: ArrowUpToLine },
 		{ id: 'backward', label: 'Send backward', enabled: canLayer, section: 'arrange', icon: ArrowDownToLine }, { id: 'back', label: 'Send to back', enabled: canLayer, section: 'arrange', icon: SendToBack },
-		{ id: 'fit', label: 'Zoom to selection', enabled: !!selected.length, shortcut: 'F', section: 'view', icon: Focus },
+		{ id: 'fit', label: 'Zoom to selection', enabled: !!selected.length, shortcut: 'Shift+2', section: 'view', icon: Focus },
+		{ id: 'selectConnected', label: 'Select connected', enabled: !!selected.length && architecture.connections.length > 0, section: 'view', icon: Network },
 		{ id: 'selectSimilar', label: 'Select similar', enabled: !!selected.length, section: 'view', icon: Sparkles },
 		{ id: 'selectAll', label: 'Select all', enabled: true, shortcut: 'Ctrl+A', section: 'view', icon: BoxSelect },
 		{ id: 'delete', label: 'Delete', enabled: editable, shortcut: 'Del', section: 'danger', icon: Trash2 }

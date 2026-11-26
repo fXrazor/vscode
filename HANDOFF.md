@@ -1,5 +1,15 @@
 # CloudForge Code OSS handoff
 
+## Miro Paste Lines → Sticky-Note Grid, Select Connected, Quick-Insert Keys (`R`/`O`/`D`/`L`) & Zoom Shortcuts — 26 November 2026
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `aaa47c3b948`, owner Antigravity. Zero overlap with unmerged Claude branches (`2dm0k0`, `ksv8z9`) or Rust.
+- **Scope:**
+  - **Miro Paste Text Lines → Sticky-Note Cluster** ([canvasOperations.ts](extensions/cloudforge/studio/src/canvasOperations.ts), [DesignCanvas.tsx](extensions/cloudforge/studio/src/DesignCanvas.tsx)): added `stickyClusterFromText()` and `addItems` command so pasting plain multi-line or bulleted text on the visual canvas creates a tidy pastel sticky-note grid (stripping `- `, `* `, `• `, `1. ` prefixes, up to 24 notes) in **1 atomic Undo/Redo step** and selects the cluster (while preserving internal `Ctrl+C/V` canvas fragment paste).
+  - **Miro Select Connected (`selectConnected`)** ([canvasOperations.ts](extensions/cloudforge/studio/src/canvasOperations.ts), [SelectionControls.tsx](extensions/cloudforge/studio/src/SelectionControls.tsx), [DesignCanvas.tsx](extensions/cloudforge/studio/src/DesignCanvas.tsx)): BFS traversal across `architecture.connections` (`connectedElementIds()`) exposed in right-click & More menus to select an entire connected flowchart/subgraph in one click.
+  - **Miro Quick-Insert & Zoom Shortcuts** ([DesignCanvas.tsx](extensions/cloudforge/studio/src/DesignCanvas.tsx)): `R` (Rectangle), `O` (Ellipse), `D` (Diamond), `L` (Connect), `Shift+1` (Fit all), `Shift+2` (Zoom to selection), `Shift+0` / `Ctrl+0` (100% zoom), `+`/`=` (Zoom in), `-` (Zoom out).
+  - **Tests:** added unit coverage in [model.test.ts](extensions/cloudforge/studio/src/model.test.ts).
+- **Fresh verification (26 November 2026):** Studio `tsc --noEmit` **PASS**, **240/240** Studio unit tests PASS (0 skipped), Studio `build` + `esbuild.webview.mts` + `oxlint` **PASS**, and real Windows Edge (`--channel=msedge`): live paste 4-line bulleted list → 2×2 sticky cluster + 1-step Undo, `R` → `Ctrl+ArrowRight` → `Ctrl+ArrowDown` → `Select connected` (3 shapes), and `Shift+0` (100% zoom) **PASS** (0 browser errors).
+
 ## Miro Quick Colour Swatches, Switch Element Type, Board Quick Find (`Ctrl+F`) & Flowchart `Ctrl+Arrow` Connected-Copy — 26 November 2026
 
 - **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `124d787df57`, owner Antigravity. Zero overlap with unmerged Claude branches (`2dm0k0`, `ksv8z9`) or Rust.

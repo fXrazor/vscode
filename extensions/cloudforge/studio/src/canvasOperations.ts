@@ -33,7 +33,66 @@ export type CanvasCommand =
 	/** Miro-style Switch Type: convert sticky notes, shapes, and text boxes in place while preserving text, geometry, and links. */
 	| { kind: 'convertItem'; ids: string[]; targetKind: 'note' | 'shape' | 'text'; shape?: ShapeId }
 	/** Miro-style flowchart speed shortcut (Ctrl+Arrow): spawn a matching element in a direction and connect with directional ports. */
-	| { kind: 'spawnConnected'; sourceId: string; id: string; connectionId: string; direction: 'right' | 'left' | 'up' | 'down'; mode: DesignMode };
+	| { kind: 'spawnConnected'; sourceId: string; id: string; connectionId: string; direction: 'right' | 'left' | 'up' | 'down'; mode: DesignMode }
+	/** Atomic multi-item insertion (e.g. Miro paste-lines-as-sticky-notes cluster in 1 undo step). */
+	| { kind: 'addItems'; items: BoardItem[] };
+
+const pasteNotePalette = ['#fff0b5', '#d3f9d8', '#d0ebff', '#e5dbff', '#ffe3c4', '#ffd6e7'] as const;
+
+/** Parse pasted text lines (stripping bullets/numbering) into a tidy Miro sticky-note grid. */
+export function stickyClusterFromText(text: string, origin: Position, makeId: () => string, maxItems = 24): BoardItem[] {
+	const lines = text
+		.split(/\r?\n/)
+		.map(line => line.trim().replace(/^(?:[-*•▪◦]+|\d+[.)])\s+/, '').trim())
+		.filter(Boolean)
+		.slice(0, maxItems);
+	if (!lines.length) { return []; }
+	const width = 200; const height = 128; const gap = 24;
+	const cols = lines.length <= 3 ? lines.length : Math.min(4, Math.ceil(Math.sqrt(lines.length)));
+	const rows = Math.ceil(lines.length / cols);
+	const totalW = cols * width + (cols - 1) * gap;
+	const totalH = rows * height + (rows - 1) * gap;
+	const startX = Math.round(origin.x - totalW / 2);
+	const startY = Math.round(origin.y - totalH / 2);
+	return lines.map((line, index) => {
+		const col = index % cols; const row = Math.floor(index / cols);
+		const pos = { x: startX + col * (width + gap), y: startY + row * (height + gap) };
+		return {
+			id: makeId(),
+			kind: 'note',
+			text: line.slice(0, 400),
+			fill: lines.length === 1 ? '#fff0b5' : pasteNotePalette[row % pasteNotePalette.length],
+			width,
+			height,
+			positions: { visual: pos, technical: pos },
+			members: [],
+		};
+	});
+}
+
+/** BFS across design connections to find all elements connected to the current selection (Miro Select Connected). */
+export function connectedElementIds(architecture: Architecture, seedIds: readonly string[]): string[] {
+	const valid = new Set(canvasElements(architecture).map(item => item.id));
+	const visited = new Set(expandGroups(architecture, [...seedIds]).filter(id => valid.has(id)));
+	if (!visited.size) { return []; }
+	const adjacency = new Map<string, Set<string>>();
+	const link = (a: string, b: string) => {
+		if (!adjacency.has(a)) { adjacency.set(a, new Set()); }
+		adjacency.get(a)!.add(b);
+	};
+	for (const edge of architecture.connections) {
+		const s = endpointElementId(edge.source); const t = endpointElementId(edge.target);
+		if (s && t && valid.has(s) && valid.has(t)) { link(s, t); link(t, s); }
+	}
+	const queue = [...visited];
+	while (queue.length) {
+		const current = queue.shift()!;
+		for (const next of adjacency.get(current) ?? []) {
+			if (!visited.has(next)) { visited.add(next); queue.push(next); }
+		}
+	}
+	return expandGroups(architecture, [...visited]);
+}
 
 /** Degrees in [0, 360), rounded to 0.1°; 0 is stored as undefined so unrotated drawings stay unchanged. */
 export function normaliseRotation(degrees: number): number | undefined {
@@ -346,6 +405,10 @@ export function applyCanvasCommand(architecture: Architecture, command: CanvasCo
 			const spawned: BoardItem = { ...source, id: command.id, text: '', positions: { visual: pos, technical: pos }, members: [], canvasLocked: false };
 			const link = { id: command.connectionId, source: elementEndpoint(source.id, fromPort), target: elementEndpoint(command.id, toPort), routing: 'elbow' as const };
 			return { ...architecture, items: [...architecture.items, spawned], connections: [...architecture.connections, link], layerOrder: [...sceneOrder(architecture), command.id] };
+		}
+		case 'addItems': {
+			if (!command.items.length || command.items.some(item => !item.id || byId.has(item.id)) || new Set(command.items.map(item => item.id)).size !== command.items.length) { return architecture; }
+			return { ...architecture, items: [...architecture.items, ...command.items], layerOrder: [...sceneOrder(architecture), ...command.items.map(item => item.id)] };
 		}
 	}
 }
