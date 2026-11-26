@@ -66,7 +66,10 @@ export function Studio() {
 	const [libraryOpen, setLibraryOpen] = useState(() => typeof window === 'undefined' || !window.matchMedia?.('(max-width: 760px)').matches);
 	const [libraryTab, setLibraryTab] = useState<'resources' | 'templates'>('resources');
  const [shapesOpen, setShapesOpen] = useState(false);
- function openShapes() { setDetailTab('form'); setOverview(true); setLibraryOpen(true); setShapesOpen(true); }
+ const openShapes = useCallback(() => { setDetailTab('form'); setOverview(true); setLibraryOpen(true); setShapesOpen(true); }, []);
+ const closeShapes = useCallback(() => setShapesOpen(false), []);
+ const closeLibrary = useCallback(() => setLibraryOpen(false), []);
+ const openModuleImport = useCallback(() => setModuleImportOpen(true), []);
 	const [inspectorOpen, setInspectorOpen] = useState(false);
 	const [libraryWidth, setLibraryWidth] = useState(346);
 	const [inspectorWidth, setInspectorWidth] = useState(280);
@@ -113,6 +116,10 @@ export function Studio() {
 	const [focusMode, setFocusMode] = useState(false);
 	const architectureRef = useRef(history.present);
 	architectureRef.current = history.present;
+	const selectedIdRef = useRef(selectedId);
+	selectedIdRef.current = selectedId;
+	const hostSnapshotRef = useRef(hostSnapshot);
+	hostSnapshotRef.current = hostSnapshot;
 	const hostArchitectureIdRef = useRef<string | null>(null);
 	useEffect(()=>{if(!message){return;}const timer=setTimeout(()=>setMessage(''),5000);return()=>clearTimeout(timer);},[message]);
 	const [flow, setFlow] = useState<ReactFlowInstance<CanvasNode, DesignEdgeType>>();
@@ -664,39 +671,41 @@ export function Studio() {
 		setMessage(next === 'visual' ? 'Visual Design · shared draft preserved' : 'Technical Design · shared draft preserved');
 	}
 
-	const resourceCount = architecture.resources.length;
 	const addResource = useCallback((kind: ResourceKind, provider: Provider, position?: Position, parentId?:string) => {
+		const currentArchitecture = architectureRef.current;
+		const currentCount = currentArchitecture.resources.length;
 		const id = crypto.randomUUID();
 		const definition = resourceDefinition({ kind, provider });
 		const placed = position ?? {
-			x: 160 + (resourceCount % 3) * 250,
-			y: 600 + Math.floor(Math.max(0, resourceCount - 6) / 3) * 180
+			x: 160 + (currentCount % 3) * 250,
+			y: 600 + Math.floor(Math.max(0, currentCount - 6) / 3) * 180
 		};
 		const resource:Resource = {
-			id, kind, provider, name: 'new-' + kind + '-' + (resourceCount + 1),
-			...(hostSnapshot ? { sourceFile: defaultTargetTfFile(architecture, selectedId || undefined) } : {}),
+			id, kind, provider, name: 'new-' + kind + '-' + (currentCount + 1),
+			...(hostSnapshotRef.current ? { sourceFile: defaultTargetTfFile(currentArchitecture, selectedIdRef.current || undefined) } : {}),
 			region: providerRegions[provider][0], settings: { ...definition.defaults },
 			blocks: [],
 			positions: { visual: placed, technical: placed }
 		};
-		const placement=resourcePlacement(architecture,resource,parentId); if(!placement.ok){setMessage(placement.reason);return;} resource.parentId=placement.parentId;
+		const placement=resourcePlacement(currentArchitecture,resource,parentId); if(!placement.ok){setMessage(placement.reason);return;} resource.parentId=placement.parentId;
 		dispatch({type:'add',resource});
 		setSelectedId(id);
 		setOverview(false); setInspectorOpen(true); setInspectorCategory('resources'); setDetailTab('form');
 		setMessage('Added ' + definition.label + ' to the shared draft');
-	}, [resourceCount,architecture]);
+	}, [setSelectedId]);
 
  const addCatalogueResource = useCallback((entry: CatalogueEntry, provider: Provider, position?: Position, parentId?:string) => {
+  const currentArchitecture = architectureRef.current;
   const id = crypto.randomUUID();
   const bounds = document.querySelector('.canvas')?.getBoundingClientRect();
   const placed = position ?? (flow && bounds ? flow.screenToFlowPosition({ x: bounds.x+bounds.width/2, y:bounds.y+bounds.height/2 }) : { x:100,y:100 });
   const settings = Object.fromEntries(entry.fields.filter(field=>field.required && !['name','location','region'].includes(field.name)).map(field=>[field.name, field.default === undefined ? '' : String(field.default)]));
-  const resource:Resource={ id, kind:'generic', catalogue:entry, provider, name:entry.type.replace(/^(azurerm|aws|google)_/,'')+'_'+id.slice(0,4), ...(hostSnapshot ? { sourceFile: defaultTargetTfFile(architecture, selectedId || undefined) } : {}), region:providerRegions[provider][0], settings, blocks:[], positions:{visual:placed,technical:placed} };
-  const placement=resourcePlacement(architecture,resource,parentId);if(!placement.ok){setMessage(placement.reason);return;}resource.parentId=placement.parentId;dispatch({type:'add',resource});
+  const resource:Resource={ id, kind:'generic', catalogue:entry, provider, name:entry.type.replace(/^(azurerm|aws|google)_/,'')+'_'+id.slice(0,4), ...(hostSnapshotRef.current ? { sourceFile: defaultTargetTfFile(currentArchitecture, selectedIdRef.current || undefined) } : {}), region:providerRegions[provider][0], settings, blocks:[], positions:{visual:placed,technical:placed} };
+  const placement=resourcePlacement(currentArchitecture,resource,parentId);if(!placement.ok){setMessage(placement.reason);return;}resource.parentId=placement.parentId;dispatch({type:'add',resource});
   setSelectedId(id); setOverview(false); setInspectorOpen(true); setInspectorCategory('resources'); setDetailTab('form');
- },[flow,architecture]);
+ },[flow, setSelectedId]);
 
- function addTemplate(kind:'network'|'platform'|'workflow') {
+ const addTemplate = useCallback((kind:'network'|'platform'|'workflow') => {
   if(kind==='workflow'){
    const rect=document.querySelector('.canvas')?.getBoundingClientRect();
    const centre=flow&&rect?flow.screenToFlowPosition({x:rect.x+rect.width/2,y:rect.y+rect.height/2}):{x:200,y:200};
@@ -712,7 +721,7 @@ export function Studio() {
   dispatch({type:'insert',architecture:{name:pattern.name,resources,items:[],connections:pattern.connections.filter(edge=>wanted.includes(endpointElementId(edge.source)??'')&&wanted.includes(endpointElementId(edge.target)??'')).map(edge=>({...edge,id:crypto.randomUUID(),source:remapEndpoint(edge.source,Object.fromEntries(ids),0)!,target:remapEndpoint(edge.target,Object.fromEntries(ids),0)!}))}});
   setSelectedId(resources[0].id); setOverview(true); setInspectorOpen(true);
   void flow?.fitView({nodes:resources.map(resource=>({id:resource.id})),padding:0.2});
- }
+ }, [flow, setSelectedId]);
 
 	const addItem = useCallback((kind: BoardItem['kind'], position: Position, caption?:string, shape?: ShapeId) => {
 		const id = crypto.randomUUID();
@@ -735,8 +744,21 @@ export function Studio() {
 		} });
 		setSelectedId(id);
 		setModuleImportOpen(false);
-		setMessage('Module reference added. Source inspection requires service integration.');
+		setMessage('Module reference added to the architecture draft.');
 	}
+
+	const moduleCount = useMemo(
+		() => architecture.resources.reduce((count, resource) => count + (resource.kind === 'module' ? 1 : 0), 0),
+		[architecture.resources]
+	);
+	const handleCatalogueDesignAdd = useCallback((kind: BoardItem['kind'], caption?: string, shape?: ShapeId) => {
+		const position = flow?.screenToFlowPosition({ x: innerWidth / 2, y: innerHeight / 2 });
+		if (position) { addItem(kind, position, caption, shape); }
+	}, [flow, addItem]);
+	const libraryResizeHandle = useMemo(
+		() => <PaneResizeHandle side="library" width={libraryWidth} minimum={346} onCommit={setLibraryWidth} />,
+		[libraryWidth]
+	);
 
 	function exportSample() {
 		const blob = new Blob([JSON.stringify(exportableArchitecture(architecture), null, 2)], { type: 'application/json' });
@@ -775,14 +797,11 @@ export function Studio() {
 					onExportArtifact: exportHostArtifact,
 				} : undefined} />
 			<div className="studio-body">
-				<ResourceCatalogue architecture={architecture} onAdd={addResource} onAddCatalogue={addCatalogueResource} onTemplate={addTemplate} search={search} onSearch={setSearch} onImportModule={() => setModuleImportOpen(true)}
-					shapesOpen={shapesOpen} onShapesOpen={openShapes} onShapesBack={() => setShapesOpen(false)}
+				<ResourceCatalogue moduleCount={moduleCount} onAdd={addResource} onAddCatalogue={addCatalogueResource} onTemplate={addTemplate} search={search} onSearch={setSearch} onImportModule={openModuleImport}
+					shapesOpen={shapesOpen} onShapesOpen={openShapes} onShapesBack={closeShapes}
 					tab={libraryTab} onTabChange={setLibraryTab}
-     visible={libraryOpen} onClose={() => setLibraryOpen(false)}
-					onDesignAdd={(kind,caption,shape) => {
-						const position = flow?.screenToFlowPosition({ x: innerWidth / 2, y: innerHeight / 2 });
-						if (position) { addItem(kind, position, caption, shape); }
-					}} resizeHandle={<PaneResizeHandle side="library" width={libraryWidth} minimum={346} onCommit={setLibraryWidth} />} />
+     visible={libraryOpen} onClose={closeLibrary}
+					onDesignAdd={handleCatalogueDesignAdd} resizeHandle={libraryResizeHandle} />
 				<div className="design-area">
 					<div className="canvas-shell">
 						<DesignCanvas architecture={architecture} mode={mode} theme={theme} onThemeChange={setTheme} selectedId={selectedId} selectedIds={selectedIds} onSelectionChange={setSelectedIds} dispatch={dispatch}
