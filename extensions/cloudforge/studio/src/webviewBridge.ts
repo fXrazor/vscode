@@ -90,6 +90,7 @@ export interface HostGraphViewState {
 	readonly spacing: 'auto' | number;
 	readonly height: number;
 	readonly showMembership: boolean;
+	readonly showInputs?: boolean;
 	readonly expanded: readonly string[];
 	readonly pins: Readonly<Record<string, HostPoint>>;
 }

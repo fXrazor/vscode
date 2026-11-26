@@ -19,6 +19,8 @@ export interface GraphPresentation {
 	pins: Record<string, Position>;
 	expanded: string[];
 	showMembership: boolean;
+	/** Ghost cards for var., local. and data. inputs. */
+	showInputs: boolean;
 	density: 'auto' | 'detailed' | 'compact';
 	/** Card badge overlay: plan actions, Terraform apply waves or configured dependents. */
 	overlay: 'none' | 'plan' | 'order' | 'impact';
@@ -29,7 +31,7 @@ export interface GraphPresentation {
 	/** Vertical stretch percentage (100–300), independent of spacing. */
 	height: number;
 }
-export const defaultGraphPresentation: GraphPresentation = { lens: 'all', layout: 'layers', route: 'curved', pins: {}, expanded: [], showMembership: false, density: 'auto', overlay: 'none', spacing: 'auto', height: 100 };
+export const defaultGraphPresentation: GraphPresentation = { lens: 'all', layout: 'layers', route: 'curved', pins: {}, expanded: [], showMembership: false, showInputs: true, density: 'auto', overlay: 'none', spacing: 'auto', height: 100 };
 
 export type GraphPresentationAction =
 	| { type: 'set'; patch: Partial<Omit<GraphPresentation, 'pins' | 'expanded'>> }
@@ -85,6 +87,7 @@ export function parseGraphPresentation(value: unknown): Partial<GraphPresentatio
 	if (raw.spacing === 'auto' || (typeof raw.spacing === 'number' && raw.spacing >= 100 && raw.spacing <= 300)) { out.spacing = raw.spacing; }
 	if (typeof raw.height === 'number' && raw.height >= 100 && raw.height <= 300) { out.height = raw.height; }
 	if (typeof raw.showMembership === 'boolean') { out.showMembership = raw.showMembership; }
+	if (typeof raw.showInputs === 'boolean') { out.showInputs = raw.showInputs; }
 	if (Array.isArray(raw.expanded)) { out.expanded = raw.expanded.filter(id => typeof id === 'string'); }
 	if (raw.pins && typeof raw.pins === 'object') { out.pins = Object.fromEntries(Object.entries(raw.pins as Record<string, Position>).filter(([, point]) => point && Number.isFinite(point.x) && Number.isFinite(point.y)).map(([id, point]) => [id, { x: point.x, y: point.y }])); }
 	return out as Partial<GraphPresentation>;

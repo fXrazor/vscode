@@ -13,7 +13,7 @@ import type { Position } from './model.ts';
 
 export type GraphLayoutKind = 'layers' | 'scopes' | 'tree';
 export type GraphSize = { width: number; height: number };
-export interface GraphLane { id: string; label: string; x: number; y: number; width: number; height: number; kind: 'layer' | 'scope'; members?: string[] }
+export interface GraphLane { id: string; label: string; x: number; y: number; width: number; height: number; kind: 'layer' | 'scope' | 'inputs'; members?: string[] }
 export interface GraphLayoutResult { positions: Record<string, Position>; sizes: Record<string, GraphSize>; lanes: GraphLane[]; columns: GraphLane[] }
 
 /** Engineering reading order: scope, then the network a workload lands in, the controls on it, the workload, its data and telemetry. */
@@ -206,4 +206,25 @@ function spread(result: GraphLayoutResult, edges: readonly GraphEdge[], spacing:
 		const left = Math.min(...members.map(id => result.positions[id].x)) - 20;
 		Object.assign(column, { x: left, width: Math.max(...members.map(id => result.positions[id].x + result.sizes[id].width)) - left + 20, height: bottom + 10 - column.y });
 	}
+}
+
+export const inputSize: GraphSize = { width: 196, height: 52 };
+/**
+ * Ghost inputs (var., local., data.) sit in one row above the graph, each near the mean x of the
+ * cards that read it, swept left to right so they never overlap each other or any card.
+ */
+export function placeInputs(inputs: readonly { id: string; consumers: readonly { resourceId: string }[] }[], layout: GraphLayoutResult): { positions: Record<string, Position>; lane?: GraphLane } {
+	const placed = inputs.map(input => {
+		const xs = input.consumers.flatMap(consumer => { const p = layout.positions[consumer.resourceId]; const size = layout.sizes[consumer.resourceId]; return p && size ? [p.x + size.width / 2] : []; });
+		return { id: input.id, centre: xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : NaN };
+	}).filter(item => Number.isFinite(item.centre)).sort((a, b) => a.centre - b.centre || a.id.localeCompare(b.id));
+	if (!placed.length) { return { positions: {} }; }
+	const boxes = Object.entries(layout.positions).map(([id, p]) => ({ ...p, ...layout.sizes[id] }));
+	const top = Math.min(...boxes.map(box => box.y), ...[...layout.lanes, ...layout.columns].map(lane => lane.y));
+	const y = top - 48 - inputSize.height; const gap = 18;
+	const positions: Record<string, Position> = {}; let cursor = -Infinity;
+	for (const item of placed) { const x = Math.max(item.centre - inputSize.width / 2, cursor); positions[item.id] = { x: Math.round(x), y: Math.round(y) }; cursor = x + inputSize.width + gap; }
+	const xs = Object.values(positions).map(p => p.x);
+	const minX = Math.min(...xs, ...boxes.map(box => box.x)); const maxX = Math.max(...xs.map(x => x + inputSize.width), ...boxes.map(box => box.x + box.width));
+	return { positions, lane: { id: 'lane:inputs', kind: 'inputs', label: 'Inputs · var. local. data.', x: minX - graphMetrics.gutter, y: y - graphMetrics.bandHeader, width: maxX - minX + graphMetrics.gutter + 40, height: inputSize.height + graphMetrics.bandHeader + 18 } };
 }

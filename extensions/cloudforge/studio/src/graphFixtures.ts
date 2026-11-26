@@ -82,5 +82,12 @@ export function hubSpokeArchitecture(): Architecture {
 		r('diag-kv', 'azurerm_monitor_diagnostic_setting', 'kv-to-log', 'rg-app', [['target_resource_id', 'kv'], ['log_analytics_workspace_id', 'log']]),
 		r('diag-st', 'azurerm_monitor_diagnostic_setting', 'st-to-log', 'rg-app', [['target_resource_id', 'st'], ['log_analytics_workspace_id', 'log']]),
 	];
-	return { name: 'Hub and spoke platform', items: [], connections: [], resources };
+	// Inputs the graph shows as ghost cards: a bound variable, a sensitive variable and a data source read.
+	const variables = [{ id: 'v-k8s', name: 'kubernetes_version', type: 'string' as const, description: 'AKS control plane version', sensitive: false }, { id: 'v-ssh', name: 'admin_ssh_public_key', type: 'string' as const, description: 'VM admin key', sensitive: true }];
+	const find = (id: string) => resources.find(resource => resource.id === id)!;
+	find('aks').fieldBindings = { [bindingKey({ kind: 'setting', name: 'kubernetes_version' })]: { variableId: 'v-k8s' } };
+	find('vm-app').fieldBindings = { [bindingKey({ kind: 'setting', name: 'admin_ssh_key' })]: { variableId: 'v-ssh' } };
+	find('kv').settings = { ...find('kv').settings, tenant_id: 'data.azurerm_client_config.current.tenant_id' };
+	find('ra-kv').settings = { ...find('ra-kv').settings, scope: '${local.platform_scope}' };
+	return { name: 'Hub and spoke platform', items: [], connections: [], resources, variables };
 }

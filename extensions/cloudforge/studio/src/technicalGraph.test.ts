@@ -9,7 +9,7 @@ import { hubSpokeArchitecture } from './graphFixtures.ts';
 import { sampleArchitecture } from './fixture.ts';
 import { createHistory, historyReducer, type Action } from './model.ts';
 import { applyWaves, graphOverlays, lensEdges, matchesQuery, neighbourhood, orderingCycles, portId, projectTechnicalGraph, traceNode } from './technicalGraph.ts';
-import { layerOrder, layoutTechnicalGraph } from './technicalGraphLayout.ts';
+import { inputSize, layerOrder, layoutTechnicalGraph, placeInputs } from './technicalGraphLayout.ts';
 import { defaultGraphPresentation, graphEditAllowed, graphPresentationReducer, parseGraphPresentation, serialiseGraphPresentation } from './graphPresentation.ts';
 import { buildHostViewState } from './serviceAdapter.ts';
 
@@ -182,4 +182,19 @@ test('planned replace or destroy marks configured dependents as affected', () =>
 	const upstream = traceNode(snapshot.edges.filter(edge => edge.ordering && !edge.membership), 'snet-aks').upstream;
 	for (const id of upstream) { assert.equal(byNode[id]?.affectedBy, undefined); }
 	assert.equal(dependents.size, 3); assert.ok(upstream.size > 0);
+});
+
+test('var., local. and data. inputs become ghost cards outside the resource graph', () => {
+	const architecture = hubSpokeArchitecture(); const snapshot = projectTechnicalGraph(architecture);
+	assert.deepEqual(snapshot.inputs.map(input => input.address), ['data.azurerm_client_config.current', 'local.platform_scope', 'var.admin_ssh_public_key', 'var.kubernetes_version']);
+	const ssh = snapshot.inputs.find(input => input.address === 'var.admin_ssh_public_key')!;
+	assert.equal(ssh.sensitive, true); assert.equal(ssh.declared, true); assert.deepEqual(ssh.consumers, [{ resourceId: 'vm-app', field: 'admin_ssh_key' }]);
+	assert.deepEqual(snapshot.inputs.find(input => input.kind === 'data')!.consumers, [{ resourceId: 'kv', field: 'tenant_id' }]);
+	assert.equal(snapshot.nodes.length, architecture.resources.length, 'ghosts are not resource nodes');
+	assert.ok(snapshot.edges.every(edge => !edge.source.startsWith('input:')), 'ghosts never enter ordering, waves or impact');
+	const layout = layoutTechnicalGraph(snapshot, { layout: 'layers', expanded: new Set(), compact: false, pins: {}, edges: snapshot.edges });
+	const placed = placeInputs(snapshot.inputs, layout);
+	const boxes = [...Object.values(placed.positions).map(p => ({ ...p, ...inputSize })), ...Object.entries(layout.positions).map(([id, p]) => ({ ...p, ...layout.sizes[id] }))];
+	for (const [i, a] of boxes.entries()) { for (const b of boxes.slice(i + 1)) { assert.ok(a.x + a.width <= b.x || b.x + b.width <= a.x || a.y + a.height <= b.y || b.y + b.height <= a.y); } }
+	assert.equal(Object.keys(placed.positions).length, 4); assert.ok(placed.lane);
 });

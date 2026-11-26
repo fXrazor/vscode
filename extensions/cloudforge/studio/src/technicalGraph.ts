@@ -91,8 +91,22 @@ export interface GraphEdge {
 	readonly targetPort: string;
 	readonly evidence: readonly GraphEvidence[];
 }
+/** A Terraform input a resource reads but that is not a managed resource card: var., local. or data. */
+export interface GraphInput {
+	readonly id: string;
+	readonly kind: 'variable' | 'local' | 'data';
+	/** Terraform address, e.g. `var.kubernetes_version` or `data.azurerm_client_config.current`. */
+	readonly address: string;
+	readonly label: string;
+	readonly sensitive: boolean;
+	/** Declared in the project (variables list) or only referenced in an expression. */
+	readonly declared: boolean;
+	readonly consumers: readonly { readonly resourceId: string; readonly field: string }[];
+}
 export interface TechnicalGraphSnapshot {
 	readonly revision: string;
+	/** Ghost inputs. Never part of `nodes`/`edges`, so ordering, waves, cycles and impact stay resource-only. */
+	readonly inputs: readonly GraphInput[];
 	readonly nodes: readonly GraphNode[];
 	readonly edges: readonly GraphEdge[];
 	readonly hubSpokes: readonly { readonly hub: string; readonly spokes: readonly string[] }[];
@@ -175,9 +189,41 @@ export function projectTechnicalGraph(architecture: Architecture): TechnicalGrap
 	const hubSpokes = documentedHubSpokes(architecture, relationships).map(star => ({ hub: star.hub, spokes: [...star.spokes] }));
 	const revision = hash(JSON.stringify([nodes.map(node => [node.id, node.label, node.type, node.scope, node.region.value]), edges.map(edge => [edge.id, edge.evidence.length])]));
 	return deepFreeze({
-		revision, nodes, edges, hubSpokes, cycles,
+		revision, nodes, edges, hubSpokes, cycles, inputs: graphInputs(architecture),
 		coverage: { documented: nodes.filter(node => node.reviewStatus === 'documented').length, unreviewed: nodes.filter(node => node.reviewStatus === 'unreviewed').length, unknownRegion: nodes.filter(node => !node.region.known).length },
 	});
+}
+
+const inputPattern = /\b(?:(var|local)\.([A-Za-z_][\w-]*)|data\.([A-Za-z_]\w*)\.([A-Za-z_][\w-]*))/g;
+/** Variables bound to fields and var./local./data. references found in field expressions. */
+export function graphInputs(architecture: Architecture): GraphInput[] {
+	const inputs = new Map<string, { kind: GraphInput['kind']; address: string; label: string; sensitive: boolean; declared: boolean; consumers: Map<string, { resourceId: string; field: string }> }>();
+	const add = (kind: GraphInput['kind'], address: string, label: string, resourceId: string, field: string, declared = false, sensitive = false) => {
+		const item = inputs.get(address) ?? { kind, address, label, sensitive, declared, consumers: new Map() };
+		item.declared ||= declared; item.sensitive ||= sensitive; item.consumers.set(resourceId + '\u0000' + field, { resourceId, field }); inputs.set(address, item);
+	};
+	const variables = new Map((architecture.variables ?? []).map(variable => [variable.id, variable]));
+	const declaredNames = new Map((architecture.variables ?? []).map(variable => [variable.name, variable]));
+	const scan = (resourceId: string, field: string, value: unknown) => {
+		if (typeof value !== 'string' || !value) { return; }
+		for (const match of value.matchAll(inputPattern)) {
+			if (match[1]) { const declared = match[1] === 'var' ? declaredNames.get(match[2]) : undefined; add(match[1] === 'var' ? 'variable' : 'local', match[1] + '.' + match[2], match[2], resourceId, field, !!declared, !!declared?.sensitive); }
+			else { add('data', 'data.' + match[3] + '.' + match[4], match[4] + ' (' + match[3] + ')', resourceId, field); }
+		}
+	};
+	const walkBlocks = (resourceId: string, blocks: readonly Resource['blocks'][number][], prefix: string) => {
+		for (const block of blocks) { for (const [key, value] of Object.entries(block.values ?? {})) { scan(resourceId, prefix + block.type + '.' + key, value); } walkBlocks(resourceId, block.blocks ?? [], prefix + block.type + '.'); }
+	};
+	for (const resource of architecture.resources) {
+		for (const [key, binding] of Object.entries(resource.fieldBindings ?? {})) {
+			const variable = variables.get(binding.variableId); if (!variable) { continue; }
+			let field = key; try { const parsed = JSON.parse(key) as string[]; field = parsed.at(-1) ?? key; } catch { /* Legacy key. */ }
+			add('variable', 'var.' + variable.name, variable.name, resource.id, field, true, variable.sensitive);
+		}
+		for (const [field, value] of Object.entries(resource.settings ?? {})) { scan(resource.id, field, value); }
+		walkBlocks(resource.id, resource.blocks ?? [], '');
+	}
+	return [...inputs.values()].sort((a, b) => a.address.localeCompare(b.address)).slice(0, 200).map(item => ({ id: 'input:' + item.address, kind: item.kind, address: item.address, label: item.label, sensitive: item.sensitive, declared: item.declared, consumers: [...item.consumers.values()] }));
 }
 
 export function portId(resourceId: string, field: string, peer: string): string { return 'port:' + JSON.stringify([resourceId, field, peer]); }

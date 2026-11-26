@@ -9,6 +9,7 @@
 	--tg-edge-unclassified: #9aa0b2;
 	--tg-edge-tree: #b9bfd0;
 	--tg-lane: #eceef4aa;
+	--tg-edge-input: #8a7fb8;
 	--tg-lane-line: #dfe2ec;
 	--tg-mini: #c9c2ee;
 }
@@ -22,6 +23,7 @@
 	--tg-edge-unclassified: #7d8297;
 	--tg-edge-tree: #4b5068;
 	--tg-lane: #20222daa;
+	--tg-edge-input: #a99ee0;
 	--tg-lane-line: #31344a;
 	--tg-mini: #5a4d8f;
 }
@@ -184,3 +186,13 @@
 .tg-edge-label { font-size: 11.5px; padding: 3px 9px; }
 .technical-graph.is-compact-view .tg-lane-layer span { font-size: 17px; top: 12px; }
 .technical-graph.is-compact-view .tg-lane-scope span { font-size: 26px; }
+
+/* Ghost inputs: var., local. and data. are read, not managed, so they are dashed and unfilled. */
+.tg-ghost { box-sizing: border-box; display: flex; flex-direction: column; justify-content: center; gap: 2px; padding: 6px 10px; border: 1.5px dashed var(--tg-edge-input); border-radius: 10px; background: color-mix(in srgb, var(--surface) 70%, transparent); color: var(--text); transition: opacity .15s; }
+.tg-ghost code { font-size: 11.5px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tg-ghost span { font-size: 10.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tg-ghost-data { border-color: var(--tg-edge-reference); }
+.tg-ghost-local { border-style: dotted; }
+.tg-ghost.tg-state-dim { opacity: .28; } .tg-ghost.tg-state-trace { border-style: solid; }
+.tg-lane-inputs { border-top: 1px dashed var(--tg-lane-line); background: transparent; }
+.tg-edge.tg-cat-input { stroke: var(--tg-edge-input); stroke-dasharray: 4 4; stroke-width: 1.3; }

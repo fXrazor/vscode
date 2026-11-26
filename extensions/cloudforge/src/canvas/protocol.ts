@@ -463,6 +463,7 @@ export interface CanvasGraphViewState {
 	readonly spacing: 'auto' | number;
 	readonly height: number;
 	readonly showMembership: boolean;
+	readonly showInputs?: boolean;
 	readonly expanded: readonly string[];
 	readonly pins: Readonly<Record<string, CanvasPoint>>;
 }
@@ -487,7 +488,7 @@ export function sanitizeGraphViewState(value: unknown): CanvasGraphViewState | u
 	const spacing = value.spacing === 'auto' ? 'auto' : typeof value.spacing === 'number' && Number.isFinite(value.spacing) ? Math.min(300, Math.max(100, Math.round(value.spacing))) : 'auto';
 	const height = typeof value.height === 'number' && Number.isFinite(value.height) ? Math.min(300, Math.max(100, Math.round(value.height))) : 100;
 	const expanded = Array.isArray(value.expanded) ? [...new Set(value.expanded.filter(isOpaqueId))].slice(0, MAX_NODE_POSITIONS) : [];
-	return { lens: pick('lens'), layout: pick('layout'), route: pick('route'), density: pick('density'), overlay: pick('overlay'), spacing, height, showMembership: value.showMembership === true, expanded, pins: sanitizeNodePositionMap(value.pins) ?? {} };
+	return { lens: pick('lens'), layout: pick('layout'), route: pick('route'), density: pick('density'), overlay: pick('overlay'), spacing, height, showMembership: value.showMembership === true, ...(typeof value.showInputs === 'boolean' ? { showInputs: value.showInputs } : {}), expanded, pins: sanitizeNodePositionMap(value.pins) ?? {} };
 }
 
 export type CanvasNoticeKind = 'stale' | 'unavailable' | 'info';
