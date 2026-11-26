@@ -140,7 +140,7 @@ export interface IssuedMcpGrant extends McpGrantSummary {
 	readonly mcpCommand: string;
 }
 
-export type LearningStudioTab = 'proposals' | 'skills' | 'blueprints' | 'agents';
+export type LearningStudioTab = 'task' | 'proposals' | 'skills' | 'blueprints' | 'agents';
 
 export interface LearningStudioViewState {
 	readonly architectureName?: string;
@@ -156,12 +156,22 @@ export interface LearningStudioViewState {
 	readonly statusMessage?: string;
 }
 
+export interface ChatTopologyArgs {
+	readonly blueprintQuery?: string;
+	readonly prefix?: string;
+	readonly region?: string;
+	readonly cidrBaseOctet?: number;
+}
+
 export type LearningStudioMessage =
 	| { readonly type: 'switchTab'; readonly tab: LearningStudioTab }
 	| { readonly type: 'filterSkills'; readonly category: SkillCategory | 'all' }
 	| { readonly type: 'applyProposal'; readonly proposalId: string }
 	| { readonly type: 'rejectProposal'; readonly proposalId: string }
-	| { readonly type: 'proposeBlueprint'; readonly blueprintId: string }
+	| { readonly type: 'proposeBlueprint'; readonly blueprintId: string; readonly prefix?: string; readonly region?: string; readonly cidrBaseOctet?: number }
+	| { readonly type: 'saveTask'; readonly title: string; readonly mode: LearningMode; readonly objective: string; readonly newRequirement?: string }
+	| { readonly type: 'toggleRequirement'; readonly requirementId: string }
+	| { readonly type: 'saveNote'; readonly address: string; readonly why?: string; readonly userNote?: string; readonly docLabel?: string; readonly docUrl?: string }
 	| { readonly type: 'copyMcpConfig'; readonly client: 'codex' | 'claude-code' }
 	| { readonly type: 'revokeGrant'; readonly grantIdPreview: string }
 	| { readonly type: 'refresh' };
@@ -175,7 +185,40 @@ const SKILL_CATEGORIES: ReadonlySet<string> = new Set<SkillCategory>([
 
 const LEARNING_MODES: ReadonlySet<string> = new Set<LearningMode>(['hint', 'guided', 'workedExample']);
 const PROPOSAL_STATUSES: ReadonlySet<string> = new Set<ProposalStatus>(['pending', 'stale', 'accepted', 'rejected']);
-const STUDIO_TABS: ReadonlySet<string> = new Set<LearningStudioTab>(['proposals', 'skills', 'blueprints', 'agents']);
+const STUDIO_TABS: ReadonlySet<string> = new Set<LearningStudioTab>(['task', 'proposals', 'skills', 'blueprints', 'agents']);
+
+export function parseChatTopologyArgs(prompt: string): ChatTopologyArgs {
+	const tokens = prompt.trim().split(/\s+/).filter(Boolean);
+	let blueprintQuery: string | undefined;
+	let prefix: string | undefined;
+	let region: string | undefined;
+	let cidrBaseOctet: number | undefined;
+	for (const token of tokens) {
+		const eq = token.indexOf('=');
+		if (eq > 0) {
+			const key = token.slice(0, eq).toLowerCase();
+			const val = token.slice(eq + 1).trim();
+			if ((key === 'prefix' || key === 'name') && /^[a-z][a-z0-9-]{1,23}$/.test(val) && !val.endsWith('-')) {
+				prefix = val;
+			} else if ((key === 'region' || key === 'location') && /^[a-z0-9-]{2,32}$/.test(val)) {
+				region = val;
+			} else if ((key === 'cidr' || key === 'octet' || key === 'cidrbaseoctet') && /^\d{1,3}$/.test(val)) {
+				const parsed = Number(val);
+				if (Number.isInteger(parsed) && parsed >= 0 && parsed <= 250) {
+					cidrBaseOctet = parsed;
+				}
+			}
+		} else if (!blueprintQuery) {
+			blueprintQuery = token;
+		}
+	}
+	return {
+		...(blueprintQuery ? { blueprintQuery } : {}),
+		...(prefix ? { prefix } : {}),
+		...(region ? { region } : {}),
+		...(cidrBaseOctet !== undefined ? { cidrBaseOctet } : {})
+	};
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -589,7 +632,56 @@ export function parseLearningStudioMessage(raw: unknown): LearningStudioMessage 
 		}
 		case 'proposeBlueprint': {
 			const blueprintId = str(raw.blueprintId, 64);
-			return blueprintId && /^[a-z0-9-]+$/.test(blueprintId) ? { type: 'proposeBlueprint', blueprintId } : undefined;
+			if (!blueprintId || !/^[a-z0-9-]+$/.test(blueprintId)) {
+				return undefined;
+			}
+			const rawPrefix = typeof raw.prefix === 'string' ? raw.prefix.trim() : '';
+			const prefix = rawPrefix.length > 0 && /^[a-z][a-z0-9-]{1,23}$/.test(rawPrefix) && !rawPrefix.endsWith('-') ? rawPrefix : undefined;
+			const rawRegion = typeof raw.region === 'string' ? raw.region.trim() : '';
+			const region = rawRegion.length > 0 && /^[a-z0-9-]{2,32}$/.test(rawRegion) ? rawRegion : undefined;
+			const rawOctet = typeof raw.cidrBaseOctet === 'number'
+				? raw.cidrBaseOctet
+				: typeof raw.cidrBaseOctet === 'string' && /^\d{1,3}$/.test(raw.cidrBaseOctet.trim())
+					? Number(raw.cidrBaseOctet.trim())
+					: undefined;
+			const cidrBaseOctet = rawOctet !== undefined && Number.isInteger(rawOctet) && rawOctet >= 0 && rawOctet <= 250 ? rawOctet : undefined;
+			return {
+				type: 'proposeBlueprint',
+				blueprintId,
+				...(prefix ? { prefix } : {}),
+				...(region ? { region } : {}),
+				...(cidrBaseOctet !== undefined ? { cidrBaseOctet } : {})
+			};
+		}
+		case 'saveTask': {
+			const title = str(typeof raw.title === 'string' ? raw.title.trim() : '', 200);
+			const mode = typeof raw.mode === 'string' && LEARNING_MODES.has(raw.mode) ? raw.mode as LearningMode : undefined;
+			const objective = optStr(typeof raw.objective === 'string' ? raw.objective.trim() : '', 4000) ?? '';
+			const newRequirement = str(typeof raw.newRequirement === 'string' ? raw.newRequirement.trim() : '', 512);
+			return title && mode
+				? { type: 'saveTask', title, mode, objective, ...(newRequirement ? { newRequirement } : {}) }
+				: undefined;
+		}
+		case 'toggleRequirement': {
+			const requirementId = str(raw.requirementId, 64);
+			return requirementId ? { type: 'toggleRequirement', requirementId } : undefined;
+		}
+		case 'saveNote': {
+			const address = str(typeof raw.address === 'string' ? raw.address.trim() : '', 256);
+			if (!address || !/^[A-Za-z0-9._\-\[\]"]+$/.test(address)) {
+				return undefined;
+			}
+			const why = str(typeof raw.why === 'string' ? raw.why.trim() : '', 2000);
+			const userNote = str(typeof raw.userNote === 'string' ? raw.userNote.trim() : '', 2000);
+			const docLabel = str(typeof raw.docLabel === 'string' ? raw.docLabel.trim() : '', 128);
+			const docUrl = str(typeof raw.docUrl === 'string' ? raw.docUrl.trim() : '', 512);
+			return {
+				type: 'saveNote',
+				address,
+				...(why ? { why } : {}),
+				...(userNote ? { userNote } : {}),
+				...(docLabel && docUrl && docUrl.startsWith('https://') ? { docLabel, docUrl } : {})
+			};
 		}
 		case 'copyMcpConfig':
 			return raw.client === 'codex' || raw.client === 'claude-code'
@@ -654,7 +746,62 @@ export function buildLearningStudioHtml(state: LearningStudioViewState, nonce: s
 	};
 
 	let bodyHtml = '';
-	if (state.activeTab === 'proposals') {
+	if (state.activeTab === 'task') {
+		if (!state.architectureName) {
+			bodyHtml = `
+				<section class="empty-block">
+					<h2>No architecture selected</h2>
+					<p>Open a CloudForge project or Terraform folder to record a learning task, track requirement checklists, and attach resource rationale notes.</p>
+				</section>`;
+		} else {
+			const task = state.record?.task;
+			const modeOpt = (m: LearningMode, label: string) => `<option value="${m}"${(task?.mode ?? 'guided') === m ? ' selected' : ''}>${label}</option>`;
+			const checklistHtml = (task?.requirements ?? []).length === 0
+				? '<p class="muted">No requirements yet. Add one below to track progress against your Terraform resources.</p>'
+				: `<ul class="checklist">${(task?.requirements ?? []).map(req => {
+					const done = req.status === 'addressed';
+					return `<li class="${done ? 'done' : ''}">
+						<button type="button" class="check-btn" data-action="toggleRequirement" data-id="${escapeHtml(req.id)}" aria-pressed="${done}">${done ? '✓' : '○'}</button>
+						<span>${escapeHtml(req.text)}${req.linkedAddresses.length ? ` <span class="muted">${req.linkedAddresses.map(a => `<code>${escapeHtml(a)}</code>`).join(', ')}</span>` : ''}</span>
+					</li>`;
+				}).join('')}</ul>`;
+			const notesEntries = Object.entries(state.record?.notes ?? {});
+			const notesListHtml = notesEntries.length === 0
+				? '<p class="muted">No resource rationale notes saved for this architecture yet.</p>'
+				: notesEntries.map(([addr, note]) => `
+					<div class="note-card">
+						<h4><code>${escapeHtml(addr)}</code></h4>
+						${note.why ? `<p class="prose"><strong>Why:</strong> ${escapeHtml(note.why)}</p>` : ''}
+						${note.userNote ? `<p class="prose"><strong>Note:</strong> ${escapeHtml(note.userNote)}</p>` : ''}
+						${note.docs.length ? `<div class="meta">Docs: ${note.docs.map(d => `<code>${escapeHtml(d.label)}</code> (${escapeHtml(d.url)})`).join(' · ')}</div>` : ''}
+					</div>`).join('');
+			bodyHtml = `
+				<section class="entry">
+					<h3>Learning task &amp; checklist</h3>
+					<p class="notice">Stored locally in CloudForge service data (never modifies your Git repository or Terraform files).</p>
+					<form id="task-form" class="form-grid">
+						<label>Task title<input name="title" type="text" maxlength="200" value="${escapeHtml(task?.title ?? '')}" placeholder="e.g. Build Azure Hub-and-Spoke lab" required></label>
+						<label>Guidance mode<select name="mode">${modeOpt('hint', 'Hint only')}${modeOpt('guided', 'Guided checklist')}${modeOpt('workedExample', 'Worked example')}</select></label>
+						<label class="full">Objective<textarea name="objective" rows="2" maxlength="4000" placeholder="What should this architecture achieve?">${escapeHtml(task?.objective ?? '')}</textarea></label>
+						<label class="full">Add requirement (optional)<input name="newRequirement" type="text" maxlength="512" placeholder="e.g. Provision disjoint hub and spoke VNets with NSGs"></label>
+						<div class="row-actions full"><button type="submit" class="primary-btn">Save learning task</button></div>
+					</form>
+					${checklistHtml}
+				</section>
+				<section class="entry">
+					<h3>Resource rationale notes (${notesEntries.length})</h3>
+					${notesListHtml}
+					<form id="note-form" class="form-grid">
+						<label>Resource address<input name="address" type="text" maxlength="256" placeholder="e.g. azurerm_virtual_network.hub" required></label>
+						<label>Design rationale (why)<input name="why" type="text" maxlength="2000" placeholder="Why does this resource exist?"></label>
+						<label class="full">Learner note<input name="userNote" type="text" maxlength="2000" placeholder="Personal study note or reminder"></label>
+						<label>Official doc label (optional)<input name="docLabel" type="text" maxlength="128" placeholder="e.g. Azure VNet Docs"></label>
+						<label>Official HTTPS doc URL (optional)<input name="docUrl" type="url" maxlength="512" placeholder="https://learn.microsoft.com/..."></label>
+						<div class="row-actions full"><button type="submit" class="ghost-btn">Save resource note</button></div>
+					</form>
+				</section>`;
+		}
+	} else if (state.activeTab === 'proposals') {
 		if (!state.architectureName) {
 			bodyHtml = `
 				<section class="empty-block">
@@ -727,7 +874,13 @@ export function buildLearningStudioHtml(state: LearningStudioViewState, nonce: s
 			</article>`).join('');
 		bodyHtml = `${notice}${filterBar}${list}`;
 	} else if (state.activeTab === 'blueprints') {
-		const intro = `<p class="notice">Verified multi-cloud topologies aligned with CloudForge Visual containers and Technical Graph patterns. Submitting a blueprint creates a reviewable proposal without writing to disk until you confirm.</p>`;
+		const intro = `
+			<p class="notice">Verified multi-cloud topologies aligned with CloudForge Visual containers and Technical Graph patterns. Optional customizations below apply disjoint CIDRs (<code>10.&lt;octet&gt;.0.0/16</code> &amp; <code>10.&lt;octet+1&gt;.0.0/16</code>) and stage a reviewable proposal without writing to disk.</p>
+			<div class="custom-bar">
+				<label>Prefix<input id="bp-prefix" type="text" maxlength="24" placeholder="cf-lab"></label>
+				<label>Region<input id="bp-region" type="text" maxlength="32" placeholder="uksouth / eu-west-2"></label>
+				<label>CIDR 2nd octet (0-250)<input id="bp-octet" type="number" min="0" max="250" placeholder="0"></label>
+			</div>`;
 		const cards = state.blueprints.map(bp => `
 			<article class="entry">
 				<div class="entry-head">
@@ -960,8 +1113,27 @@ export function buildLearningStudioHtml(state: LearningStudioViewState, nonce: s
 	}
 	.empty-block { padding: 12px 0; max-width: 60ch; }
 	.empty-block h2 { margin: 0 0 8px; font-size: 16px; }
+	.form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; margin: 12px 0; }
+	.form-grid label, .custom-bar label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--vscode-descriptionForeground); }
+	.form-grid .full { grid-column: 1 / -1; }
+	.custom-bar { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 16px; padding: 12px; border: 1px solid var(--vscode-panel-border, rgba(128,128,128,.25)); border-radius: 6px; }
+	input, select, textarea {
+		font: inherit;
+		color: var(--vscode-input-foreground);
+		background: var(--vscode-input-background);
+		border: 1px solid var(--vscode-input-border, rgba(128,128,128,.35));
+		border-radius: 4px;
+		padding: 6px 8px;
+	}
+	.checklist { list-style: none; padding: 0; margin: 12px 0 0; }
+	.checklist li { display: flex; align-items: baseline; gap: 8px; padding: 5px 0; }
+	.checklist li.done span { text-decoration: line-through; opacity: 0.75; }
+	.check-btn { border: 0; background: transparent; color: var(--vscode-foreground); cursor: pointer; font-size: 14px; padding: 0 4px; }
+	.note-card { padding: 8px 0; border-top: 1px solid var(--vscode-panel-border, rgba(128,128,128,.15)); }
+	.note-card h4 { margin: 0 0 4px; font-size: 13px; }
 	@media (max-width: 640px) {
 		.shell { grid-template-columns: 1fr; }
+		.form-grid, .custom-bar { grid-template-columns: 1fr; }
 		.rail { border-right: 0; border-bottom: 1px solid var(--vscode-panel-border, rgba(128,128,128,.22)); }
 	}
 </style>
@@ -971,6 +1143,7 @@ export function buildLearningStudioHtml(state: LearningStudioViewState, nonce: s
 	<nav class="rail" aria-label="Learning Studio sections">
 		<h1 class="rail-title">Learning Studio</h1>
 		<div class="rail-sub">${headerSub}</div>
+		${navItem('task', 'Task & Notes', state.record?.task?.requirements.length ?? 0)}
 		${navItem('proposals', 'Proposals', pendingCount)}
 		${navItem('skills', 'Baked-in Skills', state.skills.length)}
 		${navItem('blueprints', 'Starter Blueprints', state.blueprints.length)}
@@ -999,14 +1172,51 @@ export function buildLearningStudioHtml(state: LearningStudioViewState, nonce: s
 			vscode.postMessage({ type: 'filterSkills', category: target.getAttribute('data-category') });
 		} else if (action === 'applyProposal' || action === 'rejectProposal') {
 			vscode.postMessage({ type: action, proposalId: target.getAttribute('data-id') });
+		} else if (action === 'toggleRequirement') {
+			vscode.postMessage({ type: 'toggleRequirement', requirementId: target.getAttribute('data-id') });
 		} else if (action === 'proposeBlueprint') {
-			vscode.postMessage({ type: 'proposeBlueprint', blueprintId: target.getAttribute('data-id') });
+			const prefixEl = document.getElementById('bp-prefix');
+			const regionEl = document.getElementById('bp-region');
+			const octetEl = document.getElementById('bp-octet');
+			vscode.postMessage({
+				type: 'proposeBlueprint',
+				blueprintId: target.getAttribute('data-id'),
+				prefix: prefixEl instanceof HTMLInputElement ? prefixEl.value : '',
+				region: regionEl instanceof HTMLInputElement ? regionEl.value : '',
+				cidrBaseOctet: octetEl instanceof HTMLInputElement ? octetEl.value : ''
+			});
 		} else if (action === 'copyMcpConfig') {
 			vscode.postMessage({ type: 'copyMcpConfig', client: target.getAttribute('data-client') });
 		} else if (action === 'revokeGrant') {
 			vscode.postMessage({ type: 'revokeGrant', grantIdPreview: target.getAttribute('data-id') });
 		} else if (action === 'refresh') {
 			vscode.postMessage({ type: 'refresh' });
+		}
+	});
+	document.addEventListener('submit', function (event) {
+		const form = event.target;
+		if (!(form instanceof HTMLFormElement)) {
+			return;
+		}
+		event.preventDefault();
+		const data = new FormData(form);
+		if (form.id === 'task-form') {
+			vscode.postMessage({
+				type: 'saveTask',
+				title: String(data.get('title') || ''),
+				mode: String(data.get('mode') || 'guided'),
+				objective: String(data.get('objective') || ''),
+				newRequirement: String(data.get('newRequirement') || '')
+			});
+		} else if (form.id === 'note-form') {
+			vscode.postMessage({
+				type: 'saveNote',
+				address: String(data.get('address') || ''),
+				why: String(data.get('why') || ''),
+				userNote: String(data.get('userNote') || ''),
+				docLabel: String(data.get('docLabel') || ''),
+				docUrl: String(data.get('docUrl') || '')
+			});
 		}
 	});
 })();

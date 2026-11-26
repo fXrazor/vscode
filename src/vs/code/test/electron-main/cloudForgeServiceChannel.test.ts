@@ -752,6 +752,9 @@ suite('CloudForgeServiceChannel', () => {
 		assert.strictEqual(validateCloudForgeServiceParams('listBuiltinSkills', { category: 'arbitrary' }), undefined);
 		assert.deepStrictEqual(validateCloudForgeServiceParams('getTopologyBlueprint', {}), {});
 		assert.deepStrictEqual(validateCloudForgeServiceParams('getTopologyBlueprint', { blueprintId: 'azure-hub-spoke' }), { blueprintId: 'azure-hub-spoke' });
+		assert.deepStrictEqual(validateCloudForgeServiceParams('getTopologyBlueprint', { blueprintId: 'aws-landing-zone', prefix: 'prod-uk', region: 'eu-west-2', cidrBaseOctet: 20 }), { blueprintId: 'aws-landing-zone', prefix: 'prod-uk', region: 'eu-west-2', cidrBaseOctet: 20 });
+		assert.strictEqual(validateCloudForgeServiceParams('getTopologyBlueprint', { prefix: 'prod-uk' }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('getTopologyBlueprint', { blueprintId: 'azure-hub-spoke', cidrBaseOctet: 255 }), undefined);
 		assert.strictEqual(validateCloudForgeServiceParams('getTopologyBlueprint', { blueprintId: '../escape' }), undefined);
 
 		assert.deepStrictEqual(validateCloudForgeServiceParams('getLearningRecord', { workspaceId, architectureId: `${workspaceId}-architecture-1` }), { workspaceId, architectureId: `${workspaceId}-architecture-1` });

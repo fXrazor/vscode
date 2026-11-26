@@ -931,13 +931,31 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 			return value.category === undefined ? {} : { category: value.category };
 		}
 		case 'getTopologyBlueprint': {
-			if (!hasOnlyKeys(value, ['blueprintId'])) {
+			if (!hasOnlyKeys(value, ['blueprintId', 'prefix', 'region', 'cidrBaseOctet'])) {
 				return undefined;
 			}
-			if (value.blueprintId !== undefined && (typeof value.blueprintId !== 'string' || !/^[a-z0-9-]{1,64}$/.test(value.blueprintId))) {
+			const hasCustom = value.prefix !== undefined || value.region !== undefined || value.cidrBaseOctet !== undefined;
+			if (value.blueprintId === undefined) {
+				return hasCustom ? undefined : {};
+			}
+			if (typeof value.blueprintId !== 'string' || !/^[a-z0-9-]{1,64}$/.test(value.blueprintId)) {
 				return undefined;
 			}
-			return value.blueprintId === undefined ? {} : { blueprintId: value.blueprintId };
+			if (value.prefix !== undefined && (typeof value.prefix !== 'string' || !/^[a-z][a-z0-9-]{1,23}$/.test(value.prefix) || value.prefix.endsWith('-'))) {
+				return undefined;
+			}
+			if (value.region !== undefined && (typeof value.region !== 'string' || !/^[a-z0-9-]{2,32}$/.test(value.region))) {
+				return undefined;
+			}
+			if (value.cidrBaseOctet !== undefined && (typeof value.cidrBaseOctet !== 'number' || !Number.isSafeInteger(value.cidrBaseOctet) || value.cidrBaseOctet < 0 || value.cidrBaseOctet > 250)) {
+				return undefined;
+			}
+			return {
+				blueprintId: value.blueprintId,
+				...(value.prefix === undefined ? {} : { prefix: value.prefix }),
+				...(value.region === undefined ? {} : { region: value.region }),
+				...(value.cidrBaseOctet === undefined ? {} : { cidrBaseOctet: value.cidrBaseOctet })
+			};
 		}
 		case 'getLearningRecord': {
 			if (!hasOnlyKeys(value, ['workspaceId', 'architectureId']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId)) {

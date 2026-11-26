@@ -379,6 +379,33 @@
 				"label": "%mcp.provider%"
 			}
 		],
+		"chatParticipants": [
+			{
+				"id": "cloudforge.assistant",
+				"name": "cloudforge",
+				"fullName": "CloudForge",
+				"description": "%chat.description%",
+				"isSticky": true,
+				"commands": [
+					{
+						"name": "topology",
+						"description": "%chat.command.topology%"
+					},
+					{
+						"name": "skills",
+						"description": "%chat.command.skills%"
+					},
+					{
+						"name": "explain",
+						"description": "%chat.command.explain%"
+					},
+					{
+						"name": "proposals",
+						"description": "%chat.command.proposals%"
+					}
+				]
+			}
+		],
 		"keybindings": [
 			{
 				"command": "cloudforge.toggleCanvasFocusMode",

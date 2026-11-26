@@ -66,5 +66,10 @@
 	"command.openLearningStudio": "Open Learning Studio",
 	"command.refreshLearning": "Refresh Learning & Proposals",
 	"command.copyMcpConfig": "Copy Scoped MCP Config (Codex / Claude Code)…",
-	"command.revokeMcpGrants": "Revoke Active MCP Grant…"
+	"command.revokeMcpGrants": "Revoke Active MCP Grant…",
+	"chat.description": "Build multi-cloud topologies, browse baked-in CloudForge skills, and review architecture proposals.",
+	"chat.command.topology": "List or scaffold a customized multi-cloud starter blueprint as a reviewable proposal.",
+	"chat.command.skills": "Inspect baked-in CloudForge diagram, topology, workflow, and Terraform skills.",
+	"chat.command.explain": "Explain a resource type using saved architecture notes and guidance.",
+	"chat.command.proposals": "Inspect pending AI and blueprint proposals for the active architecture."
 }

@@ -8,6 +8,7 @@ import test from 'node:test';
 import {
 	buildExternalMcpConfigSnippet,
 	buildLearningStudioHtml,
+	parseChatTopologyArgs,
 	parseIssuedMcpGrant,
 	parseLearningRecord,
 	parseLearningStudioMessage,
@@ -201,10 +202,83 @@ test('renders CSP-hardened Learning Studio HTML and escapes untrusted strings', 
 
 test('validates webview studio messages and rejects unknown or malformed actions', () => {
 	assert.deepEqual(parseLearningStudioMessage({ type: 'switchTab', tab: 'skills' }), { type: 'switchTab', tab: 'skills' });
+	assert.deepEqual(parseLearningStudioMessage({ type: 'switchTab', tab: 'task' }), { type: 'switchTab', tab: 'task' });
 	assert.equal(parseLearningStudioMessage({ type: 'switchTab', tab: 'exec' }), undefined);
-	assert.deepEqual(parseLearningStudioMessage({ type: 'proposeBlueprint', blueprintId: 'azure-hub-spoke' }), { type: 'proposeBlueprint', blueprintId: 'azure-hub-spoke' });
+	assert.deepEqual(parseLearningStudioMessage({ type: 'proposeBlueprint', blueprintId: 'azure-hub-spoke', prefix: 'prod-uk', region: 'westeurope', cidrBaseOctet: '20' }), {
+		type: 'proposeBlueprint',
+		blueprintId: 'azure-hub-spoke',
+		prefix: 'prod-uk',
+		region: 'westeurope',
+		cidrBaseOctet: 20
+	});
 	assert.equal(parseLearningStudioMessage({ type: 'proposeBlueprint', blueprintId: '../escape' }), undefined);
+	assert.deepEqual(parseLearningStudioMessage({ type: 'saveTask', title: 'Hub lab', mode: 'guided', objective: 'Build hub', newRequirement: 'Add NSG' }), {
+		type: 'saveTask',
+		title: 'Hub lab',
+		mode: 'guided',
+		objective: 'Build hub',
+		newRequirement: 'Add NSG'
+	});
+	assert.equal(parseLearningStudioMessage({ type: 'saveTask', title: 'Bad', mode: 'auto', objective: '' }), undefined);
+	assert.deepEqual(parseLearningStudioMessage({ type: 'toggleRequirement', requirementId: 'req-1' }), { type: 'toggleRequirement', requirementId: 'req-1' });
+	assert.deepEqual(parseLearningStudioMessage({ type: 'saveNote', address: 'azurerm_virtual_network.hub', why: 'Central hub', docLabel: 'Docs', docUrl: 'https://learn.microsoft.com/azure' }), {
+		type: 'saveNote',
+		address: 'azurerm_virtual_network.hub',
+		why: 'Central hub',
+		docLabel: 'Docs',
+		docUrl: 'https://learn.microsoft.com/azure'
+	});
+	assert.equal(parseLearningStudioMessage({ type: 'saveNote', address: 'bad address with spaces' }), undefined);
 	assert.deepEqual(parseLearningStudioMessage({ type: 'copyMcpConfig', client: 'codex' }), { type: 'copyMcpConfig', client: 'codex' });
 	assert.equal(parseLearningStudioMessage({ type: 'copyMcpConfig', client: 'evil' }), undefined);
 	assert.equal(parseLearningStudioMessage({ type: 'unknown' }), undefined);
+});
+
+test('parses @cloudforge /topology slash command arguments safely', () => {
+	assert.deepEqual(parseChatTopologyArgs('aws-landing-zone prefix=edge-uk region=eu-west-2 cidr=30'), {
+		blueprintQuery: 'aws-landing-zone',
+		prefix: 'edge-uk',
+		region: 'eu-west-2',
+		cidrBaseOctet: 30
+	});
+	// Rejects invalid prefix, out-of-range octet, and preserves valid blueprint token.
+	assert.deepEqual(parseChatTopologyArgs('azure-hub-spoke prefix=../bad cidr=999'), {
+		blueprintQuery: 'azure-hub-spoke'
+	});
+});
+
+test('renders Task & Notes tab with escaped task objective, checklist, and resource notes', () => {
+	const html = buildLearningStudioHtml({
+		architectureName: 'Hub Lab',
+		sourceRevision: 'd'.repeat(64),
+		activeTab: 'task',
+		skillCategoryFilter: 'all',
+		record: {
+			workspaceId: 'ws-1',
+			architectureId: 'ws-1-arch-1',
+			sourceRevision: 'd'.repeat(64),
+			task: {
+				title: '<img src=x>Lab',
+				mode: 'guided',
+				objective: 'Deploy hub & spoke',
+				requirements: [{ id: 'req-1', text: 'Create hub VNet', status: 'addressed', linkedAddresses: ['azurerm_virtual_network.hub'] }],
+				assumptions: [],
+				skillIds: []
+			},
+			notes: {
+				'azurerm_virtual_network.hub': { why: 'Core transit VNet', docs: [] }
+			},
+			proposals: [],
+			availableSkills: []
+		},
+		skills: [],
+		blueprints: [],
+		grants: [],
+		vscodeAgentEnabled: true
+	}, 'nonce999');
+
+	assert.ok(html.includes('&lt;img src=x&gt;Lab'));
+	assert.ok(html.includes('Create hub VNet'));
+	assert.ok(html.includes('Core transit VNet'));
+	assert.ok(html.includes('data-action="toggleRequirement"'));
 });

@@ -24,6 +24,7 @@ import {
 	type WebviewPanel
 } from 'vscode';
 import { registerCloudForgeMcpProvider } from './mcpProvider';
+import { registerCloudForgeChatParticipant } from './chatParticipant';
 import {
 	buildExternalMcpConfigSnippet,
 	buildLearningStudioHtml,
@@ -35,6 +36,7 @@ import {
 	parseSkillsList,
 	parseTopologyBlueprint,
 	parseTopologyBlueprintList,
+	type LearningMode,
 	type LearningRecord,
 	type LearningStudioTab,
 	type McpGrantSummary,
@@ -159,7 +161,8 @@ class LearningStore implements Disposable {
 }
 
 type LearnTreeNode =
-	| { readonly kind: 'section'; readonly section: 'proposals' | 'skills' | 'blueprints' | 'agents' }
+	| { readonly kind: 'section'; readonly section: 'task' | 'proposals' | 'skills' | 'blueprints' | 'agents' }
+	| { readonly kind: 'requirement'; readonly id: string; readonly text: string; readonly addressed: boolean }
 	| { readonly kind: 'proposal'; readonly proposal: ProposalDraft }
 	| { readonly kind: 'skill'; readonly skill: PinnedSkill }
 	| { readonly kind: 'blueprint'; readonly blueprint: TopologyBlueprintSummary }
@@ -182,7 +185,9 @@ class CloudForgeLearnTreeProvider implements TreeDataProvider<LearnTreeNode>, Di
 			case 'section': {
 				const pending = (this.store.record?.proposals ?? []).filter(p => p.status === 'pending').length;
 				const activeGrants = this.store.grants.filter(g => g.active && !g.revoked).length;
+				const reqs = this.store.record?.task?.requirements ?? [];
 				const meta: Record<typeof element.section, { label: string; count: number; icon: string; expanded: boolean }> = {
+					task: { label: this.store.record?.task?.title ?? l10n.t('Learning Task & Notes'), count: reqs.length, icon: 'checklist', expanded: reqs.length > 0 },
 					proposals: { label: l10n.t('Pending Proposals'), count: pending, icon: 'git-pull-request', expanded: pending > 0 },
 					skills: { label: l10n.t('Baked-in Skills'), count: this.store.skills.length, icon: 'book', expanded: false },
 					blueprints: { label: l10n.t('Starter Blueprints'), count: this.store.blueprints.length, icon: 'layers', expanded: false },
@@ -194,6 +199,13 @@ class CloudForgeLearnTreeProvider implements TreeDataProvider<LearnTreeNode>, Di
 					cfg.expanded ? TreeItemCollapsibleState.Expanded : TreeItemCollapsibleState.Collapsed
 				);
 				item.iconPath = new ThemeIcon(cfg.icon);
+				return item;
+			}
+			case 'requirement': {
+				const item = new TreeItem(element.text, TreeItemCollapsibleState.None);
+				item.description = element.addressed ? l10n.t('addressed') : l10n.t('open');
+				item.iconPath = new ThemeIcon(element.addressed ? 'pass-filled' : 'circle-outline');
+				item.command = { command: 'cloudforge.openLearningStudio', title: l10n.t('Open Learning Task'), arguments: ['task'] };
 				return item;
 			}
 			case 'proposal': {
@@ -239,6 +251,7 @@ class CloudForgeLearnTreeProvider implements TreeDataProvider<LearnTreeNode>, Di
 	getChildren(element?: LearnTreeNode): LearnTreeNode[] {
 		if (!element) {
 			return [
+				{ kind: 'section', section: 'task' },
 				{ kind: 'section', section: 'proposals' },
 				{ kind: 'section', section: 'skills' },
 				{ kind: 'section', section: 'blueprints' },
@@ -249,6 +262,19 @@ class CloudForgeLearnTreeProvider implements TreeDataProvider<LearnTreeNode>, Di
 			return [];
 		}
 		switch (element.section) {
+			case 'task': {
+				const reqs = this.store.record?.task?.requirements ?? [];
+				if (reqs.length === 0) {
+					return [{
+						kind: 'agentInfo',
+						label: l10n.t('Create Learning Task & Notes…'),
+						description: l10n.t('checklist & rationale'),
+						command: 'cloudforge.openLearningStudio',
+						tab: 'task'
+					}];
+				}
+				return reqs.map(r => ({ kind: 'requirement', id: r.id, text: r.text, addressed: r.status === 'addressed' }));
+			}
 			case 'proposals':
 				return (this.store.record?.proposals ?? []).map(proposal => ({ kind: 'proposal', proposal }));
 			case 'skills':
@@ -473,13 +499,18 @@ export function activateLearning(context: ExtensionContext, host: LearningHost):
 		renderPanel();
 	}
 
-	async function proposeBlueprint(blueprintId: string): Promise<void> {
+	async function proposeBlueprint(blueprintId: string, prefix?: string, region?: string, cidrBaseOctet?: number): Promise<void> {
 		const graph = host.getGraph();
 		if (!graph) {
 			void window.showInformationMessage(l10n.t('Open a CloudForge architecture before proposing a blueprint.'));
 			return;
 		}
-		const bpRes = await host.callService<unknown>('getTopologyBlueprint', { blueprintId });
+		const bpRes = await host.callService<unknown>('getTopologyBlueprint', {
+			blueprintId,
+			...(prefix ? { prefix } : {}),
+			...(region ? { region } : {}),
+			...(cidrBaseOctet !== undefined ? { cidrBaseOctet } : {})
+		});
 		if (!bpRes.ok) {
 			void window.showErrorMessage(l10n.t('Could not load blueprint ({0}).', bpRes.error.code));
 			return;
@@ -512,6 +543,108 @@ export function activateLearning(context: ExtensionContext, host: LearningHost):
 		}
 		activeTab = 'proposals';
 		statusMessage = l10n.t('Created reviewable proposal for "{0}" ({1} files). Review and apply when ready.', blueprint.title, blueprint.files.length);
+		await store.refresh();
+		renderPanel();
+	}
+
+	async function saveTaskFromStudio(title: string, mode: LearningMode, objective: string, newRequirement?: string): Promise<void> {
+		const graph = host.getGraph();
+		if (!graph) {
+			return;
+		}
+		const existing = store.record?.task;
+		const requirements = [...(existing?.requirements ?? [])];
+		if (newRequirement) {
+			requirements.push({
+				id: `req-${requirements.length + 1}`,
+				text: newRequirement,
+				status: 'open',
+				linkedAddresses: []
+			});
+		}
+		const saved = await host.callService<unknown>('saveLearningRecord', {
+			workspaceId: graph.workspaceId,
+			architectureId: graph.architectureId,
+			task: {
+				title,
+				mode,
+				objective,
+				requirements,
+				assumptions: [...(existing?.assumptions ?? [])],
+				skillIds: [...(existing?.skillIds ?? [])]
+			}
+		});
+		if (!saved.ok) {
+			void window.showErrorMessage(l10n.t('Could not save learning task ({0}).', saved.error.code));
+			return;
+		}
+		statusMessage = l10n.t('Saved learning task "{0}".', title);
+		await store.refresh();
+		renderPanel();
+	}
+
+	async function toggleRequirementStatus(requirementId: string): Promise<void> {
+		const graph = host.getGraph();
+		const task = store.record?.task;
+		if (!graph || !task) {
+			return;
+		}
+		const requirements = task.requirements.map(req => req.id === requirementId
+			? { ...req, status: req.status === 'addressed' ? 'open' : 'addressed' }
+			: req
+		);
+		const saved = await host.callService<unknown>('saveLearningRecord', {
+			workspaceId: graph.workspaceId,
+			architectureId: graph.architectureId,
+			task: {
+				title: task.title,
+				mode: task.mode,
+				objective: task.objective,
+				requirements,
+				assumptions: [...task.assumptions],
+				skillIds: [...task.skillIds]
+			}
+		});
+		if (!saved.ok) {
+			void window.showErrorMessage(l10n.t('Could not update requirement ({0}).', saved.error.code));
+			return;
+		}
+		await store.refresh();
+		renderPanel();
+	}
+
+	async function saveResourceNoteFromStudio(address: string, why?: string, userNote?: string, docLabel?: string, docUrl?: string): Promise<void> {
+		const graph = host.getGraph();
+		if (!graph) {
+			return;
+		}
+		const currentNotes = store.record?.notes ?? {};
+		const existing = currentNotes[address];
+		const docs = [...(existing?.docs ?? [])];
+		if (docLabel && docUrl) {
+			docs.push({ label: docLabel, url: docUrl });
+		}
+		const nextNotes: Record<string, unknown> = {
+			...currentNotes,
+			[address]: {
+				...(why ? { why } : existing?.why ? { why: existing.why } : {}),
+				...(userNote ? { userNote } : existing?.userNote ? { userNote: existing.userNote } : {}),
+				docs
+			}
+		};
+		const saved = await host.callService<unknown>('saveLearningRecord', {
+			workspaceId: graph.workspaceId,
+			architectureId: graph.architectureId,
+			notes: nextNotes
+		});
+		if (!saved.ok) {
+			const msg = saved.error.code === 'INVALID_PARAMS'
+				? l10n.t('Could not save resource note. Check that documentation links use an allowlisted HTTPS domain (registry.terraform.io, learn.microsoft.com, docs.aws.amazon.com, cloud.google.com, developer.hashicorp.com, opentofu.org).')
+				: l10n.t('Could not save resource note ({0}).', saved.error.code);
+			void window.showErrorMessage(msg);
+			return;
+		}
+		statusMessage = l10n.t('Saved note on {0}.', address);
 		await store.refresh();
 		renderPanel();
 	}
@@ -578,7 +711,16 @@ export function activateLearning(context: ExtensionContext, host: LearningHost):
 					void rejectProposal(msg.proposalId);
 					break;
 				case 'proposeBlueprint':
-					void proposeBlueprint(msg.blueprintId);
+					void proposeBlueprint(msg.blueprintId, msg.prefix, msg.region, msg.cidrBaseOctet);
+					break;
+				case 'saveTask':
+					void saveTaskFromStudio(msg.title, msg.mode, msg.objective, msg.newRequirement);
+					break;
+				case 'toggleRequirement':
+					void toggleRequirementStatus(msg.requirementId);
+					break;
+				case 'saveNote':
+					void saveResourceNoteFromStudio(msg.address, msg.why, msg.userNote, msg.docLabel, msg.docUrl);
 					break;
 				case 'copyMcpConfig':
 					void copyExternalMcpConfig(msg.client);
@@ -596,9 +738,18 @@ export function activateLearning(context: ExtensionContext, host: LearningHost):
 		void store.refresh().then(() => renderPanel());
 	}
 
+	const chatDisposable = registerCloudForgeChatParticipant({
+		callService: (method, params) => host.callService(method, params),
+		getActiveGraph: () => host.getGraph(),
+		architectureName: () => host.architectureName(),
+		vscodeAgentEnabled: () => mcp.enabled,
+		refreshLearning: () => store.refresh()
+	});
+
 	context.subscriptions.push(
 		store,
 		mcp.disposable,
+		chatDisposable,
 		treeProvider,
 		treeView,
 		host.onDidChangeGraph(() => {
