@@ -16,7 +16,7 @@ import {
 	getBezierPath, getSmoothStepPath, getStraightPath, useViewport,
 	type Edge, type EdgeProps, type Node, type NodeProps, type OnNodesChange, type ReactFlowInstance, type Viewport,
 } from '@xyflow/react';
-import { AlertCircle, AlertTriangle, Share2, Rows3, Columns3, Network, Orbit, ChevronDown, Crosshair, FileCode2, Search, SlidersHorizontal, X, ChevronUp, Maximize2, Minus, Pencil, Pin, PinOff, Plus, RotateCcw, Scan } from 'lucide-react';
+import { Activity, Eye, GitBranch, Boxes, Layers, LayoutGrid, ShieldAlert, AlertCircle, AlertTriangle, Share2, Rows3, Columns3, Network, Orbit, ChevronDown, Crosshair, FileCode2, Search, SlidersHorizontal, X, ChevronUp, Maximize2, Minus, Pencil, Pin, PinOff, Plus, RotateCcw, Scan } from 'lucide-react';
 import type { Action, Architecture, DesignMode } from './model.ts';
 import { applyWaves, graphLenses, graphOverlays, layerLabels, lensEdges, matchesQuery, neighbourhood, projectTechnicalGraph, traceNode, type NodeOverlay, type PlanAction, type GraphCategory, type GraphEdge, type GraphNode, type GraphPort, type GraphInput, type TechnicalGraphSnapshot } from './technicalGraph.ts';
 import { inputSize, layoutTechnicalGraph, placeInputs, treeConnector, treeLinkPath, treeParents, visiblePortCount, type GraphLane } from './technicalGraphLayout.ts';
@@ -46,6 +46,7 @@ const graphLayouts = [
 	{ id: 'bundled', label: 'Bundled', short: 'Bundled', icon: Orbit, hint: 'radial hierarchical edge bundling' },
 	{ id: 'force', label: 'Network', short: 'Network', icon: Share2, hint: 'force-directed graph with resource icons; drag to rearrange (graph only)' },
 ] as const;
+const lensIcons = { all: LayoutGrid, dependencies: GitBranch, topology: Boxes, runtime: Activity, observability: Eye, security: ShieldAlert } as const;
 const categoryOrder: GraphCategory[] = ['ownership', 'attachment', 'execution', 'reference', 'runtime', 'observability', 'unclassified'];
 
 const GraphCard = memo(function GraphCard({ data, selected }: NodeProps<CardNode>) {
@@ -390,22 +391,22 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme
 			<Background variant={BackgroundVariant.Dots} gap={24} size={1} color="var(--grid-pattern)" bgColor="var(--canvas)" />
 			{snapshot.nodes.length > 40 && <MiniMap pannable zoomable nodeColor={node => node.type === 'lane' ? 'transparent' : 'var(--tg-mini)'} />}
 		</ReactFlow>}
-		<div className="tg-toolbar" role="toolbar" aria-label="Technical graph view options">
-			<label className="tg-search"><Search size={13} /><input aria-label="Find resource" placeholder="Find resource, address or file" value={query} onChange={event => setQuery(event.target.value)}
+		{presentation.layout === 'force' && <div className="tg-spread-float"><SpreadDial value={presentation.network.spread} onChange={spread => onPresentation({ type: 'set', patch: { network: { ...presentation.network, spread } } })} /></div>}
+		<div className="tg-toolbar tg-rail" role="toolbar" aria-label="Technical graph view options" aria-orientation="vertical">
+			<label className="tg-search" data-tip="Find resource (Enter to jump)"><Search size={15} /><input aria-label="Find resource" placeholder="Find resource, address or file" value={query} onChange={event => setQuery(event.target.value)}
 				onKeyDown={event => { if (event.key === 'Enter') { const hit = snapshot.nodes.find(node => layout.positions[node.id] && matchesQuery(node, query)); if (hit) { onSelect(hit.id); void flow?.fitView({ nodes: [{ id: hit.id }], padding: 0.6, maxZoom: 1.1, duration: 260 }); } } if (event.key === 'Escape') { setQuery(''); } }} />
 				{query && <button className="tg-icon-button" aria-label="Clear search" onClick={() => setQuery('')}><X size={12} /></button>}</label>
 			<div className="tg-segment" role="radiogroup" aria-label="Lens">
-				{graphLenses.map(lens => <button key={lens.id} role="radio" aria-checked={presentation.lens === lens.id} title={lens.hint} onClick={() => onPresentation({ type: 'set', patch: { lens: lens.id } })}>{lens.label}</button>)}
+				{graphLenses.map(lens => { const Icon = lensIcons[lens.id]; return <button key={lens.id} role="radio" aria-checked={presentation.lens === lens.id} aria-label={lens.label} data-tip={lens.label + ' · ' + lens.hint} onClick={() => onPresentation({ type: 'set', patch: { lens: lens.id } })}><Icon size={15} strokeWidth={1.8} /></button>; })}
 			</div>
 			<div className="tg-segment tg-layouts" role="radiogroup" aria-label="Graph layout">
-				{graphLayouts.map(item => <button key={item.id} role="radio" aria-checked={presentation.layout === item.id} aria-label={item.label} title={item.label + ' · ' + item.hint} onClick={() => onPresentation({ type: 'set', patch: { layout: item.id } })}><item.icon size={15} strokeWidth={1.8} /><span>{item.short}</span></button>)}
+				{graphLayouts.map(item => <button key={item.id} role="radio" aria-checked={presentation.layout === item.id} aria-label={item.label} data-tip={item.label + ' · ' + item.hint} onClick={() => onPresentation({ type: 'set', patch: { layout: item.id } })}><item.icon size={15} strokeWidth={1.8} /><span>{item.short}</span></button>)}
 			</div>
-			{presentation.layout === 'force' && <SpreadDial value={presentation.network.spread} onChange={spread => onPresentation({ type: 'set', patch: { network: { ...presentation.network, spread } } })} />}
-			{scopeChoices.length > 1 && <label className={'tg-scope-pick' + (spotlight ? ' is-active' : '')} title="Spotlight one scope; everything outside it greys out"><Crosshair size={13} />Scope<select aria-label="Spotlight scope" value={presentation.spotlight ?? ''} onChange={event => onPresentation({ type: 'set', patch: { spotlight: event.target.value || undefined } })}>
+			{scopeChoices.length > 1 && <label className={'tg-scope-pick' + (spotlight ? ' is-active' : '')} data-tip={'Spotlight scope: ' + (scopeChoices.find(choice => choice.id === presentation.spotlight)?.label ?? 'all scopes') + ' · everything outside it greys out'}><Crosshair size={15} /><select aria-label="Spotlight scope" value={presentation.spotlight ?? ''} onChange={event => onPresentation({ type: 'set', patch: { spotlight: event.target.value || undefined } })}>
 				<option value="">All scopes</option>{scopeChoices.map(choice => <option key={choice.id} value={choice.id}>{choice.label} ({choice.members})</option>)}</select>{spotlight && <button className="tg-icon-button" aria-label="Show every scope" title="Show every scope" onClick={() => onPresentation({ type: 'set', patch: { spotlight: undefined } })}><X size={12} /></button>}</label>}
-			<label>Overlay<select aria-label="Card overlay" value={presentation.overlay} onChange={event => onPresentation({ type: 'set', patch: { overlay: event.target.value as GraphPresentation['overlay'] } })}>
+			<label className={'tg-overlay-pick' + (presentation.overlay !== 'none' ? ' is-active' : '')} data-tip={'Card overlay: ' + ({ none: 'none', plan: 'plan actions', order: 'apply order', impact: 'dependents' } as Record<string, string>)[presentation.overlay]}><Layers size={15} /><select aria-label="Card overlay" value={presentation.overlay} onChange={event => onPresentation({ type: 'set', patch: { overlay: event.target.value as GraphPresentation['overlay'] } })}>
 				<option value="none">No overlay</option><option value="plan">Plan actions{plan ? '' : ' (no plan)'}</option><option value="order">Apply order</option><option value="impact">Dependents</option></select></label>
-			<details className="tg-view-menu"><summary className="tg-text-button" aria-label="View options"><SlidersHorizontal size={13} />View</summary>
+			<details className="tg-view-menu"><summary className="tg-text-button" aria-label="View options" data-tip="View options"><SlidersHorizontal size={15} /></summary>
 				<div className="tg-view-panel">
 					{presentation.layout === 'force' ? <NetworkControls value={presentation.network} onChange={patch => onPresentation({ type: 'set', patch: { network: { ...presentation.network, ...patch } } })} /> : <>
 					<label>Routes<select aria-label="Route style" value={presentation.route} onChange={event => onPresentation({ type: 'set', patch: { route: event.target.value as RouteStyle } })}>
@@ -422,8 +423,8 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme
 					{onExportImage && <div className="tg-export-row"><span>Save image</span><button className="tg-text-button" disabled={exporting} onClick={() => void exportImage('svg')}>SVG</button><button className="tg-text-button" disabled={exporting} onClick={() => void exportImage('png')}>PNG</button></div>}
 				</div>
 			</details>
-			{presentation.focus && <button className="tg-text-button" aria-pressed="true" title="Show the whole graph again" onClick={() => onPresentation({ type: 'set', patch: { focus: undefined } })}><Crosshair size={13} />Focused: {snapshot.nodes.find(node => node.id === presentation.focus!.id)?.label ?? 'resource'}<X size={12} /></button>}
-			{pinCount > 0 && <button className="tg-text-button" onClick={() => onPresentation({ type: 'clearPins' })} title="Return pinned cards to the automatic layout (graph only)"><RotateCcw size={13} />Reset {pinCount} pin{pinCount === 1 ? '' : 's'}</button>}
+			{presentation.focus && <button className="tg-text-button" aria-pressed="true" aria-label="Show the whole graph again" data-tip={'Focused on ' + (snapshot.nodes.find(node => node.id === presentation.focus!.id)?.label ?? 'resource') + ' · click to show the whole graph'} onClick={() => onPresentation({ type: 'set', patch: { focus: undefined } })}><Crosshair size={15} /></button>}
+			{pinCount > 0 && <button className="tg-text-button" onClick={() => onPresentation({ type: 'clearPins' })} aria-label={'Reset ' + pinCount + ' pin' + (pinCount === 1 ? '' : 's')} data-tip={'Reset ' + pinCount + ' pin' + (pinCount === 1 ? '' : 's') + ' · return pinned cards to the automatic layout'}><RotateCcw size={15} /><small>{pinCount}</small></button>}
 		</div>
 		<div className="tg-legend" aria-label="Relationship legend">
 			{categoriesShown.map(category => <span key={category} className={'tg-legend-item tg-cat-' + category}><i />{categoryNames[category]}</span>)}
@@ -624,6 +625,7 @@ function ForceGraph({ spotlight, onSpotlight, snapshot, edges, membership, visib
 		requestAnimationFrame(step);
 	}, [reducedMotion]);
 	const toLocal = (event: { clientX: number; clientY: number }) => { const element = svg.current; const matrix = element?.getScreenCTM(); if (!element || !matrix) { return { x: 0, y: 0 }; } const point = new DOMPoint(event.clientX, event.clientY).matrixTransform(matrix.inverse()); return { x: point.x, y: point.y }; };
+	const lastTap = useRef({ id: '', at: 0 });
 	const drag = useRef<{ id?: string; startX: number; startY: number; moved: boolean; view?: { x: number; y: number; w: number; h: number } } | null>(null);
 	const simNodes = sim.current?.nodes ?? [];
 	const byId = new Map(simNodes.map(node => [node.id, node]));
@@ -668,9 +670,13 @@ function ForceGraph({ spotlight, onSpotlight, snapshot, edges, membership, visib
 			onPointerUp={() => {
 				const state = drag.current; drag.current = null; if (!state) { return; }
 				if (state.id && sim.current) { const node = sim.current.nodes.find(item => item.id === state.id); if (node) { delete node.fx; delete node.fy; } sim.current.alphaTarget = 0; }
-				if (!state.moved) { onSelect(state.id ?? ''); }
-			}}
-			onDoubleClick={event => { const id = (event.target as Element).closest('[data-node]')?.getAttribute('data-node'); if (id) { onOpenDetails(id); } }}>
+				if (!state.moved) {
+					// Pointer capture retargets the browser's dblclick to the svg, so a second click on the same node within 450 ms opens its details here.
+					const now = performance.now(); const last = lastTap.current;
+					if (state.id && last.id === state.id && now - last.at < 450) { lastTap.current = { id: '', at: 0 }; onOpenDetails(state.id); return; }
+					lastTap.current = { id: state.id ?? '', at: now }; onSelect(state.id ?? '');
+				}
+			}}>
 			<defs>{['uses', 'used-by'].map(kind => <marker key={kind} id={'tg-force-arrow-' + kind} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" className={'tg-force-arrow is-' + kind} /></marker>)}{categories.map(category => <marker key={category} id={'tg-force-arrow-' + category} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" className={'tg-force-arrow tg-cat-' + category} /></marker>)}</defs>
 			<g className="tg-force-hulls">{hulls.map(hull => <g key={hull.group} className={'tg-force-hull tg-layer-' + hull.layer + (hull.dim ? ' is-dim' : '') + (hull.outside ? ' is-outside' : '') + (hull.lit ? ' is-lit' : '')}><path d={hull.d} />{network.clusters === 'scope'
 				? <text x={hull.x} y={hull.y} textAnchor="middle" style={hullFont} className="is-clickable" role="button" tabIndex={0} aria-label={(hull.lit ? 'Show every scope' : 'Spotlight ' + hull.label)} onPointerDown={event => event.stopPropagation()} onClick={() => onSpotlight(hull.lit ? '' : hull.group)} onKeyDown={event => { if (event.key === 'Enter') { onSpotlight(hull.lit ? '' : hull.group); } }}>{hull.label}</text>
