@@ -1,5 +1,11 @@
 # Studio continuation checkpoint — 25 November 2026
 
+## Miro Floating `+` Connected-Copy Dots & Compact Narrow-Viewport Bar — 26 November 2026
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `addaee8aaee`, owner Antigravity.
+- **Scope:** added `ConnectedCopyHandles` (`src/SelectionResizeHandle.tsx`, `src/DesignCanvas.tsx`, `src/styles.css`) rendering Miro-style floating `+` connected-copy dots around a single selected upright drawing (spawning matching connected elements in 1 atomic Undo step) and hid redundant `.selection-caption` below `1120px` so floating bars always clear nearby nodes at `1024×768`.
+- **Fresh checks:** Studio `tsc --noEmit` **PASS**, Studio `build` + `esbuild.webview.mts` **PASS**, real Windows Edge `whiteboard-controls-verify.mjs` **20/20 PASS** + live `+` connected-copy dot click chain & 1-step Undo **PASS** (0 browser errors).
+
 ## Miro Paste Lines → Sticky-Note Grid, Select Connected, Quick-Insert Keys & Zoom Shortcuts — 26 November 2026
 
 - **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `aaa47c3b948`, owner Antigravity.

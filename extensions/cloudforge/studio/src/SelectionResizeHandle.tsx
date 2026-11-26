@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 import { useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { useInternalNodes, useViewport, ViewportPortal } from '@xyflow/react';
-import { LayoutGrid } from 'lucide-react';
+import { LayoutGrid, Plus } from 'lucide-react';
 import { detectSpacingLayout, dragScale, selectionUnitBoxes, type Bounds, type SelectionUnitBox, type SpacingHandle } from './selectionGeometry.ts';
 import { resizeAnchors, type ResizeAnchor } from './canvasOperations.ts';
 import { projectResize, type ResizeBox } from './resizeGeometry.ts';
@@ -159,5 +159,41 @@ export function SelectionResizeHandle({
 				}} />;
 		})}
 		{activeGap && <div className="selection-spacing-badge" aria-live="polite" style={{ left: activeGap.handle.x, top: activeGap.handle.y - 18 / zoom, fontSize: 11 / zoom, padding: `${2 / zoom}px ${6 / zoom}px`, borderRadius: 4 / zoom }}>{activeGap.gap} px</div>}
+	</ViewportPortal>;
+}
+
+const quickCopyDirs = [
+	{ dir: 'right', label: 'Add connected copy to right (Ctrl+Right)', ox: 1, oy: 0.5, dx: 22, dy: 0 },
+	{ dir: 'bottom', dirKey: 'down', label: 'Add connected copy below (Ctrl+Down)', ox: 0.5, oy: 1, dx: 0, dy: 22 },
+	{ dir: 'left', label: 'Add connected copy to left (Ctrl+Left)', ox: 0, oy: 0.5, dx: -22, dy: 0 },
+] as const;
+
+/**
+ * Miro-style floating "+" quick-add connected copy dots around a single selected upright drawing.
+ * Clicking a dot spawns a matching drawing in that direction linked by a directional arrow (1 undo step).
+ */
+export function ConnectedCopyHandles({ id, onSpawn }: { id: string; onSpawn: (direction: 'right' | 'left' | 'up' | 'down') => void }) {
+	const { zoom } = useViewport();
+	const nodes = useInternalNodes([id]);
+	const node = nodes[0];
+	if (!node || !node.measured.width || !node.measured.height) { return null; }
+	const x = node.internals.positionAbsolute.x;
+	const y = node.internals.positionAbsolute.y;
+	const w = node.measured.width;
+	const h = node.measured.height;
+	const size = 18 / zoom;
+	return <ViewportPortal>
+		{quickCopyDirs.map(item => {
+			const dir = ('dirKey' in item ? item.dirKey : item.dir) as 'right' | 'left' | 'down';
+			const cx = x + w * item.ox + item.dx / zoom;
+			const cy = y + h * item.oy + item.dy / zoom;
+			return <button key={dir} type="button" className="connected-copy-handle nodrag nopan" data-dir={dir}
+				aria-label={item.label} title={item.label}
+				style={{ transform: `translate(${cx - size / 2}px, ${cy - size / 2}px)`, width: size, height: size, borderWidth: 1.5 / zoom }}
+				onPointerDown={event => event.stopPropagation()}
+				onClick={event => { event.stopPropagation(); onSpawn(dir); }}>
+				<Plus size={11 / zoom} strokeWidth={2.5} aria-hidden="true" />
+			</button>;
+		})}
 	</ViewportPortal>;
 }

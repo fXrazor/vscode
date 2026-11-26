@@ -1,5 +1,13 @@
 # CloudForge Code OSS handoff
 
+## Miro Floating `+` Connected-Copy Dots & Compact Narrow-Viewport Floating Bar — 26 November 2026
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `addaee8aaee`, owner Antigravity. Zero overlap with unmerged Claude branches (`2dm0k0`, `ksv8z9`) or Rust.
+- **Scope:**
+  - Added `ConnectedCopyHandles` ([SelectionResizeHandle.tsx](extensions/cloudforge/studio/src/SelectionResizeHandle.tsx), [DesignCanvas.tsx](extensions/cloudforge/studio/src/DesignCanvas.tsx), [styles.css](extensions/cloudforge/studio/src/styles.css)): floating Miro-style **`+`** quick-add connected-copy dots (`.connected-copy-handle`) on the right, bottom, and left of any single selected upright unlocked sticky note, shape, or text box; clicking spawns a matching drawing connected with directional ports in **1 atomic Undo/Redo step**.
+  - Added `@media (max-width: 1120px)` caption hiding on floating `.selection-controls` in [styles.css](extensions/cloudforge/studio/src/styles.css) so single-element bars stay compact (~242px) and always clear nearby elements even at `1024×768` and `50%` zoom.
+- **Fresh verification (26 November 2026):** Studio `tsc --noEmit` **PASS**, Studio `build` + `esbuild.webview.mts` **PASS**, and real Windows Edge (`--channel=msedge`): `whiteboard-controls-verify.mjs` **20/20 PASS** (`1360×860` & `1024×768`, light & dark) + live click test of `.connected-copy-handle` right/down dots → `Select connected` (3 shapes) → 1-step Undo **PASS** (0 browser errors).
+
 ## Miro Paste Lines → Sticky-Note Grid, Select Connected, Quick-Insert Keys (`R`/`O`/`D`/`L`) & Zoom Shortcuts — 26 November 2026
 
 - **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `aaa47c3b948`, owner Antigravity. Zero overlap with unmerged Claude branches (`2dm0k0`, `ksv8z9`) or Rust.

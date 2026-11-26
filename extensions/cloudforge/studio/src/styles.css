@@ -1054,6 +1054,7 @@ select, summary, label:has(> select), label:has(> input[type=checkbox]), label:h
 .selection-anchor .selection-controls .selection-quick-actions > button:hover, .selection-anchor .selection-controls .selection-quick-actions [aria-haspopup]:hover { background: var(--hover, color-mix(in srgb, var(--text) 7%, transparent)); }
 .selection-anchor .selection-controls .selection-quick-actions > select { min-height: 28px; padding: 3px 4px; border-color: transparent; border-radius: 7px; background-color: transparent; }
 .selection-anchor .selection-controls .selection-caption { font-size: 11px; padding: 0 5px 0 3px; border-right: 1px solid var(--border); margin-right: 1px; }
+@media (max-width: 1120px) { .selection-anchor .selection-controls .selection-caption { display: none; } }
 .connection-tools.line-bar > *, .selection-anchor .selection-controls .selection-quick-actions > * { flex: none; }
 .connection-tools.line-bar .line-bar-select { width: auto; max-width: none; }
 .connection-tools.line-bar .line-bar-menu > summary { margin: 0; border: 0; box-shadow: none; }
@@ -1094,3 +1095,6 @@ select, summary, label:has(> select), label:has(> input[type=checkbox]), label:h
 .canvas-find-bar button { width: 26px; height: 26px; min-height: 0; padding: 0; display: grid; place-items: center; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; }
 .canvas-find-bar button:hover:not(:disabled) { background: var(--hover); color: var(--text); }
 .canvas-find-bar button:disabled { opacity: .35; cursor: default; }
+/* Miro floating "+" quick-add connected copy dots around a single selected upright drawing. */
+.connected-copy-handle { position: absolute; z-index: 18; pointer-events: auto; display: grid; place-items: center; padding: 0; min-height: 0; border-radius: 50%; background: var(--panel-solid); color: var(--accent); border-style: solid; border-color: color-mix(in srgb, var(--accent) 65%, var(--border)); opacity: .78; box-shadow: 0 2px 6px #00000020; cursor: pointer; transition: opacity 100ms ease, background 100ms ease, color 100ms ease; }
+.connected-copy-handle:hover, .connected-copy-handle:focus-visible { opacity: 1; background: var(--accent); border-color: var(--accent); color: #ffffff; outline: none; }

@@ -12,7 +12,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, type Dispatch,
 import { canvasElements, connectedElementIds, expandGroups, resizeSelectionBoxes, sceneOrder, selectionFragment, stickyClusterFromText, type TextAppearance } from './canvasOperations.ts';
 import { applyUniformSpacing, layoutSelection, type Alignment } from './selectionGeometry.ts';
 import { CanvasActionMenu, SelectionControls, resizable, type SelectionAction } from './SelectionControls.tsx';
-import { SelectionResizeHandle } from './SelectionResizeHandle.tsx';
+import { ConnectedCopyHandles, SelectionResizeHandle } from './SelectionResizeHandle.tsx';
 import { InkCapture } from './InkCapture.tsx';
 import { PenOptions } from './PenOptions.tsx';
 import type { InkStyle } from './ink.ts';
@@ -636,6 +636,12 @@ export const DesignCanvas = memo(function DesignCanvas({
 				<AlignmentGuides lines={guideLines}/>
 				{mode === 'visual' && flow && showConnections && <ConnectionOverlays architecture={architecture} mode={mode} selectedId={selectedConnectionId} showLabels={showLabels} canvas={bounds} flow={flow} dispatch={dispatch} onSelect={id => { setCreatingConnection(false); onSelectionChange([]); setSelectedConnectionId(id); }} onClose={() => { setSelectedConnectionId(''); bounds.current?.focus(); }}/>}
 				{mode === 'visual' && !hand && !pen && !creatingConnection && selectedIds.length > 1 && <SelectionResizeHandle architecture={architecture} ids={selectedIds} mode={mode} boxes={resizeBoxes} onScale={(scale, anchor) => dispatch({ type: 'canvas', command: { kind: 'resize', ids: selectedIds, mode, scale, anchor } })} onApplySpacing={(axis, gap) => dispatch({ type: 'canvas', command: { kind: 'move', mode, positions: applyUniformSpacing(architecture, selectedIds, mode, axis, gap, nodeSizes()) } })} onTidy={() => run('align-tidy')}/>}
+				{mode === 'visual' && !hand && !pen && !creatingConnection && selectedIds.length === 1 && architecture.items.some(item => item.id === selectedIds[0] && !item.canvasLocked && !item.rotation && (item.kind === 'note' || item.kind === 'shape' || item.kind === 'text')) && <ConnectedCopyHandles id={selectedIds[0]} onSpawn={direction => {
+					const id = crypto.randomUUID(); const connectionId = crypto.randomUUID();
+					dispatch({ type: 'canvas', command: { kind: 'spawnConnected', sourceId: selectedIds[0], id, connectionId, direction, mode } });
+					onSelectionChange([id]);
+					setShowConnections(true);
+				}}/>}
 				{minimap && <MiniMap<CanvasNode> pannable zoomable nodeColor={node => node.type === 'board' && node.data.item.kind === 'frame' ? 'transparent' : '#8e79d9'} />}
 				{!creatingConnection && !selectedConnection && selectedIds.some(id=>canvasElements(architecture).some(item=>item.id===id)) && <SelectionAnchor ids={selectedIds.filter(id=>canvasElements(architecture).some(item=>item.id===id))} canvas={bounds}>{mode === 'visual' ? <SelectionControls architecture={architecture} ids={selectedIds} dispatch={dispatch} run={run} hasClipboard={hasClipboard} hasStyleClipboard={hasStyleClipboard} mode={mode} onInspect={onOpen} container={bounds.current}/> : <section className="selection-controls" aria-label="Graph inspection controls">{selectedIds.length === 1 && architecture.resources.some(resource => resource.id === selectedIds[0]) && <button onClick={() => onOpenDetails(selectedIds[0])}>Inspect resource</button>}<button onClick={() => run('fit')}>Focus selection</button><button onClick={() => run('clear')}>Clear selection</button></section>}</SelectionAnchor>}
 			</ReactFlow>
