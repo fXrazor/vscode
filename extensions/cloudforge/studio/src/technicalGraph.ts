@@ -19,13 +19,14 @@ import { resourceAddress, resourceAncestors } from './resourceHierarchy.ts';
 
 export type GraphCategory = RelationshipCategory | 'unclassified';
 /** Focused lenses. One universal arrow direction would misrepresent these meanings. */
-export type GraphLens = 'all' | 'dependencies' | 'topology' | 'runtime' | 'observability';
+export type GraphLens = 'all' | 'dependencies' | 'topology' | 'runtime' | 'observability' | 'security';
 export const graphLenses: { id: GraphLens; label: string; hint: string }[] = [
 	{ id: 'all', label: 'All', hint: 'Every evidenced relationship' },
 	{ id: 'dependencies', label: 'Dependencies', hint: 'Prerequisite → consumer (Terraform ordering)' },
 	{ id: 'topology', label: 'Topology', hint: 'Ownership and attachments' },
 	{ id: 'runtime', label: 'Runtime', hint: 'Configured runtime intent' },
 	{ id: 'observability', label: 'Observability', hint: 'Telemetry source → destination' },
+	{ id: 'security', label: 'Exposure', hint: 'Configured public entry points, public access settings and the controls around them (configured intent, not a reachability test)' },
 ];
 export const lensCategories: Record<GraphLens, readonly GraphCategory[]> = {
 	all: ['ownership', 'attachment', 'execution', 'reference', 'runtime', 'observability', 'unclassified'],
@@ -33,6 +34,7 @@ export const lensCategories: Record<GraphLens, readonly GraphCategory[]> = {
 	topology: ['ownership', 'attachment'],
 	runtime: ['runtime'],
 	observability: ['observability'],
+	security: ['ownership', 'attachment', 'execution', 'reference', 'unclassified'],
 };
 
 export interface GraphEvidence {
@@ -77,6 +79,8 @@ export interface GraphNode {
 	readonly inDegree: number;
 	readonly outDegree: number;
 	readonly inCycle: boolean;
+	/** Configured exposure intent. Never a claim that traffic can actually reach the resource. */
+	readonly exposure?: { readonly kind: 'entry' | 'public-access' | 'behind-entry'; readonly reason: string };
 }
 export interface GraphEdge {
 	readonly id: string;
@@ -186,12 +190,36 @@ export function projectTechnicalGraph(architecture: Architecture): TechnicalGrap
 			inCycle: inCycle.has(resource.id),
 		};
 	});
+	const exposure = configuredExposure(architecture, nodes, edges);
+	for (const node of nodes) { if (exposure[node.id]) { (node as { exposure?: GraphNode['exposure'] }).exposure = exposure[node.id]; } }
 	const hubSpokes = documentedHubSpokes(architecture, relationships).map(star => ({ hub: star.hub, spokes: [...star.spokes] }));
 	const revision = hash(JSON.stringify([nodes.map(node => [node.id, node.label, node.type, node.scope, node.region.value]), edges.map(edge => [edge.id, edge.evidence.length])]));
 	return deepFreeze({
 		revision, nodes, edges, hubSpokes, cycles, inputs: graphInputs(architecture),
 		coverage: { documented: nodes.filter(node => node.reviewStatus === 'documented').length, unreviewed: nodes.filter(node => node.reviewStatus === 'unreviewed').length, unknownRegion: nodes.filter(node => !node.region.known).length },
 	});
+}
+
+const publicEntryTypes = /^(azurerm_public_ip|azurerm_application_gateway|azurerm_frontdoor|azurerm_cdn_frontdoor_endpoint|azurerm_lb|aws_eip|aws_lb|aws_alb|aws_elb|aws_internet_gateway|aws_cloudfront_distribution|aws_api_gateway_rest_api|aws_apigatewayv2_api|google_compute_address|google_compute_global_address|google_compute_global_forwarding_rule|google_compute_forwarding_rule)$/;
+const publicSettings: Record<string, string> = { public_network_access_enabled: 'public network access enabled', publicly_accessible: 'publicly accessible', associate_public_ip_address: 'public IP on launch', map_public_ip_on_launch: 'public IP on launch', allow_nested_items_to_be_public: 'nested items may be public' };
+/**
+ * Configured exposure intent: public entry resources, public-access flags, and what is configured
+ * downstream of an entry. Network rules, NSGs and firewalls are not evaluated, so this is not reachability.
+ */
+export function configuredExposure(architecture: Architecture, nodes: readonly Pick<GraphNode, 'id' | 'type' | 'label'>[], edges: readonly GraphEdge[]): Record<string, NonNullable<GraphNode['exposure']>> {
+	const out: Record<string, NonNullable<GraphNode['exposure']>> = {};
+	for (const node of nodes) { if (publicEntryTypes.test(node.type)) { out[node.id] = { kind: 'entry', reason: 'Public entry point resource' }; } }
+	for (const resource of architecture.resources) {
+		if (out[resource.id]) { continue; }
+		const flags = Object.entries(publicSettings).filter(([key]) => String(resource.settings?.[key] ?? '').trim().toLowerCase() === 'true').map(([, text]) => text);
+		if (flags.length) { out[resource.id] = { kind: 'public-access', reason: flags.join(', ') }; }
+	}
+	const ordering = edges.filter(edge => edge.ordering && !edge.membership);
+	for (const entry of Object.keys(out).filter(id => out[id].kind === 'entry')) {
+		const label = nodes.find(node => node.id === entry)?.label ?? entry;
+		for (const id of traceNode(ordering, entry).downstream) { if (!out[id]) { out[id] = { kind: 'behind-entry', reason: 'Configured downstream of ' + label }; } }
+	}
+	return out;
 }
 
 const inputPattern = /\b(?:(var|local)\.([A-Za-z_][\w-]*)|data\.([A-Za-z_]\w*)\.([A-Za-z_][\w-]*))/g;
@@ -232,7 +260,11 @@ function safeAddress(resource: Resource): string { try { return resourceAddress(
 /** Edges visible in a lens. Membership edges only appear in Topology, or when explicitly requested. */
 export function lensEdges(snapshot: TechnicalGraphSnapshot, lens: GraphLens, showMembership: boolean): GraphEdge[] {
 	const allowed = new Set(lensCategories[lens]);
-	return snapshot.edges.filter(edge => allowed.has(edge.category) && (!edge.membership || showMembership));
+	const edges = snapshot.edges.filter(edge => allowed.has(edge.category) && (!edge.membership || showMembership));
+	if (lens !== 'security') { return edges; }
+	// Exposure: lines that touch an exposed resource or a security/identity control.
+	const relevant = new Set(snapshot.nodes.filter(node => node.exposure || node.layer === 'security' || node.layer === 'identity').map(node => node.id));
+	return edges.filter(edge => relevant.has(edge.source) || relevant.has(edge.target));
 }
 
 /** Upstream prerequisites and downstream configured dependents of one node (cycle-safe). */

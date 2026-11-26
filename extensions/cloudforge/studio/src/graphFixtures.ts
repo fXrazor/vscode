@@ -87,6 +87,7 @@ export function hubSpokeArchitecture(): Architecture {
 	const find = (id: string) => resources.find(resource => resource.id === id)!;
 	find('aks').fieldBindings = { [bindingKey({ kind: 'setting', name: 'kubernetes_version' })]: { variableId: 'v-k8s' } };
 	find('vm-app').fieldBindings = { [bindingKey({ kind: 'setting', name: 'admin_ssh_key' })]: { variableId: 'v-ssh' } };
+	find('st').settings = { ...find('st').settings, public_network_access_enabled: 'true' };
 	find('kv').settings = { ...find('kv').settings, tenant_id: 'data.azurerm_client_config.current.tenant_id' };
 	find('ra-kv').settings = { ...find('ra-kv').settings, scope: '${local.platform_scope}' };
 	return { name: 'Hub and spoke platform', items: [], connections: [], resources, variables };

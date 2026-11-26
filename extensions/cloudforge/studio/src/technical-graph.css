@@ -196,3 +196,8 @@
 .tg-ghost.tg-state-dim { opacity: .28; } .tg-ghost.tg-state-trace { border-style: solid; }
 .tg-lane-inputs { border-top: 1px dashed var(--tg-lane-line); background: transparent; }
 .tg-edge.tg-cat-input { stroke: var(--tg-edge-input); stroke-dasharray: 4 4; stroke-width: 1.3; }
+
+.tg-chip-exposure { font-weight: 650; border: 1px solid currentColor; }
+.tg-exposure-entry, .tg-exposure-public-access { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); }
+.tg-exposure-behind-entry { color: #b4541a; background: color-mix(in srgb, #c0532b 8%, transparent); border-style: dashed; }
+.theme-dark .tg-exposure-behind-entry { color: #f3a07e; }

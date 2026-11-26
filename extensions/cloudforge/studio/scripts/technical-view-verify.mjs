@@ -70,7 +70,7 @@ try {
 			assert.deepEqual(await exported(), original); pass('drag, pins and graph shortcuts leave the exported project unchanged');
 			assert.equal(await page.getByLabel('Undo', { exact: true }).isDisabled(), true); pass('graph actions add no Undo step');
 			// Lenses, overlays, focus.
-			for (const lens of ['Dependencies', 'Topology', 'Runtime', 'Observability', 'All']) { await page.getByRole('radio', { name: lens }).click(); }
+			for (const lens of ['Dependencies', 'Topology', 'Runtime', 'Observability', 'Exposure', 'All']) { await page.getByRole('radio', { name: lens }).click(); }
 			for (const overlay of ['order', 'impact', 'plan', 'none']) { await page.getByLabel('Card overlay').selectOption(overlay); }
 			await card.click(); await page.getByRole('button', { name: 'Focus 2 hops' }).click(); await page.waitForTimeout(400);
 			assert.ok(await page.locator('.react-flow__node-card').count() < original.resources.length); await page.getByRole('button', { name: 'Show all' }).click(); pass('lenses, overlays and focus switch without project changes');

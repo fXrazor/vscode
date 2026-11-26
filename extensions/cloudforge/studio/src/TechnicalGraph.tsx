@@ -24,7 +24,7 @@ import { graphEditAllowed, type GraphPresentation, type GraphPresentationAction,
 import { relationshipNames } from './infrastructureRelationships.ts';
 import { resourceIntelligence } from './providerKnowledge.ts';
 
-type CardData = { node: GraphNode; /* state 'soft' = hover context */ overlay?: NodeOverlay; badge?: { kind: 'plan' | 'order' | 'impact'; text: string; tone: string; title: string }; match: boolean; compact: boolean; expanded: boolean; state: 'normal' | 'focus' | 'trace' | 'dim' | 'soft'; pinned: boolean; tracedPorts: ReadonlySet<string>; onRename: (id: string, label: string) => void; onEdit: (id: string) => void; onToggleRows: (id: string) => void; onUnpin: (id: string) => void };
+type CardData = { node: GraphNode; lens: GraphPresentation['lens']; /* state 'soft' = hover context */ overlay?: NodeOverlay; badge?: { kind: 'plan' | 'order' | 'impact'; text: string; tone: string; title: string }; match: boolean; compact: boolean; expanded: boolean; state: 'normal' | 'focus' | 'trace' | 'dim' | 'soft'; pinned: boolean; tracedPorts: ReadonlySet<string>; onRename: (id: string, label: string) => void; onEdit: (id: string) => void; onToggleRows: (id: string) => void; onUnpin: (id: string) => void };
 type LaneData = { lane: GraphLane };
 type GhostData = { input: GraphInput; state: 'normal' | 'trace' | 'dim'; onSelectConsumer: (id: string) => void };
 type GhostNode = Node<GhostData, 'ghost'>;
@@ -75,6 +75,7 @@ const GraphCard = memo(function GraphCard({ data, selected }: NodeProps<CardNode
 			{node.region.known ? <span className="tg-chip">{node.region.value}</span> : <span className="tg-chip tg-chip-unknown" title="No region value in this draft">region unknown</span>}
 			{compact && node.ports.length > 0 && <span className="tg-chip">{node.ports.length} input{node.ports.length === 1 ? '' : 's'}</span>}
 			{node.sourceFile && <span className="tg-chip" title={node.sourceFile + (node.sourceLine ? ':' + node.sourceLine : '')}>{node.sourceFile.split(/[\\/]/).pop()}{node.sourceLine ? ':' + node.sourceLine : ''}</span>}
+			{node.exposure && (node.exposure.kind !== 'behind-entry' || data.lens === 'security') && <span className={'tg-chip tg-chip-exposure tg-exposure-' + node.exposure.kind} title={node.exposure.reason + ' · configured intent; NSG, firewall and route rules are not evaluated'}>{node.exposure.kind === 'entry' ? 'public entry' : node.exposure.kind === 'public-access' ? 'public access' : 'behind entry'}</span>}
 			{node.reviewStatus === 'unreviewed' && <span className="tg-chip tg-chip-unknown" title="No reviewed provider profile; relationships are shown as generic references">unreviewed</span>}
 		</div>
 		{!compact && shown > 0 && <ul className="tg-rows" aria-label={'Configured inputs of ' + node.label}>
@@ -214,7 +215,7 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme
 				: !selectedNode ? 'normal' : node.id === selectedNode.id ? 'focus' : trace?.upstream.has(node.id) || trace?.downstream.has(node.id) ? 'trace' : 'dim';
 			return { id: node.id, type: 'card', position: layout.positions[node.id], selected: node.id === selectedId, draggable: true, connectable: false, deletable: false,
 				ariaLabel: node.label + ', ' + node.typeLabel + ', ' + layerLabels[node.layer],
-				data: { node, overlay: overlays.byNode[node.id], badge: badgeFor(node), match: !query.trim() || matchesQuery(node, query), compact, expanded: expanded.has(node.id), state, pinned: !!presentation.pins[node.id], tracedPorts, onRename: rename, onEdit: onOpenDetails, onToggleRows: toggleRows, onUnpin: unpin } };
+				data: { node, lens: presentation.lens, overlay: overlays.byNode[node.id], badge: badgeFor(node), match: (!query.trim() || matchesQuery(node, query)) && (presentation.lens !== 'security' || !!node.exposure || node.layer === 'security' || node.layer === 'identity' || visibleEdges.some(edge => edge.source === node.id || edge.target === node.id)), compact, expanded: expanded.has(node.id), state, pinned: !!presentation.pins[node.id], tracedPorts, onRename: rename, onEdit: onOpenDetails, onToggleRows: toggleRows, onUnpin: unpin } };
 		});
 		const ghosts: GhostNode[] = Object.entries(inputLayout.positions).map(([id, position]) => {
 			const input = snapshot.inputs.find(item => item.id === id)!;
@@ -224,7 +225,7 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme
 		});
 		const inputLanes: LaneNode[] = inputLayout.lane ? [{ id: inputLayout.lane.id, type: 'lane', position: { x: inputLayout.lane.x, y: inputLayout.lane.y }, data: { lane: inputLayout.lane }, draggable: false, selectable: false, focusable: false, connectable: false, deletable: false, zIndex: -2 }] : [];
 		return [...lanes, ...inputLanes, ...cards, ...ghosts];
-	}, [inputLayout, onSelect, layout, snapshot, selectedNode, selectedId, trace, compact, expanded, presentation.pins, tracedPorts, rename, onOpenDetails, toggleRows, unpin, overlays, badgeFor, query, hoverNode, hoverEdge, visibleEdges]);
+	}, [presentation.lens, inputLayout, onSelect, layout, snapshot, selectedNode, selectedId, trace, compact, expanded, presentation.pins, tracedPorts, rename, onOpenDetails, toggleRows, unpin, overlays, badgeFor, query, hoverNode, hoverEdge, visibleEdges]);
 	// Local copy only so React Flow can show a drag in progress. It is rebuilt from layout + pins.
 	const [nodes, setNodes] = useState<GraphFlowNode[]>(computedNodes);
 	// Keep React Flow's measurements when presentation changes (hover, selection, overlays), otherwise

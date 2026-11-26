@@ -198,3 +198,14 @@ test('var., local. and data. inputs become ghost cards outside the resource grap
 	for (const [i, a] of boxes.entries()) { for (const b of boxes.slice(i + 1)) { assert.ok(a.x + a.width <= b.x || b.x + b.width <= a.x || a.y + a.height <= b.y || b.y + b.height <= a.y); } }
 	assert.equal(Object.keys(placed.positions).length, 4); assert.ok(placed.lane);
 });
+
+test('exposure lens shows configured public entry, public access and what sits behind an entry', () => {
+	const snapshot = projectTechnicalGraph(hubSpokeArchitecture());
+	const exposure = (id: string) => snapshot.nodes.find(node => node.id === id)!.exposure;
+	assert.equal(exposure('pip-fw')?.kind, 'entry'); assert.equal(exposure('st')?.kind, 'public-access'); assert.equal(exposure('afw')?.kind, 'behind-entry');
+	assert.equal(exposure('aks'), undefined);
+	const edges = lensEdges(snapshot, 'security', false);
+	assert.ok(edges.some(edge => edge.source === 'pip-fw' && edge.target === 'afw'));
+	assert.ok(edges.length < lensEdges(snapshot, 'dependencies', false).length);
+	assert.ok(edges.every(edge => !edge.membership));
+});
