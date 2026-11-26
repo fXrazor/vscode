@@ -983,3 +983,4 @@ select, summary, label:has(> select), label:has(> input[type=checkbox]), label:h
 .studio .react-flow__node, .studio .react-flow__node.draggable { cursor: pointer; }
 .studio .react-flow__node.dragging { cursor: grabbing; }
 .studio .react-flow__edge { cursor: pointer; }
+.terraform-identifier-field { display: grid; gap: 4px; } .terraform-identifier-field > p { margin: 0; } .terraform-identifier-field input[readonly] { color: var(--muted); }

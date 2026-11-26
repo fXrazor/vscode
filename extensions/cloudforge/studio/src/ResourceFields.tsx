@@ -9,7 +9,7 @@ import { ResourceIconPicker } from './ResourceIconPicker.tsx';
 import { additionalBlocks, editableFields, fieldIssue, type BlockDefinition } from './formDefinition.ts';
 import { SchemaField } from './SchemaField.tsx';
 import { bindingKey, canBindField, eligibleReferenceTargets, fieldDefinition, fieldTargetPath, regionAttribute, resourceRefBindingIssue, variableBindingIssue, type FieldTarget } from './fieldBindings.ts';
-import { inheritedReference, inheritedReferences, isResourceContainer, resourcePlacement, visualParentId, visualResourcePlacement } from './resourceHierarchy.ts';
+import { inheritedReference, inheritedReferences, isResourceContainer, resourcePlacement, terraformIdentifier, visualParentId, visualResourcePlacement } from './resourceHierarchy.ts';
 import { formCoverageGaps, type HostFormSchema, type LiveSchemaMap } from './liveSchema.ts';
 import type { HostCloudRegionsPayload, HostModuleInspection } from './webviewBridge.ts';
 import { resolveProviderRegions } from './serviceAdapter.ts';
@@ -101,7 +101,7 @@ export function ResourceFields({ resource, dispatch, architecture, compactMetada
 				<summary>Metadata<span className="schema-type">{resourceDefinition(resource).type}</span></summary>
 				<div className="form-section-body">
 					<SchemaField name="Resource name" value={resource.name} definition={{name:'name',type:'string',description:'The resource name. A variable changes the Terraform value; the identifier stays stable.'}} onChange={value => dispatch({ type:'update', id:resource.id, patch:{name:value} })} {...binding({kind:'name'})}/>
-					<label>Terraform identifier<input readOnly value={resource.terraformName ?? resource.name.replace(/[^A-Za-z0-9_-]/g, '_').replace(/^[^A-Za-z_]/, '_$&')} /></label>
+					<TerraformIdentifierField resource={resource} architecture={architecture} dispatch={dispatch} sourceBacked={!!hasSource} onOpenSource={onOpenSource} />
 					<label>Project Terraform file
 						<div className="source-file-row">
 							<input readOnly value={(resource.sourceFile ?? 'main.tf') + (resource.sourceLine ? ':' + resource.sourceLine : '')} />
@@ -246,4 +246,24 @@ function NestedBlocks({ blocks, definitions, scope, onChange, resource, architec
 			</details>}
 		</div>
 	);
+}
+
+/** The local name in `resource "TYPE" "NAME"`: other resources refer to it as TYPE.NAME, and Terraform state is keyed by it. */
+function TerraformIdentifierField({ resource, architecture, dispatch, sourceBacked, onOpenSource }: { resource: Resource; architecture?: Architecture; dispatch: Dispatch<Action>; sourceBacked: boolean; onOpenSource?: () => void }) {
+	const current = terraformIdentifier(resource);
+	const [draft, setDraft] = useState<string | undefined>(undefined);
+	const value = draft ?? current;
+	const type = resourceDefinition(resource).type;
+	const issue = draft === undefined || draft === current ? undefined
+		: !/^[A-Za-z_][A-Za-z0-9_-]*$/.test(draft) ? 'Start with a letter or underscore; use letters, numbers, _ and - only.'
+		: architecture?.resources.some(item => item.id !== resource.id && resourceDefinition(item).type === type && terraformIdentifier(item) === draft) ? 'Another ' + type + ' already uses this identifier.' : undefined;
+	const commit = () => { if (draft !== undefined && draft !== current && !issue) { dispatch({ type: 'update', id: resource.id, patch: { terraformName: draft } }); } setDraft(undefined); };
+	const help = sourceBacked
+		? 'This block already exists in your Terraform files. Rename it in the code, together with a moved block, so Terraform does not plan to destroy and recreate it.'
+		: 'The name in resource "' + type + '" "' + current + '". Other resources reference it as ' + type + '.' + current + '. It is separate from the resource name above and does not change when you rename the resource.';
+	return <div className="terraform-identifier-field">
+		<label>Terraform identifier<input aria-describedby={resource.id + '-tfid-help'} readOnly={sourceBacked} aria-invalid={!!issue} value={value} spellCheck={false}
+			onChange={event => setDraft(event.target.value)} onBlur={commit} onKeyDown={event => { if (event.key === 'Enter') { commit(); } if (event.key === 'Escape') { setDraft(undefined); } }} /></label>
+		<p id={resource.id + '-tfid-help'} className={issue ? 'schema-field-error' : 'field-help'}>{issue ?? help}{sourceBacked && onOpenSource && !issue && <> <button type="button" className="quiet-button" onClick={onOpenSource}>Open code</button></>}</p>
+	</div>;
 }
