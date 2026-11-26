@@ -2,7 +2,7 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-import type { Dispatch } from 'react';
+import { useState, type Dispatch } from 'react';
 import type { Action, Architecture, Resource, ResourceBlock } from './model.ts';
 import { resourceDefinition } from './fixture.ts';
 import { ResourceIconPicker } from './ResourceIconPicker.tsx';
@@ -208,6 +208,7 @@ function NestedBlocks({ blocks, definitions, scope, onChange, resource, architec
 	parentBlockId?: string;
 	onConfigureTerraform?: (query?:string)=>void;
 }) {
+	const [blockFilter, setBlockFilter] = useState('');
 	const available = definitions.filter(definition => blocks.filter(block => block.type === definition.type).length < definition.max);
 	return (
 		<div className="nested-blocks">
@@ -235,11 +236,12 @@ function NestedBlocks({ blocks, definitions, scope, onChange, resource, architec
 			})}
 			{definitions.filter(definition => definition.required && !blocks.some(block => block.type === definition.type) && !dynamicBlockConfigured(resource,definition.type,parentBlockId)).map(definition => <p className="required-block-notice" tabIndex={-1} data-block-type={definition.type} key={definition.type}>Required block: {definition.label}. Add it below to configure its fields.</p>)}
 			{available.length > 0 && <details className="add-blocks">
-				<summary>Add Blocks<span>＋</span></summary>
-				<div className="add-block-options">{available.map(definition => (
-					<button key={definition.type} aria-label={'Add ' + definition.label + ' to ' + scope} onClick={() => onChange([...blocks, {
+				<summary>Add blocks<small>{available.length}</small><span>＋</span></summary>
+				{available.length > 8 && <input className="add-block-filter" type="search" aria-label={'Filter blocks for ' + scope} placeholder="Filter blocks" value={blockFilter} onChange={event => setBlockFilter(event.target.value)} />}
+				<div className="add-block-options">{[...available].sort((a, b) => Number(!!b.required) - Number(!!a.required)).filter(definition => definition.label.toLowerCase().includes(blockFilter.trim().toLowerCase())).map(definition => (
+					<button key={definition.type} className={definition.required ? 'is-required' : undefined} aria-label={'Add ' + definition.label + ' to ' + scope} title={definition.type} onClick={() => onChange([...blocks, {
 						id: crypto.randomUUID(), type: definition.type, values: { ...definition.fields }, blocks: []
-					}])}>＋ {definition.label}<small>{definition.required ? 'Required · ' : ''}{definition.max === 1 ? 'Single block' : 'Repeatable block'}</small></button>
+					}])}><span aria-hidden="true">＋</span><strong>{fieldLabel(definition.label.replaceAll(' ', '_'))}</strong><small>{definition.required ? 'Required' : definition.max === 1 ? 'Single' : 'Repeatable'}</small></button>
 				))}</div>
 			</details>}
 		</div>
