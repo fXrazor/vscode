@@ -130,6 +130,61 @@ Worktree: `C:/Users/dalep/.codex/worktrees/infrastructure-studio/CloudForge-Code
 
 Dale approved continuing the proposed point-endpoint pass in this chat. No further approval is needed for that plan. Work remains within Studio and handoff documentation; one architecture and one semantic undo history, independent theme/viewport/tool preferences, drawings excluded from Terraform and Rust-owned guarded I/O remain binding.
 
+### Studio pass 10: Miro-style connectors and menus (Claude), 26 November 2026
+
+Branch `claude/project-thread-2irlth` (merged to main on Dale's request, 26 November 2026). Based on Miro's connector help (help.miro.com/hc/articles/360017730733): Ctrl/Cmd turns snapping off while drawing or moving a line end, Shift keeps straight 45° steps, and line type (straight, elbow, curved) is a drawn choice in the line's toolbar.
+
+- `ConnectionOverlays.tsx`: dragging a connector end with Ctrl/Cmd held drops a free canvas point even over an element; Shift constrains it to 45° from the fixed end (`constrainAngle`). Drop feedback says which mode is active.
+- `DesignCanvas.tsx`: drawing a new connector from a port with Ctrl/Cmd held makes a loose end where you release (no element snap, no drop menu). Modifier state is tracked in a ref (`freeDrop`).
+- Dependency lines: `Architecture.dependencyStyles` (keyed by dependency id or `*`), action `styleDependency` (validated, undoable, never written to Terraform; preserved by `serviceAdapter` refreshes). Clicking a dependency line now selects it and opens `DependencyTools.tsx` (path, style, weight, colour, Apply to all lines, Reset, Open target). Enter on a focused dependency line still opens its target.
+- `PathPicker` (drawn Straight / Elbow / Curve radios) replaces the Path dropdown for design connections too; `loose-connectors-verify.mjs` updated.
+- Menus (`SelectionControls.tsx`): right-click and More share `SelectionMenuBody`: heading with selection count, icons, grouped sections with real separators, key hints as keycaps (⌘/⇧ on Mac), Arrange as a submenu, Delete in danger colour. CSS in `styles.css` (`.canvas-context-*`, `.menu-shortcut`, `.path-picker`, `.dependency-tools`). The old nth-child separator hack is gone.
+- Checks: `npm run check`, 214/214 tests (new dependency style test), loose-connectors-verify 16/16, whiteboard-controls-verify 20/20.
+
+- Connection labels someone typed now stay visible after deselecting (`labelIsAuthored`); only automatic service edge-kind labels and dependency labels follow the View toggle, renamed "Show automatic and dependency labels". A selected connection shows a soft halo instead of swapping its dash, so style edits show live.
+- "Configure in Terraform" buttons (Additional configuration and Terraform-configured fields) use the `.code-action` style with a code icon. A browser audit over the three samples found no other unstyled inspector buttons.
+- One Miro-style edit bar (`ConnectionTools.tsx` `.line-bar`, `LineStyleControls`): line type icons, colour swatch menu (9 presets + custom), style, weight, start/end arrow toggles, inline label with an Aa formatting menu, reverse, an ⋯ Endpoints menu, delete and close in one row. Dependency lines use the same bar (name, style controls, Apply to all, Reset, Open, Close). The element selection bar uses the same shape. Every option and accessible name from before is kept.
+- Resource library: 8px gap between the Cloud provider picker, search and catalogue line.
+- Four connection points per element (`EndpointPort`: input = left, output = right, top, bottom). `ResourceNode.tsx` renders four source handles (`Ports`) and `DesignCanvas` uses `ConnectionMode.Loose`, so a line can start or end on any side; non-default sides are stored on the endpoint via `connectEndpoints`. Geometry (`connectionPath`, `connectionAnchor`) and the Endpoints menu (Port: Top / Bottom) handle the new sides. Test: hover a resource, drag from its bottom point to another resource's top point. `hosted-refresh-verify` reports one 404 console error on this preview server both before and after this change.
+- Mixed list entries (`ListEntries.tsx`, action `setListEntries`): every list field of strings or numbers is edited entry by entry, and each entry is a Value, a Variable (including object variable leaves) or a Reference (any eligible resource, so a VM can list several NICs). Stored as `resourceRefs[key] = { refs, items }`: `refs` keeps every referenced resource for dependencies, cycles and validation; `items` is the ordered list and projects as `[azurerm_network_interface.a.id, var.b, "c"]`. A list of plain values collapses back to the ordinary literal. The whole-field Reference and Variable modes are unchanged. Known gap: Terraform typed in the code editor is not parsed back into mixed entries.
+- List, map and object fields (`LiteralFields.tsx`, `editor-refinement.css`): icon remove beside each entry, a dashed Add entry row, a quiet Unset link and a ghost Edit JSON toggle. Accessible names are unchanged ("Remove entry 1", "Add entry to …", "Unset …"). Test: open a subnet's Address prefix or any list/map field.
+
+Test checklist:
+1. Select a connection end, hold Ctrl, drag it over a resource and release: it stays a loose point where you dropped it.
+2. Hold Shift while dragging an end: the line keeps 0°/45°/90° steps.
+3. Drag from a port with Ctrl held and release over another resource: a loose end is created, not a link.
+4. View > All inherited dependencies, click a dotted line: the Dependency line toolbar opens. Pick Curve, change colour/weight, then Apply to all lines and Reset. Undo/redo works; the Terraform code does not change.
+5. Right-click a resource and open the More (…) menu: icons, separators, keycaps, Arrange submenu, red Delete.
+
+### Studio pass 9: test view comments, object variables (Claude), 26 November 2026
+
+- Same branch `claude/project-thread-2irlth`, merged to main on Dale's request (26 November 2026).
+- Field labels read as sentences with acronyms (`src/fieldLabel.ts`, "Enable DNS hostnames"); raw names stay in tooltips and help. True/false arguments use a Not set / On / Off toggle (`.bool-toggle`, role radiogroup). Add property lists readable names.
+- Resource workspace is larger: up to 1920×1200, code pane defaults to 630px (was 420), right panel `clamp(300px, 27vw, 440px)`.
+- **Object variables:** new variable type `object` (JSON editor). A field binding can carry `path` (`{ variableId, path: ['prod','cidr'] }`), projected as `var.aws_network.prod.cidr`. The Variable picker lists each value inside an object (nested groups as headings), type-checks the leaf against the field, and shows `aws_network › prod › cidr` in the chip. Import reads `var.NAME.a.b` back into a path binding and accepts `object({...})` declarations, keeping the declared constraint in `typeConstraint` so optional()/types are written back unchanged; otherwise the constraint is derived from the default. Missing paths show a field issue. No variables-inside-variables (Terraform can't); use locals for derived values.
+- Estate sample binds vpc-prod/vpc-shared `cidr_block` and `enable_dns_hostnames` to `var.aws_network.<env>.*`.
+- Checks: Studio check pass, test 213/213, technical-view-verify 64/64. `provider-editor-verify` crashes in this container before and after these changes (VMSS help-icon measurement), so it needs a Windows run.
+- **Test checklist:** (1) Estate sample → vpc-prod → focused workspace: code shows `var.aws_network.prod.cidr`. (2) CIDR block → Variable: picker shows aws_network › prod › cidr etc.; text fields can't pick `dns_hostnames` (bool) and vice versa. (3) Pick shared › cidr: code updates; Undo restores. (4) Variables panel: create an Object variable from JSON; variables.tf preview shows `type = object({...})`. (5) Save and reload a project with `var.x.y` in source: binding comes back. (6) Rename a key in the object: the field shows "no longer exists". (7) Bool toggles and labels look right in light and dark.
+- **Open:** a key/value tree editor for object values (currently JSON); editing an imported object's default does not re-derive its kept `typeConstraint`.
+
+### Technical Graph pass 8: scope spotlight, multi-cloud estate, browser test view (Claude), 26 November 2026
+
+- Branch `claude/project-thread-2irlth` (after PR #3 merged). Not merged to main yet; open a PR from this branch when Dale approves.
+- **Scope spotlight:** a floating "Spotlight scope" picker (top right of the graph) and clickable Network hull labels. The chosen top-level scope (resource group, VPC, VNet, GCP project/folder, AWS account/OU, management group, Kubernetes namespace) and everything whose scopePath includes it stays lit; the rest is greyed (`.is-outside`). Works in Layers, Scopes, Tree, Bundled and Network. Transient: not serialised, cleared by restore. Never writes positions or Terraform.
+- **Grouping and separation:** `separateGroups` in the force engine pushes each scope's cluster disc apart with a gap of 70·spread, so different resource groups / VPCs / projects never overlap; hull labels scale with zoom. Scopes layout packs large scopes into square blocks (`perLineOf` in `technicalGraphLayout.ts`) instead of thin tall columns.
+- **Multi-cloud estate sample** (`src/estateFixture.ts`, 126 resources): Azure hub plus prod/stage/dev resource groups with spokes, NSGs, VMs and AKS; AWS transit gateway, two VPCs, EKS and RDS; two GCP projects with networks, subnetworks, NAT, GKE and Cloud SQL. Open with `?sample=estate` or `#estate`.
+- **Icons:** `src/coreIcons.ts` gives AWS and GCP core types (VPC, subnet, IGW, NAT, TGW, EKS, RDS, network, subnetwork, GKE, SQL …) their real catalog icons where the catalogue had the Azure resource-group placeholder.
+- **Browser test view:** `node build.ts && node scripts/build-test-view.mjs <out>` builds a self-contained copy (icons packed in one JSON, AWS forms split in four, `scripts/test-view.html` as the page with a sample switcher). Published privately for Dale as a claude.ai page where comments act as annotations: https://claude.ai/artifact/SZKUsLiQ7LqF3yGsmapCpN
+- Checks: Studio `check` pass, `test` 211/211, `technical-view-verify` 64/64 (adds estate scopes no-overlap, spotlight in Scopes and Network, hull non-overlap). Not run here: oxlint, hygiene, extension tests, host tsc, Windows Edge suites.
+- **Test checklist (Dale):**
+  1. Open the test view, pick "Multi-cloud estate", then Configuration → Technical Graph. Every resource has a real icon (no Azure RG icon on AWS/GCP items).
+  2. Scopes layout: each resource group / VPC / project is a separate, roughly square block; none overlap.
+  3. Spotlight scope → rg-prod: rg-prod and its members stay coloured, everything else greys out; X ("Show every scope") restores.
+  4. Network layout: clusters for each scope are visibly apart; drag the spread dial to 300 % and back, clusters stay separate. Click a hull label to spotlight it.
+  5. Selecting a greyed resource still opens its card; nothing becomes Modified and Undo is empty after spotlight, layout and drag.
+  6. Leave a comment on the test view page; it should reach the next Claude session.
+- **Next:** wire Antigravity's contract/workflow modules (see pass 7), spotlight by second-level scope (subnets inside a VNet), and a "collapse other scopes" option for very large estates.
+
 ### Technical Graph pass 7: large graphs, final checks and merge (Claude), 26 November 2026
 
 - Network solver: exact repulsion up to 400 nodes (`forceSettings.exactLimit`), Barnes–Hut (theta 0.9, mass √r) plus a uniform collision grid above it; per-simulation degree/index cache. Bench: 1,000 nodes settle in ~0.4 s, 2,000 in ~1 s; Bundled layout is under 40 ms at 2,000 nodes.

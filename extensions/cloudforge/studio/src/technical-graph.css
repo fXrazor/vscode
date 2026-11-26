@@ -321,3 +321,47 @@
 .tg-spread input[type="range"] { height: 16px; margin: 0 2px; }
 @media (max-width: 1360px) { .tg-spread input[type="range"] { width: 76px; } }
 @media (max-width: 1180px) { .tg-spread input[type="range"] { width: 60px; } .tg-spread output { display: none; } }
+
+/* Scope spotlight: everything outside the chosen scope greys out in every layout. */
+.tg-card.is-outside { opacity: .22; filter: grayscale(1); }
+.react-flow__edge.is-outside { opacity: .12; }
+.tg-bundle-leaf.is-outside, .tg-force-node.is-outside { opacity: .16; filter: grayscale(1); }
+.tg-bundle-path.is-outside, .tg-force-link.is-outside { opacity: .05; }
+.tg-force-hull.is-outside { opacity: .25; filter: grayscale(1); }
+.tg-force-hull.is-lit path { stroke-width: 2; stroke-dasharray: none; fill: color-mix(in srgb, var(--accent) 7%, transparent); stroke: color-mix(in srgb, var(--accent) 55%, transparent); }
+.tg-force-hull text.is-clickable { cursor: pointer; pointer-events: auto; }
+.tg-force-hull text.is-clickable:hover { fill: var(--accent); text-decoration: underline; }
+.tg-scope-pick select { max-width: 170px; }
+@media (max-width: 1360px) { .tg-scope-pick select { max-width: 120px; } }
+.tg-scope-pick { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted); background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 3px 4px 3px 9px; box-shadow: 0 2px 8px -6px #0004; }
+.tg-scope-pick select { border: 0; background: transparent; color: var(--text); font: inherit; font-size: 12px; }
+.tg-scope-pick.is-active { border-color: var(--accent); color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
+@media (max-width: 1600px) { .tg-layouts button span { display: none; } .tg-layouts button { padding: 0 7px; } }
+@media (max-width: 1440px) { .tg-spread { font-size: 0 !important; gap: 4px !important; } .tg-spread output { font-size: 11px; } }
+
+/* Graph controls live in a vertical icon rail on the left edge, so side panels and narrow screens never squeeze or cover them. Names show as tooltips. */
+.tg-rail { top: 14px; left: 14px; right: auto; bottom: auto; flex-direction: column; align-items: stretch; gap: 6px; overflow: visible; padding: 0; width: 40px; }
+.tg-rail > * { width: 40px; }
+.tg-rail .tg-segment { flex-direction: column; padding: 3px; gap: 2px; }
+.tg-rail .tg-segment button { width: 32px; height: 30px; padding: 0; display: grid; place-items: center; font-size: 0; }
+.tg-rail .tg-segment button span { display: none; }
+.tg-rail > label, .tg-rail > .tg-text-button, .tg-rail .tg-view-menu > summary { position: relative; display: grid; place-items: center; width: 40px; height: 36px; padding: 0 !important; gap: 0; font-size: 0; border-radius: 8px; background: var(--surface); border: 1px solid var(--border); box-shadow: 0 2px 8px -6px #0004; color: var(--muted); cursor: pointer; }
+.tg-rail > label:hover, .tg-rail > .tg-text-button:hover, .tg-rail .tg-view-menu > summary:hover { color: var(--text); }
+.tg-rail > label > select { position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; opacity: 0; cursor: pointer; }
+.tg-rail > label.is-active { color: var(--accent); border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
+.tg-rail .tg-scope-pick > .tg-icon-button { position: absolute; right: -7px; top: -7px; width: 16px; height: 16px; min-height: 0; padding: 0; border-radius: 50%; background: var(--accent); color: #fff; display: grid; place-items: center; z-index: 1; }
+.tg-rail > .tg-text-button small { position: absolute; right: 3px; bottom: 1px; font-size: 9.5px; font-weight: 650; }
+.tg-rail .tg-search input { position: absolute; left: calc(100% + 8px); top: -1px; height: 36px; width: 0; padding: 0; border: 0; opacity: 0; border-radius: 8px; background: var(--surface); box-shadow: 0 6px 20px -10px #0006; transition: width .16s ease, opacity .16s ease; font-size: 12px; }
+.tg-rail .tg-search:focus-within input, .tg-rail .tg-search input:not(:placeholder-shown) { width: 240px; padding: 0 10px; opacity: 1; border: 1px solid var(--accent); }
+.tg-rail .tg-search > .tg-icon-button { position: absolute; left: calc(100% + 222px); top: 10px; z-index: 1; }
+.tg-rail .tg-view-menu { position: relative; }
+.tg-rail .tg-view-menu > summary { list-style: none; }
+.tg-rail .tg-view-menu > summary::-webkit-details-marker { display: none; }
+.tg-rail .tg-view-panel { position: absolute; left: calc(100% + 8px); top: auto; bottom: 0; margin-top: 0; }
+.tg-rail [data-tip] { position: relative; }
+.tg-rail [data-tip]:hover::after, .tg-rail [data-tip]:focus-visible::after { content: attr(data-tip); position: absolute; left: calc(100% + 10px); top: 50%; transform: translateY(-50%); z-index: 30; width: max-content; max-width: 260px; padding: 5px 8px; border-radius: 6px; background: var(--text); color: var(--surface); font-size: 11.5px; font-weight: 500; line-height: 1.35; white-space: normal; text-align: left; pointer-events: none; box-shadow: 0 6px 18px -8px #0008; }
+.tg-rail .tg-segment [data-tip]:hover::after { left: calc(100% + 13px); }
+.tg-rail .tg-search:focus-within::after, .tg-rail .tg-view-menu[open] > summary::after { display: none; }
+.tg-spread-float { position: absolute; top: 14px; left: 66px; z-index: 8; }
+.tg-spread-float .tg-spread { font-size: 11.5px !important; gap: 6px !important; }
+.tg-spread-float .tg-spread output { font-size: 11px; }

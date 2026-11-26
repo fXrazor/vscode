@@ -5,7 +5,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHistory, historyReducer, type Architecture, type BoardItem, type History } from './model.ts';
-import { elementEndpoint as element, pointEndpoint as point, endpointElementId, normaliseArchitectureConnections } from './connectionEndpoints.ts';
+import { elementEndpoint as element, pointEndpoint as point, endpointElementId, normaliseArchitectureConnections, normaliseEndpoint } from './connectionEndpoints.ts';
+import { connectionPath } from './connectionGeometry.ts';
 import { canConnectEndpoints, connectionAnchor } from './designConnections.ts';
 import { selectionFragment } from './canvasOperations.ts';
 import { presentationSvg } from './exportPresentation.ts';
@@ -163,4 +164,17 @@ test('endpoint commands cannot rewrite a service-derived edge or affect Terrafor
 	const guarded = createHistory({ ...board(), connections: [{ id: 'a->b', source: element('a'), target: element('b') }] });
 	assert.equal(historyReducer(guarded, { type: 'reconnectConnection', id: 'a->b', side: 'target', endpoint: point({ x: 8, y: 9 }) }), guarded);
 	assert.equal(canConnectEndpoints(h.present, element('missing'), point({ x: 8, y: 9 })), false);
+});
+
+test('elements have four connection points: left, right, top and bottom', () => {
+	const architecture = sampleArchitecture();
+	const resource = architecture.resources.find(item => item.id === 'vm')!;
+	assert.deepEqual(normaliseEndpoint({ kind: 'element', elementId: 'vm', port: 'top' }), { kind: 'element', elementId: 'vm', port: 'top' });
+	assert.equal(normaliseEndpoint({ kind: 'element', elementId: 'vm', port: 'middle' }), undefined);
+	const top = connectionAnchor(architecture, element('vm', 'top'), 'source', 'visual')!;
+	const bottom = connectionAnchor(architecture, element('vm', 'bottom'), 'target', 'visual')!;
+	assert.equal(top.y, resource.positions.visual.y);
+	assert.ok(bottom.y > top.y && bottom.x === top.x);
+	const [path] = connectionPath({ id: 'x', source: element('vm', 'bottom'), target: element('nic', 'top') }, 0, 0, 100, 200);
+	assert.match(path, /^M ?0[ ,]0/);
 });

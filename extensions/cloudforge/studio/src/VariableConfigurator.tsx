@@ -13,7 +13,7 @@ function ValueControl({id,label,text,type,sensitive,onChange,issue,helpId,onBlur
 	const common={id,'aria-label':label,'aria-invalid':!!issue,'aria-describedby':helpId,value:text,onBlur,onChange:(event:React.ChangeEvent<HTMLInputElement|HTMLSelectElement|HTMLTextAreaElement>)=>onChange(event.target.value)};
 	if(sensitive){return <input {...common} type="password" autoComplete="off" spellCheck={false}/>;}
 	if(type==='bool'){return <select {...common}><option value="">Choose a value…</option><option value="true">True</option><option value="false">False</option><option value="null">Null · no value</option>{!['','true','false','null'].includes(text)&&<option value={text}>Review this value</option>}</select>;}
-	if(type==='list(string)'||type==='map(string)'||type==='any'){return <textarea {...common} className="variable-json-input" rows={3} placeholder={variableInputTypes[type].example} spellCheck={false}/>;}
+	if(type==='list(string)'||type==='map(string)'||type==='object'||type==='any'){return <textarea {...common} className="variable-json-input" rows={type==='object'?6:3} placeholder={variableInputTypes[type].example} spellCheck={false}/>;}
 	return <input {...common} type="text" inputMode={type==='number'?'decimal':undefined} placeholder={variableInputTypes[type].example} spellCheck={false}/>;
 }
 

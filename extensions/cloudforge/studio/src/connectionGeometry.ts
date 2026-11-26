@@ -1,11 +1,13 @@
 import { getBezierPath, getSmoothStepPath, getStraightPath, Position } from '@xyflow/react';
 import type { DesignConnection } from './model.ts';
 
+const portPosition = (port: string) => port === 'top' ? Position.Top : port === 'bottom' ? Position.Bottom : port === 'input' ? Position.Left : Position.Right;
+
 /** One geometry implementation for screen and presentation export. */
 export function connectionPath(connection: DesignConnection, sourceX: number, sourceY: number, targetX: number, targetY: number) {
 	const points = { sourceX, sourceY, targetX, targetY,
-		sourcePosition: connection.source.kind === 'element' ? connection.source.port === 'input' ? Position.Left : Position.Right : sourceX <= targetX ? Position.Right : Position.Left,
-		targetPosition: connection.target.kind === 'element' ? connection.target.port === 'output' ? Position.Right : Position.Left : sourceX <= targetX ? Position.Left : Position.Right };
+		sourcePosition: connection.source.kind === 'element' ? portPosition(connection.source.port ?? 'output') : sourceX <= targetX ? Position.Right : Position.Left,
+		targetPosition: connection.target.kind === 'element' ? portPosition(connection.target.port ?? 'input') : sourceX <= targetX ? Position.Left : Position.Right };
 	return connection.routing === 'straight' ? getStraightPath(points) : connection.routing === 'curve' ? getBezierPath(points) : getSmoothStepPath({ ...points, borderRadius: 5 });
 }
 

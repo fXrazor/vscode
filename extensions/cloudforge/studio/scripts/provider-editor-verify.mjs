@@ -56,7 +56,7 @@ try {
 				await nic.locator(':scope > .nested-block-body > .nested-blocks > .add-blocks > summary').click();
 				await nic.getByRole('button', { name: 'Add ip configuration to network interface', exact: true }).click();
 				check('nested VMSS IP configuration is editable', await workspace.locator('[data-field-path="network_interface.ip_configuration.subnet_id"] input').count() === 1);
-				check('nested booleans keep typed controls', await workspace.locator('[data-field-path="network_interface.ip_configuration.primary"] select').count() === 1);
+				check('nested booleans keep typed controls', await workspace.locator('[data-field-path="network_interface.ip_configuration.primary"] :is(select, [role=radiogroup])').count() === 1);
 			}
 			if (viewport.width <= 1100) { await workspace.getByRole('button', { name: 'Context', exact: true }).click(); }
 			await workspace.getByRole('tab', { name: 'Variables', exact: true }).click();

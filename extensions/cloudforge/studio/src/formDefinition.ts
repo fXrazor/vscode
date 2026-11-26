@@ -5,7 +5,7 @@
 import type { Architecture, Resource, ResourceBlock } from './model.ts';
 import { getDef, type AttrDef } from './cloudlab-core/catalog/index.ts';
 import { resourceDefinition } from './fixture.ts';
-import { bindingKey, bindingTarget, fieldDefinition, fieldTargetPath, resourceRefBindingIssue, variableBindingIssue } from './fieldBindings.ts';
+import { bindingKey, bindingTarget, fieldDefinition, fieldTargetPath, resourceRefBindingIssue, variableBindingIssue, hasRefBinding } from './fieldBindings.ts';
 import { inheritedReference } from './resourceHierarchy.ts';
 import { liveSchemaAttributes, liveSchemaBlocks, type LiveSchemaMap } from './liveSchema.ts';
 import { dynamicBlockConfigured, extraFieldValue } from './additionalTerraform.ts';
@@ -71,7 +71,7 @@ export function resourceFormIssues(resource: Resource, variables?: import('./var
 			if (['name', 'location', 'region'].includes(field.name)) { continue; }
 			if(architecture&&inheritedReference(architecture,resource,[field.name])){continue;}
 			const key = bindingKey({kind:'setting',name:field.name});
-			const issue = resource.fieldBindings?.[key] || resource.resourceRefs?.[key]?.refs.length ? undefined : fieldIssue(resource.settings[field.name] ?? '', field);
+			const issue = resource.fieldBindings?.[key] || hasRefBinding(resource.resourceRefs?.[key]) ? undefined : fieldIssue(resource.settings[field.name] ?? '', field);
 			if (issue) { issues.push(field.name + ': ' + issue); }
 		}
 	}
@@ -86,7 +86,7 @@ export function resourceFormIssues(resource: Resource, variables?: import('./var
 					if (extraFieldValue(resource, {kind:'block',blockId:block.id,name:field.name}) !== undefined) { continue; }
 					if(architecture&&inheritedReference(architecture,resource,fieldTargetPath(resource,{kind:'block',blockId:block.id,name:field.name}))){continue;}
 					const key = bindingKey({kind:'block',blockId:block.id,name:field.name});
-					const issue = resource.fieldBindings?.[key] || resource.resourceRefs?.[key]?.refs.length ? undefined : fieldIssue(block.values[field.name] ?? '', field);
+					const issue = resource.fieldBindings?.[key] || hasRefBinding(resource.resourceRefs?.[key]) ? undefined : fieldIssue(block.values[field.name] ?? '', field);
 					if (issue) { issues.push(prefix + field.name + ': ' + issue); }
 				}
 				visit(block.blocks, definition.children, prefix, block.id);

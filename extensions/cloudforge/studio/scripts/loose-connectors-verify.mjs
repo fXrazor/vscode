@@ -100,7 +100,7 @@ try {
 			await page.getByLabel('End endpoint Y', { exact: true }).fill('-90');
 			await page.getByLabel('End endpoint Y', { exact: true }).press('Enter');
 			await page.getByLabel('Connection label', { exact: true }).fill('Loose <endpoint> & route');
-			await page.getByLabel('Connection path', { exact: true }).selectOption('curve');
+			await page.getByRole('radiogroup', { name: 'Connection path' }).getByRole('radio', { name: 'Curve' }).click();
 			await page.getByLabel('Connection stroke style', { exact: true }).selectOption('dotted');
 			await page.locator('main.canvas').focus(); await page.keyboard.press('f');
 			await page.locator('.connection-endpoint-fields > summary').click();

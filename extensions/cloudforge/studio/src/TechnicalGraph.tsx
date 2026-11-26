@@ -16,7 +16,7 @@ import {
 	getBezierPath, getSmoothStepPath, getStraightPath, useViewport,
 	type Edge, type EdgeProps, type Node, type NodeProps, type OnNodesChange, type ReactFlowInstance, type Viewport,
 } from '@xyflow/react';
-import { AlertCircle, AlertTriangle, Share2, Rows3, Columns3, Network, Orbit, ChevronDown, Crosshair, FileCode2, Search, SlidersHorizontal, X, ChevronUp, Maximize2, Minus, Pencil, Pin, PinOff, Plus, RotateCcw, Scan } from 'lucide-react';
+import { Activity, Eye, GitBranch, Boxes, Layers, LayoutGrid, ShieldAlert, AlertCircle, AlertTriangle, Share2, Rows3, Columns3, Network, Orbit, ChevronDown, Crosshair, FileCode2, Search, SlidersHorizontal, X, ChevronUp, Maximize2, Minus, Pencil, Pin, PinOff, Plus, RotateCcw, Scan } from 'lucide-react';
 import type { Action, Architecture, DesignMode } from './model.ts';
 import { applyWaves, graphLenses, graphOverlays, layerLabels, lensEdges, matchesQuery, neighbourhood, projectTechnicalGraph, traceNode, type NodeOverlay, type PlanAction, type GraphCategory, type GraphEdge, type GraphNode, type GraphPort, type GraphInput, type TechnicalGraphSnapshot } from './technicalGraph.ts';
 import { inputSize, layoutTechnicalGraph, placeInputs, treeConnector, treeLinkPath, treeParents, visiblePortCount, type GraphLane } from './technicalGraphLayout.ts';
@@ -28,7 +28,7 @@ import { createForceSimulation, forceSettings, hullPath, nodeRadii, orientForce,
 import { snapshotTroubleshootingFindings } from './technicalGraphPatterns.ts';
 import { resourceIntelligence } from './providerKnowledge.ts';
 
-type CardData = { treeToggle?: { collapsed: boolean; count: number }; onToggleTree?: (id: string) => void; node: GraphNode; lens: GraphPresentation['lens']; /* state 'soft' = hover context */ overlay?: NodeOverlay; badge?: { kind: 'plan' | 'order' | 'impact'; text: string; tone: string; title: string }; match: boolean; compact: boolean; expanded: boolean; state: 'normal' | 'focus' | 'trace' | 'dim' | 'soft'; pinned: boolean; tracedPorts: ReadonlySet<string>; onRename: (id: string, label: string) => void; onEdit: (id: string) => void; onToggleRows: (id: string) => void; onUnpin: (id: string) => void };
+type CardData = { outside?: boolean; treeToggle?: { collapsed: boolean; count: number }; onToggleTree?: (id: string) => void; node: GraphNode; lens: GraphPresentation['lens']; /* state 'soft' = hover context */ overlay?: NodeOverlay; badge?: { kind: 'plan' | 'order' | 'impact'; text: string; tone: string; title: string }; match: boolean; compact: boolean; expanded: boolean; state: 'normal' | 'focus' | 'trace' | 'dim' | 'soft'; pinned: boolean; tracedPorts: ReadonlySet<string>; onRename: (id: string, label: string) => void; onEdit: (id: string) => void; onToggleRows: (id: string) => void; onUnpin: (id: string) => void };
 type LaneData = { lane: GraphLane };
 type GhostData = { input: GraphInput; state: 'normal' | 'trace' | 'dim'; onSelectConsumer: (id: string) => void };
 type GhostNode = Node<GhostData, 'ghost'>;
@@ -46,6 +46,7 @@ const graphLayouts = [
 	{ id: 'bundled', label: 'Bundled', short: 'Bundled', icon: Orbit, hint: 'radial hierarchical edge bundling' },
 	{ id: 'force', label: 'Network', short: 'Network', icon: Share2, hint: 'force-directed graph with resource icons; drag to rearrange (graph only)' },
 ] as const;
+const lensIcons = { all: LayoutGrid, dependencies: GitBranch, topology: Boxes, runtime: Activity, observability: Eye, security: ShieldAlert } as const;
 const categoryOrder: GraphCategory[] = ['ownership', 'attachment', 'execution', 'reference', 'runtime', 'observability', 'unclassified'];
 
 const GraphCard = memo(function GraphCard({ data, selected }: NodeProps<CardNode>) {
@@ -55,7 +56,7 @@ const GraphCard = memo(function GraphCard({ data, selected }: NodeProps<CardNode
 	useEffect(() => { if (!editing) { setDraft(node.label); } }, [node.label, editing]);
 	const { shown, hidden } = visiblePortCount(node, expanded);
 	const commit = () => { setEditing(false); const value = draft.trim(); if (value && value !== node.label) { data.onRename(node.id, value); } };
-	return <div className={'tg-card tg-layer-' + node.layer + ' tg-state-' + state + (selected ? ' is-selected' : '') + (compact ? ' is-compact' : '') + (data.match ? '' : ' is-unmatched')} data-review={node.reviewStatus}>
+	return <div className={'tg-card tg-layer-' + node.layer + ' tg-state-' + state + (selected ? ' is-selected' : '') + (compact ? ' is-compact' : '') + (data.match ? '' : ' is-unmatched') + (data.outside ? ' is-outside' : '')} data-review={node.reviewStatus}>
 		<Handle type="target" id="in" position={HandlePosition.Top} className="tg-handle" isConnectable={false} />
 		<Handle type="target" id="in-bottom" position={HandlePosition.Bottom} className="tg-handle" isConnectable={false} />
 		<Handle type="target" id="in-left" position={HandlePosition.Left} className="tg-handle" isConnectable={false} />
@@ -212,6 +213,10 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme
 	}, [snapshot.nodes]);
 	const toggleTree = useCallback((id: string) => onPresentation({ type: 'toggleCollapsed', id }), [onPresentation]);
 	const focusSet = useMemo(() => presentation.focus && snapshot.nodes.some(node => node.id === presentation.focus!.id) ? neighbourhood(visibleEdges, presentation.focus.id, presentation.focus.depth) : undefined, [presentation.focus, snapshot, visibleEdges]);
+	// Scope spotlight: the chosen scope and everything it owns stay in colour; the rest greys out.
+	const spotlight = useMemo(() => presentation.spotlight && snapshot.nodes.some(node => node.id === presentation.spotlight) ? new Set(snapshot.nodes.filter(node => node.id === presentation.spotlight || node.scopePath.includes(presentation.spotlight!)).map(node => node.id)) : undefined, [presentation.spotlight, snapshot]);
+	const scopeChoices = useMemo(() => snapshot.nodes.filter(node => node.isScope && node.scopePath.length <= 1).sort((a, b) => (a.scopePath[0] ?? a.id).localeCompare(b.scopePath[0] ?? b.id) || a.scopePath.length - b.scopePath.length || a.label.localeCompare(b.label)).map(node => ({ id: node.id, label: (node.scopePath.length ? '\u2003' : '') + node.label + ' · ' + node.typeLabel, members: snapshot.nodes.filter(item => item.scopePath.includes(node.id)).length })), [snapshot]);
+	useEffect(() => { if (spotlight && flow) { void flow.fitView({ nodes: [...spotlight].map(id => ({ id })), padding: 0.12, maxZoom: 1, duration: 280 }); } }, [spotlight, flow]);
 	const layout = useMemo(() => layoutTechnicalGraph(snapshot, { layout: presentation.layout, expanded, compact: false, pins: presentation.pins, edges: visibleEdges, visible: focusSet, spacing: presentation.spacing, height: presentation.height, collapsed: collapsedSet }), [collapsedSet, snapshot, presentation.layout, expanded, presentation.pins, visibleEdges, focusSet, presentation.spacing, presentation.height]);
 	const inputLayout = useMemo(() => presentation.showInputs && presentation.layout !== 'tree' ? placeInputs(snapshot.inputs.map(input => ({ ...input, consumers: input.consumers.filter(consumer => layout.positions[consumer.resourceId]) })), layout) : { positions: {} as Record<string, { x: number; y: number }> }, [presentation.showInputs, presentation.layout, snapshot.inputs, layout]);
 	const impact = useMemo(() => Object.fromEntries(snapshot.nodes.map(node => [node.id, traceNode(visibleEdges.filter(edge => edge.ordering), node.id).downstream.size])), [snapshot, visibleEdges]);
@@ -252,7 +257,7 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme
 				: !selectedNode ? 'normal' : node.id === selectedNode.id ? 'focus' : trace?.upstream.has(node.id) || trace?.downstream.has(node.id) ? 'trace' : 'dim';
 			return { id: node.id, type: 'card', position: layout.positions[node.id], selected: node.id === selectedId, draggable: true, connectable: false, deletable: false,
 				ariaLabel: node.label + ', ' + node.typeLabel + ', ' + layerLabels[node.layer],
-				data: { treeToggle: presentation.layout === 'tree' && treeDescendants[node.id] ? { collapsed: collapsedSet.has(node.id), count: treeDescendants[node.id] } : undefined, onToggleTree: toggleTree, node, lens: presentation.lens, overlay: overlays.byNode[node.id], badge: badgeFor(node), match: (!query.trim() || matchesQuery(node, query)) && (presentation.lens !== 'security' || !!node.exposure || node.layer === 'security' || node.layer === 'identity' || visibleEdges.some(edge => edge.source === node.id || edge.target === node.id)), compact, expanded: expanded.has(node.id), state, pinned: !!presentation.pins[node.id], tracedPorts, onRename: rename, onEdit: onOpenDetails, onToggleRows: toggleRows, onUnpin: unpin } };
+				data: { treeToggle: presentation.layout === 'tree' && treeDescendants[node.id] ? { collapsed: collapsedSet.has(node.id), count: treeDescendants[node.id] } : undefined, onToggleTree: toggleTree, node, lens: presentation.lens, overlay: overlays.byNode[node.id], badge: badgeFor(node), outside: !!spotlight && !spotlight.has(node.id), match: (!query.trim() || matchesQuery(node, query)) && (presentation.lens !== 'security' || !!node.exposure || node.layer === 'security' || node.layer === 'identity' || visibleEdges.some(edge => edge.source === node.id || edge.target === node.id)), compact, expanded: expanded.has(node.id), state, pinned: !!presentation.pins[node.id], tracedPorts, onRename: rename, onEdit: onOpenDetails, onToggleRows: toggleRows, onUnpin: unpin } };
 		});
 		const ghosts: GhostNode[] = Object.entries(inputLayout.positions).map(([id, position]) => {
 			const input = snapshot.inputs.find(item => item.id === id)!;
@@ -262,7 +267,7 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme
 		});
 		const inputLanes: LaneNode[] = inputLayout.lane ? [{ id: inputLayout.lane.id, type: 'lane', position: { x: inputLayout.lane.x, y: inputLayout.lane.y }, data: { lane: inputLayout.lane }, draggable: false, selectable: false, focusable: false, connectable: false, deletable: false, zIndex: -2 }] : [];
 		return [...lanes, ...inputLanes, ...cards, ...ghosts];
-	}, [treeDescendants, collapsedSet, toggleTree, presentation.layout, presentation.lens, inputLayout, onSelect, layout, snapshot, selectedNode, selectedId, trace, compact, expanded, presentation.pins, tracedPorts, rename, onOpenDetails, toggleRows, unpin, overlays, badgeFor, query, hoverNode, hoverEdge, visibleEdges]);
+	}, [treeDescendants, collapsedSet, toggleTree, presentation.layout, presentation.lens, inputLayout, onSelect, layout, snapshot, selectedNode, selectedId, trace, compact, expanded, presentation.pins, tracedPorts, rename, onOpenDetails, toggleRows, unpin, overlays, badgeFor, query, hoverNode, hoverEdge, visibleEdges, spotlight]);
 	// Local copy only so React Flow can show a drag in progress. It is rebuilt from layout + pins.
 	const [nodes, setNodes] = useState<GraphFlowNode[]>(computedNodes);
 	// Keep React Flow's measurements when presentation changes (hover, selection, overlays), otherwise
@@ -303,7 +308,7 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme
 				: hoverNode && !selectedNode ? (hovered ? 'trace' : 'dim')
 				: !trace ? 'normal' : trace.edges.has(edge.id) ? 'trace' : 'dim';
 			const sourceLabel = snapshot.nodes.find(node => node.id === edge.source)?.label ?? edge.source;
-			return { id: edge.id, type: 'graph', source: edge.source, target: edge.target, sourceHandle, targetHandle, selectable: true, deletable: false, focusable: true,
+			return { id: edge.id, type: 'graph', source: edge.source, target: edge.target, sourceHandle, targetHandle, selectable: true, deletable: false, focusable: true, className: spotlight && !(spotlight.has(edge.source) && spotlight.has(edge.target)) ? 'is-outside' : undefined,
 				ariaLabel: categoryNames[edge.category] + ' from ' + (snapshot.nodes.find(node => node.id === edge.source)?.label ?? edge.source) + ' to ' + (snapshot.nodes.find(node => node.id === edge.target)?.label ?? edge.target),
 				markerEnd: { type: 'arrowclosed' as never, width: targetHandle === 'in' || targetHandle.startsWith('in-') ? 16 : 11, height: targetHandle === 'in' || targetHandle.startsWith('in-') ? 16 : 11, color: 'var(--tg-edge-' + edge.category + ')' },
 				data: { edge, route: presentation.route, state, animate: !reducedMotion && !!trace && (state === 'trace' || edge.id === selectedEdgeId), label: sourceLabel + ' → ' + [...new Set(edge.evidence.map(item => item.field))].join(', ') + ' · ' + categoryNames[edge.category] } };
@@ -327,7 +332,7 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme
 			}
 		}
 		return graphEdges;
-	}, [inputLayout, visibleEdges, layout, snapshot, compact, expanded, selectedEdgeId, trace, presentation.route, presentation.layout, reducedMotion, selectedId, hoverNode, hoverEdge, selectedNode]);
+	}, [inputLayout, visibleEdges, layout, snapshot, compact, expanded, selectedEdgeId, trace, presentation.route, presentation.layout, reducedMotion, selectedId, hoverNode, hoverEdge, selectedNode, spotlight]);
 
 	const bounds = useRef<HTMLDivElement>(null);
 	const lastFit = useRef('');
@@ -366,8 +371,8 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme
 	const pinCount = Object.keys(presentation.pins).length;
 	const categoriesShown = categoryOrder.filter(category => visibleEdges.some(edge => edge.category === category));
 	return <main ref={bounds} tabIndex={0} className={'canvas technical-graph theme-' + theme + (compact ? ' is-compact-view' : '')} data-read-only="true" data-graph="technical" aria-label="Technical graph" onKeyDownCapture={handleKeys}>
-		{presentation.layout === 'force' ? <ForceGraph snapshot={snapshot} edges={visibleEdges} membership={membershipEdges} visible={focusSet} selectedId={selectedId} query={query} overlays={overlays} network={presentation.network} onSelect={id => { setSelectedEdgeId(''); onSelect(id); }} onOpenDetails={onOpenDetails} reducedMotion={reducedMotion} /> :
-		bundled ? <BundledGraph snapshot={snapshot} edges={visibleEdges} visible={focusSet} selectedId={selectedId} query={query} onSelect={id => { setSelectedEdgeId(''); onSelect(id); }} onOpenDetails={onOpenDetails} reducedMotion={reducedMotion} /> :
+		{presentation.layout === 'force' ? <ForceGraph spotlight={spotlight} onSpotlight={id => onPresentation({ type: 'set', patch: { spotlight: id || undefined } })} snapshot={snapshot} edges={visibleEdges} membership={membershipEdges} visible={focusSet} selectedId={selectedId} query={query} overlays={overlays} network={presentation.network} onSelect={id => { setSelectedEdgeId(''); onSelect(id); }} onOpenDetails={onOpenDetails} reducedMotion={reducedMotion} /> :
+		bundled ? <BundledGraph spotlight={spotlight} snapshot={snapshot} edges={visibleEdges} visible={focusSet} selectedId={selectedId} query={query} onSelect={id => { setSelectedEdgeId(''); onSelect(id); }} onOpenDetails={onOpenDetails} reducedMotion={reducedMotion} /> :
 		<ReactFlow<GraphFlowNode, GraphFlowEdge> nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes}
 			onInit={instance => { setFlow(instance); onInit?.(instance); setZoom(instance.getZoom()); }}
 			onNodesChange={onNodesChange}
@@ -386,20 +391,22 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme
 			<Background variant={BackgroundVariant.Dots} gap={24} size={1} color="var(--grid-pattern)" bgColor="var(--canvas)" />
 			{snapshot.nodes.length > 40 && <MiniMap pannable zoomable nodeColor={node => node.type === 'lane' ? 'transparent' : 'var(--tg-mini)'} />}
 		</ReactFlow>}
-		<div className="tg-toolbar" role="toolbar" aria-label="Technical graph view options">
-			<label className="tg-search"><Search size={13} /><input aria-label="Find resource" placeholder="Find resource, address or file" value={query} onChange={event => setQuery(event.target.value)}
+		{presentation.layout === 'force' && <div className="tg-spread-float"><SpreadDial value={presentation.network.spread} onChange={spread => onPresentation({ type: 'set', patch: { network: { ...presentation.network, spread } } })} /></div>}
+		<div className="tg-toolbar tg-rail" role="toolbar" aria-label="Technical graph view options" aria-orientation="vertical">
+			<label className="tg-search" data-tip="Find resource (Enter to jump)"><Search size={15} /><input aria-label="Find resource" placeholder="Find resource, address or file" value={query} onChange={event => setQuery(event.target.value)}
 				onKeyDown={event => { if (event.key === 'Enter') { const hit = snapshot.nodes.find(node => layout.positions[node.id] && matchesQuery(node, query)); if (hit) { onSelect(hit.id); void flow?.fitView({ nodes: [{ id: hit.id }], padding: 0.6, maxZoom: 1.1, duration: 260 }); } } if (event.key === 'Escape') { setQuery(''); } }} />
 				{query && <button className="tg-icon-button" aria-label="Clear search" onClick={() => setQuery('')}><X size={12} /></button>}</label>
 			<div className="tg-segment" role="radiogroup" aria-label="Lens">
-				{graphLenses.map(lens => <button key={lens.id} role="radio" aria-checked={presentation.lens === lens.id} title={lens.hint} onClick={() => onPresentation({ type: 'set', patch: { lens: lens.id } })}>{lens.label}</button>)}
+				{graphLenses.map(lens => { const Icon = lensIcons[lens.id]; return <button key={lens.id} role="radio" aria-checked={presentation.lens === lens.id} aria-label={lens.label} data-tip={lens.label + ' · ' + lens.hint} onClick={() => onPresentation({ type: 'set', patch: { lens: lens.id } })}><Icon size={15} strokeWidth={1.8} /></button>; })}
 			</div>
 			<div className="tg-segment tg-layouts" role="radiogroup" aria-label="Graph layout">
-				{graphLayouts.map(item => <button key={item.id} role="radio" aria-checked={presentation.layout === item.id} aria-label={item.label} title={item.label + ' · ' + item.hint} onClick={() => onPresentation({ type: 'set', patch: { layout: item.id } })}><item.icon size={15} strokeWidth={1.8} /><span>{item.short}</span></button>)}
+				{graphLayouts.map(item => <button key={item.id} role="radio" aria-checked={presentation.layout === item.id} aria-label={item.label} data-tip={item.label + ' · ' + item.hint} onClick={() => onPresentation({ type: 'set', patch: { layout: item.id } })}><item.icon size={15} strokeWidth={1.8} /><span>{item.short}</span></button>)}
 			</div>
-			{presentation.layout === 'force' && <SpreadDial value={presentation.network.spread} onChange={spread => onPresentation({ type: 'set', patch: { network: { ...presentation.network, spread } } })} />}
-			<label>Overlay<select aria-label="Card overlay" value={presentation.overlay} onChange={event => onPresentation({ type: 'set', patch: { overlay: event.target.value as GraphPresentation['overlay'] } })}>
+			{scopeChoices.length > 1 && <label className={'tg-scope-pick' + (spotlight ? ' is-active' : '')} data-tip={'Spotlight scope: ' + (scopeChoices.find(choice => choice.id === presentation.spotlight)?.label ?? 'all scopes') + ' · everything outside it greys out'}><Crosshair size={15} /><select aria-label="Spotlight scope" value={presentation.spotlight ?? ''} onChange={event => onPresentation({ type: 'set', patch: { spotlight: event.target.value || undefined } })}>
+				<option value="">All scopes</option>{scopeChoices.map(choice => <option key={choice.id} value={choice.id}>{choice.label} ({choice.members})</option>)}</select>{spotlight && <button className="tg-icon-button" aria-label="Show every scope" title="Show every scope" onClick={() => onPresentation({ type: 'set', patch: { spotlight: undefined } })}><X size={12} /></button>}</label>}
+			<label className={'tg-overlay-pick' + (presentation.overlay !== 'none' ? ' is-active' : '')} data-tip={'Card overlay: ' + ({ none: 'none', plan: 'plan actions', order: 'apply order', impact: 'dependents' } as Record<string, string>)[presentation.overlay]}><Layers size={15} /><select aria-label="Card overlay" value={presentation.overlay} onChange={event => onPresentation({ type: 'set', patch: { overlay: event.target.value as GraphPresentation['overlay'] } })}>
 				<option value="none">No overlay</option><option value="plan">Plan actions{plan ? '' : ' (no plan)'}</option><option value="order">Apply order</option><option value="impact">Dependents</option></select></label>
-			<details className="tg-view-menu"><summary className="tg-text-button" aria-label="View options"><SlidersHorizontal size={13} />View</summary>
+			<details className="tg-view-menu"><summary className="tg-text-button" aria-label="View options" data-tip="View options"><SlidersHorizontal size={15} /></summary>
 				<div className="tg-view-panel">
 					{presentation.layout === 'force' ? <NetworkControls value={presentation.network} onChange={patch => onPresentation({ type: 'set', patch: { network: { ...presentation.network, ...patch } } })} /> : <>
 					<label>Routes<select aria-label="Route style" value={presentation.route} onChange={event => onPresentation({ type: 'set', patch: { route: event.target.value as RouteStyle } })}>
@@ -416,8 +423,8 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme
 					{onExportImage && <div className="tg-export-row"><span>Save image</span><button className="tg-text-button" disabled={exporting} onClick={() => void exportImage('svg')}>SVG</button><button className="tg-text-button" disabled={exporting} onClick={() => void exportImage('png')}>PNG</button></div>}
 				</div>
 			</details>
-			{presentation.focus && <button className="tg-text-button" aria-pressed="true" title="Show the whole graph again" onClick={() => onPresentation({ type: 'set', patch: { focus: undefined } })}><Crosshair size={13} />Focused: {snapshot.nodes.find(node => node.id === presentation.focus!.id)?.label ?? 'resource'}<X size={12} /></button>}
-			{pinCount > 0 && <button className="tg-text-button" onClick={() => onPresentation({ type: 'clearPins' })} title="Return pinned cards to the automatic layout (graph only)"><RotateCcw size={13} />Reset {pinCount} pin{pinCount === 1 ? '' : 's'}</button>}
+			{presentation.focus && <button className="tg-text-button" aria-pressed="true" aria-label="Show the whole graph again" data-tip={'Focused on ' + (snapshot.nodes.find(node => node.id === presentation.focus!.id)?.label ?? 'resource') + ' · click to show the whole graph'} onClick={() => onPresentation({ type: 'set', patch: { focus: undefined } })}><Crosshair size={15} /></button>}
+			{pinCount > 0 && <button className="tg-text-button" onClick={() => onPresentation({ type: 'clearPins' })} aria-label={'Reset ' + pinCount + ' pin' + (pinCount === 1 ? '' : 's')} data-tip={'Reset ' + pinCount + ' pin' + (pinCount === 1 ? '' : 's') + ' · return pinned cards to the automatic layout'}><RotateCcw size={15} /><small>{pinCount}</small></button>}
 		</div>
 		<div className="tg-legend" aria-label="Relationship legend">
 			{categoriesShown.map(category => <span key={category} className={'tg-legend-item tg-cat-' + category}><i />{categoryNames[category]}</span>)}
@@ -500,7 +507,7 @@ function WhyPanel({ snapshot, edge, node, trace, overlay, wave, focused, onFocus
  * Radial hierarchical edge bundling view. Hover or select a resource: its prerequisites ("uses")
  * and configured dependents ("used by") light up in two colours; everything else fades.
  */
-function BundledGraph({ snapshot, edges, visible, selectedId, query, onSelect, onOpenDetails, reducedMotion }: { snapshot: TechnicalGraphSnapshot; edges: readonly GraphEdge[]; visible?: ReadonlySet<string>; selectedId: string; query: string; onSelect: (id: string) => void; onOpenDetails: (id: string) => void; reducedMotion: boolean }) {
+function BundledGraph({ spotlight, snapshot, edges, visible, selectedId, query, onSelect, onOpenDetails, reducedMotion }: { spotlight?: ReadonlySet<string>; snapshot: TechnicalGraphSnapshot; edges: readonly GraphEdge[]; visible?: ReadonlySet<string>; selectedId: string; query: string; onSelect: (id: string) => void; onOpenDetails: (id: string) => void; reducedMotion: boolean }) {
 	const bundle = useMemo(() => bundleLayout(snapshot, edges, { visible }), [snapshot, edges, visible]);
 	const [hover, setHover] = useState('');
 	const [view, setView] = useState({ scale: 1, x: 0, y: 0 });
@@ -523,14 +530,14 @@ function BundledGraph({ snapshot, edges, visible, selectedId, query, onSelect, o
 			<g className="tg-bundle-paths">
 				{bundle.paths.map(path => {
 					const state = !focus ? '' : path.target === focus ? ' is-uses' : path.source === focus ? ' is-used-by' : ' is-dim';
-					return <path key={path.edgeId} d={path.d} className={'tg-bundle-path tg-cat-' + path.category + state + (reducedMotion ? '' : ' can-animate')} />;
+					return <path key={path.edgeId} d={path.d} className={'tg-bundle-path tg-cat-' + path.category + state + (reducedMotion ? '' : ' can-animate') + (spotlight && !(spotlight.has(path.source) && spotlight.has(path.target)) ? ' is-outside' : '')} />;
 				})}
 			</g>
 			{bundle.leaves.map(leaf => {
 				const degrees = leaf.angle * 180 / Math.PI - 90; const flip = leaf.angle > Math.PI;
 				const state = !focus ? '' : leaf.id === focus ? ' is-focus' : related.has(leaf.id) ? ' is-related' : ' is-dim';
 				const match = !query.trim() || leaf.label.toLowerCase().includes(query.trim().toLowerCase());
-				return <g key={leaf.id} className={'tg-bundle-leaf tg-layer-' + leaf.layer + state + (match ? '' : ' is-unmatched') + (leaf.id === selectedId ? ' is-selected' : '')} transform={`rotate(${degrees}) translate(${bundle.radius + 8},0)${flip ? ' rotate(180)' : ''}`}
+				return <g key={leaf.id} className={'tg-bundle-leaf tg-layer-' + leaf.layer + state + (match ? '' : ' is-unmatched') + (spotlight && !spotlight.has(leaf.id) ? ' is-outside' : '') + (leaf.id === selectedId ? ' is-selected' : '')} transform={`rotate(${degrees}) translate(${bundle.radius + 8},0)${flip ? ' rotate(180)' : ''}`}
 					role="button" tabIndex={0} aria-label={leaf.label} onMouseEnter={() => setHover(leaf.id)} onMouseLeave={() => setHover('')}
 					onClick={event => { event.stopPropagation(); onSelect(leaf.id); }} onDoubleClick={() => onOpenDetails(leaf.id)} onKeyDown={event => { if (event.key === 'Enter') { onSelect(leaf.id); } }}>
 					<circle cx={flip ? 4 : -4} r={3.5} />
@@ -566,7 +573,7 @@ function LaneRuler({ lanes }: { lanes: readonly GraphLane[] }) {
  * layer-coloured ring. Dragging moves a node only inside this view and reheats the simulation; it
  * never pins, moves or edits the project. Hover or select lights up uses and used-by.
  */
-function ForceGraph({ snapshot, edges, membership, visible, selectedId, query, overlays, network, onSelect, onOpenDetails, reducedMotion }: { snapshot: TechnicalGraphSnapshot; edges: readonly GraphEdge[]; membership: readonly GraphEdge[]; visible?: ReadonlySet<string>; selectedId: string; query: string; overlays: { byNode: Record<string, NodeOverlay> }; network: NetworkOptions; onSelect: (id: string) => void; onOpenDetails: (id: string) => void; reducedMotion: boolean }) {
+function ForceGraph({ spotlight, onSpotlight, snapshot, edges, membership, visible, selectedId, query, overlays, network, onSelect, onOpenDetails, reducedMotion }: { spotlight?: ReadonlySet<string>; onSpotlight: (id: string) => void; snapshot: TechnicalGraphSnapshot; edges: readonly GraphEdge[]; membership: readonly GraphEdge[]; visible?: ReadonlySet<string>; selectedId: string; query: string; overlays: { byNode: Record<string, NodeOverlay> }; network: NetworkOptions; onSelect: (id: string) => void; onOpenDetails: (id: string) => void; reducedMotion: boolean }) {
 	const nodes = useMemo(() => snapshot.nodes.filter(node => !visible || visible.has(node.id)), [snapshot.nodes, visible]);
 	const sim = useRef<ForceSimulation | null>(null);
 	const [, setFrame] = useState(0);
@@ -575,15 +582,16 @@ function ForceGraph({ snapshot, edges, membership, visible, selectedId, query, o
 	const svg = useRef<SVGSVGElement>(null);
 	const host = useRef<HTMLDivElement>(null);
 	const lastClusters = useRef(network.clusters);
+	const lastSpread = useRef(network.spread);
 	const running = useRef(false);
-	const fit = useCallback(() => {
-		const current = sim.current; if (!current?.nodes.length) { return; }
-		const xs = current.nodes.map(node => node.x); const ys = current.nodes.map(node => node.y); const big = Math.max(...current.nodes.map(node => node.r)); const pad = 70 + big;
+	const fit = useCallback((only?: ReadonlySet<string>) => {
+		const all = sim.current?.nodes ?? []; const chosen = only ? all.filter(node => only.has(node.id)) : all; if (!chosen.length) { return; }
+		const xs = chosen.map(node => node.x); const ys = chosen.map(node => node.y); const big = Math.max(...chosen.map(node => node.r)); const pad = 70 + big;
 		const box = { x: Math.min(...xs) - pad, y: Math.min(...ys) - pad, w: Math.max(...xs) - Math.min(...xs) + pad * 2, h: Math.max(...ys) - Math.min(...ys) + pad * 2 + 70 };
 		const element = host.current; const aspect = element?.clientWidth ? element.clientWidth / Math.max(1, element.clientHeight) : 1.6;
 		if (box.w / box.h < aspect) { const w = box.h * aspect; box.x -= (w - box.w) / 2; box.w = w; } else { const h = box.w / aspect; box.y -= (h - box.h) / 2; box.h = h; }
 		// Never zoom out past a readable size: a widely spread graph stays spread on screen and pans instead.
-		const width = element?.clientWidth || 1200; const minScale = 0.62;
+		const width = element?.clientWidth || 1200; const minScale = chosen.length > 60 ? 0.22 : 0.62;
 		if (width / box.w < minScale) { const w = width / minScale; const h = w / aspect; box.x += (box.w - w) / 2; box.y += (box.h - h) / 2; box.w = w; box.h = h; }
 		setView(box);
 	}, []);
@@ -598,14 +606,18 @@ function ForceGraph({ snapshot, edges, membership, visible, selectedId, query, o
 		let reused = 0; if (!regroup) { for (const node of next.nodes) { const old = previous.get(node.id); if (old) { node.x = old.x; node.y = old.y; reused++; } } }
 		if (reused) { next.alpha = 0.5; }
 		const settled = settleForce(next, nodes.length > 600 ? 120 : 300);
+		const spreadOnly = lastSpread.current !== network.spread && reused > 0; lastSpread.current = network.spread;
 		const element = host.current; sim.current = reused ? settled : orientForce(settled, element?.clientWidth ? element.clientWidth / Math.max(1, element.clientHeight) : 1.6);
-		fit(); setFrame(frame => frame + 1);
+		// A spread change keeps the zoom, so the graph visibly opens out; anything else re-fits.
+		if (spreadOnly) { const all = settled.nodes; const mx = all.reduce((sum, node) => sum + node.x, 0) / all.length; const my = all.reduce((sum, node) => sum + node.y, 0) / all.length; setView(current => current ? { ...current, x: mx - current.w / 2, y: my - current.h / 2 } : current); } else { fit(); }
+		setFrame(frame => frame + 1);
 	}, [nodes, edges, membership, radii, network, fit]);
 	// Keep the selected resource in view (for example after Find → Enter) without changing the zoom.
 	useEffect(() => {
 		const node = sim.current?.nodes.find(item => item.id === selectedId);
 		setView(current => !node || !current || (node.x > current.x + 60 && node.x < current.x + current.w - 60 && node.y > current.y + 60 && node.y < current.y + current.h - 120) ? current : { ...current, x: node.x - current.w / 2, y: node.y - current.h / 2 });
 	}, [selectedId]);
+	useEffect(() => { if (spotlight) { fit(spotlight); } }, [spotlight, fit]);
 	const animate = useCallback(() => {
 		if (running.current || reducedMotion) { return; }
 		running.current = true;
@@ -613,6 +625,7 @@ function ForceGraph({ snapshot, edges, membership, visible, selectedId, query, o
 		requestAnimationFrame(step);
 	}, [reducedMotion]);
 	const toLocal = (event: { clientX: number; clientY: number }) => { const element = svg.current; const matrix = element?.getScreenCTM(); if (!element || !matrix) { return { x: 0, y: 0 }; } const point = new DOMPoint(event.clientX, event.clientY).matrixTransform(matrix.inverse()); return { x: point.x, y: point.y }; };
+	const lastTap = useRef({ id: '', at: 0 });
 	const drag = useRef<{ id?: string; startX: number; startY: number; moved: boolean; view?: { x: number; y: number; w: number; h: number } } | null>(null);
 	const simNodes = sim.current?.nodes ?? [];
 	const byId = new Map(simNodes.map(node => [node.id, node]));
@@ -624,14 +637,16 @@ function ForceGraph({ snapshot, edges, membership, visible, selectedId, query, o
 	// Screen pixels per graph unit, for zoom-aware labels.
 	const scale = view && svg.current ? svg.current.clientWidth / view.w : 1;
 	const base = forceSettings.radius; const hubRadius = base * (1 + network.sizeBy / 100 * 0.55);
-	const showLabel = (id: string, r: number) => network.labels === 'all' || id === focus || related.has(id) || id === selectedId || (network.labels === 'auto' && (nodes.length <= 36 || scale >= 0.9 || r >= hubRadius || (!!query.trim() && matchesQuery(info.get(id)!, query))));
+	const showLabel = (id: string, r: number) => network.labels === 'all' || id === focus || related.has(id) || id === selectedId || (network.labels === 'auto' && (nodes.length <= 36 || (!!spotlight && spotlight.size <= 60 && spotlight.has(id)) || scale >= 0.9 || r >= hubRadius || (!!query.trim() && matchesQuery(info.get(id)!, query))));
 	// Soft cluster hulls behind everything, labelled with the scope or layer they gather.
 	const hulls = network.clusters === 'none' ? [] : [...simNodes.reduce((groups, node) => { if (node.group) { groups.set(node.group, [...(groups.get(node.group) ?? []), node]); } return groups; }, new Map<string, ForceNode[]>())].filter(([, members]) => members.length > 1).map(([group, members]) => {
 		const label = network.clusters === 'layer' ? layerLabels[members[0].layer] : info.get(group)?.label ?? snapshot.nodes.find(node => node.id === group)?.label ?? group;
 		const top = members.reduce((best, node) => node.y - node.r < best.y - best.r ? node : best, members[0]);
 		const cx = members.reduce((sum, node) => sum + node.x, 0) / members.length;
-		return { group, label, d: hullPath(members), x: cx, y: top.y - top.r - 30, layer: members[0].layer, dim: !!focus && !members.some(node => node.id === focus) };
+		return { group, label, d: hullPath(members), x: cx, y: top.y - top.r - 30, layer: members[0].layer, dim: !!focus && !members.some(node => node.id === focus), outside: !!spotlight && !members.some(node => spotlight.has(node.id)), lit: !!spotlight && network.clusters === 'scope' && spotlight.has(group) };
 	});
+	// Scope names stay about 11–12 px on screen at any zoom, so large estates remain labelled.
+	const hullFont = { fontSize: Math.min(64, Math.max(11, 11.5 / Math.max(scale, 0.01))) + 'px', strokeWidth: Math.max(4, 4 / Math.max(scale, 0.01)) + 'px' };
 	const linkPath = (a: { x: number; y: number; r: number }, b: { x: number; y: number; r: number }, endGap: number) => {
 		const dx = b.x - a.x; const dy = b.y - a.y; const l = Math.hypot(dx, dy) || 1; const ux = dx / l; const uy = dy / l;
 		if (network.links === 'straight') { return `M ${a.x + ux * (a.r + 2)} ${a.y + uy * (a.r + 2)} L ${b.x - ux * (b.r + endGap)} ${b.y - uy * (b.r + endGap)}`; }
@@ -655,17 +670,23 @@ function ForceGraph({ snapshot, edges, membership, visible, selectedId, query, o
 			onPointerUp={() => {
 				const state = drag.current; drag.current = null; if (!state) { return; }
 				if (state.id && sim.current) { const node = sim.current.nodes.find(item => item.id === state.id); if (node) { delete node.fx; delete node.fy; } sim.current.alphaTarget = 0; }
-				if (!state.moved) { onSelect(state.id ?? ''); }
-			}}
-			onDoubleClick={event => { const id = (event.target as Element).closest('[data-node]')?.getAttribute('data-node'); if (id) { onOpenDetails(id); } }}>
+				if (!state.moved) {
+					// Pointer capture retargets the browser's dblclick to the svg, so a second click on the same node within 450 ms opens its details here.
+					const now = performance.now(); const last = lastTap.current;
+					if (state.id && last.id === state.id && now - last.at < 450) { lastTap.current = { id: '', at: 0 }; onOpenDetails(state.id); return; }
+					lastTap.current = { id: state.id ?? '', at: now }; onSelect(state.id ?? '');
+				}
+			}}>
 			<defs>{['uses', 'used-by'].map(kind => <marker key={kind} id={'tg-force-arrow-' + kind} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" className={'tg-force-arrow is-' + kind} /></marker>)}{categories.map(category => <marker key={category} id={'tg-force-arrow-' + category} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" className={'tg-force-arrow tg-cat-' + category} /></marker>)}</defs>
-			<g className="tg-force-hulls">{hulls.map(hull => <g key={hull.group} className={'tg-force-hull tg-layer-' + hull.layer + (hull.dim ? ' is-dim' : '')}><path d={hull.d} /><text x={hull.x} y={hull.y} textAnchor="middle">{hull.label}</text></g>)}</g>
+			<g className="tg-force-hulls">{hulls.map(hull => <g key={hull.group} className={'tg-force-hull tg-layer-' + hull.layer + (hull.dim ? ' is-dim' : '') + (hull.outside ? ' is-outside' : '') + (hull.lit ? ' is-lit' : '')}><path d={hull.d} />{network.clusters === 'scope'
+				? <text x={hull.x} y={hull.y} textAnchor="middle" style={hullFont} className="is-clickable" role="button" tabIndex={0} aria-label={(hull.lit ? 'Show every scope' : 'Spotlight ' + hull.label)} onPointerDown={event => event.stopPropagation()} onClick={() => onSpotlight(hull.lit ? '' : hull.group)} onKeyDown={event => { if (event.key === 'Enter') { onSpotlight(hull.lit ? '' : hull.group); } }}>{hull.label}</text>
+				: <text x={hull.x} y={hull.y} textAnchor="middle" style={hullFont}>{hull.label}</text>}</g>)}</g>
 			<g className="tg-force-links">
 				{membership.filter(edge => byId.has(edge.source) && byId.has(edge.target)).map(edge => { const a = byId.get(edge.source)!; const b = byId.get(edge.target)!; return <line key={edge.id} x1={a.x} y1={a.y} x2={b.x} y2={b.y} className={'tg-force-link is-membership' + (focus && edge.source !== focus && edge.target !== focus ? ' is-dim' : '')} />; })}
 				{visibleEdges.map(edge => {
 					const a = byId.get(edge.source)!; const b = byId.get(edge.target)!;
 					const state = !focus ? '' : edge.target === focus ? ' is-uses' : edge.source === focus ? ' is-used-by' : ' is-dim';
-					return <path key={edge.id} d={linkPath(a, b, 5)} className={'tg-force-link tg-cat-' + edge.category + state + (state === ' is-uses' || state === ' is-used-by' ? ' is-flow' : '')} markerEnd={'url(#tg-force-arrow-' + (state === ' is-uses' ? 'uses' : state === ' is-used-by' ? 'used-by' : edge.category) + ')'} />;
+					return <path key={edge.id} d={linkPath(a, b, 5)} className={'tg-force-link tg-cat-' + edge.category + state + (state === ' is-uses' || state === ' is-used-by' ? ' is-flow' : '') + (spotlight && !(spotlight.has(edge.source) && spotlight.has(edge.target)) ? ' is-outside' : '')} markerEnd={'url(#tg-force-arrow-' + (state === ' is-uses' ? 'uses' : state === ' is-used-by' ? 'used-by' : edge.category) + ')'} />;
 				})}
 			</g>
 			{[...simNodes].sort((a, b) => a.r - b.r).map(simNode => {
@@ -674,7 +695,7 @@ function ForceGraph({ snapshot, edges, membership, visible, selectedId, query, o
 				const overlay = overlays.byNode[node.id]; const issues = (overlay?.errors ?? 0) + (overlay?.warnings ?? 0);
 				const state = !focus ? '' : node.id === focus ? ' is-focus' : related.has(node.id) ? ' is-related' : ' is-dim';
 				const match = !query.trim() || matchesQuery(node, query);
-				return <g key={node.id} data-node={node.id} data-r={r} className={'tg-force-node tg-layer-' + node.layer + state + (match ? '' : ' is-unmatched') + (node.id === selectedId ? ' is-selected' : '') + (r >= hubRadius ? ' is-hub' : '')} transform={`translate(${simNode.x} ${simNode.y})`}
+				return <g key={node.id} data-node={node.id} data-r={r} className={'tg-force-node tg-layer-' + node.layer + state + (match ? '' : ' is-unmatched') + (spotlight && !spotlight.has(node.id) ? ' is-outside' : '') + (node.id === selectedId ? ' is-selected' : '') + (r >= hubRadius ? ' is-hub' : '')} transform={`translate(${simNode.x} ${simNode.y})`}
 					role="button" tabIndex={0} aria-label={node.label + ', ' + node.typeLabel} onPointerEnter={() => setHover(node.id)} onPointerLeave={() => setHover('')} onKeyDown={event => { if (event.key === 'Enter') { onSelect(node.id); } }}>
 					<title>{node.address}</title>
 					{node.exposure && node.exposure.kind !== 'behind-entry' && <circle r={r + 7} className="tg-force-exposed" />}
@@ -687,7 +708,7 @@ function ForceGraph({ snapshot, edges, membership, visible, selectedId, query, o
 			})}
 		</svg>}
 		<div className="tg-bundle-key" aria-hidden="true"><span className="is-uses">uses (prerequisite)</span><span className="is-used-by">used by (dependent)</span>{network.sizeBy > 0 && <span className="tg-force-size-key"><i /><i />size = connections</span>}<span>drag a node to rearrange · scroll to zoom · drag the background to pan</span></div>
-		<button className="tg-force-fit tg-text-button" onClick={() => { fit(); if (sim.current) { sim.current.alpha = 0.6; animate(); } }}><Scan size={13} />Re-run layout</button>
+		<button className="tg-force-fit tg-text-button" onClick={() => { fit(spotlight); if (sim.current) { sim.current.alpha = 0.6; animate(); } }}><Scan size={13} />Re-run layout</button>
 	</div>;
 }
 

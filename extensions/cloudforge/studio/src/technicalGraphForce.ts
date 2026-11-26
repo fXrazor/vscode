@@ -105,6 +105,10 @@ export function tickForce(sim: ForceSimulation): boolean {
 		for (const node of sim.nodes) { if (!node.group) { continue; } const c = centres.get(node.group) ?? { x: 0, y: 0, n: 0 }; c.x += node.x; c.y += node.y; c.n++; centres.set(node.group, c); }
 		for (const node of sim.nodes) { const c = node.group ? centres.get(node.group) : undefined; if (c && c.n > 1) { node.vx += (c.x / c.n - node.x) * options.clusterPull * alpha; node.vy += (c.y / c.n - node.y) * options.clusterPull * alpha; } }
 	}
+	// Keep whole groups apart: each group is a disc (centroid, farthest member + its radius); any two
+	// discs that overlap are pushed apart, the smaller group moving more. Different resource groups,
+	// VPCs or projects therefore never share space, however many there are.
+	if (options.clusterPull) { separateGroups(sim.nodes, options); }
 	// A weak pull of each layer toward its own direction keeps network, compute and data readable.
 	if (options.layerPull) {
 		const pull = options.layerPull;
@@ -121,6 +125,25 @@ export function tickForce(sim: ForceSimulation): boolean {
 	// Centre force: shift the free nodes so their mean stays at the origin.
 	const free = sim.nodes.filter(node => node.fx === undefined); if (free.length) { cx /= free.length; cy /= free.length; for (const node of free) { node.x -= cx; node.y -= cy; } }
 	return true;
+}
+
+function separateGroups(nodes: ForceNode[], options: ForceOptions): void {
+	const groups = new Map<string, { members: ForceNode[]; x: number; y: number; r: number }>();
+	for (const node of nodes) { if (!node.group) { continue; } const group = groups.get(node.group) ?? { members: [], x: 0, y: 0, r: 0 }; group.members.push(node); groups.set(node.group, group); }
+	const list = [...groups.values()]; if (list.length < 2) { return; }
+	for (const group of list) { for (const node of group.members) { group.x += node.x; group.y += node.y; } group.x /= group.members.length; group.y /= group.members.length; for (const node of group.members) { group.r = Math.max(group.r, Math.hypot(node.x - group.x, node.y - group.y) + node.r); } }
+	const gap = 70 * options.spread;
+	for (let i = 0; i < list.length; i++) {
+		for (let j = i + 1; j < list.length; j++) {
+			const a = list[i]; const b = list[j]; let dx = b.x - a.x; let dy = b.y - a.y; let d = Math.hypot(dx, dy);
+			if (d < 1e-6) { dx = 1; dy = (j - i) * 0.01; d = Math.hypot(dx, dy); }
+			const overlap = a.r + b.r + gap - d; if (overlap <= 0) { continue; }
+			const total = a.members.length + b.members.length; const push = overlap * 0.25 / d;
+			const moveA = b.members.length / total; const moveB = a.members.length / total;
+			for (const node of a.members) { node.vx -= dx * push * moveA; node.vy -= dy * push * moveA; }
+			for (const node of b.members) { node.vx += dx * push * moveB; node.vy += dy * push * moveB; }
+		}
+	}
 }
 
 function exactBodies(nodes: ForceNode[], options: ForceOptions, alpha: number): void {

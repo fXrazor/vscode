@@ -39,18 +39,17 @@ export const ResourceNode = memo(function ResourceNode({ data, selected }: NodeP
 	if(isResourceContainer(data.resource)){
 		return <div className={'resource-container '+data.mode+(selected?' is-selected':'')}>
 			<NodeResizer isVisible={!technical&&selected&&!data.resource.canvasLocked} minWidth={280} minHeight={180} maxWidth={10000} maxHeight={10000} onResizeEnd={(_,size)=>data.dispatch({type:'resizeContainer',id:data.resource.id,position:{x:size.x+data.origin.x,y:size.y+data.origin.y},width:size.width,height:size.height})}/>
-			<Handle type="target" position={Position.Left} id="input" aria-label="Infrastructure input"/>
+			<Ports label="Infrastructure"/>
 			<header className="resource-container-heading"><img src={'./assets/'+graphic.icon} alt=""/><strong>{data.resource.label||data.resource.name}</strong><span>{metadata.label}</span>{data.resource.canvasLocked&&<LockKeyhole size={12}/>}<small>{data.childCount} inside</small>{issueButton}</header>
 			{technical&&<div className="container-properties"><code title={metadata.type}>{metadata.type}</code>{Object.entries(data.resource.settings).slice(0,1).map(([name,value])=><span className="container-inline-field" key={name}><span>{name}</span><code>{isSensitiveProperty(name,fieldDefinition(data.resource,{kind:'setting',name})?.sensitive)?'Sensitive value':fieldExpression(data.resource,{kind:'setting',name},data.variables,data.architecture)??value}</code></span>)}{boundRegion?<span title={boundRegion}><Variable size={11}/>{boundRegion}</span>:<span title={data.resource.region}>{data.resource.region}</span>}</div>}
 			{!data.childCount&&<div className="container-empty">Drop compatible resources here<span>Configure inheritance and attachments in Parameters</span></div>}
-			<Handle type="source" position={Position.Right} id="output" aria-label="Infrastructure output"/>
 		</div>;
 	}
 	return (
 		<div className={'resource-node ' + data.mode + (selected ? ' is-selected' : '')}>
 			<NodeResizer isVisible={!technical && selected && !data.resource.canvasLocked} keepAspectRatio minWidth={iconSizeLimits.min} minHeight={iconSizeLimits.min} maxWidth={iconSizeLimits.max} maxHeight={iconSizeLimits.max}
 				onResizeEnd={(_, size) => data.dispatch({type:'resizeResource',id:data.resource.id,iconSize:Math.round(size.width),position:{x:size.x+data.origin.x,y:size.y+data.origin.y}})}/>
-			<Handle type="target" position={Position.Left} id="input" aria-label="Design link input" />
+			<Ports label="Design link"/>
 			<div className="resource-node-heading">
 				{data.resource.canvasLocked && <LockKeyhole size={12} aria-label="Canvas locked"/>}
 				<img src={'./assets/' + graphic.icon} alt="" />
@@ -68,10 +67,15 @@ export const ResourceNode = memo(function ResourceNode({ data, selected }: NodeP
 					})}
 					<div className="technical-node-footer"><button className="nodrag nopan node-relationships" aria-label={'Inspect relationships for ' + data.resource.name} onClick={event => { event.stopPropagation(); data.onConnections(data.resource.id); }}><span>{incomingCount} inputs</span><span>{outgoingCount} dependents</span></button><button className={'nodrag nopan '+(data.findings.length?'node-warning':'node-check')} onClick={()=>data.onReview(data.resource.id)}>{data.findings.length?data.findings.length+' local issues · Review':'Local checks clear'}</button><span className="technical-layer" title={knowledge.reviewStatus === 'documented' ? 'Documented infrastructure role; configuration is a draft, not observed cloud state.' : 'Provider semantics have not been reviewed for this type.'}>{knowledge.layer === 'unknown' ? 'Unreviewed type' : knowledge.layer}</span></div></div>
 			)}
-			<Handle type="source" position={Position.Right} id="output" aria-label="Design link output" />
 		</div>
 	);
 });
+
+/** Four connection points per element, as in Miro. In loose connection mode any point can start or end a line. */
+function Ports({ label, className }: { label: string; className?: string }) {
+	return <>{([['input', Position.Left], ['output', Position.Right], ['top', Position.Top], ['bottom', Position.Bottom]] as const).map(([id, position]) =>
+		<Handle key={id} className={className} type="source" position={position} id={id} aria-label={label + ' ' + id}/>)}</>;
+}
 
 export const BoardNode = memo(function BoardNode({ data, selected }: NodeProps<BoardNodeType>) {
 	const { item, dispatch } = data;
@@ -82,11 +86,10 @@ export const BoardNode = memo(function BoardNode({ data, selected }: NodeProps<B
 				onResizeEnd={(_, size) => dispatch({ type: 'resizeItem', id: item.id, mode: data.mode, position: { x: size.x, y: size.y }, width: size.width, height: size.height })} />
 		<div className={'board-item ' + item.kind + (selected ? ' is-selected' : '')}
    style={{ rotate: rotation ? rotation + 'deg' : undefined, background: item.kind === 'shape' || item.kind === 'ink' ? undefined : item.fill, opacity: item.opacity ?? 1, ...(item.kind !== 'shape' && item.kind !== 'text' && item.kind !== 'ink' ? { borderColor: item.strokeColor, borderWidth: item.strokeWidth, borderStyle: item.strokeStyle } : {}) }}>
-   {item.kind !== 'frame' && <Handle className="drawing-port" type="target" position={Position.Left} id="input" aria-label="Drawing connection input"/>}
+   {item.kind !== 'frame' && <Ports label="Drawing connection" className="drawing-port"/>}
 			{item.kind === 'shape' && <svg className="board-shape-geometry" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path d={shapeDefinition(item.shape).path} fill={item.fill ?? '#eef2ff'} stroke={item.strokeColor ?? '#7565bd'} strokeWidth={item.strokeWidth ?? 1.5} strokeDasharray={shapeStrokeDash(item.strokeStyle, item.strokeWidth)} strokeLinecap="round" vectorEffect="non-scaling-stroke" /></svg>}
 {item.kind === 'ink' && <svg className="board-ink-geometry" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path d={item.path} fill="none" stroke={item.strokeColor ?? inkDefaults.strokeColor} strokeWidth={item.strokeWidth ?? inkDefaults.strokeWidth} strokeDasharray={shapeStrokeDash(item.strokeStyle, item.strokeWidth)} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" /></svg>}
 {item.kind !== 'ink' && (data.mode === 'technical' ? <span className="drawing-text-readonly">{item.text}</span> : <DrawingText item={item} dispatch={dispatch} editToken={data.editToken}/>)}{item.canvasLocked && <span className="drawing-lock"><LockKeyhole size={12}/></span>}
-   {item.kind !== 'frame' && <Handle className="drawing-port" type="source" position={Position.Right} id="output" aria-label="Drawing connection output"/>}
    {data.mode === 'visual' && selected && !item.canvasLocked && item.kind !== 'frame' && <RotateHandle angle={rotation} onTurn={setTurning} onCommit={angle => { setTurning(undefined); dispatch({ type: 'canvas', command: { kind: 'rotate', ids: [item.id], angle } }); }}/>}
 		</div>
 	</>);

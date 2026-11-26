@@ -3,16 +3,27 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 import type { Architecture, Resource, ResourceBlock } from './model.ts';
-import { isSensitiveProperty, type VariableDefinition } from './variables.ts';
+import { isObjectValue, isSensitiveProperty, variableValueAt, type VariableDefinition } from './variables.ts';
 import { getDef, type AttrDef } from './cloudlab-core/catalog/index.ts';
 import { resourceDefinition } from './fixture.ts';
 import { inheritedReference, inheritedReferences, resourceAddress } from './resourceHierarchy.ts';
 import { liveSchemaDefinitionTree, liveSchemaOutputs, type LiveSchemaMap } from './liveSchema.ts';
 
 export type FieldTarget = { kind: 'name' } | { kind: 'region' } | { kind: 'setting'; name: string } | { kind: 'block'; blockId: string; name: string };
-export type VariableBinding = { variableId: string };
+/** `path` picks one attribute of an object variable: { variableId, path: ['dns', 'enabled'] } writes var.NAME.dns.enabled. */
+export type VariableBinding = { variableId: string; path?: string[] };
 export type ResourceRefEntry = { resourceId: string; attribute: string };
-export type ResourceRefBinding = { refs: ResourceRefEntry[] };
+/** One entry of a mixed list: a typed value, a variable or a resource reference, written in order as [a, var.b, type.name.id]. */
+export type ListEntry = { kind: 'value'; value: string } | { kind: 'variable'; variableId: string; path?: string[] } | { kind: 'ref'; resourceId: string; attribute: string };
+/** `refs` lists every referenced resource (dependencies, cycles, validation); `items`, when set, is the full mixed list in order. */
+export type ResourceRefBinding = { refs: ResourceRefEntry[]; items?: ListEntry[] };
+export const hasRefBinding = (binding?: ResourceRefBinding) => !!(binding?.refs.length || binding?.items?.length);
+export function listEntryExpression(entry: ListEntry, architecture?: Architecture): string {
+	if (entry.kind === 'value') { return JSON.stringify(entry.value); }
+	if (entry.kind === 'variable') { return variableBindingExpression(architecture?.variables?.find(item => item.id === entry.variableId), entry); }
+	const source = architecture?.resources.find(item => item.id === entry.resourceId);
+	return source ? resourceAddress(source) + '.' + entry.attribute : 'Missing resource';
+}
 export type ResourceRefCandidate = { resource: Resource; attribute: string; expression: string };
 export const fieldAliases: Record<string, string> = {
 	'Address space': 'address_space', 'Address prefix': 'address_prefixes', SKU: 'sku.name', Capacity: 'sku.capacity',
@@ -80,7 +91,14 @@ export function fieldDefinition(resource: Resource, target: FieldTarget, liveSch
 	return visit(resource.blocks, attrs);
 }
 
-export function acceptsVariable(variable: VariableDefinition, definition?: Pick<AttrDef, 'type'>): boolean {
+export function acceptsVariable(variable: VariableDefinition, definition?: Pick<AttrDef, 'type'>, path?: readonly string[]): boolean {
+	if (path?.length) {
+		const value = variableValueAt(variable, path);
+		if (value === undefined) { return false; }
+		if (!definition || value === null) { return true; }
+		const kind = typeof value === 'string' ? 'string' : typeof value === 'number' ? 'number' : typeof value === 'boolean' ? 'bool' : Array.isArray(value) ? 'list' : isObjectValue(value) ? 'map' : 'any';
+		return ['string', 'number', 'bool', 'list', 'map'].includes(definition.type) ? definition.type === kind : true;
+	}
 	if (!definition || variable.type === 'any') { return true; }
 	const type = definition.type;
 	return type === 'list' ? variable.type === 'list(string)' : type === 'map' ? variable.type === 'map(string)' : !['string', 'number', 'bool'].includes(type) || variable.type === type;
@@ -89,7 +107,13 @@ export function acceptsVariable(variable: VariableDefinition, definition?: Pick<
 export function variableBindingIssue(binding: VariableBinding | undefined, variables: VariableDefinition[], definition?: Pick<AttrDef, 'type'>): string | undefined {
 	if (!binding) { return undefined; }
 	const variable = variables.find(item => item.id === binding.variableId);
-	return !variable ? 'The bound variable is missing. Choose another variable or a fixed value.' : !acceptsVariable(variable, definition) ? 'Variable type does not match this field.' : undefined;
+	if (variable && binding.path?.length && variableValueAt(variable, binding.path) === undefined) { return 'var.' + variable.name + '.' + binding.path.join('.') + ' no longer exists in the object. Choose another value.'; }
+	return !variable ? 'The bound variable is missing. Choose another variable or a fixed value.' : !acceptsVariable(variable, definition, binding.path) ? 'Variable type does not match this field.' : undefined;
+}
+
+/** The Terraform expression for a variable binding: var.NAME, or var.NAME.a.b for one attribute of an object variable. */
+export function variableBindingExpression(variable: VariableDefinition | undefined, binding: VariableBinding | undefined): string {
+	return variable ? 'var.' + variable.name + (binding?.path?.length ? '.' + binding.path.join('.') : '') : 'Missing variable';
 }
 
 export function boundVariable(architecture: Architecture, resource: Resource, target: FieldTarget) {
@@ -102,6 +126,7 @@ export function fieldExpression(resource: Resource, target: FieldTarget, variabl
 	if (inherited) { return inherited.expression; }
 	const key = bindingKey(target);
 	const refBinding = resource.resourceRefs?.[key];
+	if (refBinding?.items?.length) { return '[' + refBinding.items.map(entry => listEntryExpression(entry, architecture)).join(', ') + ']'; }
 	if (refBinding?.refs.length) {
 		const parts = refBinding.refs.map(entry => {
 			const source = architecture?.resources.find(item => item.id === entry.resourceId);
@@ -113,7 +138,7 @@ export function fieldExpression(resource: Resource, target: FieldTarget, variabl
 	const binding = resource.fieldBindings?.[key];
 	if (!binding) { return undefined; }
 	const variable = variables?.find(item=>item.id===binding.variableId);
-	return variable ? 'var.'+variable.name : 'Missing variable';
+	return variableBindingExpression(variable, binding);
 }
 
 export function wouldCreateReferenceCycle(architecture: Architecture, consumerId: string, providerId: string): boolean {
@@ -178,6 +203,13 @@ export function acceptsResourceRefs(architecture: Architecture, resource: Resour
 }
 
 export function resourceRefBindingIssue(binding: ResourceRefBinding | undefined, architecture: Architecture | undefined, resource: Resource, definition?: AttrDef): string | undefined {
+	if (binding?.items?.length) {
+		if (definition && definition.type !== 'list') { return 'Only list fields can mix values, variables and references.'; }
+		for (const entry of binding.items) {
+			if (entry.kind === 'variable' && architecture && !architecture.variables?.some(item => item.id === entry.variableId)) { return 'A variable in this list no longer exists. Choose another variable or a value.'; }
+			if (entry.kind === 'value' && !entry.value.trim()) { return 'An entry in this list is empty. Fill it in or remove it.'; }
+		}
+	}
 	if (!binding || !binding.refs.length) { return undefined; }
 	if (!definition?.refTypes?.length || isSensitiveProperty(definition.name, definition.sensitive)) {
 		return 'This field does not support typed resource references.';
@@ -202,8 +234,8 @@ export function resourceRefBindingIssue(binding: ResourceRefBinding | undefined,
 	return undefined;
 }
 
-export function variablePreview(variable: VariableDefinition, sensitiveField = false): string {
+export function variablePreview(variable: VariableDefinition, sensitiveField = false, path?: readonly string[]): string {
 	if (sensitiveField || variable.sensitive) { return 'Sensitive value'; }
-	const value = variable.value !== undefined ? variable.value : variable.defaultValue;
+	const value = path?.length ? variableValueAt(variable, path) : variable.value !== undefined ? variable.value : variable.defaultValue;
 	return value === undefined ? 'Required input · value not set' : typeof value === 'string' ? value || 'Empty string' : JSON.stringify(value);
 }

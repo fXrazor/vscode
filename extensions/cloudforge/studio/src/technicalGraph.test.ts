@@ -349,3 +349,20 @@ test('large networks use the approximate solver and still settle apart', () => {
 	let close = 0; for (const [i, p] of sim.nodes.entries()) { for (const q of sim.nodes.slice(i + 1)) { if (Math.hypot(p.x - q.x, p.y - q.y) < (p.r + q.r) * 0.6) { close++; } } }
 	assert.ok(close < sim.nodes.length * 0.02, close + ' overlapping pairs');
 });
+
+test('multi-cloud estate: every top-level scope gets its own cluster, kept apart in Network, with real AWS and Google icons', async () => {
+	const { estateArchitecture } = await import('./estateFixture.ts'); const { coreIcon } = await import('./coreIcons.ts');
+	const snapshot = projectTechnicalGraph(estateArchitecture()); const edges = lensEdges(snapshot, 'all', true);
+	const tops = new Set(snapshot.nodes.map(node => node.scopePath[0] ?? node.id));
+	for (const id of ['rg-conn', 'rg-prod', 'vpc-prod', 'vpc-shared', 'prj-platform', 'prj-analytics']) { assert.ok(tops.has(id), id); }
+	assert.ok(snapshot.nodes.find(node => node.id === 'gke')!.scopePath.includes('prj-platform'), 'a Google Cloud project is a scope');
+	assert.ok(snapshot.nodes.filter(node => node.provider !== 'azure').every(node => !node.icon.includes('azure-resource-groups')), 'AWS and Google resources never show the Azure placeholder');
+	assert.equal(coreIcon('aws_vpc', 'azure-resource-groups.svg'), 'catalog-icons/aws/aws-virtual-private-cloud.svg');
+	assert.equal(coreIcon('azurerm_resource_group', 'azure-resource-groups.svg'), 'azure-resource-groups.svg');
+	const sim = settleForce(createForceSimulation(snapshot.nodes, edges, { radii: nodeRadii(snapshot.nodes, edges, 150) }));
+	const groups = new Map<string, typeof sim.nodes>(); for (const node of sim.nodes) { groups.set(node.group, [...(groups.get(node.group) ?? []), node]); }
+	const discs = [...groups.values()].map(members => { const x = members.reduce((s, n) => s + n.x, 0) / members.length; const y = members.reduce((s, n) => s + n.y, 0) / members.length; return { x, y, r: Math.max(...members.map(n => Math.hypot(n.x - x, n.y - y) + n.r)) }; });
+	for (const [i, a] of discs.entries()) { for (const b of discs.slice(i + 1)) { assert.ok(Math.hypot(a.x - b.x, a.y - b.y) >= a.r + b.r, 'scope clusters overlap'); } }
+	const scopes = layoutTechnicalGraph(snapshot, { layout: 'scopes', expanded: new Set(), compact: false, pins: {}, edges });
+	const prod = scopes.columns.find(column => column.id === 'column:rg-prod')!; assert.ok(new Set((prod.members ?? []).map(id => scopes.positions[id].x)).size >= 4, 'a large resource group wraps into a block, not a thin column');
+});

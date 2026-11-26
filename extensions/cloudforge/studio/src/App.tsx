@@ -24,6 +24,7 @@ import { ResourceCatalogue } from './ResourceCatalogue.tsx';
 import { DesignCanvas } from './DesignCanvas.tsx';
 import { TechnicalGraph } from './TechnicalGraph.tsx';
 import { defaultGraphPresentation, graphEditAllowed, graphPresentationReducer, parseGraphPresentation, serialiseGraphPresentation } from './graphPresentation.ts';
+import { estateArchitecture } from './estateFixture.ts';
 import { hubSpokeArchitecture } from './graphFixtures.ts';
 import { CodePanel } from './CodePanel.tsx';
 import { ModuleImport, type ModuleReference } from './ModuleImport.tsx';
@@ -886,6 +887,6 @@ export function Studio() {
 
 /** Preview-only sample selection; the hosted webview always receives the project from the extension. */
 function previewSample() {
-	try { if (new URLSearchParams(location.search).get('sample') === 'hub-spoke') { return hubSpokeArchitecture(); } } catch { /* Non-browser test environments use the default sample. */ }
+	try { const sample = new URLSearchParams(location.search).get('sample') ?? (location.hash.match(/^#(hub-spoke|estate)$/)?.[1] ?? null); if (sample === 'hub-spoke') { return hubSpokeArchitecture(); } if (sample === 'estate') { return estateArchitecture(); } } catch { /* Non-browser test environments use the default sample. */ }
 	return sampleArchitecture();
 }

@@ -1,5 +1,17 @@
 # CloudForge Code OSS handoff
 
+## Studio pass 10 (Claude) — 26 November 2026
+
+Miro-style connectors: Ctrl/Cmd free drop, Shift 45° steps, editable dependency lines (curve/straight/elbow, style, weight, colour, per line or all) and redesigned canvas menus, on `claude/project-thread-2irlth` (merged to main 26 November 2026). See "Studio pass 10" in the [Studio continuation](extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md).
+
+## Studio pass 9 (Claude) — 26 November 2026
+
+Object (nested) variables bound as `var.NAME.a.b`, readable field labels, On/Off toggles and a larger resource workspace, on `claude/project-thread-2irlth` (merged to main 26 November 2026). See "Studio pass 9" in the [Studio continuation](extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md).
+
+## Technical Graph pass 8 (Claude) — 26 November 2026
+
+Branch `claude/project-thread-2irlth`, merged to main 26 November 2026: scope spotlight, multi-cloud estate sample (126 resources), separated scope clusters, AWS/GCP core icons and a browser test view (`extensions/cloudforge/studio/scripts/build-test-view.mjs`). Details, checks and a test checklist are under "Technical Graph pass 8" in the [Studio continuation](extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md).
+
 ## Approved main merge and complete continuation handoff — 26 November 2026
 
 Dale explicitly requested **push, merge and complete the handoff**, superseding the historical local-only/no-merge notes below for these checkpoints. Integration owner: Codex. Desktop main `4bb840d2718` is merged with installed verification `8b3d5dee698` and readiness repair `cb1c18465b7` in the owned `codex/provider-installed-verification` worktree. The installer upgrade record and all Technical Graph/design work are preserved. Resolve the final desktop integration SHA with `git log -1 --grep="Merge provider mirror workflow fixes"`; the push destination is `fXrazor/vscode` main and the retained feature branch.

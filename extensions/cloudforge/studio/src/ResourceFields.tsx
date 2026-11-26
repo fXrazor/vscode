@@ -2,20 +2,22 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-import type { Dispatch } from 'react';
+import { Code2 } from 'lucide-react';
+import { useState, type Dispatch } from 'react';
 import type { Action, Architecture, Resource, ResourceBlock } from './model.ts';
 import { resourceDefinition } from './fixture.ts';
 import { ResourceIconPicker } from './ResourceIconPicker.tsx';
 import { additionalBlocks, editableFields, fieldIssue, type BlockDefinition } from './formDefinition.ts';
 import { SchemaField } from './SchemaField.tsx';
-import { bindingKey, canBindField, eligibleReferenceTargets, fieldDefinition, fieldTargetPath, regionAttribute, resourceRefBindingIssue, variableBindingIssue, type FieldTarget } from './fieldBindings.ts';
-import { inheritedReference, inheritedReferences, isResourceContainer, resourcePlacement, visualParentId, visualResourcePlacement } from './resourceHierarchy.ts';
+import { bindingKey, canBindField, eligibleReferenceTargets, fieldDefinition, fieldTargetPath, regionAttribute, resourceRefBindingIssue, variableBindingIssue, type FieldTarget, type ListEntry } from './fieldBindings.ts';
+import { inheritedReference, inheritedReferences, isResourceContainer, resourcePlacement, terraformIdentifier, visualParentId, visualResourcePlacement } from './resourceHierarchy.ts';
 import { formCoverageGaps, type HostFormSchema, type LiveSchemaMap } from './liveSchema.ts';
 import type { HostCloudRegionsPayload, HostModuleInspection } from './webviewBridge.ts';
 import { resolveProviderRegions } from './serviceAdapter.ts';
 import { fieldImpact } from './fieldImpact.ts';
 import { getDef, indexedVersion } from './cloudlab-core/catalog/index.ts';
 import { providerFormEvidence } from './providerCatalogue.ts';
+import { fieldLabel } from './fieldLabel.ts';
 import { additionalTerraformItems, dynamicBlockConfigured, extraFieldValue, terraformValueText } from './additionalTerraform.ts';
 
 // Visibility only: leave optional capacity unset until the user supplies a value.
@@ -51,7 +53,7 @@ function fieldState(resource:Resource,architecture:Architecture|undefined,target
 	const key = bindingKey(target);
 	const canBind = !!architecture && canBindField(resource, target);
 	const extra = extraFieldValue(resource,target);
-	return {path:path.join('.'),impact:fieldImpact(resource,path,liveSchemas?.[resourceDefinition(resource).type]),...(canBind?{variables:architecture.variables??[],onManageVariables,binding:resource.fieldBindings?.[key],onBind:(variableId?:string)=>dispatch({type:'bindVariable',id:resource.id,target,variableId}),resourceReference:definition?.refTypes?.length?{binding:resource.resourceRefs?.[key],candidates:eligibleReferenceTargets(architecture,resource,definition,liveSchemas),architecture,resource,onSelect:(refs?:{resourceId:string;attribute:string}[])=>dispatch({type:'bindResourceRef',id:resource.id,target,refs}),onReveal:onRevealResource}:undefined}:{}),
+	return {path:path.join('.'),impact:fieldImpact(resource,path,liveSchemas?.[resourceDefinition(resource).type]),...(canBind?{variables:architecture.variables??[],onManageVariables,binding:resource.fieldBindings?.[key],onBind:(variableId?:string,path?:string[])=>dispatch({type:'bindVariable',id:resource.id,target,variableId,path}),list:definition?.type==='list'?{binding:resource.resourceRefs?.[key],candidates:definition.refTypes?.length?eligibleReferenceTargets(architecture,resource,definition,liveSchemas):[],issue:resourceRefBindingIssue(resource.resourceRefs?.[key],architecture,resource,definition),onChange:(items:ListEntry[]|null)=>dispatch({type:'setListEntries',id:resource.id,target,items})}:undefined,resourceReference:definition?.refTypes?.length?{binding:resource.resourceRefs?.[key],candidates:eligibleReferenceTargets(architecture,resource,definition,liveSchemas),architecture,resource,onSelect:(refs?:{resourceId:string;attribute:string}[])=>dispatch({type:'bindResourceRef',id:resource.id,target,refs}),onReveal:onRevealResource}:undefined}:{}),
 		...(extra!==undefined?{terraform:{expression:terraformValueText(extra),onConfigure:onConfigureTerraform?()=>onConfigureTerraform(path.at(-1)):undefined}}:{}),
 		inheritance:available?{available,reference:architecture&&inheritedReference(architecture,resource,path),onInherit:(enabled:boolean)=>dispatch({type:'useInheritance',id:resource.id,target,enabled}),onReveal:onRevealResource}:undefined};
 }
@@ -100,7 +102,7 @@ export function ResourceFields({ resource, dispatch, architecture, compactMetada
 				<summary>Metadata<span className="schema-type">{resourceDefinition(resource).type}</span></summary>
 				<div className="form-section-body">
 					<SchemaField name="Resource name" value={resource.name} definition={{name:'name',type:'string',description:'The resource name. A variable changes the Terraform value; the identifier stays stable.'}} onChange={value => dispatch({ type:'update', id:resource.id, patch:{name:value} })} {...binding({kind:'name'})}/>
-					<label>Terraform identifier<input readOnly value={resource.terraformName ?? resource.name.replace(/[^A-Za-z0-9_-]/g, '_').replace(/^[^A-Za-z_]/, '_$&')} /></label>
+					<TerraformIdentifierField resource={resource} architecture={architecture} dispatch={dispatch} sourceBacked={!!hasSource} onOpenSource={onOpenSource} />
 					<label>Project Terraform file
 						<div className="source-file-row">
 							<input readOnly value={(resource.sourceFile ?? 'main.tf') + (resource.sourceLine ? ':' + resource.sourceLine : '')} />
@@ -182,9 +184,9 @@ export function ResourceFields({ resource, dispatch, architecture, compactMetada
 			)}
 			<NestedBlocks blocks={resource.blocks} definitions={additionalBlocks(resource, liveSchemas)} scope="resource" resource={resource} architecture={architecture} dispatch={dispatch} onManageVariables={onManageVariables} onRevealResource={onRevealResource} liveSchemas={liveSchemas} onConfigureTerraform={onConfigureTerraform}
 				onChange={blocks => dispatch({ type: 'update', id: resource.id, patch: { blocks } })} />
-			{(resource.catalogue || liveSchema) && <details className="form-section advanced-properties"><summary>Advanced properties<span className="schema-type">{liveSchema ? liveSchema.providerSource + ' ' + liveSchema.providerVersion : 'Optional additions'}</span></summary><div className="form-section-body"><p className="field-help">{liveSchema ? 'Add optional arguments from the imported Rust provider schema. Check its version against your architecture lock file. Required arguments stay in Main Parameters.' : 'Add optional arguments from the bundled catalogue. Required arguments stay in Main Parameters.'}</p><label className="add-provider-property">Add property<select aria-label="Add provider property" value="" onChange={event=>{const field=properties.find(field=>field.name===event.target.value);if(field) {dispatch({type:'update',id:resource.id,patch:{settings:{...resource.settings,[field.name]:field.default===undefined?'':typeof field.default==='string'?field.default:JSON.stringify(field.default)}}});}}}><option value="">Choose an optional property…</option>{properties.filter(field=>!field.required&&!['name','location','region'].includes(field.name)&&!paths.has(field.name)).map(field=><option key={field.name} value={field.name}>{field.name} · {field.type}</option>)}</select></label></div></details>}
+			{(resource.catalogue || liveSchema) && <details className="form-section advanced-properties"><summary>Advanced properties<span className="schema-type">{liveSchema ? liveSchema.providerSource + ' ' + liveSchema.providerVersion : 'Optional additions'}</span></summary><div className="form-section-body"><p className="field-help">{liveSchema ? 'Add optional arguments from the imported Rust provider schema. Check its version against your architecture lock file. Required arguments stay in Main Parameters.' : 'Add optional arguments from the bundled catalogue. Required arguments stay in Main Parameters.'}</p><label className="add-provider-property">Add property<select aria-label="Add provider property" value="" onChange={event=>{const field=properties.find(field=>field.name===event.target.value);if(field) {dispatch({type:'update',id:resource.id,patch:{settings:{...resource.settings,[field.name]:field.default===undefined?'':typeof field.default==='string'?field.default:JSON.stringify(field.default)}}});}}}><option value="">Choose an optional property…</option>{properties.filter(field=>!field.required&&!['name','location','region'].includes(field.name)&&!paths.has(field.name)).map(field=><option key={field.name} value={field.name} title={field.description}>{fieldLabel(field.name)} ({field.name})</option>)}</select></label></div></details>}
    <p className="form-coverage">{liveSchema ? (liveSchema.selection?.lockedVersionVerified ? "Architecture lock matched · " : "Imported schema · ") + liveSchema.providerSource + " " + liveSchema.providerVersion : formEvidence?.schemaCapture ? "Captured provider schema · " + formEvidence.schemaCapture.provider + " " + formEvidence.schemaCapture.version + ". Compare this version with your architecture lock. Local shape checks do not replace provider validation." : "Schema details unavailable for this resource."}</p>
-   {onConfigureTerraform && <details className="form-section additional-configuration" open={additional.length>0}><summary>Additional configuration{additional.length>0&&<span className="schema-type">Configured in Terraform</span>}</summary><div className="form-section-body"><p className="field-help">Use Form for ordinary values, lists, maps and nested blocks. Terraform expressions and dynamic blocks use the same resource-scoped code editor and Undo history.</p>{additional.map(item=><div className="additional-config-item" key={item.path}><strong>{item.path}</strong><p className="field-help">{item.description}</p><button type="button" onClick={()=>onConfigureTerraform(item.query)}>Configure in Terraform</button></div>)}{additional.length===0&&<button type="button" onClick={()=>onConfigureTerraform()}>Configure in Terraform</button>}<p className="field-help">Additional code is preserved after Apply. Provider validation is shown only when available; Save still opens the guarded file review.</p>{formEvidence?.url&&<a href={liveSchema?.docsUrl || formEvidence.url} target="_blank" rel="noreferrer">Provider documentation for this resource</a>}{formEvidence?.exampleHcl&&<details className="provider-example"><summary>Provider documentation example</summary><p className="field-help">Captured from the recorded provider documentation and parsed locally. This example has not been executed or adapted to your resource; its compatibility with the selected schema has not been established.</p><pre>{formEvidence.exampleHcl}</pre></details>}</div></details>}
+   {onConfigureTerraform && <details className="form-section additional-configuration" open={additional.length>0}><summary>Additional configuration{additional.length>0&&<span className="schema-type">Configured in Terraform</span>}</summary><div className="form-section-body"><p className="field-help">Use Form for ordinary values, lists, maps and nested blocks. Terraform expressions and dynamic blocks use the same resource-scoped code editor and Undo history.</p>{additional.map(item=><div className="additional-config-item" key={item.path}><strong>{item.path}</strong><p className="field-help">{item.description}</p><button type="button" className="code-action" onClick={()=>onConfigureTerraform(item.query)}><Code2 size={14} aria-hidden="true"/>Configure in Terraform</button></div>)}{additional.length===0&&<button type="button" className="code-action" onClick={()=>onConfigureTerraform()}><Code2 size={14} aria-hidden="true"/>Configure in Terraform</button>}<p className="field-help">Additional code is preserved after Apply. Provider validation is shown only when available; Save still opens the guarded file review.</p>{formEvidence?.url&&<a href={liveSchema?.docsUrl || formEvidence.url} target="_blank" rel="noreferrer">Provider documentation for this resource</a>}{formEvidence?.exampleHcl&&<details className="provider-example"><summary>Provider documentation example</summary><p className="field-help">Captured from the recorded provider documentation and parsed locally. This example has not been executed or adapted to your resource; its compatibility with the selected schema has not been established.</p><pre>{formEvidence.exampleHcl}</pre></details>}</div></details>}
    {!liveSchema && formEvidence && <details className="form-coverage form-coverage-gaps"><summary>{formEvidence.unmappedArgumentNames.length || !formEvidence.argumentSectionRecognized ? 'Documentation differences from captured schema' : 'Documentation source and version'}</summary><p>{formEvidence.matchesDeclaredVersionTag ? 'Documentation matches the declared catalogue version.' : 'Documentation version applicability is unverified. Import the matching provider schema before relying on these fields.'}</p>{formEvidence.url && <a href={formEvidence.url} target="_blank" rel="noreferrer">Open recorded provider documentation</a>}{formEvidence.unmappedArgumentNames.length > 0 && <ul>{formEvidence.unmappedArgumentNames.map(name => <li key={name}><code>{name}</code> · absent from this captured provider schema</li>)}</ul>}</details>}
    {liveSchema?.coverage && (coverageGaps.length === 0
     ? <p className="form-coverage">No reported editable paths need a code-only editor · {liveSchema.coverage.paths} schema paths{liveSchema.coverage.readOnly ? ', ' + liveSchema.coverage.readOnly + ' read-only outputs' : ''}.</p>
@@ -207,6 +209,7 @@ function NestedBlocks({ blocks, definitions, scope, onChange, resource, architec
 	parentBlockId?: string;
 	onConfigureTerraform?: (query?:string)=>void;
 }) {
+	const [blockFilter, setBlockFilter] = useState('');
 	const available = definitions.filter(definition => blocks.filter(block => block.type === definition.type).length < definition.max);
 	return (
 		<div className="nested-blocks">
@@ -214,7 +217,7 @@ function NestedBlocks({ blocks, definitions, scope, onChange, resource, architec
 			const definition = definitions.find(item => item.type === block.type);
 				const label = definition?.label ?? block.type.replaceAll('_', ' ');
 				const fields = [...new Set([...(definition?.attributes ?? []).map(field => field.name), ...Object.keys(block.values)])];
-				const missing = fields.filter(name => { if(extraFieldValue(resource,{kind:'block',blockId:block.id,name})!==undefined){return false;} if(architecture&&inheritedReference(architecture,resource,fieldTargetPath(resource,{kind:'block',blockId:block.id,name}))){return false;} const key = bindingKey({kind:'block',blockId:block.id,name}); const attribute = definition?.attributes?.find(field => field.name === name); const refBind = resource.resourceRefs?.[key]; if (refBind?.refs.length) { return !!resourceRefBindingIssue(refBind, architecture, resource, attribute); } const binding = resource.fieldBindings?.[key]; return binding ? variableBindingIssue(binding,architecture?.variables??[],attribute) : fieldIssue(block.values[name] ?? '', attribute); }).length;
+				const missing = fields.filter(name => { if(extraFieldValue(resource,{kind:'block',blockId:block.id,name})!==undefined){return false;} if(architecture&&inheritedReference(architecture,resource,fieldTargetPath(resource,{kind:'block',blockId:block.id,name}))){return false;} const key = bindingKey({kind:'block',blockId:block.id,name}); const attribute = definition?.attributes?.find(field => field.name === name); const refBind = resource.resourceRefs?.[key]; if (refBind?.refs.length || refBind?.items?.length) { return !!resourceRefBindingIssue(refBind, architecture, resource, attribute); } const binding = resource.fieldBindings?.[key]; return binding ? variableBindingIssue(binding,architecture?.variables??[],attribute) : fieldIssue(block.values[name] ?? '', attribute); }).length;
 				function update(next: ResourceBlock) {
 					onChange(blocks.map(item => item.id === block.id ? next : item));
 				}
@@ -234,13 +237,34 @@ function NestedBlocks({ blocks, definitions, scope, onChange, resource, architec
 			})}
 			{definitions.filter(definition => definition.required && !blocks.some(block => block.type === definition.type) && !dynamicBlockConfigured(resource,definition.type,parentBlockId)).map(definition => <p className="required-block-notice" tabIndex={-1} data-block-type={definition.type} key={definition.type}>Required block: {definition.label}. Add it below to configure its fields.</p>)}
 			{available.length > 0 && <details className="add-blocks">
-				<summary>Add Blocks<span>＋</span></summary>
-				<div className="add-block-options">{available.map(definition => (
-					<button key={definition.type} aria-label={'Add ' + definition.label + ' to ' + scope} onClick={() => onChange([...blocks, {
+				<summary>Add blocks<small>{available.length}</small><span>＋</span></summary>
+				{available.length > 8 && <input className="add-block-filter" type="search" aria-label={'Filter blocks for ' + scope} placeholder="Filter blocks" value={blockFilter} onChange={event => setBlockFilter(event.target.value)} />}
+				<div className="add-block-options">{[...available].sort((a, b) => Number(!!b.required) - Number(!!a.required)).filter(definition => definition.label.toLowerCase().includes(blockFilter.trim().toLowerCase())).map(definition => (
+					<button key={definition.type} className={definition.required ? 'is-required' : undefined} aria-label={'Add ' + definition.label + ' to ' + scope} title={definition.type} onClick={() => onChange([...blocks, {
 						id: crypto.randomUUID(), type: definition.type, values: { ...definition.fields }, blocks: []
-					}])}>＋ {definition.label}<small>{definition.required ? 'Required · ' : ''}{definition.max === 1 ? 'Single block' : 'Repeatable block'}</small></button>
+					}])}><span aria-hidden="true">＋</span><strong>{fieldLabel(definition.label.replaceAll(' ', '_'))}</strong><small>{definition.required ? 'Required' : definition.max === 1 ? 'Single' : 'Repeatable'}</small></button>
 				))}</div>
 			</details>}
 		</div>
 	);
+}
+
+/** The local name in `resource "TYPE" "NAME"`: other resources refer to it as TYPE.NAME, and Terraform state is keyed by it. */
+function TerraformIdentifierField({ resource, architecture, dispatch, sourceBacked, onOpenSource }: { resource: Resource; architecture?: Architecture; dispatch: Dispatch<Action>; sourceBacked: boolean; onOpenSource?: () => void }) {
+	const current = terraformIdentifier(resource);
+	const [draft, setDraft] = useState<string | undefined>(undefined);
+	const value = draft ?? current;
+	const type = resourceDefinition(resource).type;
+	const issue = draft === undefined || draft === current ? undefined
+		: !/^[A-Za-z_][A-Za-z0-9_-]*$/.test(draft) ? 'Start with a letter or underscore; use letters, numbers, _ and - only.'
+		: architecture?.resources.some(item => item.id !== resource.id && resourceDefinition(item).type === type && terraformIdentifier(item) === draft) ? 'Another ' + type + ' already uses this identifier.' : undefined;
+	const commit = () => { if (draft !== undefined && draft !== current && !issue) { dispatch({ type: 'update', id: resource.id, patch: { terraformName: draft } }); } setDraft(undefined); };
+	const help = sourceBacked
+		? 'This block already exists in your Terraform files. Rename it in the code, together with a moved block, so Terraform does not plan to destroy and recreate it.'
+		: 'The name in resource "' + type + '" "' + current + '". Other resources reference it as ' + type + '.' + current + '. It is separate from the resource name above and does not change when you rename the resource.';
+	return <div className="terraform-identifier-field">
+		<label>Terraform identifier<input aria-describedby={resource.id + '-tfid-help'} readOnly={sourceBacked} aria-invalid={!!issue} value={value} spellCheck={false}
+			onChange={event => setDraft(event.target.value)} onBlur={commit} onKeyDown={event => { if (event.key === 'Enter') { commit(); } if (event.key === 'Escape') { setDraft(undefined); } }} /></label>
+		<p id={resource.id + '-tfid-help'} className={issue ? 'schema-field-error' : 'field-help'}>{issue ?? help}{sourceBacked && onOpenSource && !issue && <> <button type="button" className="quiet-button" onClick={onOpenSource}>Open code</button></>}</p>
+	</div>;
 }

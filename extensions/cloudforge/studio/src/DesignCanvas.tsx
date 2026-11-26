@@ -4,7 +4,8 @@
  *--------------------------------------------------------------------------------------------*/
 import { shapeDefinitions, type ShapeId } from './shapes.ts';
 import { DesignEdge, type DesignEdgeType } from './DesignEdge.tsx';
-import { ConnectionOverlays } from './ConnectionOverlays.tsx';
+import { ConnectionOverlays, labelIsAuthored } from './ConnectionOverlays.tsx';
+import { DependencyTools, dependencyStyle } from './DependencyTools.tsx';
 import { ConnectionCreate } from './ConnectionCreate.tsx';
 import { canConnect, connectionAnchor } from './designConnections.ts';
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type RefObject, type KeyboardEvent as ReactKeyboardEvent } from 'react';
@@ -17,7 +18,7 @@ import { PenOptions } from './PenOptions.tsx';
 import type { InkStyle } from './ink.ts';
 import { ConnectorDropMenu } from './ConnectorDropMenu.tsx';
 import { droppedItem } from './connectorDrop.ts';
-import { elementEndpoint, endpointElementId, needsConnectionOverlay, pointEndpoint } from './connectionEndpoints.ts';
+import { elementEndpoint, endpointElementId, needsConnectionOverlay, pointEndpoint, type EndpointPort } from './connectionEndpoints.ts';
 import { connectionPathBounds } from './connectionGeometry.ts';
 import { resizeBounds } from './resizeGeometry.ts';
 import { resourceIconSize } from './resourceGeometry.ts';
@@ -29,7 +30,7 @@ import { SelectionAnchor } from './SelectionAnchor.tsx';
 import { alignmentGuides, type GuideLine } from './alignmentGuides.ts';
 import { AlignmentGuides } from './AlignmentGuides.tsx';
 import {
-	Background, BackgroundVariant, MarkerType, MiniMap, ReactFlow, SelectionMode,
+	Background, BackgroundVariant, ConnectionMode, MarkerType, MiniMap, ReactFlow, SelectionMode,
 	useNodesState, useViewport, type OnNodesChange, type ReactFlowInstance, type Viewport
 } from '@xyflow/react';
 import { BoardNode, ResourceNode, type CanvasNode } from './ResourceNode.tsx';
@@ -95,6 +96,7 @@ export const DesignCanvas = memo(function DesignCanvas({
 	const [minimap, setMinimap] = useState(false);
 	const [zoom, setZoom] = useState(1);
 	const [selectedConnectionId, setSelectedConnectionId] = useState('');
+	const [dependencyPick, setDependencyPick] = useState<{ id: string; left: number; top: number }>();
 	const [showConnections, setShowConnections] = useState(true);
 	const [allDependencies, setAllDependencies] = useState(false);
 	const [dropFeedback, setDropFeedback] = useState<{target?:string;ok:boolean;reason:string}>();
@@ -106,6 +108,13 @@ export const DesignCanvas = memo(function DesignCanvas({
 	const [editRequest, setEditRequest] = useState({ id: '', token: 0 });
 	const selectedConnection = architecture.connections.find(connection => connection.id === selectedConnectionId);
 	const bounds = useRef<HTMLDivElement>(null);
+	// Ctrl / Cmd held while drawing a connector turns off snapping to elements.
+	const freeDrop = useRef(false);
+	useEffect(() => {
+		const track = (event: KeyboardEvent | PointerEvent) => { freeDrop.current = event.ctrlKey || event.metaKey; };
+		window.addEventListener('keydown', track, true); window.addEventListener('keyup', track, true); window.addEventListener('pointermove', track, true);
+		return () => { window.removeEventListener('keydown', track, true); window.removeEventListener('keyup', track, true); window.removeEventListener('pointermove', track, true); };
+	}, []);
 	// An automatic first fit is redone when panels settle (e.g. the inspector opens on load), until the user moves the view.
 	const autoFit = useRef<{ mode?: DesignMode; at: number }>({ at: 0 });
 	useEffect(() => {
@@ -124,6 +133,7 @@ export const DesignCanvas = memo(function DesignCanvas({
 	const diagnostics = useMemo(() => architectureDiagnostics(architecture), [architecture]);
 	const dependencies = useMemo(() => inheritedDependencies(architecture), [architecture]);
 	const relationships = useMemo(() => infrastructureRelationships(architecture), [architecture]);
+	const selectedDependency = dependencyPick && dependencies.find(dependency => dependency.id === dependencyPick.id);
 	// The Technical Graph is a separate renderer (TechnicalGraph.tsx); this canvas only authors the design.
 	const resourcePosition = (id: string): Position => architecture.resources.find(resource => resource.id === id)?.positions[mode] ?? { x: 0, y: 0 };
 
@@ -187,11 +197,11 @@ export const DesignCanvas = memo(function DesignCanvas({
 		type: 'design' as const, selected: connection.id === selectedConnectionId, hidden: !showConnections,
 		markerStart: connection.startArrow ? { type: MarkerType.ArrowClosed, color: connection.stroke ?? '#7565bd', width: 15, height: 15 } : undefined,
 		markerEnd: connection.endArrow === false ? undefined : { type: MarkerType.ArrowClosed, color: connection.stroke ?? '#7565bd', width: 15, height: 15 },
-		data: { connection, showLabel: showLabels }, ariaLabel: 'Design connection: ' + (connection.label || endpointElementId(connection.source) + ' to ' + endpointElementId(connection.target))
+		data: { connection, showLabel: showLabels || labelIsAuthored(connection) }, ariaLabel: 'Design connection: ' + (connection.label || endpointElementId(connection.source) + ' to ' + endpointElementId(connection.target))
 	})), ...dependencies.map(dependency=>{
 		const active=selectedIds.includes(dependency.source)||selectedIds.includes(dependency.target);
-			return {...dependency,sourceHandle:'output',targetHandle:'input',type:'design' as const,hidden:!showConnections||!active&&!allDependencies,animated:false,className:'infrastructure-dependency',data:{connection:{...dependency,source:elementEndpoint(dependency.source),target:elementEndpoint(dependency.target),pattern:'dotted' as const,label:dependency.fields.join(', '),endArrow:false},showLabel:showLabels||active,dependency:true},ariaLabel:'Inherited dependency: '+dependency.fields.join(', ')};
-		})], [architecture.connections, selectedConnectionId, showConnections, showLabels, dependencies, mode, allDependencies, selectedIds]);
+			return {...dependency,sourceHandle:'output',targetHandle:'input',type:'design' as const,hidden:!showConnections||!active&&!allDependencies&&dependency.id!==selectedDependency?.id,animated:false,className:'infrastructure-dependency',selected:dependency.id===selectedDependency?.id,data:{connection:{...dependency,source:elementEndpoint(dependency.source),target:elementEndpoint(dependency.target),pattern:'dotted' as const,...dependencyStyle(architecture,dependency.id),label:dependency.fields.join(', '),endArrow:false},showLabel:showLabels||active||dependency.id===selectedDependency?.id,dependency:true},ariaLabel:'Inherited dependency: '+dependency.fields.join(', ')};
+		})], [architecture.connections, selectedConnectionId, showConnections, showLabels, dependencies, mode, allDependencies, selectedIds, architecture.dependencyStyles, selectedDependency]);
 
 	function createItem(kind: BoardItem['kind']) {
 		if (mode !== 'visual') { return; }
@@ -226,7 +236,7 @@ export const DesignCanvas = memo(function DesignCanvas({
 	}
 	function run(action: SelectionAction) {
 		const ids = expandGroups(architecture, selectedIds);
-		if (action === 'clear') { onSelectionChange([]); setSelectedConnectionId(''); setCreatingConnection(false); setAdditiveSelection(false); bounds.current?.focus(); }
+		if (action === 'clear') { onSelectionChange([]); setSelectedConnectionId(''); setDependencyPick(undefined); setCreatingConnection(false); setAdditiveSelection(false); bounds.current?.focus(); }
 		else if (action === 'selectAll') { onSelectionChange(canvasElements(architecture).map(item => item.id)); }
 		else if (action === 'copy') { copySelection(); }
 		else if (action === 'paste') { if (clipboard.current) { insertCopy(clipboard.current); } }
@@ -380,14 +390,25 @@ export const DesignCanvas = memo(function DesignCanvas({
 				nodes={(nodes[0]?.data.mode===mode ? nodes : displayNodes).map(node=>({...node,className:dropFeedback?.target===node.id?'container-drop-'+(dropFeedback.ok?'valid':'invalid'):undefined}))} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange}
 				onInit={instance => { setFlow(instance); setZoom(instance.getZoom()); onInit(instance); if(!viewports.current[mode]){autoFit.current={mode,at:performance.now()};requestAnimationFrame(()=>{void instance.fitView({padding:canvasFitPadding,maxZoom:1}).then(()=>{viewports.current[mode]=instance.getViewport();setZoom(instance.getZoom());});});} }}
 				onMoveStart={event => { if (event) { autoFit.current = { at: 0 }; } }}
-				onConnect={connection => dispatch({ type: 'connect', source: connection.source, target: connection.target })}
+				onConnect={connection => {
+					// Default sides keep the compact form; any other side (top, bottom, a reversed side) is stored on the endpoint.
+					const from = connection.sourceHandle ?? 'output'; const to = connection.targetHandle ?? 'input';
+					if (from === 'output' && to === 'input') { dispatch({ type: 'connect', source: connection.source, target: connection.target }); return; }
+					dispatch({ type: 'connectEndpoints', id: crypto.randomUUID(), source: elementEndpoint(connection.source, from as EndpointPort), target: elementEndpoint(connection.target, to as EndpointPort) });
+				}}
+				connectionMode={ConnectionMode.Loose}
 				onConnectEnd={(event, state) => {
 					// A connector released on empty canvas offers to create the element it points at.
 					const client = 'changedTouches' in event ? event.changedTouches[0] : event; const area = bounds.current?.getBoundingClientRect();
+					// Holding Ctrl / Cmd drops a free end where the pointer is, even over another element (no snapping).
+					if (freeDrop.current && mode === 'visual' && state.fromNode && state.fromHandle?.type === 'source' && flow && client) {
+						const id = crypto.randomUUID(); dispatch({ type: 'connectEndpoints', id, source: elementEndpoint(state.fromNode.id), target: pointEndpoint(flow.screenToFlowPosition({ x: client.clientX, y: client.clientY })) });
+						onSelectionChange([]); setSelectedConnectionId(id); setShowConnections(true); return;
+					}
 					if (mode !== 'visual' || state.isValid || state.toNode || !state.fromNode || state.fromHandle?.type !== 'source' || !flow || !area || !(client && (event.target as Element | null)?.closest?.('.react-flow__pane'))) { return; }
 					setConnectorDrop({ source: state.fromNode.id, point: flow.screenToFlowPosition({ x: client.clientX, y: client.clientY }), left: Math.min(client.clientX - area.left + 8, area.width - 196), top: Math.min(client.clientY - area.top - 12, area.height - 236) });
 				}}
-				isValidConnection={connection => mode === 'visual' && canConnect(architecture, connection.source, connection.target)}
+				isValidConnection={connection => mode === 'visual' && !freeDrop.current && canConnect(architecture, connection.source, connection.target)}
 				minZoom={0.1} maxZoom={20}
 				onSelectionEnd={() => requestAnimationFrame(() => onSelectionChange(expandGroups(architecture, (flow?.getNodes() ?? []).filter(node => node.selected).map(node => node.id))))}
 				onNodeClick={(event, node) => {
@@ -399,8 +420,12 @@ export const DesignCanvas = memo(function DesignCanvas({
 						} else { onSelectionChange(group); if(node.type==='resource'&&group.length===1){onOpen(node.id);} }
 					}
 				}}
-				onPaneClick={() => { setSelectedConnectionId(''); onSelect(''); }}
-				onEdgeClick={(_, edge) => { setCreatingConnection(false); if(edge.data?.dependency){onOpen(edge.target);}else{setSelectedConnectionId(edge.id); onSelect('');} }}
+				onPaneClick={() => { setSelectedConnectionId(''); setDependencyPick(undefined); onSelect(''); }}
+				onEdgeClick={(event, edge) => { setCreatingConnection(false); if(edge.data?.dependency){
+					// A dependency line is selected for its appearance tools; Enter or the tools open its target.
+					const area = bounds.current?.getBoundingClientRect(); if (!area) { return; }
+					setSelectedConnectionId(''); setDependencyPick({ id: edge.id, left: Math.max(12, Math.min(event.clientX - area.left + 12, area.width - 372)), top: Math.max(12, Math.min(event.clientY - area.top + 12, area.height - 236)) });
+				}else{setDependencyPick(undefined); setSelectedConnectionId(edge.id); onSelect('');} }}
 				onNodeDoubleClick={(_, node) => { if (node.type === 'resource') { onOpenDetails(node.id); } }}
 				onNodeDragStart={(_, node, moved) => { autoFit.current = { at: 0 }; onSelectionChange(expandGroups(architecture, (moved.length ? moved : [node]).map(item=>item.id))); }}
 				onNodeDrag={(event,node,moved)=>{if(moved.length<=1&&'clientX' in event){setDropFeedback(placementAt(node,event));}}}
@@ -421,6 +446,7 @@ export const DesignCanvas = memo(function DesignCanvas({
 				{minimap && <MiniMap<CanvasNode> pannable zoomable nodeColor={node => node.type === 'board' && node.data.item.kind === 'frame' ? 'transparent' : '#8e79d9'} />}
 				{!creatingConnection && !selectedConnection && selectedIds.some(id=>canvasElements(architecture).some(item=>item.id===id)) && <SelectionAnchor ids={selectedIds.filter(id=>canvasElements(architecture).some(item=>item.id===id))} canvas={bounds}>{mode === 'visual' ? <SelectionControls architecture={architecture} ids={selectedIds} dispatch={dispatch} run={run} hasClipboard={hasClipboard} mode={mode} onInspect={onOpen} container={bounds.current}/> : <section className="selection-controls" aria-label="Graph inspection controls">{selectedIds.length === 1 && architecture.resources.some(resource => resource.id === selectedIds[0]) && <button onClick={() => onOpenDetails(selectedIds[0])}>Inspect resource</button>}<button onClick={() => run('fit')}>Focus selection</button><button onClick={() => run('clear')}>Clear selection</button></section>}</SelectionAnchor>}
 			</ReactFlow>
+			{selectedDependency && dependencyPick && mode === 'visual' && <DependencyTools architecture={architecture} dependency={selectedDependency} at={dependencyPick} dispatch={dispatch} onOpen={id => { setDependencyPick(undefined); onOpen(id); }} onClose={() => { setDependencyPick(undefined); bounds.current?.focus(); }}/>}
 			{connectorDrop && <ConnectorDropMenu at={connectorDrop} onClose={() => { setConnectorDrop(undefined); bounds.current?.focus(); }} onKeepLooseEnd={() => {
 				const id = crypto.randomUUID(); dispatch({ type: 'connectEndpoints', id, source: elementEndpoint(connectorDrop.source), target: pointEndpoint(connectorDrop.point) });
 				setConnectorDrop(undefined); onSelectionChange([]); setSelectedConnectionId(id); setShowConnections(true); bounds.current?.focus();
@@ -437,7 +463,7 @@ export const DesignCanvas = memo(function DesignCanvas({
 				<label title="Snap to aligned edges and centres, or to equal spacing between neighbours, within 6 screen pixels. Grid snapping takes precedence."><input type="checkbox" checked={guides} onChange={event => {setGuides(event.target.checked);setGuideLines([]);}} />Alignment guides</label>
 				<label><input type="checkbox" checked={showConnections} onChange={event => setShowConnections(event.target.checked)} />Show connections</label>
 				<label><input type="checkbox" checked={allDependencies} onChange={event=>setAllDependencies(event.target.checked)}/>All inherited dependencies</label>
-				<label><input type="checkbox" checked={showLabels} onChange={event => setShowLabels(event.target.checked)} />Always show connection labels</label>
+				<label><input type="checkbox" checked={showLabels} onChange={event => setShowLabels(event.target.checked)} />Show automatic and dependency labels</label>
 				<button aria-pressed={minimap} onClick={() => setMinimap(value => !value)}>Minimap</button>
 				<details className="canvas-shortcuts"><summary>Keyboard shortcuts</summary><p>Ctrl / Cmd + click: extend selection<br/>Shift + drag: select an area<br/>Arrows: move 1 px; Shift + arrows: 10 px<br/>Enter: edit; Escape: clear selection<br/>V: select; H: pan; P: pen; T: text; N: note<br/>[ and ]: rotate drawings 15° (Shift: 1°)<br/>F: focus selection; Space + drag: pan<br/>Alt + F10: move to the selection toolbar; Escape: back to the canvas<br/>Copy, duplicate, group and layer actions are in the selection menu.</p></details>
 			</div></details>

@@ -1,4 +1,5 @@
 import type { CatalogueEntry, Provider } from './model.ts';
+import { coreIcon } from './coreIcons.ts';
 
 export interface CatalogueSnapshot { provider: Provider; version: string; source: string; entries: CatalogueEntry[]; }
 const snapshots = new Map<Provider, Promise<CatalogueSnapshot>>();
@@ -10,7 +11,7 @@ export function loadCatalogue(provider: Provider): Promise<CatalogueSnapshot> {
   snapshot = fetch('./assets/catalogue/' + provider + '.json').then(async response => {
    if (!response.ok) { throw new Error('The provider catalogue could not be loaded.'); }
    const value = await response.json() as CatalogueSnapshot;
-   return { ...value, entries: value.entries.map(entry => ({ ...entry, providerVersion: value.version, providerSource: value.source })) };
+   return { ...value, entries: value.entries.map(entry => ({ ...entry, icon: coreIcon(entry.type, entry.icon), providerVersion: value.version, providerSource: value.source })) };
   }).catch(error => { snapshots.delete(provider); throw error; });
   snapshots.set(provider, snapshot);
  }
