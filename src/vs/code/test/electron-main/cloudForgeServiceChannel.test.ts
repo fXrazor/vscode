@@ -753,6 +753,44 @@ suite('CloudForgeServiceChannel', () => {
 		assert.strictEqual(validateCloudForgeServiceParams('checkTemplateCompatibility', { ...scoped, expectedSourceRevision: 'abc' }), undefined);
 		assert.strictEqual(validateCloudForgeServiceParams('checkTemplateCompatibility', { workspaceId: 'workspace-1', templateId: 'cloudforge.azure.basic-vnet' }), undefined);
 		assert.strictEqual(validateCloudForgeServiceParams('checkTemplateCompatibility', { ...scoped, rootPath: 'C:/x' }), undefined);
+
+		assert.deepStrictEqual(validateCloudForgeServiceParams('listTemplateSources', {}), {});
+		assert.strictEqual(validateCloudForgeServiceParams('listTemplateSources', { url: 'https://evil' }), undefined);
+
+		assert.deepStrictEqual(validateCloudForgeServiceParams('importTemplatePackageFile', {}), {});
+		assert.deepStrictEqual(validateCloudForgeServiceParams('importTemplatePackageFile', { replace: true, acceptHighRisk: false }), { replace: true, acceptHighRisk: false });
+		assert.strictEqual(validateCloudForgeServiceParams('importTemplatePackageFile', { archivePath: 'C:\\x.zip' }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('importTemplatePackageFile', { replace: 'yes' }), undefined);
+
+		assert.deepStrictEqual(validateCloudForgeServiceParams('removeCachedTemplate', { templateId: 'example.team.net', version: '1.0.0' }), { templateId: 'example.team.net', version: '1.0.0' });
+		assert.strictEqual(validateCloudForgeServiceParams('removeCachedTemplate', { templateId: 'example.team.net' }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('removeCachedTemplate', { templateId: '..', version: '1.0.0' }), undefined);
+	});
+
+	test('picks a template package in Electron main for importTemplatePackageFile and blocks UNC paths', async () => {
+		const cancelled = createBroker([contosoWindow]);
+		assert.deepStrictEqual(await cancelled.call(1, 'importTemplatePackageFile', {}), {
+			ok: false,
+			error: { code: 'CANCELLED', message: 'The CloudForge request was cancelled.' }
+		});
+		assert.deepStrictEqual(cancelled.dialogs.map(dialog => dialog.properties), [['openFile']]);
+		assert.deepStrictEqual(cancelled.callsByWindow(), { 1: [] });
+
+		const unc = createBroker([contosoWindow], { picked: ['\\\\server\\share\\template.zip'] });
+		assert.strictEqual((await unc.call(1, 'importTemplatePackageFile', {})).ok, false);
+		assert.deepStrictEqual(unc.callsByWindow(), { 1: [] });
+
+		const local = createBroker([contosoWindow], {
+			picked: ['D:\\Templates\\my-network.zip'],
+			reply: () => ({ imported: true, outcome: 'added', templateId: 'example.team.my-network', version: '1.0.0' })
+		});
+		const imported = await local.call(1, 'importTemplatePackageFile', { replace: true });
+		assert.strictEqual(imported.ok, true);
+		assert.deepStrictEqual(local.callsByWindow(), {
+			1: [{ method: 'importTemplatePackageFile', params: { replace: true, archivePath: 'D:\\Templates\\my-network.zip' } }]
+		});
+
+		await Promise.all([cancelled, unc, local].map(item => item.broker.stop()));
 	});
 
 	test('validates downloadProviderPackage params', () => {

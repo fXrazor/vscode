@@ -45,7 +45,8 @@ const cloudForgeMethods: ReadonlySet<string> = new Set<CloudForgeServiceMethod>(
 	'detectEngines', 'runEngineValidate', 'runEnginePlan',
 	'listMirrorPackages', 'checkOfflineMirrorReadiness', 'runEngineInitOffline', 'extractProviderSchemaFromMirror',
 	'importMirrorPackage', 'downloadProviderPackage', 'listProviderVersions', 'evictMirrorPackage', 'verifyMirrorIntegrity', 'planMirrorCleanup',
-	'listTemplates', 'getTemplateDetails', 'checkTemplateCompatibility'
+	'listTemplates', 'getTemplateDetails', 'checkTemplateCompatibility',
+	'listTemplateSources', 'importTemplatePackageFile', 'removeCachedTemplate'
 ]);
 
 /** The service allows `installGit` 10 minutes; the broker waits a little longer for its reply. */
@@ -875,6 +876,25 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 			}
 			return { templateId: value.templateId, ...(value.version === undefined ? {} : { version: value.version }) };
 		}
+		case 'importTemplatePackageFile': {
+			// `archivePath` is broker-owned: it comes from the Electron-main native picker only.
+			if (!hasOnlyKeys(value, ['replace', 'acceptHighRisk'])) {
+				return undefined;
+			}
+			if ((value.replace !== undefined && typeof value.replace !== 'boolean') || (value.acceptHighRisk !== undefined && typeof value.acceptHighRisk !== 'boolean')) {
+				return undefined;
+			}
+			return {
+				...(value.replace === undefined ? {} : { replace: value.replace }),
+				...(value.acceptHighRisk === undefined ? {} : { acceptHighRisk: value.acceptHighRisk })
+			};
+		}
+		case 'removeCachedTemplate': {
+			if (!hasOnlyKeys(value, ['templateId', 'version']) || !isTemplateId(value.templateId) || !isTemplateVersion(value.version)) {
+				return undefined;
+			}
+			return { templateId: value.templateId, version: value.version };
+		}
 		case 'checkTemplateCompatibility': {
 			if (!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'expectedSourceRevision', 'templateId', 'version']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId) || !isTemplateId(value.templateId)) {
 				return undefined;
@@ -996,6 +1016,7 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 		case 'detectEngines':
 		case 'listMirrorPackages':
 		case 'verifyMirrorIntegrity':
+		case 'listTemplateSources':
 			return hasOnlyKeys(value, []) ? {} : undefined;
 		case 'listCloudRegions': {
 			if (!hasOnlyKeys(value, ['provider', 'scope', 'configuredRegions'])) {
@@ -1088,6 +1109,8 @@ export interface ICloudForgeRequestContext {
 	pickSchemaFile?(): Promise<string | undefined>;
 	/** Opens a native provider `.zip` archive picker owned by the calling window. `undefined` when cancelled. */
 	pickMirrorArchive?(): Promise<string | undefined>;
+	/** Opens a native template package `.zip` picker owned by the calling window. `undefined` when cancelled. */
+	pickTemplatePackage?(): Promise<string | undefined>;
 }
 
 export type CloudForgeResolvedRequest =
@@ -1144,6 +1167,16 @@ export async function resolveCloudForgeRequest(method: CloudForgeServiceMethod, 
 		}
 		case 'importMirrorPackage': {
 			const archivePath = await context.pickMirrorArchive?.();
+			if (archivePath === undefined) {
+				return { kind: 'failure', code: 'CANCELLED' };
+			}
+			if (!isLocalPath(archivePath)) {
+				return { kind: 'failure', code: 'SCOPE_DENIED' };
+			}
+			return { kind: 'call', params: { ...params, archivePath } };
+		}
+		case 'importTemplatePackageFile': {
+			const archivePath = await context.pickTemplatePackage?.();
 			if (archivePath === undefined) {
 				return { kind: 'failure', code: 'CANCELLED' };
 			}
@@ -1236,7 +1269,8 @@ export class CloudForgeServiceBroker implements IServerChannel<string> {
 				resolveScope: () => resolveCloudForgeWindowScope(window.openedWorkspace, configPath => this.workspacesManagementMainService.resolveLocalWorkspace(configPath)),
 				pickParentFolder: () => this.pickParentFolder(window.win ?? undefined),
 				pickSchemaFile: () => this.pickSchemaFile(window.win ?? undefined),
-				pickMirrorArchive: () => this.pickMirrorArchive(window.win ?? undefined)
+				pickMirrorArchive: () => this.pickMirrorArchive(window.win ?? undefined),
+				pickTemplatePackage: () => this.pickTemplatePackage(window.win ?? undefined)
 			});
 			if (request.kind === 'failure') {
 				return safeFailure(new CloudForgeServiceError(request.code)) as T;
@@ -1312,6 +1346,19 @@ export class CloudForgeServiceBroker implements IServerChannel<string> {
 			buttonLabel: localize('cloudForge.importMirrorArchive', "Import Archive"),
 			properties: ['openFile'],
 			filters: [{ name: localize('cloudForge.providerZipFilter', "Provider Archive (.zip)"), extensions: ['zip'] }]
+		}, window);
+		if (result.canceled || result.filePaths.length !== 1) {
+			return undefined;
+		}
+		return result.filePaths[0];
+	}
+
+	private async pickTemplatePackage(window: electron.BrowserWindow | undefined): Promise<string | undefined> {
+		const result = await this.dialogMainService.showOpenDialog({
+			title: localize('cloudForge.pickTemplatePackage', "Choose a CloudForge Template Package (.zip)"),
+			buttonLabel: localize('cloudForge.importTemplatePackage', "Import Template"),
+			properties: ['openFile'],
+			filters: [{ name: localize('cloudForge.templateZipFilter', "CloudForge Template Package (.zip)"), extensions: ['zip'] }]
 		}, window);
 		if (result.canceled || result.filePaths.length !== 1) {
 			return undefined;
