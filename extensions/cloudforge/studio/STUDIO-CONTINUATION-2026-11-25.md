@@ -1,5 +1,11 @@
 # Studio continuation checkpoint — 25 November 2026
 
+## Technical Graph `WhyPanel` shortest dependency path tracer & spotlight-aware SVG/PNG export — 26 November 2026
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `df2168b7270`, owner Antigravity.
+- **Scope:** surfaced `shortestSnapshotPath()` inside `WhyPanel` via a collapsed `<details className="tg-why-pathfind">` (`src/TechnicalGraph.tsx`, `src/technical-graph.css`) with bidirectional shortest-path tracing, hop-by-hop clickable links + Terraform field provenance, and live path highlighting across React Flow, Network (`ForceGraph`), and Bundled views (view-local state, zero Undo steps); added colour-preserving Scope Spotlight dimming (`opacity="0.22"` / `opacity="0.12"`, zero grayscale) to `technicalGraphSvg()` (`src/technicalGraphExport.ts`, `src/TechnicalGraph.tsx`) plus unit test in `src/technicalGraph.test.ts`.
+- **Fresh checks:** Studio `tsc --noEmit` **PASS**, **233/233** Studio tests (0 skipped), Studio `build` + `esbuild.webview.mts` **PASS**, `oxlint` & `hygiene` **PASS**, Windows Edge `technical-view-verify.mjs` **64/64 PASS** + live `WhyPanel` path-tracer & spotlight SVG export check **PASS** (0 browser errors, 0 Undo steps).
+
 ## Alt+Drag direct clone & 1024px floating selection toolbar fix — 26 November 2026
 
 - **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `e58ba69c4dd`, owner Antigravity.

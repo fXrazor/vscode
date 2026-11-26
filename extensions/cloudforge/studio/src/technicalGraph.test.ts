@@ -442,3 +442,20 @@ test('network node sizing grows gradually with degree so 1-link leaves stay comp
 	assert.ok((cluster.aks - cluster.orphan) < (cluster.rg - cluster.snet) * 0.25, 'hub stands out dramatically over 1-link leaves');
 	assert.equal(cluster.rg, forceSettings.radius * 2.5, 'busiest hub reaches full configured growth once graph has real hubs');
 });
+
+test('technicalGraphSvg preserves colour and softly dims outside cards and edges when a scope spotlight is active', () => {
+	const architecture = hubSpokeArchitecture();
+	const before = JSON.stringify(architecture);
+	const snapshot = projectTechnicalGraph(architecture);
+	const edges = lensEdges(snapshot, 'all', false);
+	const layout = layoutTechnicalGraph(snapshot, { layout: 'layers', expanded: new Set(), compact: false, pins: {}, edges });
+	const spotlight = new Set(snapshot.nodes.filter(node => node.id === 'rg-app' || node.scopePath.includes('rg-app')).map(node => node.id));
+	assert.ok(spotlight.has('rg-app') && spotlight.has('aks') && !spotlight.has('vnet-hub'));
+
+	const svg = technicalGraphSvg({ snapshot, layout, edges, theme: 'light', title: 'Spotlight check', spotlight });
+	assert.equal(JSON.stringify(architecture), before, 'SVG export never mutates architecture');
+	assert.ok(!svg.includes('grayscale'), 'spotlight export stays colour-preserving without grayscale filter');
+	assert.match(svg, /<g data-id="aks" transform="[^"]+">/, 'spotlighted card keeps full opacity');
+	assert.match(svg, /<g data-id="vnet-hub" transform="[^"]+" opacity="0\.22">/, 'outside card softens to 0.22 opacity');
+	assert.match(svg, /<path d="[^"]+" fill="none" stroke="[^"]+" stroke-width="1\.6"[^<>]* opacity="0\.12" marker-end="/, 'outside edge softens to 0.12 opacity');
+});

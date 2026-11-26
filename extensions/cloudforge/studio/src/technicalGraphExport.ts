@@ -11,7 +11,7 @@ import type { GraphEdge, GraphInput, GraphNode, TechnicalGraphSnapshot } from '.
 import { inputSize, type GraphLane, type GraphLayoutResult } from './technicalGraphLayout.ts';
 import type { Position } from './model.ts';
 
-const escape = (value: string) => value.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[character]!);
+const escape = (value: string) => value.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', '\'': '&apos;' })[character]!);
 const palette = {
 	light: { canvas: '#f7f8fb', card: '#ffffff', border: '#d9dce6', text: '#1d2233', muted: '#6b7285', lane: '#eceef4', laneLine: '#dfe2ec', input: '#8a7fb8' },
 	dark: { canvas: '#15161d', card: '#1f2029', border: '#353849', text: '#e7e9f2', muted: '#9aa0b5', lane: '#20222d', laneLine: '#31344a', input: '#a99ee0' },
@@ -30,14 +30,16 @@ export interface GraphSvgInput {
 	inputs?: { positions: Record<string, Position>; lane?: GraphLane };
 	theme: 'light' | 'dark';
 	title: string;
-	/** Optional per-node badge text (overlay), e.g. "± replace" or "wave 3". */
+	/** Optional per-node badge text (overlay), e.g. "+/- replace" or "wave 3". */
 	badges?: Record<string, string>;
 	icons?: Record<string, string>;
+	/** Optional scope spotlight: outside cards and edges dim softly while preserving colour. */
+	spotlight?: ReadonlySet<string>;
 }
 
 function truncate(text: string, max: number): string { return text.length > max ? text.slice(0, max - 1) + '…' : text; }
 
-export function technicalGraphSvg({ snapshot, layout, edges, inputs, theme, title, badges = {}, icons = {} }: GraphSvgInput): string {
+export function technicalGraphSvg({ snapshot, layout, edges, inputs, theme, title, badges = {}, icons = {}, spotlight }: GraphSvgInput): string {
 	const colours = palette[theme];
 	const cards = snapshot.nodes.filter(node => layout.positions[node.id]);
 	const ghostEntries = Object.entries(inputs?.positions ?? {});
@@ -60,7 +62,8 @@ export function technicalGraphSvg({ snapshot, layout, edges, inputs, theme, titl
 		if (b.y < a.y + 10) { b = centreBottom(edge.target); const dip = Math.max(a.y, b.y) + 36 + Math.min(90, Math.abs(b.x - a.x) * 0.12); d = `M ${a.x} ${a.y} C ${a.x} ${dip}, ${b.x} ${dip}, ${b.x} ${b.y}`; }
 		const colour = edgeColours[edge.category]?.[theme] ?? colours.muted;
 		const dash = edge.category === 'reference' ? ' stroke-dasharray="6 4"' : edge.category === 'observability' ? ' stroke-dasharray="2 4"' : '';
-		return `<path d="${d}" fill="none" stroke="${colour}" stroke-width="1.6"${dash} marker-end="url(#tg-arrow-${edge.category})"><title>${escape(edge.category + ': ' + edge.evidence.map(item => item.field).join(', '))}</title></path>`;
+		const outside = spotlight && !(spotlight.has(edge.source) && spotlight.has(edge.target)) ? ' opacity="0.12"' : '';
+		return `<path d="${d}" fill="none" stroke="${colour}" stroke-width="1.6"${dash}${outside} marker-end="url(#tg-arrow-${edge.category})"><title>${escape(edge.category + ': ' + edge.evidence.map(item => item.field).join(', '))}</title></path>`;
 	}).join('');
 	// Input lines are interactive-only; the ghost card states its uses instead.
 	const card = (node: GraphNode) => {
@@ -70,7 +73,8 @@ export function technicalGraphSvg({ snapshot, layout, edges, inputs, theme, titl
 		const rowMarkup = rows.map((port, index) => `<g transform="translate(14 ${84 + index * 26})"><circle cx="4" cy="-4" r="3" fill="${edgeColours[port.category]?.[theme] ?? colours.muted}"/><text x="14" y="0" font-size="11" font-family="Consolas, monospace" fill="${colours.text}">${escape(truncate(port.field, 18))}</text><text x="${w - 28}" y="0" font-size="11" text-anchor="end" fill="${colours.muted}">${escape(truncate(port.peerLabel, 12))}</text></g>`).join('');
 		const badge = badges[node.id] ? `<g transform="translate(${w - 12} -9)"><rect x="${-badges[node.id].length * 6.4 - 14}" y="0" width="${badges[node.id].length * 6.4 + 14}" height="18" rx="9" fill="${colours.card}" stroke="${colours.muted}"/><text x="-7" y="12.5" font-size="10.5" font-weight="650" text-anchor="end" fill="${colours.text}">${escape(badges[node.id])}</text></g>` : '';
 		const exposure = node.exposure && node.exposure.kind !== 'behind-entry' ? `<text x="54" y="66" font-size="10.5" font-weight="650" fill="#c0392b">${node.exposure.kind === 'entry' ? 'public entry' : 'public access'}</text>` : '';
-		return `<g data-id="${escape(node.id)}" transform="translate(${x} ${y})"><title>${escape(node.address)}</title><rect width="${w}" height="${h}" rx="10" fill="${colours.card}" stroke="${colours.border}"/><rect width="4" height="${h}" rx="2" fill="${stripe}"/>${icon ? `<image href="${escape(icon)}" x="14" y="14" width="30" height="30"/>` : ''}<text x="54" y="28" font-size="13" font-weight="650" fill="${colours.text}">${escape(truncate(node.label, 26))}</text><text x="54" y="46" font-size="11" fill="${colours.muted}">${escape(truncate(node.typeLabel + ' · ' + node.region.value, 32))}</text>${exposure}${rowMarkup}${badge}</g>`;
+		const outside = spotlight && !spotlight.has(node.id) ? ' opacity="0.22"' : '';
+		return `<g data-id="${escape(node.id)}" transform="translate(${x} ${y})"${outside}><title>${escape(node.address)}</title><rect width="${w}" height="${h}" rx="10" fill="${colours.card}" stroke="${colours.border}"/><rect width="4" height="${h}" rx="2" fill="${stripe}"/>${icon ? `<image href="${escape(icon)}" x="14" y="14" width="30" height="30"/>` : ''}<text x="54" y="28" font-size="13" font-weight="650" fill="${colours.text}">${escape(truncate(node.label, 26))}</text><text x="54" y="46" font-size="11" fill="${colours.muted}">${escape(truncate(node.typeLabel + ' · ' + node.region.value, 32))}</text>${exposure}${rowMarkup}${badge}</g>`;
 	};
 	const ghost = ([id, p]: [string, Position]) => {
 		const input = snapshot.inputs.find(item => item.id === id) as GraphInput | undefined; if (!input) { return ''; }

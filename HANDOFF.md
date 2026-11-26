@@ -1,5 +1,17 @@
 # CloudForge Code OSS handoff
 
+## Technical Graph `WhyPanel` shortest dependency path tracer & spotlight-aware SVG/PNG export — 26 November 2026
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `df2168b7270`, owner Antigravity. Zero overlap with unmerged Claude branches (`2dm0k0`, `ksv8z9`) or Rust.
+- **Scope:**
+  - Added an interactive, collapsible **Trace path to…** dependency path tracer inside Technical Graph `WhyPanel` ([TechnicalGraph.tsx](extensions/cloudforge/studio/src/TechnicalGraph.tsx), [technical-graph.css](extensions/cloudforge/studio/src/technical-graph.css)), backed by `shortestSnapshotPath()` in `technicalGraphPatterns.ts`:
+    - Collapsed by default inside `<details className="tg-why-pathfind">` (canvas-first: zero persistent chrome).
+    - Checks both directions (`selected → target` and `target → selected`), displays the hop-by-hop chain with clickable resource links, relationship category, and Terraform field/expression provenance (or reports honestly when no directed dependency path exists).
+    - Highlights traced path nodes and edges live across **Layers / Scopes / Tree** (React Flow), **Network** (`ForceGraph`), and **Bundled** (`BundledGraph`) using pure view-local state (zero architecture mutations, zero Undo steps).
+  - Wired optional `spotlight?: ReadonlySet<string>` into `technicalGraphSvg()` ([technicalGraphExport.ts](extensions/cloudforge/studio/src/technicalGraphExport.ts), [TechnicalGraph.tsx](extensions/cloudforge/studio/src/TechnicalGraph.tsx)) so SVG/PNG exports taken with an active Scope Spotlight preserve icon/ring colour with soft opacity dimming (`opacity="0.22"` on outside cards, `opacity="0.12"` on outside edges; zero `grayscale` filters), matching the live canvas.
+  - Added unit coverage in [technicalGraph.test.ts](extensions/cloudforge/studio/src/technicalGraph.test.ts).
+- **Fresh verification (26 November 2026):** Studio `tsc --noEmit` **PASS**, **233/233** Studio unit tests PASS (0 skipped), Studio `build` + `esbuild.webview.mts` **PASS**, `oxlint` & `hygiene` **PASS** (0 errors/warnings), and real Windows Edge (`--channel=msedge`): `technical-view-verify.mjs` **64/64 PASS** + live `WhyPanel` bidirectional path tracer (Layers + Network highlights, clickable hop navigation, clear, 0 Undo steps) and spotlight SVG export check **PASS** (0 browser errors).
+
 ## Miro-style Alt+Drag clone & compact 1024px selection toolbar fix — 26 November 2026
 
 - **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `e58ba69c4dd`, owner Antigravity. Zero overlap with unmerged Claude branches (`2dm0k0`, `ksv8z9`) or Rust.
