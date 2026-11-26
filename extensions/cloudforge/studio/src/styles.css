@@ -721,6 +721,9 @@ dialog::backdrop { background: #12152488; backdrop-filter: blur(3px); }
 .loose-connection:focus-visible .react-flow__edge-path { stroke: var(--focus); stroke-width: 3; }
 .connection-endpoint { position: absolute; left: -8px; top: -8px; z-index: 1002; width: 16px; height: 16px; padding: 0; border: 2px solid var(--accent-ink); border-radius: 50%; background: var(--surface); cursor: grab; touch-action: none; pointer-events: auto; transform-origin: 8px 8px; }
 .connection-endpoint[data-valid="false"] { border-color: var(--danger); }
+.connection-midpoint { position: absolute; left: -7px; top: -7px; z-index: 1002; width: 14px; height: 14px; padding: 0; border: 2px solid var(--accent); border-radius: 3px; background: var(--surface); cursor: grab; touch-action: none; pointer-events: auto; transform-origin: 7px 7px; transition: background .12s, border-color .12s; }
+.connection-midpoint:hover, .connection-midpoint[data-bent="true"] { background: var(--accent); border-color: var(--surface); box-shadow: 0 0 0 1.5px var(--accent); }
+.connection-midpoint:active { cursor: grabbing; }
 .connection-drop-feedback { position: absolute; left: 16px; top: 16px; z-index: 1003; transform-origin: -16px -16px; padding: 4px 8px; border-radius: 4px; background: var(--surface); color: var(--text); font-size: 12px; white-space: nowrap; pointer-events: none; }
 .connection-drop-feedback[data-valid="false"] { color: var(--danger); }
 .selection-anchor.connection-overlay-tools { position: absolute; left: 0; top: 0; transform-origin: 0 0; z-index: 1003; pointer-events: auto; }

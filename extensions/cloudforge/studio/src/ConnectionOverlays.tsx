@@ -24,6 +24,8 @@ export function ConnectionOverlays({ architecture, mode, selectedId, showLabels,
 	const nodes = useInternalNodes([...new Set([...overlays, ...(selected ? [selected] : [])].flatMap(connectionElementIds))]);
 	const [preview, setPreview] = useState<Preview>();
 	const drag = useRef<{ side: 'source' | 'target' }>(undefined);
+	const [waypointPreview, setWaypointPreview] = useState<Position>();
+	const bendDrag = useRef(false);
 	const toolbar = useRef<HTMLDivElement>(null);
 	const [area, setArea] = useState({ width: 1000, height: 700, toolHeight: 210 });
 	useLayoutEffect(() => {
@@ -83,8 +85,23 @@ export function ConnectionOverlays({ architecture, mode, selectedId, showLabels,
 	const update = (side: 'source' | 'target', endpoint: DesignEndpoint) => {
 		if (selected) { dispatch({ type: 'reconnectConnection', id: selected.id, side, endpoint }); }
 	};
+	const cancelBend = () => { bendDrag.current = false; setWaypointPreview(undefined); };
+	const moveBend = (event: ReactPointerEvent<HTMLButtonElement>) => {
+		if (!bendDrag.current) { return; }
+		const pos = flow.screenToFlowPosition({ x: event.clientX, y: event.clientY });
+		setWaypointPreview({ x: Math.round(pos.x * 10) / 10, y: Math.round(pos.y * 10) / 10 });
+	};
+	const releaseBend = (event: ReactPointerEvent<HTMLButtonElement>) => {
+		if (!bendDrag.current || !selected) { return; }
+		const pos = flow.screenToFlowPosition({ x: event.clientX, y: event.clientY });
+		cancelBend();
+		dispatch({ type: 'updateConnection', id: selected.id, patch: { waypoint: { x: Math.round(pos.x * 10) / 10, y: Math.round(pos.y * 10) / 10 } } });
+	};
 
 	const source = selected && anchor(selected, 'source', false); const target = selected && anchor(selected, 'target', false);
+	const effectiveSelected = selected && waypointPreview ? { ...selected, waypoint: waypointPreview } : selected;
+	const selectedGeometry = effectiveSelected && source && target ? connectionPath(effectiveSelected, source.x, source.y, target.x, target.y) : undefined;
+	const midpoint = selectedGeometry ? { x: selectedGeometry[1], y: selectedGeometry[2] } : undefined;
 	const toolWidth = Math.min(900, Math.max(200, area.width - 80));
 	const centreX = source && target ? (source.x + target.x) / 2 * zoom + viewport.x : 80;
 	const upper = source && target ? Math.min(source.y, target.y) * zoom + viewport.y - area.toolHeight - 18 : 12;
@@ -97,7 +114,8 @@ export function ConnectionOverlays({ architecture, mode, selectedId, showLabels,
 		<svg className="loose-connections" width="1" height="1" aria-label="Canvas design connections">
 			{overlays.map(link => {
 				const start = anchor(link, 'source'); const end = anchor(link, 'target'); if (!start || !end) { return null; }
-				const [path, labelX, labelY] = connectionPath(link, start.x, start.y, end.x, end.y);
+				const activeLink = link.id === selectedId && waypointPreview ? { ...link, waypoint: waypointPreview } : link;
+				const [path, labelX, labelY] = connectionPath(activeLink, start.x, start.y, end.x, end.y);
 				const marker = 'loose-arrow-' + encodeURIComponent(link.id); const active = link.id === selectedId;
 				const colour = link.stroke ?? 'var(--accent)'; const font = link.labelFontSize ?? 11;
 				const textY = labelY + (link.labelPosition === 'above' ? -18 : link.labelPosition === 'below' ? 18 : 0);
@@ -125,6 +143,20 @@ export function ConnectionOverlays({ architecture, mode, selectedId, showLabels,
 					if (direction) { event.preventDefault(); event.stopPropagation(); const step = event.shiftKey ? 10 : 1; update(side, pointEndpoint({ x: point.x + direction[0] * step, y: point.y + direction[1] * step })); }
 				}}/>;
 		})}
+		{selected && midpoint && <button className="connection-midpoint nodrag nopan" data-bent={selected.waypoint ? 'true' : undefined} aria-label="Drag to bend connection route"
+			title={selected.waypoint ? 'Drag to reshape route · Double-click or press Backspace to reset to automatic route · Arrow keys nudge · Escape cancels' : 'Drag to bend connection route around elements · Arrow keys nudge · Escape cancels'}
+			style={{ transform: `translate(${midpoint.x}px,${midpoint.y}px) scale(${1 / zoom}) rotate(45deg)` }}
+			onPointerDown={event => { if (event.button !== 0) { return; } event.preventDefault(); event.stopPropagation(); event.currentTarget.focus({ preventScroll: true }); event.currentTarget.setPointerCapture(event.pointerId); bendDrag.current = true; setWaypointPreview(midpoint); }}
+			onPointerMove={moveBend} onPointerUp={releaseBend} onPointerCancel={cancelBend} onLostPointerCapture={cancelBend}
+			onDoubleClick={event => { event.preventDefault(); event.stopPropagation(); cancelBend(); if (selected.waypoint) { dispatch({ type: 'updateConnection', id: selected.id, patch: { waypoint: undefined } }); } }}
+			onKeyDown={event => {
+				if (event.key === 'Escape' && bendDrag.current) { event.preventDefault(); event.stopPropagation(); cancelBend(); return; }
+				if ((event.key === 'Delete' || event.key === 'Backspace' || event.key === '0') && selected.waypoint) { event.preventDefault(); event.stopPropagation(); dispatch({ type: 'updateConnection', id: selected.id, patch: { waypoint: undefined } }); return; }
+				const directions: Record<string, number[]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+				const direction = directions[event.key];
+				if (direction) { event.preventDefault(); event.stopPropagation(); const step = event.shiftKey ? 10 : 1; const basePt = selected.waypoint ?? midpoint; dispatch({ type: 'updateConnection', id: selected.id, patch: { waypoint: { x: basePt.x + direction[0] * step, y: basePt.y + direction[1] * step } } }); }
+			}}/>}
+		{waypointPreview && selected && <span className="connection-drop-feedback" role="status" style={{ transform: `translate(${waypointPreview.x}px,${waypointPreview.y}px) scale(${1 / zoom})` }} data-valid="true">Bend route · double-click to reset</span>}
 		{preview && selected && <span className="connection-drop-feedback" role="status" style={{ transform: `translate(${anchor(selected, preview.side)?.x ?? 0}px,${anchor(selected, preview.side)?.y ?? 0}px) scale(${1 / zoom})` }} data-valid={preview.valid}>{preview.label}</span>}
 		{selected && source && target && <div ref={toolbar} className="selection-anchor connection-overlay-tools" style={{ transform: `translate(${world.x}px,${world.y}px) scale(${1 / zoom})`, width: toolWidth, '--selection-max-width': toolWidth + 'px' } as React.CSSProperties}>
 			<ConnectionTools connection={selected} dispatch={dispatch} onClose={onClose}>

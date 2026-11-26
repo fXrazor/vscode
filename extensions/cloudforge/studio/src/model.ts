@@ -86,6 +86,8 @@ export interface DesignConnection {
 	labelColor?: string;
 	labelPosition?: 'above' | 'center' | 'below';
 	routing?: 'straight' | 'elbow' | 'curve';
+	/** Optional draggable bend/route point in world coordinates. Never Terraform. */
+	waypoint?: Position;
 	stroke?: string;
 	width?: number;
 	pattern?: 'solid' | 'dashed' | 'dotted';
@@ -285,6 +287,17 @@ function editArchitecture(architecture: Architecture, action: Edit): Architectur
 			if (!connection) { return architecture; }
 			const patch = action.patch;
 			if ('source' in patch || 'target' in patch || 'id' in patch || 'origin' in patch) { return architecture; }
+			const hasWaypoint = Object.hasOwn(patch, 'waypoint');
+			let nextWaypoint: Position | undefined = connection.waypoint;
+			if (hasWaypoint) {
+				if (patch.waypoint === undefined) {
+					nextWaypoint = undefined;
+				} else if (!patch.waypoint || typeof patch.waypoint !== 'object' || !Number.isFinite(patch.waypoint.x) || !Number.isFinite(patch.waypoint.y)) {
+					return architecture;
+				} else {
+					nextWaypoint = { x: Math.round(patch.waypoint.x * 10) / 10, y: Math.round(patch.waypoint.y * 10) / 10 };
+				}
+			}
 			if (patch.width !== undefined && (!Number.isFinite(patch.width) || patch.width < 1 || patch.width > 8)
 				|| patch.stroke !== undefined && !/^#[0-9a-f]{6}$/i.test(patch.stroke)
 				|| patch.routing !== undefined && !['straight', 'elbow', 'curve'].includes(patch.routing)
@@ -293,8 +306,20 @@ function editArchitecture(architecture: Architecture, action: Edit): Architectur
 				|| patch.labelColor !== undefined && !/^#[0-9a-f]{6}$/i.test(patch.labelColor)
 				|| patch.labelPosition !== undefined && !['above', 'center', 'below'].includes(patch.labelPosition)
 				|| patch.label !== undefined && patch.label.length > 200) { return architecture; }
-			if (Object.entries(patch).every(([key, value]) => connection[key as keyof DesignConnection] === value)) { return architecture; }
-			return { ...architecture, connections: architecture.connections.map(item => item.id === action.id ? { ...item, ...patch } : item) };
+			const sameWaypoint = (!nextWaypoint && !connection.waypoint) || (!!nextWaypoint && !!connection.waypoint && nextWaypoint.x === connection.waypoint.x && nextWaypoint.y === connection.waypoint.y);
+			if (sameWaypoint && Object.entries(patch).filter(([key]) => key !== 'waypoint').every(([key, value]) => connection[key as keyof DesignConnection] === value)) { return architecture; }
+			return {
+				...architecture,
+				connections: architecture.connections.map(item => {
+					if (item.id !== action.id) { return item; }
+					const updated: DesignConnection = { ...item, ...patch };
+					if (hasWaypoint) {
+						if (nextWaypoint) { updated.waypoint = nextWaypoint; }
+						else { delete updated.waypoint; }
+					}
+					return updated;
+				}),
+			};
 		}
 		case 'styleDependency': {
 			const styles = { ...architecture.dependencyStyles };

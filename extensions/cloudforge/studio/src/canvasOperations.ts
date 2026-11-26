@@ -231,7 +231,8 @@ export function applyCanvasCommand(architecture: Architecture, command: CanvasCo
 				const source = remapEndpoint(link.source, idMap, command.offset); const target = remapEndpoint(link.target, idMap, command.offset);
 				if (!source || !target) { return []; }
 				const sourceId = endpointElementId(source); const targetId = endpointElementId(target);
-				return [{ ...link, id: idMap[link.id] ?? (sourceId && targetId ? sourceId + '-' + targetId : link.id + '-copy'), source, target }];
+				const waypoint = link.waypoint ? { x: link.waypoint.x + command.offset, y: link.waypoint.y + command.offset } : undefined;
+				return [{ ...link, id: idMap[link.id] ?? (sourceId && targetId ? sourceId + '-' + targetId : link.id + '-copy'), source, target, ...(waypoint ? { waypoint } : {}) }];
 			});
 			if ((!source.length && !connections.length) || new Set(connections.map(link => link.id)).size !== connections.length || connections.some(link => architecture.connections.some(existing => existing.id === link.id))) { return architecture; }
 			return { ...architecture, resources: [...architecture.resources, ...resources], items: [...architecture.items, ...items], groups: [...(architecture.groups ?? []), ...groups], connections: [...architecture.connections, ...connections], layerOrder: [...sceneOrder(architecture), ...sceneOrder(fragment).map(id => idMap[id])] };

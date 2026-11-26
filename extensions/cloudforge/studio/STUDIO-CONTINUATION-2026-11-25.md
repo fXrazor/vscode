@@ -1,5 +1,11 @@
 # Studio continuation checkpoint — 25 November 2026
 
+## Draggable connector bend / waypoint midpoint handles — 26 November 2026
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `48d529c9557`, owner Antigravity.
+- **Scope:** added optional `waypoint?: Position` on `DesignConnection` (`src/model.ts`, `src/canvasOperations.ts`), shared Z/U rounded-elbow + quadratic-Bezier + straight waypoint geometry (`src/connectionGeometry.ts`), and interactive diamond midpoint drag handle (`src/ConnectionOverlays.tsx`, `src/styles.css`) supporting live drag preview, 1-step Undo/Redo, `Escape` cancel, arrow-key nudging, and double-click / `Backspace` / `Delete` / `0` reset, with identical SVG/PNG/PDF export geometry and zero Terraform impact. Covered in `src/connectionEndpoints.test.ts`.
+- **Fresh checks:** Studio `tsc --noEmit` **PASS**, **231/231** Studio tests (0 skipped), Studio `build` + `esbuild.webview.mts` **PASS**, `oxlint` & `hygiene` **PASS**, Windows Edge `loose-connectors-verify.mjs` **16/16 PASS** + midpoint drag/reset/Undo check **PASS** (0 browser errors).
+
 ## Network view gradual node sizing & sleek border polish — 26 November 2026
 
 - **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `e14d0b22b1a`, owner Antigravity.

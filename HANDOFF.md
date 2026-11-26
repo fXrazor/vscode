@@ -1,5 +1,23 @@
 # CloudForge Code OSS handoff
 
+## Draggable connector bend waypoints & packaged CloudForge upgrade (`48d529c9557`) — 26 November 2026
+
+- **Packaged & installed Windows upgrade (`48d529c9557`):**
+  - **Staged installer:** `Z:/CFStage/CloudForgeSetup-x64-48d529c9557.exe` (`331,848,512` bytes, SHA-256 `918235a17de6c8de90ccc23a68f3ee2d79105af775648e041888c0d919c89416`) built from clean detached checkout `Z:/CFStage/Code` at desktop commit `48d529c95579b144a1c5fc6836982967a5830772`.
+  - **Bundled Rust service:** commit `68cbe03e5425fa0d55db9cd7144a1178ef38fe77` (includes Windows MAX_PATH mirror fix, Stage 12 hardening, and PR #1 Get Ready / registry / bundle support), protocol `1`, `x64`, `6,622,208` bytes, SHA-256 `20ffe53c7c30f140a1016c6f04aa485055d461584a6e35f0e4ef1b4db50dae87` (`ServiceSigned: false`).
+  - **Bundled built-in extensions:** `AykutSarac.jsoncrack-vscode@5.1.0` (SHA-256 `7c7bb618e8e7834b9674953206d1e44a1fcb94c10676e2c4ab97121342134753`), `ms-vscode.js-debug@1.140.1` (SHA-256 `7accf7857ea4f4717b6211a2b75f5b434faf477033203a8919b6d26b6abc1897`), and `extensions/cloudforge` (including PR #4 4-port connectors & Scope Spotlight, PR #5 startup screen / Providers view / Get Ready / `.cloudforge.zip` bundles, colour-preserving Scope Spotlight, mixed-list HCL hydration, Technical Graph provenance + module drill-down, mirror extraction prefill, and gradual Network node sizing).
+  - **Installed verification:** silently upgraded `%LOCALAPPDATA%\Programs\CloudForge\CloudForge.exe`; verified `product.json` (`nameLong: "CloudForge"`, `commit: "48d529c95579b144a1c5fc6836982967a5830772"`), passed `node build/cloudforge/serviceArtifact.ts --verify` with all flags pinned, verified `AykutSarac.jsoncrack-vscode@5.1.0` and all CloudForge extension / Studio / provider-form bundles.
+- **Next feature implemented & pushed atop `48d529c9557` (Miro designer backlog — Draggable connector bend / waypoint midpoint handles):**
+  - Added optional `waypoint?: Position` on `DesignConnection` with strict finite validation, rounding, and clean reset in [model.ts](extensions/cloudforge/studio/src/model.ts) and duplicate offset preservation in [canvasOperations.ts](extensions/cloudforge/studio/src/canvasOperations.ts).
+  - Updated shared `connectionPath()` in [connectionGeometry.ts](extensions/cloudforge/studio/src/connectionGeometry.ts) so elbow (rounded 90° Z/U detours), curve (quadratic Bezier passing through `waypoint` at `t=0.5`), and straight connectors share one geometry across live canvas (`DesignEdge` & `ConnectionOverlays`) and SVG/PNG/PDF export.
+  - Added the diamond midpoint drag handle (`Drag to bend connection route`) in [ConnectionOverlays.tsx](extensions/cloudforge/studio/src/ConnectionOverlays.tsx) + [styles.css](extensions/cloudforge/studio/src/styles.css) with live drag preview, 1-step Undo/Redo on release, `Escape` cancel, arrow-key nudging, and double-click / `Backspace` / `Delete` / `0` reset to auto-route.
+  - Added unit tests in [connectionEndpoints.test.ts](extensions/cloudforge/studio/src/connectionEndpoints.test.ts).
+- **Fresh verification (26 November 2026):**
+  - Studio `tsc --noEmit`: **PASS**; Studio unit tests: **231/231 PASS** (0 skipped); Studio `build` + `esbuild.webview.mts`: **PASS**
+  - Extension unit tests (`CLOUDFORGE_REPO=Z:/CloudForge`): **125/125 PASS**; OpenVSX pin tests: **4/4 PASS**
+  - `build/oxlint.ts` + `build/hygiene.ts` on `connectionGeometry.ts` & `connectionEndpoints.test.ts`: **PASS** (0 errors/warnings)
+  - Real Windows Edge (`--channel=msedge`): `loose-connectors-verify.mjs` **16/16 PASS** + midpoint bend drag / double-click reset / 1-step Undo check **PASS** (0 browser errors).
+
 ## Network view gradual node sizing & sleek border polish — 26 November 2026
 
 - **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `e14d0b22b1a`, owner Antigravity.
