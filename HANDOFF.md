@@ -1,6 +1,21 @@
 # CloudForge Code OSS handoff
 
-## Technical Graph rebuild pass 1 (Claude) — 26 November 2026 — read first
+## Technical Graph pass 2 (Claude) — 26 November 2026 — read first
+
+Branch `claude/project-thread-2irlth`, pushed, not merged. Pass 2 finished the pass-1 queue:
+- Rewrote the browser verify script (44/44 in Chromium).
+- Removed the dead DesignCanvas technical mode and `technicalLayout.ts`.
+- Graph presentation and pins now persist under `viewState.graph`, never `nodePositions`.
+- Plan overlay flags dependents of a planned replace or destroy.
+- Ghost cards for `var.`/`local.`/`data.` inputs.
+- Exposure lens.
+- SVG/PNG export of the graph.
+- Module-call chips with planned changes folded in.
+- Radial **Bundled** (edge-bundling) view, with no new dependency.
+
+Studio has 175/175 tests passing. Details, files and the remaining queue (drift is blocked on Rust; cost chips; module drill-down) are in `extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md` under "Technical Graph pass 2".
+
+## Technical Graph rebuild pass 1 (Claude) — 26 November 2026
 
 Branch `claude/project-thread-2irlth` (from main `5b66f85c`). Studio now mounts a dedicated `TechnicalGraph` (separate React Flow instance, no project dispatch) in Configuration view. It has a frozen evidence-backed graph snapshot (`technicalGraph.ts`); Layers, Scopes and Ownership-tree layouts; schema-style field rows with stable ports; curved, orthogonal and straight routes; an animated selected trace; a Why panel; graph-only pins; and a narrow edit gate so cards can be renamed and opened for editing but never moved or reparented. 169/169 Studio tests pass. Full detail, gaps and the ordered next actions for Codex are in `extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md` under “Technical Graph rebuild, pass 1”. First next action: update `scripts/technical-view-verify.mjs` for the new DOM.
 
