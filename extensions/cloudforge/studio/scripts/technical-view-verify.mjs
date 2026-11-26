@@ -5,7 +5,7 @@
 /**
  * Technical Graph browser verification (dedicated TechnicalGraph renderer, 26 November 2026).
  * Usage: node scripts/technical-view-verify.mjs <owned preview URL> [--channel=msedge] [--quick]
- * Invariants: graph drag/keys/layout never change the exported project; card rename does, and is
+ * Invariants: graph drag/keys/layout (incl. bundled) and inputs never change the exported project; card rename does, and is
  * undoable from Architecture view; layouts never overlap cards; no browser errors.
  */
 import assert from 'node:assert/strict';
@@ -58,6 +58,11 @@ try {
 			assert.equal(await page.locator('.react-flow__node-card').count(), original.resources.length); pass('every resource is a graph card');
 			await view('Card detail', 'detailed');
 			for (const layout of ['layers', 'scopes', 'tree']) { await view('Graph layout', layout); assert.ok(await noOverlap() > 0); }
+			await view('Graph layout', 'bundled');
+			assert.equal(await page.locator('.tg-bundle-leaf').count(), original.resources.length);
+			await page.getByRole('button', { name: 'snet-aks-nodes', exact: true }).click();
+			assert.ok(await page.locator('.tg-bundle-path.is-uses, .tg-bundle-path.is-used-by').count() > 0); pass('bundled view shows every resource and highlights its relationships');
+			await page.keyboard.press('Escape');
 			await view('Graph layout', 'layers'); pass('layers, scopes and tree layouts have no overlapping cards');
 			assert.ok(await page.locator('.react-flow__node-card[data-id="aks"] .tg-row').count() >= 3); pass('AKS shows its configured input rows');
 			// Drag AKS far away: a graph pin appears and the project is unchanged.
@@ -75,6 +80,7 @@ try {
 			await card.click(); await page.getByRole('button', { name: 'Focus 2 hops' }).click(); await page.waitForTimeout(400);
 			assert.ok(await page.locator('.react-flow__node-card').count() < original.resources.length); await page.getByRole('button', { name: 'Show all' }).click(); pass('lenses, overlays and focus switch without project changes');
 			assert.deepEqual(await exported(), original);
+			assert.equal(await page.locator('.react-flow__node-ghost').count(), 4); pass('var., local. and data. inputs appear as ghost cards');
 			// Rename through the card: this is a deliberate configuration edit and is undoable.
 			await page.getByRole('button', { name: 'Rename aks-platform' }).first().click();
 			await page.getByRole('textbox', { name: 'Rename aks-platform' }).fill('aks-renamed'); await page.keyboard.press('Enter');

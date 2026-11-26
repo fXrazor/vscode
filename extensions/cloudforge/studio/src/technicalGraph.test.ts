@@ -13,6 +13,7 @@ import { inputSize, layerOrder, layoutTechnicalGraph, placeInputs } from './tech
 import { defaultGraphPresentation, graphEditAllowed, graphPresentationReducer, parseGraphPresentation, serialiseGraphPresentation } from './graphPresentation.ts';
 import { buildHostViewState } from './serviceAdapter.ts';
 import { technicalGraphSvg } from './technicalGraphExport.ts';
+import { basisPath, bundleLayout, straighten } from './technicalGraphBundle.ts';
 
 const layout = (architecture = hubSpokeArchitecture(), options: Partial<Parameters<typeof layoutTechnicalGraph>[1]> = {}) => {
 	const snapshot = projectTechnicalGraph(architecture);
@@ -234,4 +235,20 @@ test('planned changes inside a module fold onto the module call card', () => {
 	const { byNode, unmatchedPlan } = graphOverlays(snapshot, [], [change('module.network.azurerm_subnet.a', 'create', 'module.network'), change('module.network.azurerm_subnet.b[0]', 'replace', 'module.network'), change('module.network.azurerm_subnet.c', 'noOp', 'module.network'), change('module.other.azurerm_subnet.d', 'create', 'module.other')]);
 	assert.deepEqual(byNode['mod-net'].inside, { create: 1, update: 0, replace: 1, delete: 0 });
 	assert.equal(unmatchedPlan, 1);
+});
+
+test('bundled view places every resource on the circle grouped by layer and bundles each edge', () => {
+	const snapshot = projectTechnicalGraph(hubSpokeArchitecture()); const edges = lensEdges(snapshot, 'all', false);
+	const bundle = bundleLayout(snapshot, edges);
+	assert.equal(bundle.leaves.length, snapshot.nodes.length);
+	for (const leaf of bundle.leaves) { assert.ok(Math.abs(Math.hypot(leaf.x, leaf.y) - bundle.radius) < 0.01); }
+	const angles = bundle.leaves.map(leaf => leaf.angle); assert.deepEqual([...angles].sort((a, b) => a - b), angles); assert.equal(new Set(angles).size, angles.length);
+	assert.deepEqual(bundle.groups.map(group => group.layer), layerOrder.filter(layer => snapshot.nodes.some(node => node.layer === layer)));
+	for (const group of bundle.groups) { assert.ok(bundle.leaves.filter(leaf => leaf.layer === group.layer).every(leaf => leaf.angle >= group.start && leaf.angle <= group.end)); }
+	assert.equal(bundle.paths.length, edges.filter(edge => edge.source !== edge.target).length);
+	assert.ok(bundle.paths.every(path => path.d.startsWith('M ') && !path.d.includes('NaN')));
+	assert.deepEqual(straighten([[0, 0], [10, 10], [20, 0]], 0), [[0, 0], [10, 0], [20, 0]]);
+	assert.match(basisPath([[0, 0], [10, 10], [20, 0]]), /^M 0 0 C .* L 20 0$/);
+	const focused = bundleLayout(snapshot, edges, { visible: new Set(['aks', 'snet-aks']) });
+	assert.equal(focused.leaves.length, 2);
 });

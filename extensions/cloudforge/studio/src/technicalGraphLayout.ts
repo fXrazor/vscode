@@ -11,7 +11,8 @@ import type { InfrastructureLayer } from './providerKnowledge.ts';
 import { layerLabels, type GraphEdge, type GraphNode, type TechnicalGraphSnapshot } from './technicalGraph.ts';
 import type { Position } from './model.ts';
 
-export type GraphLayoutKind = 'layers' | 'scopes' | 'tree';
+/** `bundled` is drawn radially by technicalGraphBundle.ts; card layout falls back to layers (used by image export). */
+export type GraphLayoutKind = 'layers' | 'scopes' | 'tree' | 'bundled';
 export type GraphSize = { width: number; height: number };
 export interface GraphLane { id: string; label: string; x: number; y: number; width: number; height: number; kind: 'layer' | 'scope' | 'inputs'; members?: string[] }
 export interface GraphLayoutResult { positions: Record<string, Position>; sizes: Record<string, GraphSize>; lanes: GraphLane[]; columns: GraphLane[] }

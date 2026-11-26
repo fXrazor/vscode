@@ -204,3 +204,27 @@
 .tg-export-row { display: flex; align-items: center; gap: 6px; padding-top: 6px; border-top: 1px solid var(--border); margin-top: 2px; }
 .tg-export-row span { font-size: 11.5px; color: var(--muted); margin-right: auto; }
 .tg-chip-module { border: 1px dashed var(--tg-layer, var(--border)); font-family: var(--mono, Consolas, monospace); }
+
+/* Bundled (radial hierarchical edge bundling) view. */
+.tg-bundle { position: absolute; inset: 64px 0 52px 0; overflow: hidden; background: var(--canvas); cursor: grab; touch-action: none; }
+.tg-bundle:active { cursor: grabbing; }
+.tg-bundle svg { width: 100%; height: 100%; transform-origin: 50% 50%; }
+.tg-bundle-group path:first-child { fill: none; stroke: var(--tg-layer); stroke-width: 6; stroke-linecap: round; opacity: .55; }
+.tg-bundle-group text { font-size: 13px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; fill: var(--muted); }
+.tg-bundle-path { fill: none; stroke: var(--tg-cat, var(--tg-edge-unclassified)); stroke-width: 1.4; opacity: .5; mix-blend-mode: multiply; transition: opacity .15s, stroke-width .15s; }
+.theme-dark .tg-bundle-path { mix-blend-mode: screen; }
+.tg-bundle-path.is-dim { opacity: .06; }
+.tg-bundle-path.is-uses { stroke: #2d6ad3; stroke-width: 2.4; opacity: 1; }
+.tg-bundle-path.is-used-by { stroke: #d2582a; stroke-width: 2.4; opacity: 1; }
+.theme-dark .tg-bundle-path.is-uses { stroke: #79a7f2; } .theme-dark .tg-bundle-path.is-used-by { stroke: #f3a07e; }
+.tg-bundle-leaf { cursor: pointer; }
+.tg-bundle-leaf circle { fill: var(--tg-layer); }
+.tg-bundle-leaf text { font-size: 13px; fill: var(--text); }
+.tg-bundle-leaf.is-dim text { fill: var(--muted); opacity: .45; }
+.tg-bundle-leaf.is-focus text, .tg-bundle-leaf.is-selected text { font-weight: 750; }
+.tg-bundle-leaf.is-related text { font-weight: 650; }
+.tg-bundle-leaf.is-unmatched { opacity: .25; }
+.tg-bundle-leaf:focus-visible { outline: none; } .tg-bundle-leaf:focus-visible text { text-decoration: underline; }
+.tg-bundle-key { position: absolute; left: 16px; bottom: 64px; display: flex; gap: 14px; font-size: 11.5px; color: var(--muted); background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; }
+.tg-bundle-key .is-uses::before, .tg-bundle-key .is-used-by::before { content: ""; display: inline-block; width: 18px; height: 3px; border-radius: 2px; margin-right: 6px; vertical-align: middle; background: #2d6ad3; }
+.tg-bundle-key .is-used-by::before { background: #d2582a; }

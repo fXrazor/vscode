@@ -23,6 +23,7 @@ import { inputSize, layoutTechnicalGraph, placeInputs, visiblePortCount, type Gr
 import { graphEditAllowed, type GraphPresentation, type GraphPresentationAction, type RouteStyle } from './graphPresentation.ts';
 import { relationshipNames } from './infrastructureRelationships.ts';
 import { graphIcons, technicalGraphSvg } from './technicalGraphExport.ts';
+import { bundleLayout } from './technicalGraphBundle.ts';
 import { resourceIntelligence } from './providerKnowledge.ts';
 
 type CardData = { node: GraphNode; lens: GraphPresentation['lens']; /* state 'soft' = hover context */ overlay?: NodeOverlay; badge?: { kind: 'plan' | 'order' | 'impact'; text: string; tone: string; title: string }; match: boolean; compact: boolean; expanded: boolean; state: 'normal' | 'focus' | 'trace' | 'dim' | 'soft'; pinned: boolean; tracedPorts: ReadonlySet<string>; onRename: (id: string, label: string) => void; onEdit: (id: string) => void; onToggleRows: (id: string) => void; onUnpin: (id: string) => void };
@@ -178,6 +179,9 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme
 	const [flow, setFlow] = useState<ReactFlowInstance<GraphFlowNode, GraphFlowEdge>>();
 	const reducedMotion = useMemo(() => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches, []);
 	const compact = presentation.density === 'compact' || presentation.density === 'auto' && zoom < 0.42;
+	const bundled = presentation.layout === 'bundled';
+	// React Flow unmounts in the bundled view; drop its instance so effects never use a stale one.
+	useEffect(() => { if (bundled) { setFlow(undefined); } }, [bundled]);
 	const visibleEdges = useMemo(() => lensEdges(snapshot, presentation.lens, presentation.showMembership), [snapshot, presentation.lens, presentation.showMembership]);
 	const expanded = useMemo(() => new Set(presentation.expanded), [presentation.expanded]);
 	const focusSet = useMemo(() => presentation.focus && snapshot.nodes.some(node => node.id === presentation.focus!.id) ? neighbourhood(visibleEdges, presentation.focus.id, presentation.focus.depth) : undefined, [presentation.focus, snapshot, visibleEdges]);
@@ -302,13 +306,13 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme
 	const lastFit = useRef('');
 	useEffect(() => {
 		// Refit when the layout kind or the set of resources changes, not on every edit or pin.
-		if (!flow) { return; }
+		if (!flow || bundled) { return; }
 		const key = presentation.layout + ':' + presentation.spacing + ':' + presentation.height + ':' + (presentation.focus ? presentation.focus.id + '/' + presentation.focus.depth : '') + ':' + snapshot.nodes.map(node => node.id).join(',');
 		if (lastFit.current === key) { return; }
 		const first = !lastFit.current; lastFit.current = key;
 		const saved = first ? viewports?.current?.technical : undefined;
 		requestAnimationFrame(() => { if (saved) { void flow.setViewport(saved); } else { void flow.fitView({ padding: fitPadding, maxZoom: 1, duration: first ? 0 : 280 }); } });
-	}, [flow, presentation.layout, presentation.spacing, presentation.height, presentation.focus, snapshot.nodes, viewports]);
+	}, [bundled, flow, presentation.layout, presentation.spacing, presentation.height, presentation.focus, snapshot.nodes, viewports]);
 
 	function handleKeys(event: ReactKeyboardEvent) {
 		const target = event.target as HTMLElement;
@@ -335,6 +339,7 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme
 	const pinCount = Object.keys(presentation.pins).length;
 	const categoriesShown = categoryOrder.filter(category => visibleEdges.some(edge => edge.category === category));
 	return <main ref={bounds} tabIndex={0} className={'canvas technical-graph theme-' + theme + (compact ? ' is-compact-view' : '')} data-read-only="true" data-graph="technical" aria-label="Technical graph" onKeyDownCapture={handleKeys}>
+		{bundled ? <BundledGraph snapshot={snapshot} edges={visibleEdges} visible={focusSet} selectedId={selectedId} query={query} onSelect={id => { setSelectedEdgeId(''); onSelect(id); }} onOpenDetails={onOpenDetails} reducedMotion={reducedMotion} /> :
 		<ReactFlow<GraphFlowNode, GraphFlowEdge> nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes}
 			onInit={instance => { setFlow(instance); onInit?.(instance); setZoom(instance.getZoom()); }}
 			onNodesChange={onNodesChange}
@@ -351,7 +356,7 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme
 			minZoom={0.08} maxZoom={2.5} proOptions={{ hideAttribution: true }} onlyRenderVisibleElements={snapshot.nodes.length > 300}>
 			<Background variant={BackgroundVariant.Dots} gap={24} size={1} color="var(--grid-pattern)" bgColor="var(--canvas)" />
 			{snapshot.nodes.length > 40 && <MiniMap pannable zoomable nodeColor={node => node.type === 'lane' ? 'transparent' : 'var(--tg-mini)'} />}
-		</ReactFlow>
+		</ReactFlow>}
 		<div className="tg-toolbar" role="toolbar" aria-label="Technical graph view options">
 			<label className="tg-search"><Search size={13} /><input aria-label="Find resource" placeholder="Find resource, address or file" value={query} onChange={event => setQuery(event.target.value)}
 				onKeyDown={event => { if (event.key === 'Enter') { const hit = snapshot.nodes.find(node => layout.positions[node.id] && matchesQuery(node, query)); if (hit) { onSelect(hit.id); void flow?.fitView({ nodes: [{ id: hit.id }], padding: 0.6, maxZoom: 1.1, duration: 260 }); } } if (event.key === 'Escape') { setQuery(''); } }} />
@@ -364,7 +369,7 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme
 			<details className="tg-view-menu"><summary className="tg-text-button" aria-label="View options"><SlidersHorizontal size={13} />View</summary>
 				<div className="tg-view-panel">
 					<label>Layout<select aria-label="Graph layout" value={presentation.layout} onChange={event => onPresentation({ type: 'set', patch: { layout: event.target.value as GraphPresentation['layout'] } })}>
-				<option value="layers">Layers</option><option value="scopes">Scopes</option><option value="tree">Ownership tree</option></select></label>
+				<option value="layers">Layers</option><option value="scopes">Scopes</option><option value="tree">Ownership tree</option><option value="bundled">Bundled (radial)</option></select></label>
 					<label>Routes<select aria-label="Route style" value={presentation.route} onChange={event => onPresentation({ type: 'set', patch: { route: event.target.value as RouteStyle } })}>
 				<option value="curved">Curved</option><option value="orthogonal">Orthogonal</option><option value="straight">Straight</option></select></label>
 					<label>Spacing<select aria-label="Graph spacing" value={String(presentation.spacing)} onChange={event => onPresentation({ type: 'set', patch: { spacing: event.target.value === 'auto' ? 'auto' : Number(event.target.value) } })}>
@@ -383,14 +388,14 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme
 		</div>
 		<div className="tg-legend" aria-label="Relationship legend">
 			{categoriesShown.map(category => <span key={category} className={'tg-legend-item tg-cat-' + category}><i />{categoryNames[category]}</span>)}
-			<span className="tg-legend-note"><Pin size={11} />Drag to pin · graph only</span>
+			{!bundled && <span className="tg-legend-note"><Pin size={11} />Drag to pin · graph only</span>}
 		</div>
-		<div className="tg-zoom" role="group" aria-label="Zoom">
+		{!bundled && <div className="tg-zoom" role="group" aria-label="Zoom">
 			<button aria-label="Zoom out" onClick={() => void flow?.zoomOut({ duration: 160 })}><Minus size={14} /></button>
 			<span>{Math.round(zoom * 100)}%</span>
 			<button aria-label="Zoom in" onClick={() => void flow?.zoomIn({ duration: 160 })}><Plus size={14} /></button>
 			<button aria-label="Fit graph" title="Fit graph" onClick={() => void flow?.fitView({ padding: fitPadding, maxZoom: 1, duration: 240 })}><Scan size={14} /></button>
-		</div>
+		</div>}
 		{(selectedEdge || selectedNode) && <WhyPanel snapshot={snapshot} edge={selectedEdge} node={selectedEdge ? undefined : selectedNode} trace={trace} overlay={selectedNode ? overlays.byNode[selectedNode.id] : undefined} wave={selectedNode ? waves[selectedNode.id] : undefined}
 			focused={!!selectedNode && presentation.focus?.id === selectedNode.id} onFocus={id => onPresentation({ type: 'set', patch: { focus: presentation.focus?.id === id ? undefined : { id, depth: 2 } } })}
 			onOpenSource={selectedNode && hasSource[selectedNode.id] ? onOpenSource : undefined} onEdit={onOpenDetails} onSelect={id => { setSelectedEdgeId(''); onSelect(id); }} onClose={() => { setSelectedEdgeId(''); onSelect(''); }} />}
@@ -434,4 +439,50 @@ function WhyPanel({ snapshot, edge, node, trace, overlay, wave, focused, onFocus
 		{profile.troubleshooting.slice(0, 2).map(hint => <p key={hint} className="tg-why-hint">{hint}</p>)}
 		<p className="tg-why-boundary">Configured relationships only. Not an outage, replacement or reachability prediction; run a plan for action impact.</p>
 	</aside>;
+}
+
+/**
+ * Radial hierarchical edge bundling view. Hover or select a resource: its prerequisites ("uses")
+ * and configured dependents ("used by") light up in two colours; everything else fades.
+ */
+function BundledGraph({ snapshot, edges, visible, selectedId, query, onSelect, onOpenDetails, reducedMotion }: { snapshot: TechnicalGraphSnapshot; edges: readonly GraphEdge[]; visible?: ReadonlySet<string>; selectedId: string; query: string; onSelect: (id: string) => void; onOpenDetails: (id: string) => void; reducedMotion: boolean }) {
+	const bundle = useMemo(() => bundleLayout(snapshot, edges, { visible }), [snapshot, edges, visible]);
+	const [hover, setHover] = useState('');
+	const [view, setView] = useState({ scale: 1, x: 0, y: 0 });
+	const drag = useRef<{ x: number; y: number; vx: number; vy: number } | null>(null);
+	const focus = hover || selectedId;
+	const related = useMemo(() => new Set(bundle.paths.flatMap(path => path.source === focus ? [path.target] : path.target === focus ? [path.source] : [])), [bundle, focus]);
+	const margin = 190; const size = (bundle.radius + margin) * 2;
+	const arc = (start: number, end: number, r: number) => { const a = start - 0.02; const b = end + 0.02; const [x0, y0] = [Math.cos(a - Math.PI / 2) * r, Math.sin(a - Math.PI / 2) * r]; const [x1, y1] = [Math.cos(b - Math.PI / 2) * r, Math.sin(b - Math.PI / 2) * r]; return `M ${x0} ${y0} A ${r} ${r} 0 ${b - a > Math.PI ? 1 : 0} 1 ${x1} ${y1}`; };
+	return <div className="tg-bundle" aria-label="Bundled relationship view"
+		onWheel={event => { const factor = event.deltaY < 0 ? 1.1 : 1 / 1.1; setView(current => ({ ...current, scale: Math.min(4, Math.max(0.4, current.scale * factor)) })); }}
+		onPointerDown={event => { if ((event.target as Element).closest('.tg-bundle-leaf')) { return; } drag.current = { x: event.clientX, y: event.clientY, vx: view.x, vy: view.y }; (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId); }}
+		onPointerMove={event => { const start = drag.current; if (start) { setView(current => ({ ...current, x: start.vx + (event.clientX - start.x), y: start.vy + (event.clientY - start.y) })); } }}
+		onPointerUp={() => { drag.current = null; }}>
+		<svg viewBox={`${-size / 2} ${-size / 2} ${size} ${size}`} style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }} onClick={event => { if (event.target === event.currentTarget) { onSelect(''); } }}>
+			{bundle.groups.map(group => <g key={group.layer} className={'tg-bundle-group tg-layer-' + group.layer}>
+				<path d={arc(group.start, group.end, bundle.radius + 150)} />
+				<text><textPath href={'#tg-arc-' + group.layer} startOffset="50%" textAnchor="middle">{group.label}</textPath></text>
+				<path id={'tg-arc-' + group.layer} d={arc(Math.min(group.start, (group.start + group.end) / 2 - 0.3), Math.max(group.end, (group.start + group.end) / 2 + 0.3), bundle.radius + 162)} fill="none" stroke="none" />
+			</g>)}
+			<g className="tg-bundle-paths">
+				{bundle.paths.map(path => {
+					const state = !focus ? '' : path.target === focus ? ' is-uses' : path.source === focus ? ' is-used-by' : ' is-dim';
+					return <path key={path.edgeId} d={path.d} className={'tg-bundle-path tg-cat-' + path.category + state + (reducedMotion ? '' : ' can-animate')} />;
+				})}
+			</g>
+			{bundle.leaves.map(leaf => {
+				const degrees = leaf.angle * 180 / Math.PI - 90; const flip = leaf.angle > Math.PI;
+				const state = !focus ? '' : leaf.id === focus ? ' is-focus' : related.has(leaf.id) ? ' is-related' : ' is-dim';
+				const match = !query.trim() || leaf.label.toLowerCase().includes(query.trim().toLowerCase());
+				return <g key={leaf.id} className={'tg-bundle-leaf tg-layer-' + leaf.layer + state + (match ? '' : ' is-unmatched') + (leaf.id === selectedId ? ' is-selected' : '')} transform={`rotate(${degrees}) translate(${bundle.radius + 8},0)${flip ? ' rotate(180)' : ''}`}
+					role="button" tabIndex={0} aria-label={leaf.label} onMouseEnter={() => setHover(leaf.id)} onMouseLeave={() => setHover('')}
+					onClick={event => { event.stopPropagation(); onSelect(leaf.id); }} onDoubleClick={() => onOpenDetails(leaf.id)} onKeyDown={event => { if (event.key === 'Enter') { onSelect(leaf.id); } }}>
+					<circle cx={flip ? 4 : -4} r={3.5} />
+					<text x={flip ? -4 : 4} dy="0.32em" textAnchor={flip ? 'end' : 'start'}>{leaf.label.length > 26 ? leaf.label.slice(0, 25) + '…' : leaf.label}</text>
+				</g>;
+			})}
+		</svg>
+		<div className="tg-bundle-key" aria-hidden="true"><span className="is-uses">uses (prerequisite)</span><span className="is-used-by">used by (dependent)</span><span>scroll to zoom · drag to pan</span></div>
+	</div>;
 }
