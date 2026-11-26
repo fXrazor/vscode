@@ -1,5 +1,14 @@
 # CloudForge Code OSS handoff
 
+## Network view gradual node sizing & sleek border polish — 26 November 2026
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `e14d0b22b1a`, owner Antigravity.
+- **Scope:**
+  - Replaced the front-loaded `Math.log1p(d) / Math.log1p(max)` radius curve in [technicalGraphForce.ts](extensions/cloudforge/studio/src/technicalGraphForce.ts) with a gradual convex degree ramp `(d / max(maxDegree, 6))^1.35` so 0- and 1-connection leaves stay compact, each extra connection steps up smoothly, small graphs don't balloon 1-link nodes into hubs, and major hubs (e.g. Resource Groups) stand out clearly.
+  - Added subtle proportional ring stroke (`1.6px` → `2.6px` max), gradual label sizing (`10.5px` → `15px`), a 3-dot gradual legend key, and a `WhyPanel` header wrap fix for long Terraform addresses in [TechnicalGraph.tsx](extensions/cloudforge/studio/src/TechnicalGraph.tsx) and [technical-graph.css](extensions/cloudforge/studio/src/technical-graph.css).
+  - Added unit coverage in [technicalGraph.test.ts](extensions/cloudforge/studio/src/technicalGraph.test.ts).
+- **Fresh verification:** Studio `tsc --noEmit` **PASS**, **230/230** Studio unit tests PASS (0 skipped), Studio `build` + `esbuild.webview.mts` **PASS**, `oxlint` & `hygiene` **PASS** (0 errors/warnings), Windows Edge `technical-view-verify.mjs` **64/64 PASS** (0 browser errors), and visual screenshot review across 9-resource cluster and 27-resource hub-spoke (light & dark).
+
 ## JSON Crack graph viewer — merged to main via fXrazor/vscode#2 — 25 November 2026
 
 Dale asked to bundle [JSON Crack](https://github.com/AykutSarac/jsoncrack.com/tree/main/apps/vscode) (`AykutSarac.jsoncrack-vscode`, MIT, fully offline; adds a graph button to the editor title on `.json` files and "Open with JSON Crack" on a selection). It ships as a built-in VSIX the same way as the JavaScript Debugger. The cloud container cannot reach Open VSX, so the hash is **not pinned yet**: run `node build/cloudforge/pinOpenVsx.ts` once on Windows (it picks the newest Open VSX version, checks engine `<=` this build, manifest id/version, MIT licence and licence file, saves `.build/cloudforge/AykutSarac.jsoncrack-vscode.<v>.vsix` and writes the `product.json` entry), then commit `product.json`. `package-win32-x64.ps1` re-downloads the pinned archive when missing, checks the SHA-256, checks the packaged extension's MIT licence, prints `JsonCrackSha256`, and only warns if the entry is absent. Tests: `cd build && node --test lib/test/cloudforgePinOpenVsx.test.ts` 4/4. Not run: the script against Open VSX, PowerShell changes, packaging.

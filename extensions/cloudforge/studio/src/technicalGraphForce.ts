@@ -48,10 +48,11 @@ export const forceSettings = { radius: 22, linkDistance: 110, charge: -460, labe
 
 /**
  * Node radius from the lines drawn to it. 'all' counts every line, including resource-group
- * membership, so a resource group holding twenty resources is the biggest node. 'dependents'
+ * membership, so a resource group holding many resources stands out as a hub. 'dependents'
  * counts resources that reference this one (edge source = the referenced resource), 'dependencies'
- * the resources it references. Logarithmic growth relative to the busiest node keeps mid-sized
- * hubs visibly bigger than leaves even beside a large resource group; the busiest node is exactly sizeBy % bigger than a node with no lines.
+ * the resources it references. A gradual convex curve (`(d / max(maxDegree, 6))^1.35`) keeps
+ * 0- and 1-connection leaves compact while making each additional connection step up smoothly
+ * and preventing tiny graphs from inflating a 1-link node into a hub.
  */
 export function nodeRadii(nodes: readonly Pick<GraphNode, 'id'>[], edges: readonly Pick<GraphEdge, 'source' | 'target' | 'membership'>[], sizeBy: number, count: NetworkOptions['sizeCount'] = 'all'): Record<string, number> {
 	const degree = new Map(nodes.map(node => [node.id, 0]));
@@ -63,8 +64,13 @@ export function nodeRadii(nodes: readonly Pick<GraphNode, 'id'>[], edges: readon
 		if (count !== 'dependencies') { bump(edge.source); }
 		if (count !== 'dependents') { bump(edge.target); }
 	}
-	const max = Math.max(1, ...degree.values()); const growth = Math.max(0, Math.min(300, sizeBy)) / 100;
-	return Object.fromEntries([...degree].map(([id, d]) => [id, Math.round(forceSettings.radius * (1 + growth * Math.log1p(d) / Math.log1p(max)) * 10) / 10]));
+	const max = Math.max(1, ...degree.values());
+	const scaleMax = Math.max(max, 6);
+	const growth = Math.max(0, Math.min(300, sizeBy)) / 100;
+	return Object.fromEntries([...degree].map(([id, d]) => {
+		const ratio = d <= 0 ? 0 : Math.pow(d / scaleMax, 1.35);
+		return [id, Math.round(forceSettings.radius * (1 + growth * ratio) * 10) / 10];
+	}));
 }
 
 /** Deterministic phyllotaxis start, like d3-force, so the same project always settles the same way. */
@@ -97,7 +103,7 @@ export function tickForce(sim: ForceSimulation): boolean {
 		t.vx -= dx * bias; t.vy -= dy * bias; s.vx += dx * (1 - bias); s.vy += dy * (1 - bias);
 	}
 	// Many-body repulsion scaled by size, and collision with label room. Exact below
-	// exactLimit nodes; above it Barnes–Hut for repulsion and a grid for collisions.
+	// exactLimit nodes; above it Barnes-Hut for repulsion and a grid for collisions.
 	if (sim.nodes.length <= forceSettings.exactLimit) { exactBodies(sim.nodes, options, alpha); } else { approximateBodies(sim.nodes, options, alpha); }
 	// Cluster pull: each node drifts toward its group's centroid (a soft forceX/forceY per group).
 	if (options.clusterPull) {
@@ -163,7 +169,7 @@ function collide(a: ForceNode, b: ForceNode, dx: number, dy: number, d2: number,
 	if (d2 < min * min) { const d = Math.sqrt(d2); const push = (min - d) / d * 0.5; a.vx -= dx * push; a.vy -= dy * push; b.vx += dx * push; b.vy += dy * push; }
 }
 interface Quad { x0: number; y0: number; size: number; mass: number; cx: number; cy: number; leaf?: ForceNode; kids?: (Quad | undefined)[] }
-/** Barnes–Hut (theta 0.9, as d3-force) with mass sqrt(r), and a uniform grid for collisions. */
+/** Barnes-Hut (theta 0.9, as d3-force) with mass sqrt(r), and a uniform grid for collisions. */
 function approximateBodies(nodes: ForceNode[], options: ForceOptions, alpha: number): void {
 	let minX = Infinity; let minY = Infinity; let maxX = -Infinity; let maxY = -Infinity;
 	for (const node of nodes) { minX = Math.min(minX, node.x); minY = Math.min(minY, node.y); maxX = Math.max(maxX, node.x); maxY = Math.max(maxY, node.y); }
