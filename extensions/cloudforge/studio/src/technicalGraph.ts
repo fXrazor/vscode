@@ -12,6 +12,7 @@
  * compatibility, name or proximity. Missing facts stay `unknown`.
  */
 import type { Architecture, Resource } from './model.ts';
+import type { FileBlockValues, FileResourceValues } from './resourceValues.ts';
 import { resourceDefinition } from './fixture.ts';
 import { infrastructureLayers, resourceIntelligence, type InfrastructureLayer, type RelationshipCategory } from './providerKnowledge.ts';
 import { documentedHubSpokes, infrastructureRelationships, type InfrastructureRelationship } from './infrastructureRelationships.ts';
@@ -159,22 +160,81 @@ export function graphLayer(resource: Resource): InfrastructureLayer {
 	return profile.layer !== 'unknown' ? profile.layer : kindLayer[resource.kind];
 }
 
+function escapeRegExp(text: string): string {
+	return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Finds exact HCL field expressions in a target resource's `readResourceValues` payload that
+ * reference `sourceAddress` (e.g. `azurerm_subnet.app` in `subnet_id` or `ip_configuration.subnet_id`),
+ * enforcing identifier boundaries so `azurerm_subnet.app` never false-matches `azurerm_subnet.app_two`.
+ */
+export function extractSourceEdgeEvidence(
+	fileResource: FileResourceValues,
+	sourceAddress: string
+): readonly { readonly field: string; readonly expression: string }[] {
+	if (!sourceAddress) { return []; }
+	const pattern = new RegExp(`(?:^|[^A-Za-z0-9_.-])${escapeRegExp(sourceAddress)}(?=$|[^A-Za-z0-9_-])`);
+	const matches: { field: string; expression: string }[] = [];
+	const seen = new Set<string>();
+	const record = (field: string, expression: string) => {
+		const trimmed = expression.trim().slice(0, 200);
+		const key = field + '\u0000' + trimmed;
+		if (!trimmed || seen.has(key) || matches.length >= 8) { return; }
+		seen.add(key);
+		matches.push({ field, expression: trimmed });
+	};
+	const walk = (attributes: Readonly<Record<string, FileBlockValues['attributes'][string]>>, blocks: readonly FileBlockValues[], prefix: string, depth: number) => {
+		if (depth > 8 || matches.length >= 8) { return; }
+		for (const [name, value] of Object.entries(attributes)) {
+			if (value.kind === 'expression' && pattern.test(value.text)) {
+				record(prefix ? `${prefix}.${name}` : name, value.text);
+			}
+		}
+		const totals = new Map<string, number>();
+		for (const block of blocks) { totals.set(block.name, (totals.get(block.name) ?? 0) + 1); }
+		const indices = new Map<string, number>();
+		for (const block of blocks) {
+			const idx = indices.get(block.name) ?? 0;
+			indices.set(block.name, idx + 1);
+			const segment = (totals.get(block.name) ?? 0) > 1 ? `${block.name}[${idx}]` : block.name;
+			walk(block.attributes, block.blocks, prefix ? `${prefix}.${segment}` : segment, depth + 1);
+		}
+	};
+	walk(fileResource.attributes, fileResource.blocks, '', 0);
+	return matches;
+}
+
 /** Build the detached, frozen graph snapshot. Pure: never mutates or retains the architecture. */
-export function projectTechnicalGraph(architecture: Architecture): TechnicalGraphSnapshot {
+export function projectTechnicalGraph(architecture: Architecture, fileValues?: readonly FileResourceValues[]): TechnicalGraphSnapshot {
 	const relationships: InfrastructureRelationship[] = infrastructureRelationships(architecture);
 	const byId = new Map(architecture.resources.map(resource => [resource.id, resource]));
+	const fileByAddress = new Map((fileValues ?? []).map(item => [item.address, item]));
 	const labelOf = (id: string) => { const resource = byId.get(id); return resource ? resource.label || resource.name : id; };
 	const isScopeResource = (resource: Resource) => scopeTypes.has(resourceDefinition(resource).type) || resource.kind === 'group';
 	const edges: GraphEdge[] = relationships.map(link => {
 		const source = byId.get(link.source);
+		const target = byId.get(link.target);
 		const membership = link.category !== 'attachment' && !!source && resourceDefinition(source).type === 'azurerm_resource_group'
 			|| link.category === 'ownership' && !!source && source.kind === 'group';
-		const field = link.evidence[0]?.field ?? 'source';
+		let evidence: GraphEvidence[] = link.evidence.map(item => ({ origin: item.origin, field: item.field, expression: item.expression, meaning: item.meaning, sourceKey: item.sourceKey }));
+		if (fileByAddress.size > 0 && source && target && evidence.some(item => item.origin === 'service' && !item.expression)) {
+			const targetFile = fileByAddress.get(safeAddress(target));
+			const sourceMatches = targetFile ? extractSourceEdgeEvidence(targetFile, safeAddress(source)) : [];
+			if (sourceMatches.length > 0) {
+				const retained = evidence.filter(item => !(item.origin === 'service' && !item.expression));
+				evidence = [
+					...retained,
+					...sourceMatches.map(match => ({ origin: 'service' as const, field: match.field, expression: match.expression, meaning: 'Referenced in Terraform source file.' })),
+				];
+			}
+		}
+		const field = evidence[0]?.field ?? 'source';
 		return {
 			id: link.id, source: link.source, target: link.target, category: link.category, ordering: link.ordering,
-			confidence: link.evidence.every(item => item.origin === 'service') ? (link.category === 'unclassified' ? 'unclassified' : 'source-graph') : 'configured',
+			confidence: evidence.every(item => item.origin === 'service') ? (link.category === 'unclassified' ? 'unclassified' : 'source-graph') : 'configured',
 			membership, targetPort: portId(link.target, field, link.source),
-			evidence: link.evidence.map(item => ({ origin: item.origin, field: item.field, expression: item.expression, meaning: item.meaning, sourceKey: item.sourceKey })),
+			evidence,
 		};
 	});
 	const cycles = orderingCycles(architecture.resources.map(resource => resource.id), edges);
@@ -198,7 +258,7 @@ export function projectTechnicalGraph(architecture: Architecture): TechnicalGrap
 			inDegree: edges.filter(edge => edge.target === resource.id && !edge.membership).length,
 			outDegree: edges.filter(edge => edge.source === resource.id && !edge.membership).length,
 			inCycle: inCycle.has(resource.id),
-			...(resource.kind === 'module' ? { module: { source: String(resource.settings?.source ?? '').slice(0, 200) } } : {}),
+			...(resource.kind === 'module' ? { module: { source: String(resource.settings?.Source ?? resource.settings?.source ?? '').slice(0, 200) } } : {}),
 		};
 	});
 	const exposure = configuredExposure(architecture, nodes, edges);
@@ -206,7 +266,7 @@ export function projectTechnicalGraph(architecture: Architecture): TechnicalGrap
 	const hubSpokes = documentedHubSpokes(architecture, relationships).map(star => ({ hub: star.hub, spokes: [...star.spokes] }));
 	const patterns = detectTechnicalGraphPatterns(nodes, edges, hubSpokes);
 	const boundaries = summarizeGraphBoundaries(nodes);
-	const revision = hash(JSON.stringify([nodes.map(node => [node.id, node.label, node.type, node.scope, node.region.value]), edges.map(edge => [edge.id, edge.evidence.length])]));
+	const revision = hash(JSON.stringify([nodes.map(node => [node.id, node.label, node.type, node.scope, node.region.value]), edges.map(edge => [edge.id, edge.evidence.map(item => [item.field, item.expression ?? ''])])]));
 	return deepFreeze({
 		revision, nodes, edges, hubSpokes, patterns, boundaries, cycles, inputs: graphInputs(architecture),
 		coverage: { documented: nodes.filter(node => node.reviewStatus === 'documented').length, unreviewed: nodes.filter(node => node.reviewStatus === 'unreviewed').length, unknownRegion: nodes.filter(node => !node.region.known).length },

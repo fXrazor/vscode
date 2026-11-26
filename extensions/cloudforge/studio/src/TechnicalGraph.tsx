@@ -18,6 +18,8 @@ import {
 } from '@xyflow/react';
 import { Activity, Eye, GitBranch, Boxes, Layers, LayoutGrid, ShieldAlert, AlertCircle, AlertTriangle, Share2, Rows3, Columns3, Network, Orbit, ChevronDown, Crosshair, FileCode2, Search, SlidersHorizontal, X, ChevronUp, Maximize2, Minus, Pencil, Pin, PinOff, Plus, RotateCcw, Scan } from 'lucide-react';
 import type { Action, Architecture, DesignMode } from './model.ts';
+import type { FileResourceValues } from './resourceValues.ts';
+import type { HostModuleInspection } from './webviewBridge.ts';
 import { applyWaves, graphLenses, graphOverlays, layerLabels, lensEdges, matchesQuery, neighbourhood, projectTechnicalGraph, traceNode, type NodeOverlay, type PlanAction, type GraphCategory, type GraphEdge, type GraphNode, type GraphPort, type GraphInput, type TechnicalGraphSnapshot } from './technicalGraph.ts';
 import { inputSize, layoutTechnicalGraph, placeInputs, treeConnector, treeLinkPath, treeParents, visiblePortCount, type GraphLane } from './technicalGraphLayout.ts';
 import { graphEditAllowed, type GraphPresentation, type GraphPresentationAction, type RouteStyle } from './graphPresentation.ts';
@@ -156,8 +158,16 @@ const nodeTypes = { card: GraphCard, lane: LaneBand, ghost: GhostCard };
 const edgeTypes = { graph: GraphRoute };
 const fitPadding = { top: '84px', right: '40px', bottom: '84px', left: '40px' } as const;
 
+export interface GraphModuleInspectionEntry {
+	readonly loading: boolean;
+	readonly inspection: HostModuleInspection | null;
+	readonly error?: string;
+}
+
 export interface TechnicalGraphProps {
 	architecture: Architecture;
+	/** Optional sanitized file values from Rust `readResourceValues` to enrich source-graph edge provenance. */
+	fileValues?: readonly FileResourceValues[];
 	theme: 'light' | 'dark';
 	presentation: GraphPresentation;
 	onPresentation: Dispatch<GraphPresentationAction>;
@@ -173,6 +183,9 @@ export interface TechnicalGraphProps {
 	plan?: { sourceRevision: string; stale: boolean; changes: readonly { address: string; moduleAddress?: string; mode?: string; actionKind: PlanAction; changedAttributePaths: readonly string[]; hasSensitiveAttributes: boolean }[] };
 	onOpenSource?: (id: string) => void;
 	hasSource?: Readonly<Record<string, boolean>>;
+	/** Host-provided child module inspections keyed by `modulePath.join('.')` (Stage 7 `requestModule`). */
+	moduleInspections?: Readonly<Record<string, GraphModuleInspectionEntry>>;
+	onInspectModule?: (modulePath: readonly string[]) => void;
 	viewports?: RefObject<Partial<Record<DesignMode, Viewport>>>;
 	/** Receives a portable SVG of the graph as currently shown; the host decides where it goes. */
 	onExportImage?: (svg: string, format: 'svg' | 'png') => void;
@@ -184,8 +197,8 @@ export function dispatchGraphEdit(onEdit: (action: Action) => void, action: Acti
 	onEdit(action); return true;
 }
 
-export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme, presentation, onPresentation, selectedId, onSelect, onOpenDetails, onEdit, onInit, viewports, diagnostics = [], plan, onOpenSource, hasSource = {}, onExportImage }: TechnicalGraphProps) {
-	const snapshot: TechnicalGraphSnapshot = useMemo(() => projectTechnicalGraph(architecture), [architecture]);
+export const TechnicalGraph = memo(function TechnicalGraph({ architecture, fileValues, theme, presentation, onPresentation, selectedId, onSelect, onOpenDetails, onEdit, onInit, viewports, diagnostics = [], plan, onOpenSource, hasSource = {}, moduleInspections, onInspectModule, onExportImage }: TechnicalGraphProps) {
+	const snapshot: TechnicalGraphSnapshot = useMemo(() => projectTechnicalGraph(architecture, fileValues), [architecture, fileValues]);
 	const [zoom, setZoom] = useState(1);
 	const [query, setQuery] = useState('');
 	const [hoverNode, setHoverNode] = useState('');
@@ -402,7 +415,7 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme
 			<div className="tg-segment tg-layouts" role="radiogroup" aria-label="Graph layout">
 				{graphLayouts.map(item => <button key={item.id} role="radio" aria-checked={presentation.layout === item.id} aria-label={item.label} data-tip={item.label + ' · ' + item.hint} onClick={() => onPresentation({ type: 'set', patch: { layout: item.id } })}><item.icon size={15} strokeWidth={1.8} /><span>{item.short}</span></button>)}
 			</div>
-			{scopeChoices.length > 1 && <label className={'tg-scope-pick' + (spotlight ? ' is-active' : '')} data-tip={'Spotlight scope: ' + (scopeChoices.find(choice => choice.id === presentation.spotlight)?.label ?? 'all scopes') + ' · everything outside it greys out'}><Crosshair size={15} /><select aria-label="Spotlight scope" value={presentation.spotlight ?? ''} onChange={event => onPresentation({ type: 'set', patch: { spotlight: event.target.value || undefined } })}>
+			{scopeChoices.length > 1 && <label className={'tg-scope-pick' + (spotlight ? ' is-active' : '')} data-tip={'Spotlight scope: ' + (scopeChoices.find(choice => choice.id === presentation.spotlight)?.label ?? 'all scopes') + ' · everything outside it dims softly'}><Crosshair size={15} /><select aria-label="Spotlight scope" value={presentation.spotlight ?? ''} onChange={event => onPresentation({ type: 'set', patch: { spotlight: event.target.value || undefined } })}>
 				<option value="">All scopes</option>{scopeChoices.map(choice => <option key={choice.id} value={choice.id}>{choice.label} ({choice.members})</option>)}</select>{spotlight && <button className="tg-icon-button" aria-label="Show every scope" title="Show every scope" onClick={() => onPresentation({ type: 'set', patch: { spotlight: undefined } })}><X size={12} /></button>}</label>}
 			<label className={'tg-overlay-pick' + (presentation.overlay !== 'none' ? ' is-active' : '')} data-tip={'Card overlay: ' + ({ none: 'none', plan: 'plan actions', order: 'apply order', impact: 'dependents' } as Record<string, string>)[presentation.overlay]}><Layers size={15} /><select aria-label="Card overlay" value={presentation.overlay} onChange={event => onPresentation({ type: 'set', patch: { overlay: event.target.value as GraphPresentation['overlay'] } })}>
 				<option value="none">No overlay</option><option value="plan">Plan actions{plan ? '' : ' (no plan)'}</option><option value="order">Apply order</option><option value="impact">Dependents</option></select></label>
@@ -438,13 +451,17 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme
 		</div>}
 		{(selectedEdge || selectedNode) && <WhyPanel snapshot={snapshot} edge={selectedEdge} node={selectedEdge ? undefined : selectedNode} trace={trace} overlay={selectedNode ? overlays.byNode[selectedNode.id] : undefined} wave={selectedNode ? waves[selectedNode.id] : undefined}
 			focused={!!selectedNode && presentation.focus?.id === selectedNode.id} onFocus={id => onPresentation({ type: 'set', patch: { focus: presentation.focus?.id === id ? undefined : { id, depth: 2 } } })}
-			onOpenSource={selectedNode && hasSource[selectedNode.id] ? onOpenSource : undefined} onEdit={onOpenDetails} onSelect={id => { setSelectedEdgeId(''); onSelect(id); }} onClose={() => { setSelectedEdgeId(''); onSelect(''); }} />}
+			onOpenSource={selectedNode && hasSource[selectedNode.id] ? onOpenSource : undefined}
+			moduleInspections={moduleInspections} onInspectModule={onInspectModule}
+			onEdit={onOpenDetails} onSelect={id => { setSelectedEdgeId(''); onSelect(id); }} onClose={() => { setSelectedEdgeId(''); onSelect(''); }} />}
 		{presentation.overlay === 'plan' && <div className="tg-banner tg-banner-info" role="status">{!plan ? 'No plan yet. Run Plan from Issues to see create, update, replace and destroy actions.' : (plan.stale ? 'Plan is older than this draft; actions may have changed. ' : 'Latest plan. ') + (overlays.unmatchedPlan ? overlays.unmatchedPlan + ' planned change' + (overlays.unmatchedPlan === 1 ? '' : 's') + ' are in modules or resources not drawn here.' : '')}</div>}
 		{snapshot.cycles.length > 0 && <div className="tg-banner" role="status"><AlertTriangle size={14} />{snapshot.cycles.length} configured reference cycle{snapshot.cycles.length === 1 ? '' : 's'} — Terraform cannot order {snapshot.cycles.map(cycle => cycle.length).reduce((a, b) => a + b, 0)} resources.</div>}
 	</main>;
 });
 
-function WhyPanel({ snapshot, edge, node, trace, overlay, wave, focused, onFocus, onOpenSource, onEdit, onSelect, onClose }: { snapshot: TechnicalGraphSnapshot; edge?: GraphEdge; node?: GraphNode; trace?: ReturnType<typeof traceNode>; overlay?: NodeOverlay; wave?: number; focused: boolean; onFocus: (id: string) => void; onOpenSource?: (id: string) => void; onEdit: (id: string) => void; onSelect: (id: string) => void; onClose: () => void }) {
+function WhyPanel({ snapshot, edge, node, trace, overlay, wave, focused, onFocus, onOpenSource, moduleInspections, onInspectModule, onEdit, onSelect, onClose }: { snapshot: TechnicalGraphSnapshot; edge?: GraphEdge; node?: GraphNode; trace?: ReturnType<typeof traceNode>; overlay?: NodeOverlay; wave?: number; focused: boolean; onFocus: (id: string) => void; onOpenSource?: (id: string) => void; moduleInspections?: Readonly<Record<string, GraphModuleInspectionEntry>>; onInspectModule?: (modulePath: readonly string[]) => void; onEdit: (id: string) => void; onSelect: (id: string) => void; onClose: () => void }) {
+	const [modulePath, setModulePath] = useState<readonly string[]>(() => node?.module ? [node.name] : []);
+	useEffect(() => { setModulePath(node?.module ? [node.name] : []); }, [node?.id, node?.name, node?.module]);
 	const label = (id: string) => snapshot.nodes.find(item => item.id === id)?.label ?? id;
 	if (edge) {
 		return <aside className="tg-why" aria-label="Why this relationship exists">
@@ -455,6 +472,17 @@ function WhyPanel({ snapshot, edge, node, trace, overlay, wave, focused, onFocus
 		</aside>;
 	}
 	if (!node) { return null; }
+	const activeModulePath = node.module ? (modulePath.length > 0 ? modulePath : [node.name]) : [];
+	const activeModuleKey = activeModulePath.join('.');
+	const activeModuleState = activeModuleKey ? moduleInspections?.[activeModuleKey] : undefined;
+	const activeInspection = activeModuleState?.inspection ?? null;
+	const drillModule = (nextPath: readonly string[]) => {
+		setModulePath(nextPath);
+		const nextKey = nextPath.join('.');
+		if (onInspectModule && !moduleInspections?.[nextKey]?.inspection && !moduleInspections?.[nextKey]?.loading) {
+			onInspectModule(nextPath);
+		}
+	};
 	const profile = resourceIntelligence(node.type);
 	const scope = node.scope ? label(node.scope) : undefined;
 	const nodePatterns = snapshot.patterns.filter(pattern => pattern.memberNodeIds.includes(node.id));
@@ -466,6 +494,7 @@ function WhyPanel({ snapshot, edge, node, trace, overlay, wave, focused, onFocus
 		<header><div><strong>{node.label}</strong><code>{node.address}</code></div><button className="tg-icon-button" aria-label="Close" onClick={onClose}>×</button></header>
 		<dl>
 			<dt>Role</dt><dd>{layerLabels[node.layer]}{scope ? ' · in ' + scope : ''}</dd>
+			{node.module?.source && <><dt>Module</dt><dd><code>{node.module.source}</code></dd></>}
 			<dt>Uses</dt><dd>{trace?.upstream.size ?? 0} prerequisite{trace?.upstream.size === 1 ? '' : 's'}{directUses.length > 0 && <span className="tg-why-peers"> ({directUses.slice(0, 4).map(id => <button key={id} className="tg-link" onClick={() => onSelect(id)}>{label(id)}</button>)}{directUses.length > 4 ? `+${directUses.length - 4}` : ''})</span>}</dd>
 			<dt>Used by</dt><dd>{trace?.downstream.size ?? 0} configured dependent{trace?.downstream.size === 1 ? '' : 's'}{directUsedBy.length > 0 && <span className="tg-why-peers"> ({directUsedBy.slice(0, 4).map(id => <button key={id} className="tg-link" onClick={() => onSelect(id)}>{label(id)}</button>)}{directUsedBy.length > 4 ? `+${directUsedBy.length - 4}` : ''})</span>}</dd>
 			<dt>Apply wave</dt><dd>{wave === undefined ? 'cycle — cannot be ordered' : wave + 1}</dd>
@@ -479,6 +508,48 @@ function WhyPanel({ snapshot, edge, node, trace, overlay, wave, focused, onFocus
 			<button onClick={() => onEdit(node.id)}><Pencil size={13} />Edit</button>
 			{onOpenSource && <button onClick={() => onOpenSource(node.id)}><FileCode2 size={13} />Source</button>}
 		</div>
+		{node.module && onInspectModule && <div className="tg-why-module" aria-label="Module inspection">
+			<div className="tg-why-pattern-head">
+				<strong>Module drill-down</strong>
+				<button type="button" className="tg-link" disabled={!!activeModuleState?.loading} onClick={() => onInspectModule(activeModulePath)}>
+					{activeModuleState?.loading ? 'Inspecting…' : activeInspection ? 'Refresh' : 'Inspect module'}
+				</button>
+			</div>
+			{activeModulePath.length > 1 && <p className="tg-why-module-crumb">
+				{activeModulePath.map((segment, index) => <span key={segment + index}>{index > 0 ? ' › ' : ''}{index < activeModulePath.length - 1 ? <button type="button" className="tg-link" onClick={() => drillModule(activeModulePath.slice(0, index + 1))}>module.{segment}</button> : <code>module.{segment}</code>}</span>)}
+			</p>}
+			{activeModuleState?.error && <p className="tg-why-warn"><AlertTriangle size={12} /><span>{activeModuleState.error}</span></p>}
+			{activeInspection && <>
+				<p className="tg-muted"><code>{activeInspection.sourceKind}</code> · <code>{activeInspection.source}</code> ({activeInspection.status})</p>
+				{activeInspection.graph && <div className="tg-why-module-list">
+					<strong>Internal resources ({activeInspection.graph.nodes.length}) · {activeInspection.graph.edges.length} link{activeInspection.graph.edges.length === 1 ? '' : 's'}</strong>
+					{activeInspection.graph.nodes.length > 0 && <ul>
+						{activeInspection.graph.nodes.slice(0, 8).map(item => <li key={item.id}><code>{item.resourceType ? item.resourceType + '.' + item.name : item.kind + '.' + item.name}</code></li>)}
+						{activeInspection.graph.nodes.length > 8 && <li className="tg-muted">+{activeInspection.graph.nodes.length - 8} more</li>}
+					</ul>}
+				</div>}
+				{activeInspection.variables.length > 0 && <div className="tg-why-module-list">
+					<strong>Inputs ({activeInspection.variables.length})</strong>
+					<ul>
+						{activeInspection.variables.slice(0, 8).map(item => <li key={item.name}><code>{item.name}</code>{item.typeExpr ? ' · ' + item.typeExpr : ''}{activeInspection.passedInputs.includes(item.name) ? ' · passed' : item.required ? ' · required' : ''}{item.sensitive ? ' · sensitive' : ''}</li>)}
+						{activeInspection.variables.length > 8 && <li className="tg-muted">+{activeInspection.variables.length - 8} more</li>}
+					</ul>
+				</div>}
+				{activeInspection.outputs.length > 0 && <div className="tg-why-module-list">
+					<strong>Outputs ({activeInspection.outputs.length})</strong>
+					<ul>
+						{activeInspection.outputs.slice(0, 8).map(item => <li key={item.name}><code>{item.name}</code>{item.sensitive ? ' · sensitive' : ''}</li>)}
+						{activeInspection.outputs.length > 8 && <li className="tg-muted">+{activeInspection.outputs.length - 8} more</li>}
+					</ul>
+				</div>}
+				{activeInspection.childModules.length > 0 && <div className="tg-why-module-list">
+					<strong>Nested child modules ({activeInspection.childModules.length})</strong>
+					<ul>
+						{activeInspection.childModules.slice(0, 8).map(child => <li key={child.name}><button type="button" className="tg-link" onClick={() => drillModule([...activeModulePath, child.name])}>module.{child.name}</button> <span className="tg-muted">({child.isLocal ? 'local' : 'external'})</span></li>)}
+					</ul>
+				</div>}
+			</>}
+		</div>}
 		{nodePatterns.length > 0 && <div className="tg-why-patterns" aria-label="Detected topology patterns">
 			{nodePatterns.map(pattern => {
 				const peers = pattern.memberNodeIds.filter(id => id !== node.id);

@@ -1,5 +1,18 @@
 # CloudForge Code OSS handoff
 
+## Technical Graph service-edge field provenance & module drill-down (`requestModule`) — 26 November 2026
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `a10ed3fb214`, owner Antigravity. Zero changes to Rust, protocol, `product.json`, or installed files.
+- **Completed Technical Graph backlog items:**
+  1. **Service-edge field provenance from `readResourceValues`:** added `extractSourceEdgeEvidence()` in [technicalGraph.ts](extensions/cloudforge/studio/src/technicalGraph.ts) and wired optional `fileValues` from [App.tsx](extensions/cloudforge/studio/src/App.tsx) into [TechnicalGraph.tsx](extensions/cloudforge/studio/src/TechnicalGraph.tsx) so `source-graph` edges promote generic no-expression service evidence to exact Terraform attribute paths and HCL expressions (including nested/repeated blocks), updating both `WhyPanel` evidence and card input port rows without false prefix matches or architecture mutations. Also fixed module cards to read both capitalised `Source` and lowercase `source` settings.
+  2. **Technical Graph module drill-down (`requestModule`):** generalised `inspectModulePath(modulePath)` in [App.tsx](extensions/cloudforge/studio/src/App.tsx) (resetting inspections on new `graph` snapshots) and wired read-only `Module drill-down` inside `WhyPanel` in [TechnicalGraph.tsx](extensions/cloudforge/studio/src/TechnicalGraph.tsx) + [technical-graph.css](extensions/cloudforge/studio/src/technical-graph.css), displaying `status`, `sourceKind`, `source`, internal resource/link counts & addresses (`inspection.graph`), declared inputs (with `passed`/`required`/`sensitive` indicators), outputs, and clickable nested child module drill-down with breadcrumb navigation (zero Undo steps).
+  3. **Tests:** added unit coverage in [technicalGraph.test.ts](extensions/cloudforge/studio/src/technicalGraph.test.ts) and ran hosted Windows Edge verification.
+- **Fresh verification (26 November 2026):**
+  - Studio `tsc --noEmit`: **PASS**; Studio unit tests: **219/219 PASS** (0 skipped); Studio `build` + `esbuild.webview.mts`: **PASS**
+  - `build/oxlint.ts` (`technicalGraph.ts`, `technicalGraph.test.ts`): **0 errors / 0 warnings**; `build/hygiene.ts`: **PASS**
+  - Real Windows Edge (`--channel=msedge`): `technical-view-verify.mjs` **64/64 PASS**, `hosted-refresh-verify.mjs` **20/20 PASS**, hosted provenance + module drill-down (`requestModule` + nested `module.subnets`) **PASS** — all with **0 browser errors** and **0 Undo steps**.
+- **Remaining next actions:** stage a fresh desktop + Rust (`53539fd9d13e`) release build/manifest to verify native first import into an empty mirror, final removal/reclaimed bytes, active leases, and selected-package extraction end-to-end; continue installed variable/additional-Terraform/AWS/Google verification.
+
 ## Package-details schema prefill, colour-preserving Scope Spotlight & mixed-list HCL hydration — 26 November 2026
 
 - **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, based on `origin/main` `532f839a3de` (includes Claude PR #4 4-port connectors, Miro edit bar, mixed list entries, and Scope Spotlight), owner Antigravity. Zero changes to Rust, protocol, `product.json`, or installed files.

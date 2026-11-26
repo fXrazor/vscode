@@ -40,7 +40,7 @@ import { workflowTemplate } from './workflowTemplate.ts';
 import { createHostBridge, type HostCloudRegionsPayload, type HostDependencyReport, type HostDetectedEngine, type HostDraftSaveError, type HostDraftSavePreview, type HostEngineInitOfflineReport, type HostEnginePlanReport, type HostEngineValidateReport, type HostSaveAllPreview, type HostExportAuditReport, type HostGraphSnapshot, type HostModuleInspection, type HostNotice, type HostOfflineMirrorReadiness, type HostValidationRun } from './webviewBridge.ts';
 import type { LiveSchemaMap } from './liveSchema.ts';
 import { parseSchemaPreview, type SchemaPreview } from './resourceDraft.ts';
-import { hydrateResourceValues, parseResourceValues } from './resourceValues.ts';
+import { hydrateResourceValues, parseResourceValues, type FileResourceValues } from './resourceValues.ts';
 import { buildDraftSavePayload, buildHostViewState, changedFilePayloads, refreshPrevious, adoptSavedFiles, defaultTargetTfFile, projectGraphSnapshotToArchitecture, projectHostDiagnostics, sanitizeDraftTfFileName } from './serviceAdapter.ts';
 import { projectResourceFiles } from './terraformProjection.ts';
 import { DraftSaveDialog } from './DraftSaveDialog.tsx';
@@ -95,6 +95,7 @@ export function Studio() {
 	const savedFilesRef = useRef<{ readonly state: Architecture; readonly files: ReadonlySet<string> } | null>(null);
 	const hostGraphRef = useRef<HostGraphSnapshot | null>(null);
 	const sourceValuesRef = useRef<ReturnType<typeof parseResourceValues>>(undefined);
+	const [sourceValues, setSourceValues] = useState<readonly FileResourceValues[] | undefined>(undefined);
 	const [hasSourceById, setHasSourceById] = useState<Readonly<Record<string, boolean>>>({});
 	const [hostNotice, setHostNotice] = useState<HostNotice | null>(null);
 	const [liveSchemas, setLiveSchemas] = useState<LiveSchemaMap>({});
@@ -168,6 +169,8 @@ export function Studio() {
 			switch (incoming.type) {
 				case 'graph': {
 					sourceValuesRef.current = undefined;
+					setSourceValues(undefined);
+					setModuleInspections({});
 					clearFormAttributes();
 					setLiveSchemas({});
 					setSchemaPreviews({});
@@ -251,6 +254,7 @@ export function Studio() {
 					}
 					const hydrated = hydrateResourceValues(base, graph, parsed.resources, parsed.variables);
 					sourceValuesRef.current = parsed;
+					setSourceValues(parsed.resources);
 					if (hydrated !== base) {
 						dispatch({ type: 'rebase', architecture: hydrated, base });
 						setHostBaseline(hydrated);
@@ -460,16 +464,23 @@ export function Studio() {
 		return () => clearTimeout(timer);
 	}, [hostBridge, hostSnapshot, architecture, mode, theme, selectedId, workspaceOpen, inspectorOpen, libraryOpen, graphPresentation]);
 
-	const inspectModuleResource = useCallback((moduleName: string) => {
-		if (!hostBridge.isHosted || !hostSnapshot || !moduleName) {
+	const inspectModulePath = useCallback((modulePath: readonly string[]) => {
+		if (!hostBridge.isHosted || !hostSnapshot || modulePath.length === 0) {
 			return;
 		}
+		const modKey = modulePath.join('.');
 		setModuleInspections(prev => ({
 			...prev,
-			[moduleName]: { loading: true, inspection: prev[moduleName]?.inspection ?? null },
+			[modKey]: { loading: true, inspection: prev[modKey]?.inspection ?? null },
 		}));
-		hostBridge.post({ type: 'requestModule', modulePath: [moduleName] });
+		hostBridge.post({ type: 'requestModule', modulePath });
 	}, [hostBridge, hostSnapshot]);
+
+	const inspectModuleResource = useCallback((moduleName: string) => {
+		if (moduleName) {
+			inspectModulePath([moduleName]);
+		}
+	}, [inspectModulePath]);
 
 	const openResource = useCallback((id: string) => {
 		setSelectedId(id);
@@ -813,11 +824,13 @@ export function Studio() {
 					}} resizeHandle={<PaneResizeHandle side="library" width={libraryWidth} minimum={346} onCommit={setLibraryWidth} />} />
 				<div className="design-area">
 					<div className="canvas-shell">
-						{mode === 'technical' ? <TechnicalGraph architecture={architecture} theme={theme} presentation={graphPresentation} onPresentation={presentGraph}
+						{mode === 'technical' ? <TechnicalGraph architecture={architecture} fileValues={sourceValues} theme={theme} presentation={graphPresentation} onPresentation={presentGraph}
 							selectedId={selectedId} onSelect={setSelectedId} onOpenDetails={openDetails} onEdit={graphEdit}
 							onInit={instance => setFlow(instance as never)} viewports={viewport}
 							onExportImage={(svg, format) => { if (hostBridge.isHosted) { exportHostArtifact(format, svg, '-graph'); } else { void downloadSvg(svg, format, sanitizeDraftTfFileName(architecture.name).replace(/\.tf$/, '') + '-graph').catch(() => setMessage('Graph export failed')); } }}
 							diagnostics={findings} hasSource={hasSourceById} onOpenSource={hostBridge.isHosted ? id => hostBridge.post({ type: 'openSource', nodeId: id }) : undefined}
+							moduleInspections={hostBridge.isHosted && hostSnapshot ? moduleInspections : undefined}
+							onInspectModule={hostBridge.isHosted && hostSnapshot ? inspectModulePath : undefined}
 							plan={enginePlanReport ? { sourceRevision: enginePlanReport.sourceRevision, stale: enginePlanReport.sourceRevision !== hostSnapshot?.sourceRevision || (hostBaseline ? history.present !== hostBaseline : false), changes: enginePlanReport.resourceChanges } : undefined} /> :
 						<DesignCanvas architecture={architecture} mode={mode} theme={theme} onThemeChange={setTheme} selectedId={selectedId} selectedIds={selectedIds} onSelectionChange={setSelectedIds} dispatch={dispatch}
 							onSelect={id => { setSelectedId(id); if (id && inspectorCategory === 'resources' && !architecture.resources.some(resource => resource.id === id)) { setDetailTab('form'); } }} onOpen={openResource} onOpenDetails={openDetails} onInit={setFlow} viewports={viewport}
