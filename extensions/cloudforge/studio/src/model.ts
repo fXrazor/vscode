@@ -7,10 +7,12 @@ import { canConnect, canConnectEndpoints } from './designConnections.ts';
 import { elementEndpoint, endpointKey, normaliseArchitectureConnections, type ArchitectureInput, type DesignEndpoint } from './connectionEndpoints.ts';
 export type { DesignEndpoint } from './connectionEndpoints.ts';
 import { applyCanvasCommand, canvasElements, type CanvasCommand } from './canvasOperations.ts';
-import { bindingKey, acceptsResourceRefs, acceptsVariable, canBindField, fieldDefinition, fieldTargetPath, findResourceBlock, pruneBlockBindings, pruneBlockResourceRefs, type FieldTarget, type ResourceRefBinding, type ResourceRefEntry, type VariableBinding } from './fieldBindings.ts';
-import { fitResourceContainers, isResourceContainer, reparentResource, resourcePlacement, terraformIdentifier } from './resourceHierarchy.ts';
+import { bindingKey, acceptsResourceRefs, acceptsVariable, canBindField, fieldDefinition, fieldTargetPath, findResourceBlock, pruneBlockBindings, pruneBlockResourceRefs, type FieldTarget, type ResourceRefBinding, type ResourceRefEntry, type VariableBinding, type ListEntry } from './fieldBindings.ts';
+import { fitResourceContainers, isResourceContainer, reparentResource, resourcePlacement, visualResourcePlacement, terraformIdentifier } from './resourceHierarchy.ts';
 import type { ShapeId } from './shapes.ts';
 import { rebaseHistory } from './historyRebase.ts';
+import type { TerraformExtraBody } from './additionalTerraform.ts';
+import { pruneTerraformExtras } from './additionalTerraform.ts';
 export type DesignMode = 'visual' | 'technical';
 export type ResourceKind = 'network' | 'subnet' | 'gateway' | 'cluster' | 'storage' | 'monitor' | 'group' | 'compute' | 'database' | 'module' | 'generic';
 export type Provider = 'azure' | 'aws' | 'gcp';
@@ -22,10 +24,13 @@ export interface CatalogueField {
 }
 export interface CatalogueEntry {
  type: string; label: string; service: string; category: string; icon: string; fields: CatalogueField[]; curated?: boolean; iconMatch?: string;
+ providerVersion?: string; providerSource?: string;
 }
 
 export interface Resource {
 	parentId?: string;
+	/** Visual containment override. Undefined follows inheritance; null explicitly means canvas. */
+	visualParentId?: string | null;
 	containerSize?: { width: number; height: number };
 	inheritanceOverrides?: string[];
 	canvasLocked?: boolean;
@@ -42,9 +47,12 @@ export interface Resource {
 	sourceLine?: number;
 	label?: string;
 	iconKind?: ResourceKind;
+	iconOverride?: { provider: Provider; icon: string; label: string };
 	region: string;
 	settings: Record<string, string>;
 	blocks: ResourceBlock[];
+	/** Sparse expressions/dynamic blocks which cannot be represented by ordinary form fields. */
+	terraformExtras?: TerraformExtraBody;
 	positions: Record<DesignMode, Position>;
 }
 
@@ -63,10 +71,16 @@ export interface Architecture {
 	resources: Resource[];
 	items: BoardItem[];
 	connections: DesignConnection[];
+	/** Appearance of derived dependency lines, keyed by dependency id or '*' for all. Never Terraform. */
+	dependencyStyles?: Record<string, DependencyStyle>;
 }
+
+export type DependencyStyle = Partial<Pick<DesignConnection, 'routing' | 'pattern' | 'width' | 'stroke'>>;
 
 export interface DesignConnection {
 	id: string; source: DesignEndpoint; target: DesignEndpoint;
+	/** Preserve source graph provenance separately from editable labels and appearance. */
+	origin?: { kind: 'service'; edgeKind: string };
 	label?: string;
 	labelFontSize?: number;
 	labelColor?: string;
@@ -115,19 +129,21 @@ export interface History {
 }
 
 export type Edit =
-	| { type: 'placeResource'; id: string; parentId?: string; mode: DesignMode; positions?: Record<string,Position> }
+	| { type: 'placeResource'; id: string; parentId?: string; visualParentId?: string | null; mode: DesignMode; positions?: Record<string,Position> }
 	| { type: 'resizeContainer'; id: string; position: Position; width: number; height: number }
 	| { type: 'useInheritance'; id: string; target: FieldTarget; enabled: boolean }
 	| { type: 'canvas'; command: CanvasCommand }
 	| { type: 'resizeResource'; id: string; position: Position; iconSize: number }
-	| { type: 'bindVariable'; id: string; target: FieldTarget; variableId?: string }
+	| { type: 'bindVariable'; id: string; target: FieldTarget; variableId?: string; path?: string[] }
+	| { type: 'setListEntries'; id: string; target: FieldTarget; items: ListEntry[] | null }
 	| { type: 'bindResourceRef'; id: string; target: FieldTarget; refs?: ResourceRefEntry[] }
 	| { type: 'updateConnection'; id: string; patch: Partial<Omit<DesignConnection, 'id' | 'source' | 'target'>> }
 	| { type: 'reverseConnection'; id: string }
+	| { type: 'styleDependency'; key: string; patch: DependencyStyle | null }
 	| { type: 'deleteConnection'; id: string }
 	| { type: 'connectEndpoints'; id: string; source: DesignEndpoint; target: DesignEndpoint }
 	| { type: 'reconnectConnection'; id: string; side: 'source' | 'target'; endpoint: DesignEndpoint }
-	| { type: 'update'; id: string; patch: Partial<Pick<Resource, 'name' | 'terraformName' | 'label' | 'iconKind' | 'region' | 'settings' | 'blocks'>> }
+	| { type: 'update'; id: string; patch: Partial<Pick<Resource, 'name' | 'terraformName' | 'label' | 'iconKind' | 'iconOverride' | 'region' | 'settings' | 'blocks'>> }
 	| { type: 'move'; id: string; mode: DesignMode; position: Position }
 	| { type: 'applyResourceCode'; resources: Resource[] }
 	| { type: 'add'; resource: Resource }
@@ -159,9 +175,11 @@ function editArchitecture(architecture: Architecture, action: Edit): Architectur
 	switch (action.type) {
 		case 'placeResource': {
 			const resource = architecture.resources.find(item=>item.id===action.id);
-			if (!resource || resource.canvasLocked || !resourcePlacement(architecture,resource,action.parentId).ok) { return architecture; }
+			if (!resource || resource.canvasLocked) { return architecture; }
+			const placement = action.visualParentId !== undefined ? visualResourcePlacement(architecture,resource,action.visualParentId??undefined) : resourcePlacement(architecture,resource,action.parentId);
+			if (!placement.ok) { return architecture; }
 			const moved = action.positions ? applyCanvasCommand(architecture,{kind:'move',mode:action.mode,positions:action.positions,fit:false}) : architecture;
-			return fitResourceContainers(reparentResource(moved,action.id,action.parentId));
+			return fitResourceContainers(reparentResource(moved,action.id,placement.parentId,action.visualParentId !== undefined ? action.visualParentId : undefined));
 		}
 		case 'resizeContainer': {
 			const resource = architecture.resources.find(item=>item.id===action.id);
@@ -185,10 +203,10 @@ function editArchitecture(architecture: Architecture, action: Edit): Architectur
 			const target = action.target;
 			if (target.kind === 'block' && !findResourceBlock(resource.blocks, target.blockId)) { return architecture; }
 			const variable = architecture.variables?.find(item => item.id === action.variableId);
-			if (action.variableId && (!variable || !acceptsVariable(variable, fieldDefinition(resource, target)))) { return architecture; }
+			if (action.variableId && (!variable || !acceptsVariable(variable, fieldDefinition(resource, target), action.path))) { return architecture; }
 			const key = bindingKey(target); const fieldBindings = { ...resource.fieldBindings }; const resourceRefs = { ...resource.resourceRefs };
-			if (fieldBindings[key]?.variableId === action.variableId && (!action.variableId || !resourceRefs[key])) { return architecture; }
-			if (action.variableId) { fieldBindings[key] = { variableId: action.variableId }; delete resourceRefs[key]; } else { delete fieldBindings[key]; }
+			if (fieldBindings[key]?.variableId === action.variableId && (fieldBindings[key]?.path ?? []).join('.') === (action.path ?? []).join('.') && (!action.variableId || !resourceRefs[key])) { return architecture; }
+			if (action.variableId) { fieldBindings[key] = action.path?.length ? { variableId: action.variableId, path: [...action.path] } : { variableId: action.variableId }; delete resourceRefs[key]; } else { delete fieldBindings[key]; }
 			const blocks = structuredClone(resource.blocks);
 			const settings = { ...resource.settings };
 			if (target.kind === 'setting' && action.variableId) { settings[target.name] ??= ''; }
@@ -217,6 +235,36 @@ function editArchitecture(architecture: Architecture, action: Edit): Architectur
 			const inheritanceOverrides = refs ? [...new Set([...(resource.inheritanceOverrides ?? []), fieldTargetPath(resource, target).join('.')])] : resource.inheritanceOverrides;
 			return { ...architecture, resources: architecture.resources.map(item => item.id === action.id ? { ...item, fieldBindings, resourceRefs, blocks, settings, inheritanceOverrides } : item) };
 		}
+		case 'setListEntries': {
+			// A list that mixes typed values, variables and references. A list of plain values collapses back to an ordinary literal.
+			const resource = architecture.resources.find(item => item.id === action.id);
+			if (!resource || !canBindField(resource, action.target)) { return architecture; }
+			const target = action.target;
+			if (target.kind === 'block' && !findResourceBlock(resource.blocks, target.blockId)) { return architecture; }
+			const definition = fieldDefinition(resource, target);
+			if (definition && definition.type !== 'list') { return architecture; }
+			const key = bindingKey(target); const items = action.items;
+			const resourceRefs = { ...resource.resourceRefs }; const fieldBindings = { ...resource.fieldBindings };
+			const blocks = structuredClone(resource.blocks); const settings = { ...resource.settings };
+			const write = (text: string) => { if (target.kind === 'setting') { settings[target.name] = text; } else if (target.kind === 'block') { findResourceBlock(blocks, target.blockId)!.values[target.name] = text; } };
+			const mixed = !!items && items.some(entry => entry.kind !== 'value');
+			if (!mixed) {
+				if (!resourceRefs[key]?.items && !items) { return architecture; }
+				delete resourceRefs[key];
+				if (items) { const numeric = (definition?.literalShape?.kind === 'list' || definition?.literalShape?.kind === 'set') && definition.literalShape.element?.kind === 'number'; write(items.length ? JSON.stringify(items.map(entry => { const text = entry.kind === 'value' ? entry.value : ''; return numeric && text.trim() && Number.isFinite(Number(text)) ? Number(text) : text; })) : ''); }
+			} else {
+				if (items.some(entry => entry.kind === 'variable' && !architecture.variables?.some(variable => variable.id === entry.variableId))) { return architecture; }
+				const refs = items.flatMap(entry => entry.kind === 'ref' ? [{ resourceId: entry.resourceId, attribute: entry.attribute }] : []);
+				if (refs.length && !acceptsResourceRefs(architecture, resource, refs, definition)) { return architecture; }
+				const next = { refs, items: structuredClone(items) };
+				if (JSON.stringify(resourceRefs[key] ?? null) === JSON.stringify(next) && !fieldBindings[key]) { return architecture; }
+				resourceRefs[key] = next; delete fieldBindings[key];
+				if (target.kind === 'setting') { settings[target.name] ??= ''; }
+				if (target.kind === 'block') { findResourceBlock(blocks, target.blockId)!.values[target.name] ??= ''; }
+			}
+			const inheritanceOverrides = mixed ? [...new Set([...(resource.inheritanceOverrides ?? []), fieldTargetPath(resource, target).join('.')])] : resource.inheritanceOverrides;
+			return { ...architecture, resources: architecture.resources.map(item => item.id === action.id ? { ...item, fieldBindings, resourceRefs, blocks, settings, inheritanceOverrides } : item) };
+		}
 		case 'resizeResource': {
 			const resource = architecture.resources.find(item => item.id === action.id);
 			if (!resource || isResourceContainer(resource) || resource.canvasLocked || ![action.position.x, action.position.y, action.iconSize].every(Number.isFinite) || action.iconSize < 24 || action.iconSize > 160) { return architecture; }
@@ -225,14 +273,14 @@ function editArchitecture(architecture: Architecture, action: Edit): Architectur
 		}
 		case 'reverseConnection': {
 			const connection = architecture.connections.find(item => item.id === action.id);
-			if (!connection || !canConnectEndpoints(architecture, connection.target, connection.source, connection.id)) { return architecture; }
+			if (!connection || connection.origin || connection.id.includes('->') || !canConnectEndpoints(architecture, connection.target, connection.source, connection.id)) { return architecture; }
 			return { ...architecture, connections: architecture.connections.map(item => item.id === action.id ? { ...item, source: item.target, target: item.source } : item) };
 		}
 		case 'updateConnection': {
 			const connection = architecture.connections.find(connection => connection.id === action.id);
 			if (!connection) { return architecture; }
 			const patch = action.patch;
-			if ('source' in patch || 'target' in patch || 'id' in patch) { return architecture; }
+			if ('source' in patch || 'target' in patch || 'id' in patch || 'origin' in patch) { return architecture; }
 			if (patch.width !== undefined && (!Number.isFinite(patch.width) || patch.width < 1 || patch.width > 8)
 				|| patch.stroke !== undefined && !/^#[0-9a-f]{6}$/i.test(patch.stroke)
 				|| patch.routing !== undefined && !['straight', 'elbow', 'curve'].includes(patch.routing)
@@ -244,8 +292,27 @@ function editArchitecture(architecture: Architecture, action: Edit): Architectur
 			if (Object.entries(patch).every(([key, value]) => connection[key as keyof DesignConnection] === value)) { return architecture; }
 			return { ...architecture, connections: architecture.connections.map(item => item.id === action.id ? { ...item, ...patch } : item) };
 		}
+		case 'styleDependency': {
+			const styles = { ...architecture.dependencyStyles };
+			if (action.patch === null) {
+				if (!(action.key in styles)) { return architecture; }
+				delete styles[action.key];
+			} else {
+				const patch = action.patch;
+				if (Object.keys(patch).some(key => !['routing', 'pattern', 'width', 'stroke'].includes(key))
+					|| patch.width !== undefined && (!Number.isFinite(patch.width) || patch.width < 1 || patch.width > 8)
+					|| patch.stroke !== undefined && !/^#[0-9a-f]{6}$/i.test(patch.stroke)
+					|| patch.routing !== undefined && !['straight', 'elbow', 'curve'].includes(patch.routing)
+					|| patch.pattern !== undefined && !['solid', 'dashed', 'dotted'].includes(patch.pattern)) { return architecture; }
+				const current = styles[action.key] ?? {};
+				if (Object.entries(patch).every(([key, value]) => current[key as keyof DependencyStyle] === value)) { return architecture; }
+				styles[action.key] = { ...current, ...patch };
+			}
+			const { dependencyStyles: _previous, ...rest } = architecture;
+			return Object.keys(styles).length ? { ...rest, dependencyStyles: styles } : rest;
+		}
 		case 'deleteConnection':
-			return architecture.connections.some(connection => connection.id === action.id) ? { ...architecture, connections: architecture.connections.filter(connection => connection.id !== action.id) } : architecture;
+			return architecture.connections.some(connection => connection.id === action.id && !connection.origin && !connection.id.includes('->')) ? { ...architecture, connections: architecture.connections.filter(connection => connection.id !== action.id) } : architecture;
 		case 'connectEndpoints': {
 			if (!action.id || action.id.includes('->') || architecture.connections.some(link => link.id === action.id) || !canConnectEndpoints(architecture, action.source, action.target)) { return architecture; }
 			return { ...architecture, connections: [...architecture.connections, { id: action.id, source: action.source, target: action.target }] };
@@ -295,7 +362,7 @@ function editArchitecture(architecture: Architecture, action: Edit): Architectur
 			if (!architecture.resources.some(resource => resource.id === action.id && Object.entries(action.patch).some(([key, value]) => resource[key as keyof Resource] !== value))) { return architecture; }
 			return {
 				...architecture,
-				resources: architecture.resources.map(resource => resource.id === action.id ? { ...resource, ...(action.patch.name!==undefined?{terraformName:terraformIdentifier(resource)}:{}), ...action.patch, ...(action.patch.blocks ? {fieldBindings:pruneBlockBindings(resource,action.patch.blocks),resourceRefs:pruneBlockResourceRefs(resource,action.patch.blocks)} : {}) } : resource)
+				resources: architecture.resources.map(resource => resource.id === action.id ? { ...resource, ...(action.patch.name!==undefined?{terraformName:terraformIdentifier(resource)}:{}), ...action.patch, ...(action.patch.blocks ? {fieldBindings:pruneBlockBindings(resource,action.patch.blocks),resourceRefs:pruneBlockResourceRefs(resource,action.patch.blocks),terraformExtras:pruneTerraformExtras(resource,action.patch.blocks)} : {}) } : resource)
 			};
 		case 'move': return applyCanvasCommand(architecture,{kind:'move',mode:action.mode,positions:{[action.id]:action.position}});
 		case 'insert':

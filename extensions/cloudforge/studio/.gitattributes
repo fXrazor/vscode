@@ -1,0 +1,5 @@
+# Generated payload and parser digests must survive checkout on every platform.
+assets/provider-forms/** text eol=lf
+assets/catalogue/** text eol=lf
+scripts/provider-documentation-parser.ts text eol=lf
+scripts/provider-schema-definition.ts text eol=lf

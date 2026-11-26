@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 import { useEffect, useId, useRef, useState } from 'react';
-import { ArrowLeft, ArrowRight, Check, CircleHelp, Layers, LockKeyhole, Variable } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, CircleHelp, Layers, LockKeyhole, Trash2 } from 'lucide-react';
 import { variableError, variableTypes, type VariableDefinition } from './variables.ts';
 import { variableInputIssue, variableInputTypes } from './variableInputs.ts';
 
@@ -13,15 +13,15 @@ function ValueControl({id,label,text,type,sensitive,onChange,issue,helpId,onBlur
 	const common={id,'aria-label':label,'aria-invalid':!!issue,'aria-describedby':helpId,value:text,onBlur,onChange:(event:React.ChangeEvent<HTMLInputElement|HTMLSelectElement|HTMLTextAreaElement>)=>onChange(event.target.value)};
 	if(sensitive){return <input {...common} type="password" autoComplete="off" spellCheck={false}/>;}
 	if(type==='bool'){return <select {...common}><option value="">Choose a value…</option><option value="true">True</option><option value="false">False</option><option value="null">Null · no value</option>{!['','true','false','null'].includes(text)&&<option value={text}>Review this value</option>}</select>;}
-	if(type==='list(string)'||type==='map(string)'||type==='any'){return <textarea {...common} className="variable-json-input" rows={3} placeholder={variableInputTypes[type].example} spellCheck={false}/>;}
+	if(type==='list(string)'||type==='map(string)'||type==='object'||type==='any'){return <textarea {...common} className="variable-json-input" rows={type==='object'?6:3} placeholder={variableInputTypes[type].example} spellCheck={false}/>;}
 	return <input {...common} type="text" inputMode={type==='number'?'decimal':undefined} placeholder={variableInputTypes[type].example} spellCheck={false}/>;
 }
 
 /** Presentation only. VariablePanel retains the draft across code/context view changes. */
-export function VariableConfigurator({variable,variables,isNew,useCount,onChange,defaultSet,valueSet,defaultText,valueText,onDefaultSet,onValueSet,onDefaultText,onValueText,error,onSave,onCancel}:{
+export function VariableConfigurator({variable,variables,isNew,useCount,onChange,defaultSet,valueSet,defaultText,valueText,onDefaultSet,onValueSet,onDefaultText,onValueText,error,onSave,onCancel,onDelete}:{
 	variable:VariableDefinition;variables:VariableDefinition[];isNew:boolean;useCount:number;onChange:(variable:VariableDefinition)=>void;
 	defaultSet:boolean;valueSet:boolean;defaultText:string;valueText:string;onDefaultSet:(value:boolean)=>void;onValueSet:(value:boolean)=>void;onDefaultText:(value:string)=>void;onValueText:(value:string)=>void;
-	error:string;onSave:()=>void;onCancel:()=>void;
+	error:string;onSave:()=>void;onCancel:()=>void;onDelete:()=>void;
 }) {
 	const id=useId();const form=useRef<HTMLFormElement>(null);const [touched,setTouched]=useState<Record<string,boolean>>({});
 	const nameIssue=variableError({...variable,name:variable.name.trim(),defaultValue:undefined,value:undefined},variables);
@@ -42,7 +42,7 @@ export function VariableConfigurator({variable,variables,isNew,useCount,onChange
 		</section>;
 	}
 	return <form ref={form} className="variables-panel variable-configurator" noValidate onSubmit={event=>{event.preventDefault();onSave();}}>
-		<header className="configurator-heading"><button type="button" className="configurator-back" aria-label="Back to variables" title="Back to variables" onClick={onCancel}><ArrowLeft size={17}/></button><div><h2>{isNew?'Create variable':'Edit variable'}</h2><p>{isNew?'Define an input you can reuse in resource fields.':useCount?`Used by ${useCount} ${useCount===1?'resource':'resources'}.`:'Available to resource fields in this architecture.'}</p></div><Variable size={19} className="configurator-symbol"/></header>
+		<header className="configurator-heading"><button type="button" className="configurator-back" aria-label="Back to variables" title="Back to variables" onClick={onCancel}><ArrowLeft size={17}/></button><div><h2>{isNew?'Create variable':'Edit variable'}</h2><p>{isNew?'Define an input you can reuse in resource fields.':useCount?`Used by ${useCount} ${useCount===1?'resource':'resources'}.`:'Available to resource fields in this architecture.'}</p></div>{!isNew && <button type="button" className="configurator-delete" aria-label="Delete variable" disabled={useCount > 0} title={useCount ? 'Remove resource references before deleting this input' : 'Delete variable · Undo restores it'} onClick={onDelete}><Trash2 size={16}/></button>}</header>
 		<div className="configurator-body">
 			<div className="configurator-field"><label htmlFor={id+'-name'}>Name <span className="field-required">*</span></label><input id={id+'-name'} autoFocus required aria-label="Variable name" autoComplete="off" placeholder="deployment_region" value={variable.name} aria-invalid={!!showIssue('name',nameIssue)} aria-describedby={id+'-name-help'} onBlur={()=>setTouched(value=>({...value,name:true}))} onChange={event=>onChange({...variable,name:event.target.value})}/><p id={id+'-name-help'} className={showIssue('name',nameIssue)?'configurator-error':'configurator-help'}>{showIssue('name',nameIssue)??'Use letters, numbers, underscores or hyphens. Start with a letter or underscore.'}</p></div>
 			<div className="configurator-field"><span className="configurator-label">Scope</span><div className="variable-scope-summary"><Layers size={15}/><strong>Architecture</strong><span>Current scope</span></div><p className="configurator-help">Resources in this architecture can use this input.</p></div>

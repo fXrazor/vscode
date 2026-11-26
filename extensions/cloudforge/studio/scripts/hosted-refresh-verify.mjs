@@ -71,15 +71,18 @@ await page.getByRole('button', { name: 'Add connection' }).click(); await page.w
 const edgesBefore = await page.locator('.react-flow__edge').count();
 check('drawing connection added', edgesBefore >= 1, 'edges=' + edgesBefore);
 await page.locator(`.react-flow__node[data-id="${noteId}"]`).click();
+// Leave room for the note's contextual toolbar before selecting a neighbouring resource.
+await page.locator('main.canvas').focus();
+for (let step = 0; step < 20; step++) { await page.keyboard.press('Shift+ArrowDown'); }
 await page.locator('.react-flow__node[data-id="la-1"]').click({ modifiers: ['Control'] });
 await page.locator('main.canvas').focus(); await page.keyboard.press('Control+g'); await page.waitForTimeout(300);
 check('badge shows Modified after edits', / · Modified$/.test(await badge()), await badge());
 await shot('a-edited');
 
-// b. Same architecture, new revision, identical nodes (the refresh that follows a save).
+// b. External refresh of the same architecture, without a draftSaveApplied acknowledgement.
 await send({ type: 'graph', graph: graph('arch-a', 'b', baseNodes) });
 check('undo still enabled after same-architecture refresh', await undoEnabled());
-check('badge clean right after refresh', /^rev b{8}$/.test(await badge()), await badge());
+check('unsaved edits stay Modified after external refresh', /^rev b{8} · Modified$/.test(await badge()), await badge());
 check('note survives refresh', (await nodeIds()).includes(noteId));
 check('drawing connection survives refresh', await page.locator('.react-flow__edge').count() === edgesBefore, 'edges=' + await page.locator('.react-flow__edge').count());
 await page.locator(`.react-flow__node[data-id="${noteId}"]`).click(); await page.waitForTimeout(300);
@@ -91,7 +94,7 @@ await shot('b-refreshed');
 await page.locator('main.canvas').focus(); await page.keyboard.press('Control+z'); await page.waitForTimeout(300);
 await page.locator(`.react-flow__node[data-id="${noteId}"]`).click(); await page.waitForTimeout(300);
 check('Ctrl+Z after refresh undoes the group only', !/Visual group/.test(await page.locator('.selection-caption').first().textContent() ?? '') && (await nodeIds()).includes(noteId));
-check('badge shows Modified again after undo', / · Modified$/.test(await badge()), await badge());
+check('badge remains Modified after undo', / · Modified$/.test(await badge()), await badge());
 await page.keyboard.press('Escape');
 
 // d. External addition survives undo.

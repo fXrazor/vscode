@@ -67,7 +67,8 @@ export function buildResourceDraft(architecture: Architecture, resourceId: strin
 	if (!node || node.kind !== 'resource' || node.type !== schema.typeName || !inCode(node)) {
 		return undefined;
 	}
-	const blockPaths = new Set(schema.blocks.map(block => block.path || block.name));
+	const normalize = (path: string) => path.replace(/\[(?:\d*|\*)\]/g, '');
+	const blockPaths = new Set(schema.blocks.map(block => normalize(block.path || block.name)));
 
 	const expression = (value: Value): DraftValue | undefined => {
 		if (isRef(value)) {
@@ -101,7 +102,7 @@ export function buildResourceDraft(architecture: Architecture, resourceId: strin
 		for (const [key, value] of Object.entries(config)) {
 			const path = prefix ? `${prefix}.${key}` : key;
 			const nested = Array.isArray(value) && value.length > 0 && value.every(isPlainObject) ? value : isPlainObject(value) ? [value] : undefined;
-			if (nested && depth < MAX_DEPTH && (blockPaths.has(path) || blockPaths.has(key) || !schema.attributes.some(attribute => attribute.name === key))) {
+			if (nested && depth < MAX_DEPTH && blockPaths.has(path)) {
 				for (const item of nested) {
 					blocks.push({ name: key, body: body(item as Record<string, Value>, path, depth + 1) });
 				}

@@ -188,6 +188,7 @@ export interface CanvasCloudRegionsPayload {
 
 export interface CanvasProviderDependency {
 	readonly display: string;
+	readonly address?: string;
 	readonly status: 'locked' | 'unlocked' | 'lockOutsideConstraints' | 'noMatchingRelease' | 'conflict';
 	readonly lockedVersion?: string;
 	readonly conflictCount: number;
@@ -199,6 +200,7 @@ export interface CanvasDependencyReport {
 	readonly engine: 'opentofu' | 'terraform';
 	readonly engineInferred: boolean;
 	readonly lockState: 'absent' | 'valid' | 'invalid' | 'unreadable';
+	readonly lockEntries?: readonly { readonly address: string; readonly version: string }[];
 	readonly providers: readonly CanvasProviderDependency[];
 	readonly unusedLockEntries: readonly string[];
 	readonly diagnosticCount: number;
@@ -447,6 +449,72 @@ export interface CanvasViewState {
 	readonly nodePositions: Partial<Record<CanvasViewMode, Readonly<Record<string, CanvasPoint>>>>;
 	readonly checkpoints: readonly ArchitectureCheckpoint[];
 	readonly sampleContext: SampleValidationContext | null;
+	/**
+	 * Technical Graph presentation (lens, layout, spacing, graph-only pins). Stored apart from
+	 * `nodePositions` so the graph can never move a resource in the Architecture design.
+	 */
+	readonly graph?: CanvasGraphViewState;
+}
+
+export interface CanvasGraphViewState {
+	readonly lens: string;
+	readonly layout: string;
+	readonly route: string;
+	readonly density: string;
+	readonly overlay: string;
+	readonly spacing: 'auto' | number;
+	readonly height: number;
+	readonly showMembership: boolean;
+	readonly showInputs?: boolean;
+	readonly expanded: readonly string[];
+	readonly collapsed?: readonly string[];
+	readonly pins: Readonly<Record<string, CanvasPoint>>;
+	/** Network (force) view options; presentation-only. */
+	readonly network?: CanvasNetworkOptions;
+}
+
+export interface CanvasNetworkOptions {
+	readonly sizeBy: number;
+	readonly sizeCount: string;
+	readonly spread: number;
+	readonly linkLength: number;
+	readonly spacing: number;
+	readonly clusters: string;
+	readonly labels: string;
+	readonly links: string;
+}
+
+const networkEnums = { sizeCount: ['all', 'dependents', 'dependencies'], clusters: ['scope', 'layer', 'none'], labels: ['auto', 'all', 'none'], links: ['curved', 'straight'] } as const;
+function sanitizeNetworkOptions(value: unknown): CanvasNetworkOptions | undefined {
+	if (!isRecord(value)) {
+		return undefined;
+	}
+	const num = (raw: unknown, min: number, max: number, fallback: number) => typeof raw === 'number' && Number.isFinite(raw) ? Math.min(max, Math.max(min, Math.round(raw))) : fallback;
+	const pick = (key: keyof typeof networkEnums): string => { const raw = value[key]; const allowed: readonly string[] = networkEnums[key]; return typeof raw === 'string' && allowed.includes(raw) ? raw : allowed[0]; };
+	return { sizeBy: num(value.sizeBy, 0, 300, 150), sizeCount: pick('sizeCount'), spread: num(value.spread, 50, 400, 150), linkLength: num(value.linkLength, 40, 300, 100), spacing: num(value.spacing, 40, 300, 100), clusters: pick('clusters'), labels: pick('labels'), links: pick('links') };
+}
+
+const graphEnums = {
+	lens: ['all', 'dependencies', 'topology', 'runtime', 'observability', 'security'],
+	layout: ['layers', 'scopes', 'tree', 'bundled', 'force'],
+	route: ['curved', 'orthogonal', 'straight'],
+	density: ['auto', 'detailed', 'compact'],
+	overlay: ['none', 'plan', 'order', 'impact'],
+} as const;
+
+/** Keeps only known graph presentation values; unknown values fall back to the graph defaults. */
+export function sanitizeGraphViewState(value: unknown): CanvasGraphViewState | undefined {
+	if (!isRecord(value)) {
+		return undefined;
+	}
+	const pick = (key: keyof typeof graphEnums): string => {
+		const raw = value[key]; const allowed: readonly string[] = graphEnums[key];
+		return typeof raw === 'string' && allowed.includes(raw) ? raw : allowed[0];
+	};
+	const spacing = value.spacing === 'auto' ? 'auto' : typeof value.spacing === 'number' && Number.isFinite(value.spacing) ? Math.min(300, Math.max(100, Math.round(value.spacing))) : 'auto';
+	const height = typeof value.height === 'number' && Number.isFinite(value.height) ? Math.min(300, Math.max(100, Math.round(value.height))) : 100;
+	const expanded = Array.isArray(value.expanded) ? [...new Set(value.expanded.filter(isOpaqueId))].slice(0, MAX_NODE_POSITIONS) : [];
+	return { lens: pick('lens'), layout: pick('layout'), route: pick('route'), density: pick('density'), overlay: pick('overlay'), spacing, height, showMembership: value.showMembership === true, ...(Array.isArray(value.collapsed) ? { collapsed: [...new Set(value.collapsed.filter(isOpaqueId))].slice(0, MAX_NODE_POSITIONS) } : {}), ...(typeof value.showInputs === 'boolean' ? { showInputs: value.showInputs } : {}), expanded, pins: sanitizeNodePositionMap(value.pins) ?? {}, ...(sanitizeNetworkOptions(value.network) ? { network: sanitizeNetworkOptions(value.network) } : {}) };
 }
 
 export type CanvasNoticeKind = 'stale' | 'unavailable' | 'info';
@@ -866,6 +934,7 @@ export function sanitizeViewState(value: unknown): CanvasViewState {
 		}
 	}
 
+	const graph = sanitizeGraphViewState(value.graph);
 	const nodePositions: Partial<Record<CanvasViewMode, Readonly<Record<string, CanvasPoint>>>> = {};
 	if (isRecord(value.nodePositions)) {
 		const visualPos = sanitizeNodePositionMap(value.nodePositions.visual);
@@ -991,6 +1060,7 @@ export function sanitizeViewState(value: unknown): CanvasViewState {
 		nodePositions,
 		checkpoints,
 		sampleContext,
+		...(graph ? { graph } : {}),
 	};
 }
 

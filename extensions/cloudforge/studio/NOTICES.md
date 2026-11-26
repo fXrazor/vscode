@@ -12,3 +12,5 @@ No proprietary Brainboard or Miro source code was copied. Reference work used vi
 - Monaco Editor 0.52.2 is bundled from the source app's local distribution under Microsoft's MIT license, retained in assets/monaco/LICENSE.txt. Upstream provenance is retained in assets/monaco/PROVENANCE.md.
 - JetBrains Mono faces and bundled font license/provenance notices are in assets/fonts.
 - Additional provider service icons are copied from the source catalogue's referenced local icon paths. Provider marks retain their original trademark/icon terms.
+
+- Provider identity marks (Azure, Amazon Web Services, Google Cloud) are from [Devicon](https://github.com/devicons/devicon/tree/32fe1d3b3f36ad11f90ab94f7db59738139c2bf6/icons), revision `32fe1d3b3f36ad11f90ab94f7db59738139c2bf6`. MIT copyright/permission text is retained in `assets/Devicon-LICENSE.txt`. These identify providers; their trademarks remain with the respective owners.

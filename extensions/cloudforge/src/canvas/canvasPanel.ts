@@ -154,6 +154,8 @@ export class CloudForgeCanvasPanel implements Disposable {
 	private ready = false;
 	private showSequence = 0;
 	private graph: CanvasGraphSnapshot | undefined;
+	private readonly schemaRequests = new Map<string, number>();
+	private readonly draftRequests = new Map<string, number>();
 	private notice: CanvasNotice | null = null;
 	private pendingValidation: { readonly scope: 'architecture' | 'resource'; readonly nodeId?: string } | undefined;
 	private pendingSelectNodeId: string | undefined;
@@ -577,12 +579,16 @@ export class CloudForgeCanvasPanel implements Disposable {
 				return;
 			}
 			case 'requestSchema': {
+				const graph = this.graph;
+				const key = message.kind + ':' + message.typeName;
+				const request = (this.schemaRequests.get(key) ?? 0) + 1;
+				this.schemaRequests.set(key, request);
 				if (!this.host.onLoadResourceSchema) {
 					this.post({ type: 'liveSchema', typeName: message.typeName, schema: null });
 					return;
 				}
 				const schema = await this.host.onLoadResourceSchema(message.kind, message.typeName);
-				if (this.panel && this.ready) {
+				if (this.panel && this.ready && this.graph === graph && this.schemaRequests.get(key) === request) {
 					this.post({ type: 'liveSchema', typeName: message.typeName, schema });
 				}
 				return;
@@ -714,8 +720,11 @@ export class CloudForgeCanvasPanel implements Disposable {
 				return;
 			}
 			case 'renderResourceDraft': {
+				const graph = this.graph;
+				const request = (this.draftRequests.get(message.resourceId) ?? 0) + 1;
+				this.draftRequests.set(message.resourceId, request);
 				const preview = this.host.onRenderResourceDraft ? await this.host.onRenderResourceDraft(message.resourceId, message.draft) : null;
-				if (this.panel && this.ready) {
+				if (this.panel && this.ready && this.graph === graph && this.draftRequests.get(message.resourceId) === request) {
 					this.post({ type: 'resourceDraftRendered', resourceId: message.resourceId, preview });
 				}
 				return;

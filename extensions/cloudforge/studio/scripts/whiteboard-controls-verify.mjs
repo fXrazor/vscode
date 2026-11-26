@@ -73,6 +73,8 @@ try {
 			await page.getByLabel('Close pen options', { exact: true }).click();
 			await page.getByLabel('Select tool', { exact: true }).click();
 			await page.getByRole('button', { name: 'Configuration', exact: true }).click();
+			assert.equal(await page.getByLabel('Draw freehand', { exact: true }).count(), 0, 'technical graph has no pen authoring tool');
+			await page.getByRole('button', { name: 'Architecture', exact: true }).click();
 			await page.getByLabel('Draw freehand', { exact: true }).click();
 			await page.getByLabel('Pen options', { exact: true }).click();
 			assert.equal(await page.getByLabel('New stroke weight').inputValue(), '8', 'pen preset survives tool/renderer changes');
@@ -157,7 +159,7 @@ try {
 			await checkFrame(false);
 			await page.screenshot({ path: path.join(output, `eligibility-${viewport.width}-${theme}.png`) });
 			await page.getByRole('button', { name: 'Configuration', exact: true }).click();
-			await checkFrame(true);
+			assert.equal(await page.locator('.selection-resize, .react-flow__resize-control').count(), 0, 'technical graph does not expose design resize controls');
 			await page.getByRole('button', { name: 'Architecture', exact: true }).click();
 			await page.getByLabel('Fit architecture to view').click();
 			await page.locator('main.canvas').focus(); await page.keyboard.press('Escape');

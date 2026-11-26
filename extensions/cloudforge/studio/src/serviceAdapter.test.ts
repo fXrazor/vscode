@@ -9,14 +9,12 @@ import { liveSchemaAttributes, liveSchemaBlocks, liveSchemaOutputs, type HostFor
 import { additionalBlocks, editableFields } from './formDefinition.ts';
 import { architectureDiagnostics, isStaleDiagnostic } from './diagnostics.ts';
 import { sourceChanges, buildDraftSavePayload, changedFilePayloads, refreshPrevious, adoptSavedFiles, buildHostViewState, defaultTargetTfFile, projectGraphSnapshotToArchitecture, projectHostDiagnostics, resolveProviderRegions } from './serviceAdapter.ts';
-import { projectResourceFiles } from './terraformProjection.ts';
+import { projectResourceFiles, terraformCode, terraformCode as codeFor } from './terraformProjection.ts';
 import { describeMerge } from './draftSaveMerge.ts';
 import { buildResourceDraft, parseSchemaPreview } from './resourceDraft.ts';
 import { hydrateResourceValues, parseResourceValues } from './resourceValues.ts';
-import { terraformCode as codeFor } from './terraformProjection.ts';
 import { sampleArchitecture as schemaSample } from './fixture.ts';
 import { explicitResourceReferences, inheritedDependencies } from './resourceHierarchy.ts';
-import { terraformCode } from './terraformProjection.ts';
 import type { HostCloudRegionsPayload, HostEngineValidateReport, HostGraphSnapshot, HostValidationRun } from './webviewBridge.ts';
 
 const SAMPLE_LIVE_SCHEMA: HostFormSchema = {
@@ -95,7 +93,7 @@ test('live Rust FormSchema converts attributes, nested blocks, outputs, and repl
 	assert.equal(withLive.some(d => d.path === 'ip_configuration' && d.severity === 'error'), true);
 });
 
-test('projectGraphSnapshotToArchitecture infers container nesting, derives VM->NIC refs, and preserves positions on refresh', () => {
+test('source summaries suggest visual nesting, preserve reference evidence without guessed bindings, and retain positions on refresh', () => {
 	const snapshot: HostGraphSnapshot = {
 		workspaceId: 'ws-1',
 		architectureId: 'arch-azure',
@@ -128,12 +126,17 @@ test('projectGraphSnapshotToArchitecture infers container nesting, derives VM->N
 
 	assert.equal(first.hasSourceById['vm-1'], true);
 	assert.equal(byId.get('rg-1')?.parentId, undefined);
-	assert.equal(byId.get('vnet-1')?.parentId, 'rg-1');
-	assert.equal(byId.get('snet-1')?.parentId, 'vnet-1');
+	assert.equal(byId.get('vnet-1')?.visualParentId, 'rg-1');
+	assert.equal(byId.get('vnet-1')?.parentId, undefined, 'a summary edge does not prove an inheritance field');
+	assert.equal(byId.get('snet-1')?.visualParentId, 'vnet-1');
+	assert.equal(byId.get('snet-1')?.parentId, undefined, 'a summary edge does not prove an inheritance field');
 	// Most specific container (Subnet) wins over broader container (Resource Group)!
-	assert.equal(byId.get('nic-1')?.parentId, 'snet-1');
-	assert.equal(byId.get('vm-1')?.parentId, 'snet-1');
-	assert.equal(byId.get('fw-1')?.parentId, 'rg-1');
+	assert.equal(byId.get('nic-1')?.visualParentId, 'snet-1');
+	assert.equal(byId.get('nic-1')?.parentId, undefined, 'a summary edge does not prove an inheritance field');
+	assert.equal(byId.get('vm-1')?.visualParentId, 'snet-1');
+	assert.equal(byId.get('vm-1')?.parentId, undefined, 'a summary edge does not prove an inheritance field');
+	assert.equal(byId.get('fw-1')?.visualParentId, 'rg-1');
+	assert.equal(byId.get('fw-1')?.parentId, undefined, 'a summary edge does not prove an inheritance field');
 	assert.equal(byId.get('mod-1')?.kind, 'module');
 
 	// Sibling firewall must not overlap the expanded VNet container!
@@ -143,14 +146,15 @@ test('projectGraphSnapshotToArchitecture infers container nesting, derives VM->N
 	const vnetBottom = vnet.positions.visual.y + (vnet.containerSize?.height ?? 0);
 	assert.equal(fw.positions.visual.x >= vnetRight || fw.positions.visual.y >= vnetBottom, true, 'Sibling firewall must not overlap expanded VNet container');
 
-	// Explicit VM -> NIC resourceRef is derived automatically and projected into HCL + Technical View edges!
+	// The source edge remains a reference. A typed VM NIC binding needs actual field evidence.
 	const vm = byId.get('vm-1')!;
 	const refs = explicitResourceReferences(first.architecture, vm);
-	assert.equal(refs.some(r => r.source.id === 'nic-1' && r.attribute === 'id' && r.path.join('.') === 'network_interface_ids'), true);
+	assert.equal(refs.length, 0);
+	assert.ok(first.architecture.connections.some(link => link.origin?.edgeKind === 'reference'));
 	const deps = inheritedDependencies(first.architecture);
-	assert.equal(deps.some(d => d.source === 'nic-1' && d.target === 'vm-1'), true);
+	assert.equal(deps.length, 0, 'no guessed inheritance or field references');
 	const vmHcl = terraformCode(first.architecture, 'vm-1');
-	assert.match(vmHcl, /network_interface_ids\s*=\s*\[\s*azurerm_network_interface\.nic_app\.id\s*\]/);
+	assert.doesNotMatch(vmHcl, /azurerm_network_interface\.nic_app\.id/);
 
 	// User moves vm-1; refreshing at a new sourceRevision preserves its custom position!
 	const moved = {
@@ -329,7 +333,10 @@ test('multi-file Terraform projects preserve per-resource sourceFile and scope g
 		],
 		diagnostics: [],
 	};
-	const { architecture } = projectGraphSnapshotToArchitecture(snapshot);
+	const projected = projectGraphSnapshotToArchitecture(snapshot).architecture;
+	// This test configures inheritance explicitly, as the form does. A summary reference alone
+	// no longer invents a resource_group_name binding.
+	const architecture = historyReducer(createHistory(projected), { type: 'placeResource', id: 'vnet-1', parentId: 'rg-1', mode: 'visual' }).present;
 	assert.deepEqual(projectResourceFiles(architecture), ['main.tf', 'compute.tf', 'network.tf']);
 	assert.equal(architecture.resources.find(r => r.id === 'vnet-1')?.sourceFile, 'network.tf');
 	assert.equal(architecture.resources.find(r => r.id === 'vnet-1')?.sourceLine, 4);
@@ -497,4 +504,22 @@ test('after a save the saved files take the canvas version in the next baseline'
 	assert.equal(adoptSavedFiles(baseline, saved, new Set(['other.tf'])).resources.find(resource => resource.id === target.id)?.name, target.name);
 	const deleted = { ...baseline, resources: baseline.resources.filter(resource => resource.id !== target.id) };
 	assert.equal(adoptSavedFiles(baseline, deleted, new Set([file])).resources.some(resource => resource.id === target.id), false);
+});
+
+test('hosted snapshot icon projection never double-prefixes catalog-icons paths', () => {
+	const projected = projectGraphSnapshotToArchitecture({
+		workspaceId: 'ws-icon',
+		architectureId: 'arch-icon',
+		architectureName: 'IconCheck',
+		sourceRevision: 'a'.repeat(64),
+		status: 'complete',
+		nodes: [
+			{ id: 'kv-1', kind: 'resource', resourceType: 'azurerm_key_vault', name: 'kvmain', label: 'kvmain', hasSource: true },
+		],
+		edges: [],
+		diagnostics: [],
+	});
+	const kv = projected.architecture.resources.find(r => r.id === 'kv-1');
+	assert.ok(kv?.catalogue?.icon);
+	assert.doesNotMatch(kv.catalogue.icon, /^catalog-icons\/catalog-icons\//);
 });

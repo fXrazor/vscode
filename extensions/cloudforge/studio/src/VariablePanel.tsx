@@ -1,8 +1,8 @@
-import { VariableImport } from './VariableImport.tsx';
 /*---------------------------------------------------------------------------------------------
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
+import { VariableImport } from './VariableImport.tsx';
 import { useEffect, useRef, useState, type Dispatch } from 'react';
 import { Plus, Search, LockKeyhole, Download, Copy, Variable } from 'lucide-react';
 import type { Action, Architecture } from './model.ts';
@@ -55,10 +55,10 @@ export function VariablePanel({ architecture, dispatch, code }: { architecture: 
 	}
 	if (code) { return <section className="variables-panel"><h2>variables.tf</h2><p className="muted">Declaration preview. Sensitive defaults and assigned values are omitted. This does not write workspace files.</p><pre className="variable-code">{variableDeclarations(variables) || '# No variables declared.'}</pre></section>; }
 	if (importing) { return <VariableImport variables={variables} dispatch={dispatch} onClose={() => setImporting(false)} />; }
-	if (editing) { return <VariableConfigurator variable={editing} variables={variables} isNew={!variables.some(variable=>variable.id===editing.id)} useCount={uses.get(editing.name)?.size??0}
+	if (editing) { return <VariableConfigurator variable={editing} variables={variables} isNew={!variables.some(variable=>variable.id===editing.id)} useCount={uses.get(variables.find(variable=>variable.id===editing.id)?.name??editing.name)?.size??0}
 		defaultSet={defaultSet} valueSet={valueSet} defaultText={defaultText} valueText={valueText} error={error}
 		onChange={value=>{setEditing(value);setError('');}} onDefaultSet={value=>{setDefaultSet(value);setError('');}} onValueSet={value=>{setValueSet(value);setError('');}}
-		onDefaultText={value=>{setDefaultText(value);setError('');}} onValueText={value=>{setValueText(value);setError('');}} onSave={save} onCancel={()=>setEditing(undefined)}/>; }
+		onDefaultText={value=>{setDefaultText(value);setError('');}} onValueText={value=>{setValueText(value);setError('');}} onSave={save} onCancel={()=>setEditing(undefined)} onDelete={()=>{if(!uses.has(variables.find(variable=>variable.id===editing.id)?.name??editing.name)){dispatch({type:'deleteVariable',id:editing.id});setEditing(undefined);}}}/>; }
 	return <section ref={list} className="variables-panel">
 		<header><h2>Variables <span className="faint">{variables.length}</span></h2><span className="spacer"/><button aria-label="Import variables" title="Import .tf or .tfvars variables" onClick={() => setImporting(true)}><Download size={16}/></button><button aria-label="Create variable" title="Create variable" onClick={() => edit({ id: crypto.randomUUID(), name: '', type: 'string', description: '', sensitive: false })}><Plus size={16} /></button></header>
 		{variables.length>0&&<label className="lab-search"><Search size={14} /><input aria-label="Search variables" placeholder="Search variables" value={query} onChange={event => setQuery(event.target.value)} /></label>}

@@ -2,9 +2,9 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-import { Group, LockKeyhole, Ungroup, X } from 'lucide-react';
+import { ArrowDownToLine, ArrowUpToLine, BoxSelect, BringToFront, ChevronRight, ClipboardPaste, Copy, CopyPlus, Focus, Group, Layers, Lock, LockKeyhole, LockOpen, SendToBack, Trash2, Ungroup, X, type LucideIcon } from 'lucide-react';
 import * as ContextMenu from '@radix-ui/react-context-menu';
-import type { Dispatch, ReactNode } from 'react';
+import { Fragment, type Dispatch, type ReactNode } from 'react';
 import type { Action, Architecture } from './model.ts';
 import { canvasElements, resizeTargets } from './canvasOperations.ts';
 import { ElementAppearance } from './ElementAppearance.tsx';
@@ -17,36 +17,63 @@ import type { DesignMode } from './model.ts';
 import { selectionUnits } from './selectionGeometry.ts';
 
 export type SelectionAction = 'copy' | 'paste' | 'duplicate' | 'delete' | 'lock' | 'unlock' | 'group' | 'ungroup' | 'front' | 'forward' | 'backward' | 'back' | 'fit' | 'edit' | 'selectAll' | 'clear' | `align-${string}` | `size-${string}`;
-export function selectionActions(architecture: Architecture, ids: string[], hasClipboard: boolean) {
+type MenuSection = 'edit' | 'clipboard' | 'structure' | 'arrange' | 'view' | 'danger';
+export type SelectionMenuAction = { id: SelectionAction; label: string; enabled: boolean; shortcut?: string; section: MenuSection; icon: LucideIcon };
+export function selectionActions(architecture: Architecture, ids: string[], hasClipboard: boolean): SelectionMenuAction[] {
 	const selected = canvasElements(architecture).filter(item => ids.includes(item.id)); const editable = selected.some(item => !item.canvasLocked);
 	const grouped = architecture.groups?.some(group => group.members.some(id => ids.includes(id)));
 	const canLayer = selected.some(item => !item.canvasLocked && !architecture.items.some(frame => frame.id === item.id && frame.kind === 'frame') && !architecture.resources.some(resource=>resource.id===item.id&&isResourceContainer(resource)));
+	const locked = selected.some(item => item.canvasLocked);
 	return [
-		{ id: 'edit', label: 'Edit text / configure', enabled: selected.length === 1 && !selected[0].canvasLocked, shortcut: 'Enter' },
-		{ id: 'copy', label: 'Copy selection', enabled: !!selected.length, shortcut: 'Ctrl+C' },
-		{ id: 'paste', label: 'Paste canvas copy', enabled: hasClipboard, shortcut: 'Ctrl+V' },
-		{ id: 'duplicate', label: 'Duplicate selection', enabled: !!selected.length, shortcut: 'Ctrl+D' },
-		{ id: 'group', label: 'Group selection', enabled: selected.length > 1 && selected.every(item => !item.canvasLocked), shortcut: 'Ctrl+G' },
-		{ id: 'ungroup', label: 'Ungroup selection', enabled: !!grouped && editable, shortcut: 'Ctrl+Shift+G' },
-		{ id: selected.some(item => item.canvasLocked) ? 'unlock' : 'lock', label: selected.some(item => item.canvasLocked) ? 'Unlock selection' : 'Lock selection', enabled: !!selected.length, shortcut: 'Ctrl+L' },
-		{ id: 'front', label: 'Bring to front', enabled: canLayer }, { id: 'forward', label: 'Bring forward', enabled: canLayer },
-		{ id: 'backward', label: 'Send backward', enabled: canLayer }, { id: 'back', label: 'Send to back', enabled: canLayer },
-		{ id: 'fit', label: 'Focus selection', enabled: !!selected.length, shortcut: 'F' },
-		{ id: 'selectAll', label: 'Select all elements', enabled: true, shortcut: 'Ctrl+A' },
-		{ id: 'delete', label: 'Delete selection', enabled: editable, shortcut: 'Delete' }
-	] as { id: SelectionAction; label: string; enabled: boolean; shortcut?: string }[];
+		{ id: 'edit', label: 'Edit text / configure', enabled: selected.length === 1 && !selected[0].canvasLocked, shortcut: 'Enter', section: 'edit', icon: Pencil },
+		{ id: 'copy', label: 'Copy', enabled: !!selected.length, shortcut: 'Ctrl+C', section: 'clipboard', icon: Copy },
+		{ id: 'paste', label: 'Paste', enabled: hasClipboard, shortcut: 'Ctrl+V', section: 'clipboard', icon: ClipboardPaste },
+		{ id: 'duplicate', label: 'Duplicate', enabled: !!selected.length, shortcut: 'Ctrl+D', section: 'clipboard', icon: CopyPlus },
+		{ id: 'group', label: 'Group', enabled: selected.length > 1 && selected.every(item => !item.canvasLocked), shortcut: 'Ctrl+G', section: 'structure', icon: Group },
+		{ id: 'ungroup', label: 'Ungroup', enabled: !!grouped && editable, shortcut: 'Ctrl+Shift+G', section: 'structure', icon: Ungroup },
+		{ id: locked ? 'unlock' : 'lock', label: locked ? 'Unlock' : 'Lock', enabled: !!selected.length, shortcut: 'Ctrl+L', section: 'structure', icon: locked ? LockOpen : Lock },
+		{ id: 'front', label: 'Bring to front', enabled: canLayer, section: 'arrange', icon: BringToFront }, { id: 'forward', label: 'Bring forward', enabled: canLayer, section: 'arrange', icon: ArrowUpToLine },
+		{ id: 'backward', label: 'Send backward', enabled: canLayer, section: 'arrange', icon: ArrowDownToLine }, { id: 'back', label: 'Send to back', enabled: canLayer, section: 'arrange', icon: SendToBack },
+		{ id: 'fit', label: 'Zoom to selection', enabled: !!selected.length, shortcut: 'F', section: 'view', icon: Focus },
+		{ id: 'selectAll', label: 'Select all', enabled: true, shortcut: 'Ctrl+A', section: 'view', icon: BoxSelect },
+		{ id: 'delete', label: 'Delete', enabled: editable, shortcut: 'Del', section: 'danger', icon: Trash2 }
+	];
+}
+
+type MenuParts = Pick<typeof ContextMenu, 'Item' | 'Separator' | 'Sub' | 'SubTrigger' | 'SubContent' | 'Portal' | 'Label'>;
+const isMac = typeof navigator !== 'undefined' && /mac/i.test(navigator.platform);
+function Shortcut({ keys }: { keys?: string }) {
+	if (!keys) { return null; }
+	return <span className="menu-shortcut" aria-hidden="true">{keys.split('+').map(key => <kbd key={key}>{key === 'Ctrl' && isMac ? '⌘' : key === 'Shift' && isMac ? '⇧' : key}</kbd>)}</span>;
+}
+
+/** One menu body for right-click and the More button: grouped sections, icons, key hints, Arrange as a submenu. */
+function SelectionMenuBody({ parts: M, actions, run, container, labelFor }: { parts: MenuParts; actions: SelectionMenuAction[]; run: (action: SelectionAction) => void; container: HTMLElement | null; labelFor?: (action: SelectionMenuAction) => string }) {
+	const sections = [...new Set(actions.map(action => action.section))];
+	const item = (action: SelectionMenuAction) => { const Icon = action.icon; return <M.Item key={action.id} disabled={!action.enabled} className="canvas-context-item" data-danger={action.section === 'danger' || undefined} onSelect={() => run(action.id)}>
+		<Icon size={15} aria-hidden="true"/><span className="menu-label">{labelFor?.(action) ?? action.label}</span><Shortcut keys={action.shortcut}/>
+	</M.Item>; };
+	return <>{sections.map((section, index) => {
+		const rows = actions.filter(action => action.section === section);
+		const body = section === 'arrange' ? <M.Sub key={section}><M.SubTrigger className="canvas-context-item" disabled={rows.every(action => !action.enabled)}><Layers size={15} aria-hidden="true"/><span className="menu-label">Arrange</span><ChevronRight size={14} className="menu-chevron" aria-hidden="true"/></M.SubTrigger>
+			<M.Portal container={container}><M.SubContent className="canvas-context-menu" sideOffset={6} alignOffset={-5} collisionPadding={8}>{rows.map(item)}</M.SubContent></M.Portal></M.Sub> : rows.map(item);
+		return <Fragment key={section}>{index > 0 && <M.Separator className="canvas-context-separator"/>}{body}</Fragment>;
+	})}</>;
+}
+
+export function CanvasActionMenu({ children, architecture, ids, hasClipboard, run, container, readOnly = false }: { children: ReactNode; architecture: Architecture; ids: string[]; hasClipboard: boolean; run: (action: SelectionAction) => void; container: HTMLElement | null; readOnly?: boolean }) {
+	const actions = selectionActions(architecture, ids, hasClipboard).filter(action => !readOnly || ['edit', 'fit', 'selectAll'].includes(action.id));
+	const count = canvasElements(architecture).filter(item => ids.includes(item.id)).length;
+	return <ContextMenu.Root><ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger><ContextMenu.Portal container={container}><ContextMenu.Content className="canvas-context-menu" aria-label="Canvas actions" collisionPadding={8} onCloseAutoFocus={event => { event.preventDefault(); container?.focus(); }}>
+		{count > 0 && <ContextMenu.Label className="canvas-context-heading">{count === 1 ? '1 element selected' : count + ' elements selected'}</ContextMenu.Label>}
+		<SelectionMenuBody parts={ContextMenu} actions={actions} run={run} container={container} labelFor={action => readOnly && action.id === 'edit' ? 'Inspect resource' : action.label}/>
+	</ContextMenu.Content></ContextMenu.Portal></ContextMenu.Root>;
 }
 
 /** How many selected elements a multi-object resize changes: drawings, plus visual-view resource icons. */
 export function resizable(architecture: Architecture, ids: string[], mode: DesignMode): number {
 	const { items, icons } = resizeTargets(architecture, ids, mode);
 	return items.length + icons.length;
-}
-
-export function CanvasActionMenu({ children, architecture, ids, hasClipboard, run, container }: { children: ReactNode; architecture: Architecture; ids: string[]; hasClipboard: boolean; run: (action: SelectionAction) => void; container: HTMLElement | null }) {
-	return <ContextMenu.Root><ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger><ContextMenu.Portal container={container}><ContextMenu.Content className="canvas-context-menu" aria-label="Canvas actions" collisionPadding={8} onCloseAutoFocus={event => { event.preventDefault(); container?.focus(); }}>
-		{selectionActions(architecture, ids, hasClipboard).map(action => <ContextMenu.Item key={action.id} disabled={!action.enabled} className="canvas-context-item" onSelect={() => run(action.id)}>{action.label}<span>{action.shortcut}</span></ContextMenu.Item>)}
-	</ContextMenu.Content></ContextMenu.Portal></ContextMenu.Root>;
 }
 
 export function SelectionControls({ architecture, ids, dispatch, run, hasClipboard, mode, onInspect, container }: {
@@ -76,7 +103,7 @@ export function SelectionControls({ architecture, ids, dispatch, run, hasClipboa
    {selected.length > 1 && !locked && <button onClick={() => run(grouped?'ungroup':'group')}>{grouped?<Ungroup size={14}/>:<Group size={14}/>} {grouped?'Ungroup':'Group'}</button>}
    {locked && <button aria-label="Unlock selection" onClick={() => run('unlock')}><LockKeyhole size={14}/>Unlock</button>}
    <DropdownMenu.Root modal={false}><DropdownMenu.Trigger aria-label="More selection actions" title="More actions"><MoreHorizontal size={17}/></DropdownMenu.Trigger><DropdownMenu.Portal container={container}>
-    <DropdownMenu.Content className="canvas-context-menu" aria-label="Selection menu" sideOffset={8} collisionPadding={12}>{selectionActions(architecture,ids,hasClipboard).map(action=><DropdownMenu.Item className="canvas-context-item" key={action.id} disabled={!action.enabled} onSelect={() => run(action.id)}>{action.label}<span>{action.shortcut}</span></DropdownMenu.Item>)}</DropdownMenu.Content>
+    <DropdownMenu.Content className="canvas-context-menu" aria-label="Selection menu" sideOffset={8} collisionPadding={12}><SelectionMenuBody parts={DropdownMenu as unknown as MenuParts} actions={selectionActions(architecture,ids,hasClipboard)} run={run} container={container}/></DropdownMenu.Content>
    </DropdownMenu.Portal></DropdownMenu.Root>
    <button aria-label="Clear canvas selection" title="Clear selection (Escape)" onClick={() => run('clear')}><X size={14}/></button>
   </div>

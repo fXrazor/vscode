@@ -5,7 +5,7 @@
 
 import assert from 'assert';
 import type * as electron from 'electron';
-import { Event } from '../../../base/common/event.js';
+import { Emitter, Event } from '../../../base/common/event.js';
 import { URI } from '../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../base/test/common/utils.js';
 import { NullLogService } from '../../../platform/log/common/log.js';
@@ -741,5 +741,79 @@ suite('CloudForgeServiceChannel', () => {
 		});
 
 		await Promise.all([cancelled, unc, local].map(item => item.broker.stop()));
+	});
+
+	test('isolates separate CloudForge sidecar instances across multiple open windows and stops only closed windows', async () => {
+		const onOpen = new Emitter<{ readonly id: number }>();
+		const onDestroy = new Emitter<{ readonly id: number }>();
+		const activeWindows = new Map<number, FakeWindow>([[1, contosoWindow]]);
+		const created: Array<{ readonly service: FakeService; started: boolean; stopped: boolean }> = [];
+
+		const broker = new CloudForgeServiceBroker(
+			'C:\\app',
+			new NullLogService(),
+			{
+				onDidOpenWindow: onOpen.event,
+				onDidDestroyWindow: onDestroy.event,
+				getWindows: () => [...activeWindows.values()],
+				getWindowById: id => {
+					const win = activeWindows.get(id);
+					return win ? { openedWorkspace: win.openedWorkspace, win: null } : undefined;
+				}
+			},
+			{
+				resolveLocalWorkspace: async configPath => [...activeWindows.values()].find(win => win.resolved?.configPath.toString() === configPath.toString())?.resolved
+			},
+			{
+				showOpenDialog: async () => ({ canceled: true, filePaths: [] })
+			},
+			() => {
+				const entry = {
+					started: false,
+					stopped: false,
+					service: new FakeService((_method, params) => ({ echoProject: params.projectPath }))
+				};
+				const origStart = entry.service.start.bind(entry.service);
+				const origStop = entry.service.stop.bind(entry.service);
+				entry.service.start = async () => { entry.started = true; return origStart(); };
+				entry.service.stop = async () => { entry.stopped = true; return origStop(); };
+				created.push(entry);
+				return entry.service;
+			}
+		);
+
+		try {
+			assert.strictEqual(created.length, 1);
+			assert.strictEqual(created[0].started, true);
+
+			// Open a second independent project window
+			activeWindows.set(2, fabrikamWindow);
+			onOpen.fire({ id: 2 });
+			assert.strictEqual(created.length, 2);
+			assert.strictEqual(created[1].started, true);
+
+			const res1 = await broker.call<CloudForgeCallResult>('window:1', 'openProject', {});
+			const res2 = await broker.call<CloudForgeCallResult>('window:2', 'openProject', {});
+			assert.deepStrictEqual(res1, { ok: true, value: { echoProject: fsPath('C:\\Projects\\Contoso Platform') } });
+			assert.deepStrictEqual(res2, { ok: true, value: { echoProject: fsPath('D:\\Work\\Fabrikam') } });
+			assert.strictEqual(created[0].service.calls.length, 1);
+			assert.strictEqual(created[1].service.calls.length, 1);
+
+			// Closing window 1 stops only window 1's sidecar; window 2 continues serving requests
+			activeWindows.delete(1);
+			onDestroy.fire({ id: 1 });
+			assert.strictEqual(created[0].stopped, true);
+			assert.strictEqual(created[1].stopped, false);
+
+			const afterClose1 = await broker.call<CloudForgeCallResult>('window:1', 'openProject', {});
+			assert.strictEqual(afterClose1.ok, false);
+			const afterClose2 = await broker.call<CloudForgeCallResult>('window:2', 'openProject', {});
+			assert.deepStrictEqual(afterClose2, { ok: true, value: { echoProject: fsPath('D:\\Work\\Fabrikam') } });
+		} finally {
+			await broker.stop();
+			onOpen.dispose();
+			onDestroy.dispose();
+		}
+		assert.strictEqual(created[1].stopped, true);
 	});
 });

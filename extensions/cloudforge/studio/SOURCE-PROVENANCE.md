@@ -16,6 +16,14 @@ The source checkout, database, authorization, processes and deployment logic are
 
 Provider snapshot index digests are in assets/catalogue/provenance.json.
 
+## Provider form/editor extension — 26 November 2026
+
+The subsequent continuation replaces documentation-name discovery with **4,271 real schema resources** from signed AzureRM 5.14.0, AWS 6.73.0 and Google 8.10.0 captures. All original 4,078 documentation entries are audited in the current provenance manifest. The old AWS 6.73.1 label returned registry 404; Google aggregate IAM pages are mapped to actual policy/binding/member types. Current implementation, capture commands and remaining gaps are in [the updated evidence](research/provider-form-coverage.md). The original prose-only pass described below is historical.
+
+`scripts/import-provider-forms.mjs` imports recursive documentation-derived definitions for all 4,078 current AzureRM/AWS/Google palette resource types into lazy `assets/provider-forms` payloads. The adapted parser's original source digest, immutable official documentation revisions, per-resource hashes, version applicability, gaps and parsed examples are recorded in `assets/provider-forms/provenance.json` and [provider form research](research/provider-form-coverage.md). These are inferred documentation types, not complete executable schemas. Imported service schemas take precedence; unavailable or ambiguous fields and validation remain explicit.
+
+Of the eight Terraform core files copied on 23 November, `catalog/index.ts` is now intentionally adapted for lazy form loading and authoritative imported field registration, and `catalog/types.ts` adds a JSON literal form type. `CLOUDLAB-CORE-PROVENANCE.json` keeps each original `sha256` and adds `adaptedSha256`/reason for those two files; the other six originals are unchanged. Pure Terraform parsing/generation still derives from the one canonical Studio Architecture. Additional code is represented only by sparse expressions/labelled structure on the owning resource and uses existing semantic Undo and guarded save. It is not arbitrary source/comment round-trip support.
+
 ## Terraform core port — 23 November 2026
 
 Eight unchanged source files from the separately supplied `Z:/CLOUDLAB FORGE 3.0/apps/web/lib` are copied under `src/cloudlab-core`: model, HCL parser, Terraform generator and curated Azure/AWS/Google catalogue definitions. Source checkout HEAD was `003f5d662be59fe92719034917fabc7c4572129a`; the per-file SHA-256 manifest `CLOUDLAB-CORE-PROVENANCE.json` identifies the actual bytes, including any source working-tree differences. No server, database, authorization, process or deployment code was copied.

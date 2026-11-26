@@ -163,6 +163,13 @@ test('view state sanitizer preserves valid independent theme/mode/viewports and 
 	assert.deepEqual(sanitizeViewState('corrupt'), defaultCanvasViewState());
 });
 
+test('graph presentation is stored apart from node positions and sanitised', () => {
+	const sanitized = sanitizeViewState({ nodePositions: { visual: { a: { x: 1, y: 2 } } }, graph: { lens: 'security', layout: 'nope', route: 'straight', density: 'compact', overlay: 'plan', spacing: 9999, height: 150, showMembership: true, expanded: ['a', 'a', 'bad\x00'], pins: { a: { x: 500, y: 600 }, b: { x: Number.NaN, y: 0 } } } });
+	assert.deepEqual(sanitized.graph, { lens: 'security', layout: 'layers', route: 'straight', density: 'compact', overlay: 'plan', spacing: 300, height: 150, showMembership: true, expanded: ['a'], pins: { a: { x: 500, y: 600 } } });
+	assert.deepEqual(sanitized.nodePositions, { visual: { a: { x: 1, y: 2 } } }, 'graph pins never leak into design positions');
+	assert.equal(sanitizeViewState({}).graph, undefined);
+});
+
 test('orientServiceEdgesForCanvas normalizes Rust dependent->prerequisite edges to left-to-right flow', () => {
 	const rawEdges = [
 		{ fromId: 'apps', toId: 'vnet_hub', kind: 'reference' },

@@ -1,0 +1,58 @@
+<title>CloudForge Studio Test View</title>
+<meta name="color-scheme" content="light dark">
+<link rel="stylesheet" href="./studio.css">
+<style>
+  :root { --tv-surface: #ffffff; --tv-text: #1d2233; --tv-muted: #6b7285; --tv-border: #d9dce6; --tv-accent: #5b46e5; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --tv-surface: #1f2029; --tv-text: #e7e9f2; --tv-muted: #9aa0b5; --tv-border: #353849; --tv-accent: #a993ff; color-scheme: dark; } }
+  :root[data-theme="dark"] { --tv-surface: #1f2029; --tv-text: #e7e9f2; --tv-muted: #9aa0b5; --tv-border: #353849; --tv-accent: #a993ff; color-scheme: dark; }
+  html, body { height: 100%; }
+  body { background: var(--tv-surface); }
+  #root { height: 100%; }
+  .tv-bar { position: fixed; left: calc(14px + env(safe-area-inset-left, 0px)); bottom: calc(60px + env(safe-area-inset-bottom, 0px)); z-index: 2147483000; font: 12px/1.3 "Segoe UI", system-ui, sans-serif; color: var(--tv-muted); }
+  .tv-bar details { background: var(--tv-surface); border: 1px solid var(--tv-border); border-radius: 10px; box-shadow: 0 8px 24px -12px #0006; }
+  .tv-bar summary { cursor: pointer; padding: 6px 10px; list-style: none; font-weight: 650; color: var(--tv-text); }
+  .tv-bar summary::-webkit-details-marker { display: none; }
+  .tv-bar nav { display: grid; gap: 4px; padding: 0 10px 10px; min-width: 220px; }
+  .tv-bar a { color: var(--tv-text); text-decoration: none; padding: 5px 8px; border-radius: 6px; }
+  .tv-bar a:hover, .tv-bar a:focus-visible { background: color-mix(in srgb, var(--tv-accent) 12%, transparent); outline: none; }
+  .tv-bar a[aria-current="true"] { color: var(--tv-accent); font-weight: 650; }
+  .tv-bar p { margin: 4px 8px 0; max-width: 240px; }
+</style>
+<div id="root"></div>
+<div class="tv-bar">
+  <details>
+    <summary>Test view · sample</summary>
+    <nav aria-label="Sample project">
+      <a href="#starter" data-sample="starter">Starter architecture</a>
+      <a href="#hub-spoke" data-sample="hub-spoke">Hub and spoke (27 resources)</a>
+      <a href="#estate" data-sample="estate">Multi-cloud estate (126 resources)</a>
+      <p>Open Configuration in the top bar for the Technical Graph. Leave comments on this page to annotate what to change.</p>
+    </nav>
+  </details>
+</div>
+<script type="module">
+  // Preview-only shims: icons ship as one file and the large AWS form schema in parts, so the whole
+  // Studio fits the hosted page's file limits. The Studio code itself is unchanged.
+  const icons = await fetch('./catalog-icons.json').then(response => response.json());
+  const iconKey = value => { if (typeof value !== 'string') { return undefined; } const match = value.match(/(?:^|\/)assets\/catalog-icons\/(.+\.svg)$/); return match ? icons['./assets/catalog-icons/' + match[1]] : undefined; };
+  const setAttribute = Element.prototype.setAttribute;
+  Element.prototype.setAttribute = function (name, value) { if ((name === 'src' || name === 'href') && iconKey(value)) { value = iconKey(value); } return setAttribute.call(this, name, value); };
+  const imageSrc = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src');
+  Object.defineProperty(HTMLImageElement.prototype, 'src', { ...imageSrc, set(value) { imageSrc.set.call(this, iconKey(value) ?? value); } });
+  const realFetch = window.fetch.bind(window);
+  const bytes = dataUrl => Uint8Array.from(atob(dataUrl.split(',')[1]), character => character.charCodeAt(0));
+  window.fetch = async (input, init) => {
+    const url = typeof input === 'string' ? input : input?.url ?? '';
+    const icon = iconKey(url.replace(location.origin, '.').replace(/^\.\.\//, './'));
+    if (icon) { return new Response(bytes(icon), { headers: { 'content-type': 'image/svg+xml' } }); }
+    if (/assets\/provider-forms\/aws\/resources\.json$/.test(url)) {
+      const parts = await Promise.all([1, 2, 3, 4].map(n => realFetch('./assets/provider-forms/aws/resources.part' + n + '.json').then(response => response.json())));
+      return new Response(JSON.stringify({ ...parts[0], resources: parts.flatMap(part => part.resources) }), { headers: { 'content-type': 'application/json' } });
+    }
+    return realFetch(input, init);
+  };
+  const current = location.hash.slice(1) || 'starter';
+  for (const link of document.querySelectorAll('.tv-bar a')) { link.setAttribute('aria-current', String(link.dataset.sample === current)); }
+  addEventListener('hashchange', () => location.reload());
+  await import('./studio.js');
+</script>

@@ -10,12 +10,14 @@
 // until Phase 4's guarded Rust save capability is approved and connected.
 
 import type { CanvasGraphSnapshot, CanvasNodeSummary } from './protocol';
+import type { LiteralShape } from './literalSchema.ts';
 
 export type SchemaKind = 'resource' | 'dataSource';
 export type FieldAccess = 'required' | 'optional' | 'computedOnly';
-export type FieldValueType = 'string' | 'number' | 'bool' | 'listString' | 'mapString';
+export type FieldValueType = 'string' | 'number' | 'bool' | 'listString' | 'mapString' | 'json';
 
 export interface FormAttribute {
+	readonly literalShape?: LiteralShape;
 	readonly name: string;
 	readonly path: string;
 	readonly access: FieldAccess;
@@ -52,6 +54,7 @@ export interface FormCoverage {
 }
 
 export interface FormSchema {
+	readonly selection?: { readonly sourceRevision: string; readonly address: string; readonly snapshotSha256: string; readonly lockedVersionVerified: true };
 	readonly kind: SchemaKind;
 	readonly typeName: string;
 	readonly providerSource: string;
@@ -659,6 +662,24 @@ function formatHclValue(
 			}
 			const lines = entries.map(([k, v]) => `${indent}  "${escapeHclString(k)}" = "${escapeHclString(String(v))}"`);
 			return `{\n${lines.join('\n')}\n${indent}}`;
+		}
+		case 'json': {
+			const render = (value: unknown): string | undefined => {
+				if (value === null || typeof value === 'boolean' || typeof value === 'number' && Number.isFinite(value)) { return String(value); }
+				if (typeof value === 'string') { return `"${escapeHclString(value)}"`; }
+				if (Array.isArray(value)) {
+					const items = value.map(render);
+					return items.every(item => item !== undefined) ? `[${items.join(', ')}]` : undefined;
+				}
+				if (value && typeof value === 'object') {
+					const entries = Object.entries(value).map(([key, item]) => [key, render(item)]);
+					return entries.every(([, item]) => item !== undefined) ? `{ ${entries.map(([key, item]) => `"${escapeHclString(key!)}" = ${item}`).join(', ')} }` : undefined;
+				}
+				return undefined;
+			};
+			const result = render(literal);
+			if (result === undefined) { diagnostics.push({ path, severity: 'error', message: 'Expected a JSON literal value.' }); }
+			return result;
 		}
 	}
 }
