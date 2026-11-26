@@ -114,6 +114,18 @@
 				"icon": "$(file-add)"
 			},
 			{
+				"command": "cloudforge.providers.importArchive",
+				"title": "%command.providers.importArchive%",
+				"category": "CloudForge",
+				"icon": "$(file-zip)"
+			},
+			{
+				"command": "cloudforge.providers.downloadMissing",
+				"title": "%command.providers.downloadMissing%",
+				"category": "CloudForge",
+				"icon": "$(cloud-download)"
+			},
+			{
 				"command": "cloudforge.showProofStatus",
 				"title": "%command.showProofStatus%",
 				"category": "%displayName%"
@@ -599,6 +611,10 @@
 				{
 					"command": "cloudforge.providers.openRegistry",
 					"when": "false"
+				},
+				{
+					"command": "cloudforge.providers.importArchive",
+					"when": "false"
 				}
 			],
 			"view/title": [
@@ -726,6 +742,11 @@
 					"command": "cloudforge.providers.initOffline",
 					"when": "view == cloudforge.providers",
 					"group": "3_engine@1"
+				},
+				{
+					"command": "cloudforge.providers.importArchive",
+					"when": "view == cloudforge.providers",
+					"group": "2_mirror@3"
 				}
 			],
 			"view/item/context": [
@@ -843,6 +864,16 @@
 					"command": "cloudforge.providers.initOffline",
 					"when": "view == cloudforge.providers && viewItem == providersSectionProject",
 					"group": "inline@1"
+				},
+				{
+					"command": "cloudforge.providers.downloadMissing",
+					"when": "view == cloudforge.providers && viewItem == providersSectionProject",
+					"group": "inline@0"
+				},
+				{
+					"command": "cloudforge.providers.importArchive",
+					"when": "view == cloudforge.providers && viewItem =~ /^providerProject\\.download/",
+					"group": "1_more@1"
 				}
 			],
 			"editor/context": [

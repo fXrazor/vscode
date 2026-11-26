@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { buildProvidersModel, compareVersionsDesc, projectNextAction, shortProviderName } from '../src/providers/model.ts';
+import { buildProvidersModel, compareVersionsDesc, isProviderAddress, projectNextAction, shortProviderName } from '../src/providers/model.ts';
 import type { CanvasDependencyReport } from '../src/canvas/protocol.ts';
 
 const AZ = 'registry.terraform.io/hashicorp/azurerm';
@@ -75,4 +75,11 @@ test('providers model: works without an open architecture', () => {
 test('providers helpers', () => {
 	assert.equal(shortProviderName(AZ), 'hashicorp/azurerm');
 	assert.deepEqual(['3.9.0', '4.0.0-beta1', '3.116.0', '4.0.0'].sort(compareVersionsDesc), ['4.0.0', '4.0.0-beta1', '3.116.0', '3.9.0']);
+});
+
+test('provider address validation', () => {
+	assert.equal(isProviderAddress('registry.terraform.io/hashicorp/azurerm'), true);
+	assert.equal(isProviderAddress('hashicorp/azurerm'), false);
+	assert.equal(isProviderAddress('registry.terraform.io/../azurerm'), false);
+	assert.equal(isProviderAddress('localhost/a/b'), false);
 });

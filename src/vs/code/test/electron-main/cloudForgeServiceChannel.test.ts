@@ -705,6 +705,17 @@ suite('CloudForgeServiceChannel', () => {
 		assert.strictEqual(validateCloudForgeServiceParams('planMirrorCleanup', { quotaBytes: 1024, workspaceId: 'workspace-1' }), undefined);
 	});
 
+	test('validates downloadProviderPackage params', () => {
+		const address = 'registry.terraform.io/hashicorp/azurerm';
+		assert.deepStrictEqual(validateCloudForgeServiceParams('downloadProviderPackage', { address, version: '3.116.0' }), { address, version: '3.116.0' });
+		assert.deepStrictEqual(validateCloudForgeServiceParams('downloadProviderPackage', { address, version: '3.116.0', platforms: ['windows_amd64', 'linux_amd64'], engine: 'terraform' }), { address, version: '3.116.0', platforms: ['windows_amd64', 'linux_amd64'], engine: 'terraform' });
+		assert.strictEqual(validateCloudForgeServiceParams('downloadProviderPackage', { address: 'hashicorp/azurerm', version: '3.116.0' }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('downloadProviderPackage', { address, version: '../3' }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('downloadProviderPackage', { address, version: '3.116.0', platforms: [] }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('downloadProviderPackage', { address, version: '3.116.0', platforms: ['../x'] }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('downloadProviderPackage', { address, version: '3.116.0', archivePath: 'C:\\x.zip' }), undefined);
+	});
+
 	test('picks a local .zip archive in Electron main for importMirrorPackage and blocks UNC paths', async () => {
 		const sha = 'a'.repeat(64);
 		const params = {

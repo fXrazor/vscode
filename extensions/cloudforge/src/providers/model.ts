@@ -60,6 +60,12 @@ export interface ProvidersModel {
 	readonly attentionCount: number;
 }
 
+/** `hostname/namespace/type` with registry-safe segments. */
+export function isProviderAddress(value: string): boolean {
+	const parts = value.split('/');
+	return parts.length === 3 && /^[a-z0-9.-]+$/i.test(parts[0]) && parts[0].includes('.') && parts.slice(1).every(part => /^[a-z0-9_-]+$/i.test(part));
+}
+
 /** `registry.terraform.io/hashicorp/azurerm` → `hashicorp/azurerm`. */
 export function shortProviderName(address: string): string {
 	const parts = address.split('/');

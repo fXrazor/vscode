@@ -73,5 +73,7 @@
 	"command.providers.openRegistry": "Show in Registry",
 	"command.providers.verify": "Verify Downloaded Providers",
 	"command.providers.initOffline": "Initialize Architecture Offline",
-	"command.providers.importSchemaFile": "Import Schema Snapshot File…"
+	"command.providers.importSchemaFile": "Import Schema Snapshot File…",
+	"command.providers.importArchive": "Import Downloaded Provider .zip…",
+	"command.providers.downloadMissing": "Download Missing Providers"
 }
