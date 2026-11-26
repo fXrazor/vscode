@@ -1,0 +1,13 @@
+# Provider archive import navigation
+
+26 November 2026. Owner: Codex. Branch `codex/provider-import-navigation`, reusing the clean isolated checkout at `C:/Users/dalep/.codex/worktrees/guided-variable-values/CloudForge-Code`, from merged main `e58ba69c4dd`. The earlier `codex/guided-variable-values` checkpoint remains on its own branch.
+
+Dale asked to continue useful development without overlapping Claude's Studio work. Read-only inspection found Claude's JSON Crack, startup, Providers/Get Ready and Studio control updates already implemented, plus Antigravity's Network and connector changes on main. The inspected Claude/Antigravity checkouts were clean. This change completes Back navigation explicitly required by the existing [native provider-package workflow](offline-provider-management-spec.md), whose current import is a forward-only sequence.
+
+Use the existing native InputBox/QuickPick flow. Restarting the wizard discards corrections; a new form or Studio panel adds unnecessary persistent UI. Standard Back buttons will move through Address → Version → Platform → Expected SHA-256 → Review while retaining the in-progress values, including edits made before pressing Back. Escape at any step abandons the draft without importing. Returning from Review permits correction of the digest, platform and identity. The platform picker restores the chosen platform. Invalid text remains on its step with the existing validation guidance.
+
+Keep import metadata in a short-lived wizard draft, separate from architecture state. Review and the final broker request use the same trimmed identity and normalized digest. Only explicit Choose Archive and Import opens the existing broker-owned archive picker. Native-dialog cancellation and service errors keep existing behavior; there is no automatic retry, download, initialization or provider execution.
+
+Implementation: a small API-independent step coordinator, a disposable native InputBox adapter, and reuse of the manager's existing QuickPick helper with optional step/selection metadata. Changes are limited to `extensions/cloudforge/src/providerMirror/`, focused tests, and handoff documentation. Studio, Providers view, extension command wiring, Rust, broker and installers are outside this change.
+
+Verify retained edits across every Back transition, no result on Escape at every step, no accepted invalid input, exact reviewed/submitted identity/digest, and explicit review before import. Run focused mirror tests, extension type checking/build and targeted lint. If the installed development host is available, exercise native Back/cancel/review there with an isolated profile and capture evidence; distinguish this from a completed archive-import/service proof.
