@@ -36,7 +36,7 @@ import {
 import { BoardNode, ResourceNode, type CanvasNode } from './ResourceNode.tsx';
 import type { Action, Architecture, BoardItem, DesignMode, Provider, ResourceKind, Position } from './model.ts';
 import { resourceDefinition, resourceTypes, providerNames } from './fixture.ts';
-import { MousePointer2, SquareDashedMousePointer, Hand, Type, StickyNote, Shapes, Frame, Minus, Plus, Scan, Cable, PenLine, ChevronLeft, ChevronRight, Lock } from 'lucide-react';
+import { MousePointer2, SquareDashedMousePointer, Hand, Type, StickyNote, Shapes, Frame, Minus, Plus, Scan, Cable, PenLine, ChevronLeft, ChevronRight, Lock, Search, ChevronUp, ChevronDown, X } from 'lucide-react';
 
 const nodeTypes = { resource: ResourceNode, board: BoardNode };
 const edgeTypes = { design: DesignEdge };
@@ -110,6 +110,10 @@ export const DesignCanvas = memo(function DesignCanvas({
 	const [hasStyleClipboard, setHasStyleClipboard] = useState(false);
 	/** Miro/Figma smart duplicate: tracks last clone+move delta so repeating Ctrl+D stamps evenly. */
 	const repeatStep = useRef<{ ids: string[]; dx: number; dy: number } | null>(null);
+	const [findOpen, setFindOpen] = useState(false);
+	const [findQuery, setFindQuery] = useState('');
+	const [findIndex, setFindIndex] = useState(0);
+	const findInput = useRef<HTMLInputElement>(null);
 	const [editRequest, setEditRequest] = useState({ id: '', token: 0 });
 	const selectedConnection = architecture.connections.find(connection => connection.id === selectedConnectionId);
 	const bounds = useRef<HTMLDivElement>(null);
@@ -156,6 +160,36 @@ export const DesignCanvas = memo(function DesignCanvas({
 		const nextIdx = (baseIdx + delta + frames.length) % frames.length;
 		jumpToFrame(frames[nextIdx], nextIdx);
 	}, [frames, selectedIds, activeFrameIndex, jumpToFrame]);
+
+	const findMatches = useMemo(() => {
+		const needle = findQuery.trim().toLowerCase();
+		if (!needle) { return [] as { kind: 'element' | 'connection'; id: string; label: string }[]; }
+		return [
+			...architecture.resources.filter(resource => {
+				const hay = [resource.label, resource.name, resource.terraformName, resource.catalogue?.type, resource.catalogue?.label, resource.kind].filter(Boolean).join(' ').toLowerCase();
+				return hay.includes(needle);
+			}).map(resource => ({ kind: 'element' as const, id: resource.id, label: resource.label || resource.name })),
+			...architecture.items.filter(item => item.text.toLowerCase().includes(needle)).map(item => ({ kind: 'element' as const, id: item.id, label: item.text })),
+			...architecture.connections.filter(link => (link.label ?? '').toLowerCase().includes(needle)).map(link => ({ kind: 'connection' as const, id: link.id, label: link.label ?? '' })),
+		];
+	}, [architecture.resources, architecture.items, architecture.connections, findQuery]);
+	const focusMatch = useCallback((match: { kind: 'element' | 'connection'; id: string }) => {
+		if (!flow) { return; }
+		autoFit.current = { at: 0 };
+		if (match.kind === 'connection') {
+			onSelectionChange([]); setSelectedConnectionId(match.id);
+			fitConnectionsAndNodes(match.id);
+		} else {
+			setSelectedConnectionId(''); onSelectionChange([match.id]);
+			void flow.fitView({ nodes: [{ id: match.id }], padding: 0.45, maxZoom: 1.4, duration: 220 });
+		}
+	}, [flow, onSelectionChange]);
+	const stepFind = useCallback((delta: number) => {
+		if (!findMatches.length) { return; }
+		const next = (findIndex + delta + findMatches.length) % findMatches.length;
+		setFindIndex(next);
+		focusMatch(findMatches[next]);
+	}, [findMatches, findIndex, focusMatch]);
 	const diagnostics = useMemo(() => architectureDiagnostics(architecture), [architecture]);
 	const dependencies = useMemo(() => inheritedDependencies(architecture), [architecture]);
 	const relationships = useMemo(() => infrastructureRelationships(architecture), [architecture]);
@@ -417,6 +451,24 @@ export const DesignCanvas = memo(function DesignCanvas({
 			if (key === 'a') { action = 'selectAll'; } else if (key === 'c') { action = event.altKey ? 'copyStyle' : 'copy'; } else if (key === 'v') { action = event.altKey ? 'pasteStyle' : 'paste'; }
 			else if (key === 'd') { action = 'duplicate'; } else if (key === 'g') { action = event.shiftKey ? 'ungroup' : 'group'; }
 			else if (key === 'f' && event.altKey) { action = 'frameSelection'; }
+			else if (key === 'f' && !event.altKey) {
+				event.preventDefault(); event.stopPropagation();
+				setFindOpen(true);
+				requestAnimationFrame(() => findInput.current?.focus());
+				return;
+			}
+			else if (['arrowleft', 'arrowright', 'arrowup', 'arrowdown'].includes(key) && mode === 'visual' && selectedIds.length === 1) {
+				const source = architecture.items.find(item => item.id === selectedIds[0] && !item.canvasLocked && (item.kind === 'note' || item.kind === 'shape' || item.kind === 'text'));
+				if (source) {
+					event.preventDefault(); event.stopPropagation();
+					const id = crypto.randomUUID(); const connectionId = crypto.randomUUID();
+					const direction = key === 'arrowright' ? 'right' : key === 'arrowleft' ? 'left' : key === 'arrowdown' ? 'down' : 'up';
+					dispatch({ type: 'canvas', command: { kind: 'spawnConnected', sourceId: source.id, id, connectionId, direction, mode } });
+					onSelectionChange([id]);
+					setShowConnections(true);
+					return;
+				}
+			}
 			else if (key === 'l') { action = canvasElements(architecture).some(item => selectedIds.includes(item.id) && item.canvasLocked) ? 'unlock' : 'lock'; }
 		} else if (key === 'tab' && mode === 'visual' && selectedIds.length === 1) {
 			const note = architecture.items.find(item => item.id === selectedIds[0] && item.kind === 'note' && !item.canvasLocked);
@@ -565,6 +617,19 @@ export const DesignCanvas = memo(function DesignCanvas({
 			}}/>}
 			{pen && flow && <InkCapture flow={flow} zoom={zoom} ink={ink} onStroke={(position, size, path, ink) => { const id = crypto.randomUUID(); dispatch({ type: 'addItem', item: { id, kind: 'ink', text: '', path, strokeColor: ink.strokeColor, strokeWidth: ink.strokeWidth, positions: { visual: position, technical: position }, width: size.width, height: size.height, members: [] } }); }}/>}
 			{creatingConnection ? <ConnectionCreate architecture={architecture} selectedId={connectionSourceId} dispatch={dispatch} onClose={() => { setCreatingConnection(false); bounds.current?.querySelector<HTMLButtonElement>('[aria-label="Connect elements"]')?.focus(); }}/> : null}
+			{findOpen && <div className="canvas-find-bar nodrag nopan" role="search" aria-label="Find on canvas">
+				<Search size={14} aria-hidden="true" />
+				<input ref={findInput} aria-label="Find on canvas" placeholder="Find resource, note, shape or frame…" value={findQuery}
+					onChange={event => { const next = event.target.value; setFindQuery(next); setFindIndex(0); }}
+					onKeyDown={event => {
+						if (event.key === 'Escape') { event.preventDefault(); setFindOpen(false); bounds.current?.focus(); }
+						else if (event.key === 'Enter') { event.preventDefault(); if (findMatches.length) { stepFind(event.shiftKey ? -1 : 1); } }
+					}} />
+				<span className="canvas-find-count" aria-live="polite">{findQuery.trim() ? (findMatches.length ? `${(findIndex % findMatches.length) + 1}/${findMatches.length}` : '0/0') : ''}</span>
+				<button type="button" aria-label="Previous match" disabled={!findMatches.length} onClick={() => stepFind(-1)}><ChevronUp size={14} /></button>
+				<button type="button" aria-label="Next match" disabled={!findMatches.length} onClick={() => stepFind(1)}><ChevronDown size={14} /></button>
+				<button type="button" aria-label="Close find" onClick={() => { setFindOpen(false); bounds.current?.focus(); }}><X size={14} /></button>
+			</div>}
 			<details className="canvas-options"><summary>View</summary><div className="view-options-content">
 				<label>Theme<select aria-label="Canvas theme" value={theme} onChange={event => onThemeChange(event.target.value as 'light' | 'dark')}><option value="light">Light</option><option value="dark">Dark</option></select></label>
 				<label>Grid<select aria-label="Canvas grid" value={grid} onChange={event => setGrid(event.target.value as typeof grid)}><option value="dots">Dots</option><option value="lines">Lines</option><option value="none">None</option></select></label>
@@ -574,7 +639,7 @@ export const DesignCanvas = memo(function DesignCanvas({
 				<label><input type="checkbox" checked={allDependencies} onChange={event=>setAllDependencies(event.target.checked)}/>All inherited dependencies</label>
 				<label><input type="checkbox" checked={showLabels} onChange={event => setShowLabels(event.target.checked)} />Show automatic and dependency labels</label>
 				<button aria-pressed={minimap} onClick={() => setMinimap(value => !value)}>Minimap</button>
-				<details className="canvas-shortcuts"><summary>Keyboard shortcuts</summary><p>Ctrl / Cmd + click: extend selection<br/>Shift + drag: select an area; Alt + drag: clone<br/>Ctrl / Cmd + D: duplicate (repeats last move)<br/>Ctrl / Cmd + Alt + C / V: copy / paste style<br/>Ctrl / Cmd + Alt + F: wrap selection in frame<br/>Tab / Shift + Tab on sticky note: spawn adjacent note<br/>Arrows: move 1 px; Shift + arrows: 10 px<br/>Enter: edit; Escape: clear selection<br/>V: select; H: pan; P: pen; T: text; N: note<br/>[ and ]: rotate drawings 15° (Shift: 1°)<br/>F: focus selection; Space + drag: pan<br/>Alt + F10: move to the selection toolbar; Escape: back to the canvas<br/>Copy, duplicate, group and layer actions are in the selection menu.</p></details>
+				<details className="canvas-shortcuts"><summary>Keyboard shortcuts</summary><p>Ctrl / Cmd + F: find on canvas<br/>Ctrl / Cmd + click: extend selection<br/>Shift + drag: select an area; Alt + drag: clone<br/>Ctrl / Cmd + D: duplicate (repeats last move)<br/>Ctrl / Cmd + Arrows: spawn connected shape / note<br/>Ctrl / Cmd + Alt + C / V: copy / paste style<br/>Ctrl / Cmd + Alt + F: wrap selection in frame<br/>Tab / Shift + Tab on sticky note: spawn adjacent note<br/>PageUp / PageDown: step between frames<br/>Arrows: move 1 px; Shift + arrows: 10 px<br/>Enter: edit; Escape: clear selection<br/>V: select; H: pan; P: pen; T: text; N: note<br/>[ and ]: rotate drawings 15° (Shift: 1°)<br/>F: focus selection; Space + drag: pan<br/>Alt + F10: move to the selection toolbar; Escape: back to the canvas<br/>Copy, duplicate, group and layer actions are in the selection menu.</p></details>
 			</div></details>
 			{dropFeedback&&<div className={'container-drop-status '+(dropFeedback.ok?'valid':'invalid')} role="status">{dropFeedback.reason}</div>}
 			<div className="canvas-navigation" role="group" aria-label="Zoom and navigation">

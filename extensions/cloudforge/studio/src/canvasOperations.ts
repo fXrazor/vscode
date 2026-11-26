@@ -3,10 +3,11 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 import type { Architecture, BoardItem, DesignMode, Position, ResourceBlock } from './model.ts';
+import type { ShapeId } from './shapes.ts';
 import { bindingKey, bindingTarget } from './fieldBindings.ts';
 import { fitResourceContainers, isResourceContainer, resourceDimensions, visualAncestors, visualDescendants, containedDescendants } from './resourceHierarchy.ts';
 import { iconSizeLimits, resourceIconSize } from './resourceGeometry.ts';
-import { connectionElementIds, endpointElementId, pointEndpoint, remapEndpoint } from './connectionEndpoints.ts';
+import { connectionElementIds, elementEndpoint, endpointElementId, pointEndpoint, remapEndpoint, type EndpointPort } from './connectionEndpoints.ts';
 import { connectionAnchor } from './designConnections.ts';
 import { projectResize, resizeAnchors, resizeLimits, type ResizeAnchor, type ResizeBox } from './resizeGeometry.ts';
 export { resizeAnchorPoint, resizeAnchors, resizeLimits, type ResizeAnchor } from './resizeGeometry.ts';
@@ -28,7 +29,11 @@ export type CanvasCommand =
 	/** Miro-style wrap selection in a new frame sized to fit its members (1 atomic undo step). */
 	| { kind: 'frameSelection'; ids: string[]; id: string; mode: DesignMode; sizes?: Record<string, { width: number; height: number }>; label?: string }
 	/** Resize an existing frame tightly around its members (or visually enclosed elements if empty). */
-	| { kind: 'fitFrame'; id: string; mode: DesignMode; sizes?: Record<string, { width: number; height: number }> };
+	| { kind: 'fitFrame'; id: string; mode: DesignMode; sizes?: Record<string, { width: number; height: number }> }
+	/** Miro-style Switch Type: convert sticky notes, shapes, and text boxes in place while preserving text, geometry, and links. */
+	| { kind: 'convertItem'; ids: string[]; targetKind: 'note' | 'shape' | 'text'; shape?: ShapeId }
+	/** Miro-style flowchart speed shortcut (Ctrl+Arrow): spawn a matching element in a direction and connect with directional ports. */
+	| { kind: 'spawnConnected'; sourceId: string; id: string; connectionId: string; direction: 'right' | 'left' | 'up' | 'down'; mode: DesignMode };
 
 /** Degrees in [0, 360), rounded to 0.1°; 0 is stored as undefined so unrotated drawings stay unchanged. */
 export function normaliseRotation(degrees: number): number | undefined {
@@ -304,6 +309,43 @@ export function applyCanvasCommand(architecture: Architecture, command: CanvasCo
 			const memberSet = new Set(members);
 			const items = architecture.items.map(item => item.id === frame.id ? { ...item, width, height, positions: { visual: pos, technical: pos }, members } : item.kind === 'frame' ? { ...item, members: item.members.filter(id => !memberSet.has(id)) } : item);
 			return { ...architecture, items };
+		}
+		case 'convertItem': {
+			const convertible = new Set(['note', 'shape', 'text']);
+			let changed = false;
+			const items = architecture.items.map(item => {
+				if (!editable.has(item.id) || !convertible.has(item.kind)) { return item; }
+				const nextShape = command.targetKind === 'shape' ? (command.shape ?? item.shape ?? 'rectangle') : undefined;
+				if (item.kind === command.targetKind && item.shape === nextShape) { return item; }
+				changed = true;
+				const next: BoardItem = { ...item, kind: command.targetKind };
+				if (nextShape) { next.shape = nextShape; } else { delete next.shape; }
+				if (command.targetKind === 'note' && (!next.fill || next.fill === 'transparent')) { next.fill = '#fff0b5'; }
+				if (command.targetKind === 'text' && next.fill === '#fff0b5') { next.fill = 'transparent'; }
+				return next;
+			});
+			return changed ? { ...architecture, items } : architecture;
+		}
+		case 'spawnConnected': {
+			if (!command.id || !command.connectionId || byId.has(command.id) || architecture.connections.some(link => link.id === command.connectionId)) { return architecture; }
+			const source = architecture.items.find(item => item.id === command.sourceId && !item.canvasLocked && (item.kind === 'note' || item.kind === 'shape' || item.kind === 'text'));
+			if (!source) { return architecture; }
+			const gap = 72;
+			const origin = source.positions[command.mode];
+			const pos: Position = command.direction === 'right' ? { x: origin.x + source.width + gap, y: origin.y }
+				: command.direction === 'left' ? { x: origin.x - source.width - gap, y: origin.y }
+				: command.direction === 'down' ? { x: origin.x, y: origin.y + source.height + gap }
+				: { x: origin.x, y: origin.y - source.height - gap };
+			const ports: Record<'right' | 'left' | 'up' | 'down', [EndpointPort, EndpointPort]> = {
+				right: ['output', 'input'],
+				left: ['input', 'output'],
+				down: ['bottom', 'top'],
+				up: ['top', 'bottom'],
+			};
+			const [fromPort, toPort] = ports[command.direction];
+			const spawned: BoardItem = { ...source, id: command.id, text: '', positions: { visual: pos, technical: pos }, members: [], canvasLocked: false };
+			const link = { id: command.connectionId, source: elementEndpoint(source.id, fromPort), target: elementEndpoint(command.id, toPort), routing: 'elbow' as const };
+			return { ...architecture, items: [...architecture.items, spawned], connections: [...architecture.connections, link], layerOrder: [...sceneOrder(architecture), command.id] };
 		}
 	}
 }

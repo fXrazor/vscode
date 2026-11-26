@@ -1,5 +1,19 @@
 # CloudForge Code OSS handoff
 
+## Miro Quick Colour Swatches, Switch Element Type, Board Quick Find (`Ctrl+F`) & Flowchart `Ctrl+Arrow` Connected-Copy — 26 November 2026
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `124d787df57`, owner Antigravity. Zero overlap with unmerged Claude branches (`2dm0k0`, `ksv8z9`) or Rust.
+- **Scope:**
+  - **Miro Switch Type (`convertItem`) & Quick Fill Colour Swatches** ([canvasOperations.ts](extensions/cloudforge/studio/src/canvasOperations.ts), [ElementAppearance.tsx](extensions/cloudforge/studio/src/ElementAppearance.tsx), [styles.css](extensions/cloudforge/studio/src/styles.css)):
+    - Added an 8-colour curated pastel swatch strip (`Butter yellow`, `Mint green`, `Sky blue`, `Lavender`, `Peach`, `Coral pink`, `Warm sand`, `White`) inside `ElementAppearance` for one-click sticky note / shape styling (**1 atomic Undo step**).
+    - Added `convertItem` (**Switch type** dropdown: `Sticky note`, `Text box`, and all flowchart shapes) preserving text, geometry, colours, and connected edges in **1 atomic Undo step**.
+  - **Miro Flowchart Speed Shortcut (`Ctrl+Arrow` / `spawnConnected`)** ([canvasOperations.ts](extensions/cloudforge/studio/src/canvasOperations.ts), [DesignCanvas.tsx](extensions/cloudforge/studio/src/DesignCanvas.tsx)):
+    - Pressing `Ctrl+ArrowRight/Left/Up/Down` on any selected unlocked sticky note, shape, or text box spawns a matching element `72px` in that direction connected with directional ports (`output→input`, `bottom→top`, etc.) in **1 atomic Undo/Redo step**.
+  - **Miro Board-Wide Quick Find (`Ctrl+F`)** ([DesignCanvas.tsx](extensions/cloudforge/studio/src/DesignCanvas.tsx), [styles.css](extensions/cloudforge/studio/src/styles.css)):
+    - Dismissible floating search pill (`Ctrl+F`, `Escape` restores canvas focus) searching across all cloud resources, sticky notes, shapes, text, frames, and connection labels with live match counter (`1/N`), `Enter`/`Shift+Enter` or `↑`/`↓` stepping, and smooth `fitView` jump (**0 Undo steps**).
+  - **Tests:** added unit coverage in [model.test.ts](extensions/cloudforge/studio/src/model.test.ts).
+- **Fresh verification (26 November 2026):** Studio `tsc --noEmit` **PASS**, **239/239** Studio unit tests PASS (0 skipped), Studio `build` + `esbuild.webview.mts` + `oxlint` **PASS**, and real Windows Edge (`--channel=msedge`): live `Mint green` swatch + `Switch type` (`Sticky note → Diamond`) + `Ctrl+ArrowRight` connected-copy + 1-step Undo + `Ctrl+F` board quick find **PASS** (0 browser errors).
+
 ## Miro Quick-Jump Frames Navigator, One-Click Bend Reset & Technical Graph Keyboard Traversal / Cycle Jump — 26 November 2026
 
 - **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `8f9deda8e4b`, owner Antigravity. Zero overlap with unmerged Claude branches (`2dm0k0`, `ksv8z9`) or Rust.

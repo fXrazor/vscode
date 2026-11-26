@@ -886,3 +886,38 @@ test('Miro Wrap in Frame and Fit Frame to Contents create/resize frames atomical
 	history = historyReducer(history, { type: 'undo' });
 	assert.equal(history.present.items.find(item => item.id === 'f1')!.width, 432);
 });
+
+test('Miro Switch Type (convertItem) and Quick-Add Connected Copy (spawnConnected) preserve content and undo atomically', () => {
+	const note: BoardItem = { id: 'n1', kind: 'note', text: 'API Gateway', fill: '#fff0b5', width: 180, height: 100, positions: { visual: { x: 100, y: 100 }, technical: { x: 100, y: 100 } }, members: [] };
+	const base: Architecture = { name: 'SwitchAndSpawn', resources: [], items: [note], connections: [] };
+
+	// Convert sticky note -> diamond shape keeping text & geometry in 1 undo step
+	let history = historyReducer(createHistory(base), {
+		type: 'canvas',
+		command: { kind: 'convertItem', ids: ['n1'], targetKind: 'shape', shape: 'diamond' },
+	});
+	const converted = history.present.items[0];
+	assert.equal(converted.kind, 'shape');
+	assert.equal(converted.shape, 'diamond');
+	assert.equal(converted.text, 'API Gateway');
+	assert.equal(history.past.length, 1);
+
+	// Ctrl+ArrowRight -> spawns matching diamond to the right with exact output->input directional link in 1 undo step
+	history = historyReducer(history, {
+		type: 'canvas',
+		command: { kind: 'spawnConnected', sourceId: 'n1', id: 'n2', connectionId: 'link-1', direction: 'right', mode: 'visual' },
+	});
+	assert.equal(history.present.items.length, 2);
+	const spawned = history.present.items.find(item => item.id === 'n2')!;
+	assert.equal(spawned.kind, 'shape');
+	assert.equal(spawned.shape, 'diamond');
+	assert.deepEqual(spawned.positions.visual, { x: 100 + 180 + 72, y: 100 });
+	const link = history.present.connections.find(c => c.id === 'link-1')!;
+	assert.deepEqual(link.source, elementEndpoint('n1', 'output'));
+	assert.deepEqual(link.target, elementEndpoint('n2', 'input'));
+
+	// 1-step Undo removes both spawned shape and its connector together
+	history = historyReducer(history, { type: 'undo' });
+	assert.equal(history.present.items.length, 1);
+	assert.equal(history.present.connections.length, 0);
+});

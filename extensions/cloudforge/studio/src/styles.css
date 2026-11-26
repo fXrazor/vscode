@@ -1084,3 +1084,13 @@ select, summary, label:has(> select), label:has(> input[type=checkbox]), label:h
 .canvas-frames-panel li small { color: var(--muted); font-size: 10.5px; flex: none; }
 .canvas-frames-add { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 28px; padding: 4px 8px; border: 1px dashed var(--border); border-radius: 6px; background: transparent; color: var(--accent); font-size: 11.5px; font-weight: 600; cursor: pointer; }
 .canvas-frames-add:hover { background: var(--selection); border-color: var(--accent); }
+/* Miro quick fill colour swatch strip in ElementAppearance and Ctrl+F board-wide search pill. */
+.appearance-swatches { display: flex; flex-wrap: wrap; gap: 6px; }
+.appearance-swatch { width: 24px; height: 24px; min-height: 0; padding: 0; border-radius: 50%; border: 1px solid color-mix(in srgb, var(--text) 18%, transparent); cursor: pointer; }
+.appearance-swatch[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--panel-solid), 0 0 0 4px var(--accent); }
+.canvas-find-bar { position: absolute; top: 14px; right: 92px; z-index: 22; display: flex; align-items: center; gap: 4px; padding: 4px 6px 4px 10px; border-radius: 10px; background: var(--panel-solid); border: 1px solid var(--accent); box-shadow: 0 10px 28px -10px #0005; color: var(--text); font-size: 12px; }
+.canvas-find-bar input { width: 200px; min-height: 0; height: 26px; padding: 0 4px; border: 0; background: transparent; color: var(--text); font-size: 12px; outline: none; }
+.canvas-find-count { min-width: 28px; text-align: center; font-size: 11px; font-variant-numeric: tabular-nums; color: var(--muted); }
+.canvas-find-bar button { width: 26px; height: 26px; min-height: 0; padding: 0; display: grid; place-items: center; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; }
+.canvas-find-bar button:hover:not(:disabled) { background: var(--hover); color: var(--text); }
+.canvas-find-bar button:disabled { opacity: .35; cursor: default; }

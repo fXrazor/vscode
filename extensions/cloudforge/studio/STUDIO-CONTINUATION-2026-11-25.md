@@ -1,5 +1,11 @@
 # Studio continuation checkpoint — 25 November 2026
 
+## Miro Quick Colour Swatches, Switch Type, Board Quick Find (`Ctrl+F`) & `Ctrl+Arrow` Connected-Copy — 26 November 2026
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `124d787df57`, owner Antigravity.
+- **Scope:** added curated 8-colour fill swatches and `convertItem` (**Switch type** between sticky note, text box, and shapes) (`src/canvasOperations.ts`, `src/ElementAppearance.tsx`, `src/styles.css`), `spawnConnected` (`Ctrl+Arrow` directional flowchart connected-copy in 1 atomic Undo step), and dismissible `Ctrl+F` board-wide quick find across resources/notes/shapes/frames/connections (`src/DesignCanvas.tsx`, `src/styles.css`). Covered in `src/model.test.ts`.
+- **Fresh checks:** Studio `tsc --noEmit` **PASS**, **239/239** Studio tests (0 skipped), Studio `build` + `esbuild.webview.mts` + `oxlint` **PASS**, real Windows Edge live check of swatches, Switch Type, `Ctrl+ArrowRight` connected-copy + Undo, and `Ctrl+F` find **PASS** (0 browser errors).
+
 ## Miro Quick-Jump Frames Navigator, One-Click Bend Reset & Technical Graph Keyboard Traversal / Cycle Jump — 26 November 2026
 
 - **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `8f9deda8e4b`, owner Antigravity.
