@@ -1,5 +1,27 @@
 # CloudForge Code OSS handoff
 
+## Technical Graph UI passes 2–7 (Claude) — merged to main 26 November 2026 — read first
+
+Branch `claude/project-thread-2irlth` merged to `main`. The Configuration view is now a dedicated `TechnicalGraph` with Layers, Scopes, Tree (horizontal tidy tree with folds), Bundled (radial edge bundling) and Network (force graph, icons, size by connections, Spread dial, cluster hulls, Barnes–Hut above 400 nodes) layouts; lenses incl. Exposure; plan/order/impact overlays; ghost inputs; SVG/PNG export; presentation persisted in `viewState.graph` (never `nodePositions`). Cards are editable (rename, form) but never movable. Studio 194/194 tests, technical-view verify 60/60. Detail and the next steps (wire Antigravity's Phase 1–2 contract/workflow/routing modules into the UI and drop the duplicates) are in `extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md`, "Technical Graph pass 7". Run `build/oxlint.ts`, `build/hygiene.ts` and the extension Node tests on Windows before the next installer build; they could not run in the cloud container.
+
+## Technical Graph pass 2 (Claude) — 26 November 2026
+
+Branch `claude/project-thread-2irlth`, pushed, not merged. Pass 2 finished the pass-1 queue:
+- Rewrote the browser verify script (44/44 in Chromium).
+- Removed the dead DesignCanvas technical mode and `technicalLayout.ts`.
+- Graph presentation and pins now persist under `viewState.graph`, never `nodePositions`.
+- Plan overlay flags dependents of a planned replace or destroy.
+- Ghost cards for `var.`/`local.`/`data.` inputs.
+- Exposure lens.
+- SVG/PNG export of the graph.
+- Module-call chips with planned changes folded in.
+- Radial **Bundled** (edge-bundling) view, with no new dependency.
+
+Studio has 175/175 tests passing. Details, files and the remaining queue (drift is blocked on Rust; cost chips; module drill-down) are in `extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md` under "Technical Graph pass 2".
+
+## Technical Graph rebuild pass 1 (Claude) — 26 November 2026
+
+Branch `claude/project-thread-2irlth` (from main `5b66f85c`). Studio now mounts a dedicated `TechnicalGraph` (separate React Flow instance, no project dispatch) in Configuration view. It has a frozen evidence-backed graph snapshot (`technicalGraph.ts`); Layers, Scopes and Ownership-tree layouts; schema-style field rows with stable ports; curved, orthogonal and straight routes; an animated selected trace; a Why panel; graph-only pins; and a narrow edit gate so cards can be renamed and opened for editing but never moved or reparented. 169/169 Studio tests pass. Full detail, gaps and the ordered next actions for Codex are in `extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md` under “Technical Graph rebuild, pass 1”. First next action: update `scripts/technical-view-verify.mjs` for the new DOM.
 ## Studio Technical Graph Rebuild — Phase 2 Background Logic & Routing — 26 November 2026
 
 - **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review` (pushed to `origin/main` atop Phase 1 `e5fc572a702`), owner Antigravity.

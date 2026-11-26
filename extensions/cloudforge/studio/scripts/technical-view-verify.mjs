@@ -2,124 +2,120 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
+/**
+ * Technical Graph browser verification (dedicated TechnicalGraph renderer, 26 November 2026).
+ * Usage: node scripts/technical-view-verify.mjs <owned preview URL> [--channel=msedge] [--quick]
+ * Invariants: graph drag/keys/layout (incl. bundled) and inputs never change the exported project; card rename does, and is
+ * undoable from Architecture view; layouts never overlap cards; no browser errors.
+ */
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 let chromium;
-for (const root of [...(process.env.PLAYWRIGHT_DIR ? [path.join(process.env.PLAYWRIGHT_DIR, 'package.json')] : []), import.meta.url]) {
+for (const root of [...(process.env.PLAYWRIGHT_DIR ? [path.join(process.env.PLAYWRIGHT_DIR, 'package.json')] : []), import.meta.url, path.join(process.cwd(), 'package.json')]) {
 	for (const name of ['playwright', 'playwright-core']) { try { chromium = createRequire(root)(name).chromium; break; } catch { /* Next installed runtime. */ } }
 	if (chromium) { break; }
 }
 assert.ok(chromium, 'Set PLAYWRIGHT_DIR to an installed runtime.');
-const url = process.argv[2]; assert.ok(url, 'Pass an owned preview URL.');
+const base = process.argv[2]; assert.ok(base, 'Pass an owned preview URL.');
 const channel = process.argv.find(arg => arg.startsWith('--channel='))?.slice(10);
 const quick = process.argv.includes('--quick');
 const output = 'output/playwright/technical-view'; mkdirSync(output, { recursive: true });
 const browser = await chromium.launch({ ...(channel ? { channel } : {}), timeout: 30_000 });
 const results = []; const browserErrors = [];
+const withSample = (sample) => base + (base.includes('?') ? '&' : '?') + 'sample=' + sample;
 try {
 	for (const viewport of (quick ? [{ width: 1360, height: 860 }] : [{ width: 1360, height: 860 }, { width: 1024, height: 768 }])) {
 		for (const theme of (quick ? ['light'] : ['light', 'dark'])) {
 			const page = await browser.newPage({ viewport }); page.setDefaultTimeout(15_000);
 			page.on('pageerror', error => browserErrors.push(error.message)); page.on('console', message => { if (message.type() === 'error') { browserErrors.push(message.text()); } });
-			await page.goto(url);
 			const pass = name => { results.push({ name, width: viewport.width, theme }); console.log(`PASS ${name} ${viewport.width} ${theme}`); };
-			const graph = async () => {
+			const exported = async () => {
 				await page.getByLabel('Export architecture', { exact: true }).click();
 				const download = page.waitForEvent('download'); await page.getByRole('button', { name: 'Graph JSON', exact: true }).click();
 				const stream = await (await download).createReadStream(); const chunks = []; for await (const chunk of stream) { chunks.push(chunk); }
 				await page.getByLabel('Export architecture', { exact: true }).click();
 				return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 			};
-			const settle = async () => page.waitForFunction(() => {
-				const signature = [...document.querySelectorAll('.react-flow__node')].map(node => node.dataset.id + ':' + node.style.transform + ':' + node.offsetWidth + ':' + node.offsetHeight).join('|');
-				if (window.__spacingSignature !== signature) { window.__spacingSignature = signature; window.__spacingAt = performance.now(); return false; }
-				return performance.now() - window.__spacingAt > 180;
-			});
-			const view = async () => { if (!(await page.locator('.canvas-options').getAttribute('open'))) { const open = await page.locator('.canvas-options').evaluate(element => element.open); if (!open) { await page.locator('.canvas-options > summary').click(); } } };
-			const closeView = async () => { if (await page.locator('.canvas-options').evaluate(element => element.open)) { await page.locator('.canvas-options > summary').click(); } };
-			const hideInspector = async () => { if (await page.getByLabel('Toggle resource inspector', { exact: true }).getAttribute('aria-expanded') === 'true') { await page.getByLabel('Toggle resource inspector', { exact: true }).click(); } };
+			const view = async (label, value) => {
+				const open = await page.locator('details.tg-view-menu').evaluate(element => element.open);
+				if (!open) { await page.getByLabel('View options', { exact: true }).click(); }
+				await page.getByLabel(label, { exact: true }).selectOption(value);
+				await page.getByLabel('View options', { exact: true }).click(); await page.waitForTimeout(500);
+			};
+			const layoutTo = async id => { await page.getByRole('radio', { name: { layers: 'Layers', scopes: 'Scopes', tree: 'Ownership tree', bundled: 'Bundled', force: 'Network' }[id], exact: true }).click(); await page.waitForTimeout(500); };
+			const noOverlap = async () => {
+				const boxes = await page.locator('.react-flow__node-card').evaluateAll(nodes => nodes.map(node => { const box = node.getBoundingClientRect(); return { id: node.dataset.id, x: box.x, y: box.y, w: box.width, h: box.height }; }));
+				for (const a of boxes) { for (const b of boxes) { if (a.id < b.id) { assert.ok(a.x + a.w <= b.x + 0.5 || b.x + b.w <= a.x + 0.5 || a.y + a.h <= b.y + 0.5 || b.y + b.h <= a.y + 0.5, a.id + ' overlaps ' + b.id); } } }
+				return boxes.length;
+			};
+			await page.goto(withSample('hub-spoke'));
 			if (theme === 'dark') { await page.getByLabel('Toggle light or dark theme').click(); }
-			await page.getByLabel('Close resource library', { exact: true }).click(); await hideInspector();
-			assert.equal(await page.getByLabel('Undo', { exact: true }).isDisabled(), true);
-			await page.locator('.react-flow__node[data-id="subnet"] .resource-container-heading').click();
-			await page.locator('main.canvas').focus(); await page.keyboard.press('Control+d');
-			await page.waitForFunction(() => document.querySelector('.shell-resources')?.textContent?.includes('12') || document.querySelectorAll('.react-flow__node-resource').length >= 12);
-			await page.getByLabel('Fit architecture to view').click(); await hideInspector(); await settle();
-			await page.locator('main.canvas').focus(); await page.keyboard.press('Escape');
-			await page.locator('.react-flow__node[data-id="vm"] .resource-node-heading img').click();
-			await page.locator('main.canvas').focus();
-			for (let index = 0; index < 7; index++) { await page.keyboard.press('Control+d'); }
-			await hideInspector();
-			const original = await graph(); assert.equal(original.resources.length, 19);
-			await page.getByRole('button', { name: 'Configuration', exact: true }).click(); await hideInspector();
-			await view(); assert.equal(await page.getByLabel('Technical layout', { exact: true }).inputValue(), 'spaced'); await page.getByLabel('Alignment guides', { exact: true }).uncheck(); await page.getByLabel('Include diagram annotations', { exact: true }).uncheck(); await closeView();
-			await page.getByLabel('Fit architecture to view').click(); await settle();
-			const boxes = await page.locator('.react-flow__node-resource').evaluateAll(nodes => nodes.map(node => { const box = node.getBoundingClientRect(); return { id: node.dataset.id, x: box.x, y: box.y, width: box.width, height: box.height }; }));
-			assert.equal(boxes.length, 19, 'all projected resources are measured and visible after fit');
-			const ancestorIds = id => { const seen = []; let resource = original.resources.find(resource => resource.id === id); while (resource) { const parent = resource.visualParentId === undefined ? resource.parentId : resource.visualParentId; if (!parent || seen.includes(parent)) { break; } seen.push(parent); resource = original.resources.find(resource => resource.id === parent); } return seen; };
-			for (const first of boxes) {
-				for (const second of boxes.filter(box => box.id !== first.id)) {
-					if (ancestorIds(first.id).includes(second.id) || ancestorIds(second.id).includes(first.id)) { continue; }
-					assert.ok(first.x + first.width <= second.x + 1 || second.x + second.width <= first.x + 1 || first.y + first.height <= second.y + 1 || second.y + second.height <= first.y + 1, first.id + ' overlaps ' + second.id);
-				}
-				const parentId = ancestorIds(first.id)[0]; if (!parentId) { continue; } const parent = boxes.find(box => box.id === parentId);
-				assert.ok(first.x > parent.x && first.y > parent.y && first.x + first.width < parent.x + parent.width && first.y + first.height < parent.y + parent.height, first.id + ' is contained');
-			}
-			await page.locator('main.canvas').focus(); await page.keyboard.press('Escape');
-			await page.waitForFunction(() => [...document.querySelectorAll('.resource-node img, .resource-container img')].every(image => image.complete && image.naturalWidth));
-			await page.screenshot({ path: path.join(output, `spaced-19-${viewport.width}-${theme}.png`) });
-			assert.deepEqual(await graph(), original, 'switching changes no architecture data'); pass('19 nested resources have no card overlaps');
-
-			await view(); await page.getByRole('button', { name: 'Space resources', exact: true }).click(); await closeView(); await settle();
-			await view(); await page.getByLabel('Technical layout', { exact: true }).selectOption('design'); await closeView();
-			await page.getByRole('button', { name: 'Architecture', exact: true }).click(); await page.getByRole('button', { name: 'Configuration', exact: true }).click();
-			await view(); await page.getByLabel('Technical layout', { exact: true }).selectOption('spaced'); await closeView(); await settle();
-			assert.deepEqual(await graph(), original);
-			await page.getByLabel('Undo', { exact: true }).click(); assert.equal((await graph()).resources.length, 18, 'one Undo removes the last copy, not a layout event');
-			await page.getByLabel('Redo', { exact: true }).click(); assert.deepEqual(await graph(), original); pass('layout stays outside semantic history');
-
-			await page.getByLabel('Fit architecture to view').click(); await settle();
-			const vm = page.locator('.react-flow__node[data-id="vm"]'); const before = await graph();
-			const cluster = page.locator('.react-flow__node[data-id="cluster"]');
-			const header = await cluster.locator('.resource-node-heading').boundingBox();
-			await page.mouse.move(header.x + header.width / 2, header.y + header.height / 2); await page.mouse.down(); await page.mouse.move(header.x + header.width / 2 - 240, header.y + header.height / 2 + 160, { steps: 8 }); await page.mouse.up();
-			await cluster.focus();
-			for (const key of ['ArrowRight', 'Shift+ArrowDown', 'Delete', 'Control+d', 'Control+v', 'Control+z']) { await page.keyboard.press(key); }
-			assert.equal(await page.locator('.resource-node.technical input, .resource-container.technical input').count(), 0, 'graph cards do not expose editors');
-			assert.equal(await page.locator('.react-flow__resize-control').count(), 0, 'graph has no design resize handles');
-			assert.equal(await page.getByLabel('Connect elements', {exact:true}).count(), 0);
-			await cluster.click({ button: 'right' });
-			assert.equal(await page.getByRole('menuitem', { name: /Duplicate|Delete|Paste|Group selection/ }).count(), 0);
+			await page.getByLabel('Toggle resource library', { exact: true }).click();
+			const original = await exported();
+			await page.getByRole('button', { name: 'Configuration', exact: true }).click();
+			await page.locator('main.technical-graph').waitFor();
+			assert.equal(await page.locator('.react-flow__node-card').count(), original.resources.length); pass('every resource is a graph card');
+			await view('Card detail', 'detailed');
+			for (const layout of ['layers', 'scopes', 'tree']) { await layoutTo(layout); assert.ok(await noOverlap() > 0); }
+			await layoutTo('bundled');
+			assert.equal(await page.locator('.tg-bundle-leaf').count(), original.resources.length);
+			await page.getByRole('button', { name: 'snet-aks-nodes', exact: true }).click();
+			assert.ok(await page.locator('.tg-bundle-path.is-uses, .tg-bundle-path.is-used-by').count() > 0); pass('bundled view shows every resource and highlights its relationships');
 			await page.keyboard.press('Escape');
-			assert.deepEqual(await graph(), before, 'AKS drag and authoring shortcuts leave the entire architecture unchanged');
-			await page.getByRole('button', { name: 'Architecture', exact: true }).click(); assert.deepEqual(await graph(), before);
-			pass('AKS graph drag and mutation gestures cannot change the project');
-
-			await page.getByRole('button', { name: 'Configuration', exact: true }).click(); await page.getByLabel('Fit architecture to view').click(); await settle();
-			await vm.getByLabel('Inspect relationships for vm-application', { exact: true }).click();
-			const workspace = page.locator('dialog.resource-workspace');
-			const picker = workspace.getByLabel('Choose resource reference for network_interface_ids', { exact: true }); await picker.click();
-			await page.getByRole('button', { name: /^Reference azurerm_network_interface\.nic-application\.id$/, exact: true }).click(); await page.getByRole('button', { name: 'Done (1 selected)', exact: true }).click();
-			const context = workspace.getByRole('button', { name: 'Context', exact: true }); if (await context.isVisible()) { await context.click(); }
-			await workspace.getByRole('tab', { name: 'Connections', exact: true }).click();
-			assert.ok((await workspace.locator('.relationship-context').innerText()).includes('Attachment'));
-			await workspace.locator('.relationship-evidence summary').filter({ hasText: 'network_interface_ids' }).click();
-			assert.ok((await workspace.locator('.relationship-context').innerText()).includes('Attach NICs to a VM'));
-			await workspace.getByText('Provider investigation guide', { exact: true }).click();
-			assert.ok((await workspace.locator('.provider-investigation').innerText()).includes('Guest collection'));
-			await page.screenshot({ path: path.join(output, `relationship-context-${viewport.width}-${theme}.png`) });
-			await workspace.getByLabel('Close resource details', { exact: true }).click(); pass('field-evidenced attachment and provider context');
-			await page.emulateMedia({ reducedMotion: 'reduce' });
-			assert.ok(await page.locator('.infrastructure-dependency path').evaluateAll(paths => paths.every(path => getComputedStyle(path).animationName === 'none')));
-			assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
-			assert.ok(await page.locator('.studio').evaluate((element, theme) => element.classList.contains('theme-' + theme), theme));
-			pass('reduced motion, theme and viewport boundaries');
+			await layoutTo('force');
+			assert.equal(await page.locator('.tg-force-node').count(), original.resources.length);
+			{ const node = await page.locator('[data-node="aks"]').boundingBox(); await page.mouse.move(node.x + node.width / 2, node.y + node.height / 2); await page.mouse.down(); await page.mouse.move(node.x + 160, node.y + 90, { steps: 8 }); await page.mouse.up(); await page.waitForTimeout(400); }
+			assert.deepEqual(await exported(), original); pass('network view shows every resource as an icon and dragging there never changes the project');
+			await view('Size by connections', '0');
+			assert.equal(new Set(await page.locator('.tg-force-node').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-r')))).size, 1);
+			await view('Size by connections', '200');
+			{ const radii = (await page.locator('.tg-force-node').evaluateAll(nodes => nodes.map(node => Number(node.getAttribute('data-r'))))); assert.ok(Math.max(...radii) >= Math.min(...radii) * 1.5, 'hub is much bigger'); }
+			assert.ok(await page.locator('.tg-force-hull').count() > 0);
+			{ const span = async () => page.locator('.tg-force-node').evaluateAll(nodes => { const at = nodes.map(node => node.getAttribute('transform').match(/-?[\d.]+/g).map(Number)); const xs = at.map(p => p[0]); const ys = at.map(p => p[1]); return (Math.max(...xs) - Math.min(...xs)) + (Math.max(...ys) - Math.min(...ys)); });
+				const before = await span(); const dial = page.getByLabel('Network spread', { exact: true }); await dial.fill('300'); await dial.blur(); await page.waitForTimeout(600);
+				assert.ok(await span() > before * 1.4, 'spread dial spreads the graph'); await dial.fill('150'); await dial.blur(); await page.waitForTimeout(400); }
+			assert.deepEqual(await exported(), original); pass('the spread dial spreads the network without project changes');
+			await view('Clusters', 'layer'); await view('Link shape', 'straight'); await view('Labels', 'all');
+			assert.equal(await page.locator('.tg-force-label').count(), original.resources.length);
+			assert.deepEqual(await exported(), original); pass('network options size nodes by connections, cluster and relabel without project changes');
+			await layoutTo('tree');
+			await page.getByRole('button', { name: 'Collapse vnet-spoke-aks', exact: true }).click(); await page.waitForTimeout(300);
+			assert.ok(await page.getByRole('button', { name: 'Expand vnet-spoke-aks', exact: true }).isVisible()); await page.getByRole('button', { name: 'Expand vnet-spoke-aks', exact: true }).click();
+			assert.deepEqual(await exported(), original); pass('tree branches fold and unfold without project changes');
+			await layoutTo('layers'); pass('layers, scopes and tree layouts have no overlapping cards');
+			assert.ok(await page.locator('.react-flow__node-card[data-id="aks"] .tg-row').count() >= 3); pass('AKS shows its configured input rows');
+			// Drag AKS far away: a graph pin appears and the project is unchanged.
+			const card = page.locator('.react-flow__node-card[data-id="aks"]'); const box = await card.boundingBox();
+			await page.mouse.move(box.x + box.width / 2, box.y + 20); await page.mouse.down(); await page.mouse.move(box.x - 300, box.y + 200, { steps: 12 }); await page.mouse.up();
+			await page.waitForTimeout(300);
+			assert.ok(await page.getByRole('button', { name: /Reset 1 pin/ }).isVisible()); pass('dragging creates a graph-only pin');
+			await card.click(); await page.locator('main.technical-graph').focus();
+			for (const key of ['Delete', 'Backspace', 'Control+z', 'Control+d', 'Control+x', 'Control+v']) { await page.keyboard.press(key); }
+			assert.deepEqual(await exported(), original); pass('drag, pins and graph shortcuts leave the exported project unchanged');
+			assert.equal(await page.getByLabel('Undo', { exact: true }).isDisabled(), true); pass('graph actions add no Undo step');
+			// Lenses, overlays, focus.
+			for (const lens of ['Dependencies', 'Topology', 'Runtime', 'Observability', 'Exposure', 'All']) { await page.getByRole('radio', { name: lens }).click(); }
+			for (const overlay of ['order', 'impact', 'plan', 'none']) { await page.getByLabel('Card overlay').selectOption(overlay); }
+			await card.click(); await page.getByRole('button', { name: 'Focus 2 hops' }).click(); await page.waitForTimeout(400);
+			assert.ok(await page.locator('.react-flow__node-card').count() < original.resources.length); await page.getByRole('button', { name: 'Show all' }).click(); pass('lenses, overlays and focus switch without project changes');
+			assert.deepEqual(await exported(), original);
+			assert.equal(await page.locator('.react-flow__node-ghost').count(), 4); pass('var., local. and data. inputs appear as ghost cards');
+			// Rename through the card: this is a deliberate configuration edit and is undoable.
+			await page.getByRole('button', { name: 'Rename aks-platform' }).first().click();
+			await page.getByRole('textbox', { name: 'Rename aks-platform' }).fill('aks-renamed'); await page.keyboard.press('Enter');
+			const renamed = await exported(); assert.equal(renamed.resources.find(resource => resource.id === 'aks').label, 'aks-renamed');
+			assert.deepEqual(renamed.resources.find(resource => resource.id === 'aks').positions, original.resources.find(resource => resource.id === 'aks').positions);
+			await page.getByRole('button', { name: 'Architecture', exact: true }).click(); await page.getByLabel('Undo', { exact: true }).click();
+			assert.deepEqual(await exported(), original); pass('card rename edits the project and is undoable from Architecture view');
+			await page.getByRole('button', { name: 'Configuration', exact: true }).click(); await page.waitForTimeout(400);
+			assert.ok(await page.getByRole('button', { name: /Reset 1 pin/ }).isVisible()); pass('graph pins survive a mode switch');
+			await page.screenshot({ path: `${output}/graph-${viewport.width}-${theme}.png` });
 			await page.close();
 		}
 	}
-	assert.deepEqual(browserErrors, []);
-	writeFileSync(path.join(output, 'report.json'), JSON.stringify({ checks: results.length, results, browserErrors }, null, 2));
-	console.log(JSON.stringify({ checks: results.length, browserErrors }));
 } finally { await browser.close(); }
+writeFileSync(`${output}/report.json`, JSON.stringify({ results, browserErrors }, null, 2));
+assert.deepEqual(browserErrors, []);
+console.log(`${results.length}/${results.length} technical graph checks passed with no browser errors.`);
