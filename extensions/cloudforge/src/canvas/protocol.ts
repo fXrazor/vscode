@@ -188,6 +188,7 @@ export interface CanvasCloudRegionsPayload {
 
 export interface CanvasProviderDependency {
 	readonly display: string;
+	readonly address?: string;
 	readonly status: 'locked' | 'unlocked' | 'lockOutsideConstraints' | 'noMatchingRelease' | 'conflict';
 	readonly lockedVersion?: string;
 	readonly conflictCount: number;
@@ -199,6 +200,7 @@ export interface CanvasDependencyReport {
 	readonly engine: 'opentofu' | 'terraform';
 	readonly engineInferred: boolean;
 	readonly lockState: 'absent' | 'valid' | 'invalid' | 'unreadable';
+	readonly lockEntries?: readonly { readonly address: string; readonly version: string }[];
 	readonly providers: readonly CanvasProviderDependency[];
 	readonly unusedLockEntries: readonly string[];
 	readonly diagnosticCount: number;

@@ -11,6 +11,8 @@ import { bindingKey, acceptsResourceRefs, acceptsVariable, canBindField, fieldDe
 import { fitResourceContainers, isResourceContainer, reparentResource, resourcePlacement, visualResourcePlacement, terraformIdentifier } from './resourceHierarchy.ts';
 import type { ShapeId } from './shapes.ts';
 import { rebaseHistory } from './historyRebase.ts';
+import type { TerraformExtraBody } from './additionalTerraform.ts';
+import { pruneTerraformExtras } from './additionalTerraform.ts';
 export type DesignMode = 'visual' | 'technical';
 export type ResourceKind = 'network' | 'subnet' | 'gateway' | 'cluster' | 'storage' | 'monitor' | 'group' | 'compute' | 'database' | 'module' | 'generic';
 export type Provider = 'azure' | 'aws' | 'gcp';
@@ -49,6 +51,8 @@ export interface Resource {
 	region: string;
 	settings: Record<string, string>;
 	blocks: ResourceBlock[];
+	/** Sparse expressions/dynamic blocks which cannot be represented by ordinary form fields. */
+	terraformExtras?: TerraformExtraBody;
 	positions: Record<DesignMode, Position>;
 }
 
@@ -303,7 +307,7 @@ function editArchitecture(architecture: Architecture, action: Edit): Architectur
 			if (!architecture.resources.some(resource => resource.id === action.id && Object.entries(action.patch).some(([key, value]) => resource[key as keyof Resource] !== value))) { return architecture; }
 			return {
 				...architecture,
-				resources: architecture.resources.map(resource => resource.id === action.id ? { ...resource, ...(action.patch.name!==undefined?{terraformName:terraformIdentifier(resource)}:{}), ...action.patch, ...(action.patch.blocks ? {fieldBindings:pruneBlockBindings(resource,action.patch.blocks),resourceRefs:pruneBlockResourceRefs(resource,action.patch.blocks)} : {}) } : resource)
+				resources: architecture.resources.map(resource => resource.id === action.id ? { ...resource, ...(action.patch.name!==undefined?{terraformName:terraformIdentifier(resource)}:{}), ...action.patch, ...(action.patch.blocks ? {fieldBindings:pruneBlockBindings(resource,action.patch.blocks),resourceRefs:pruneBlockResourceRefs(resource,action.patch.blocks),terraformExtras:pruneTerraformExtras(resource,action.patch.blocks)} : {}) } : resource)
 			};
 		case 'move': return applyCanvasCommand(architecture,{kind:'move',mode:action.mode,positions:{[action.id]:action.position}});
 		case 'insert':

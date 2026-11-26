@@ -16,6 +16,12 @@ import { resourceDefinition } from './fixture.ts';
 import { infrastructureLayers, resourceIntelligence, type InfrastructureLayer, type RelationshipCategory } from './providerKnowledge.ts';
 import { documentedHubSpokes, infrastructureRelationships, type InfrastructureRelationship } from './infrastructureRelationships.ts';
 import { resourceAddress, resourceAncestors, terraformIdentifier } from './resourceHierarchy.ts';
+import {
+	detectTechnicalGraphPatterns,
+	summarizeGraphBoundaries,
+	type DetectedTopologyPattern,
+	type GraphBoundarySummary
+} from './technicalGraphPatterns.ts';
 
 export type GraphCategory = RelationshipCategory | 'unclassified';
 /** Focused lenses. One universal arrow direction would misrepresent these meanings. */
@@ -116,6 +122,8 @@ export interface TechnicalGraphSnapshot {
 	readonly nodes: readonly GraphNode[];
 	readonly edges: readonly GraphEdge[];
 	readonly hubSpokes: readonly { readonly hub: string; readonly spokes: readonly string[] }[];
+	readonly patterns: readonly DetectedTopologyPattern[];
+	readonly boundaries: GraphBoundarySummary;
 	readonly cycles: readonly (readonly string[])[];
 	readonly coverage: { readonly documented: number; readonly unreviewed: number; readonly unknownRegion: number };
 }
@@ -196,9 +204,11 @@ export function projectTechnicalGraph(architecture: Architecture): TechnicalGrap
 	const exposure = configuredExposure(architecture, nodes, edges);
 	for (const node of nodes) { if (exposure[node.id]) { (node as { exposure?: GraphNode['exposure'] }).exposure = exposure[node.id]; } }
 	const hubSpokes = documentedHubSpokes(architecture, relationships).map(star => ({ hub: star.hub, spokes: [...star.spokes] }));
+	const patterns = detectTechnicalGraphPatterns(nodes, edges, hubSpokes);
+	const boundaries = summarizeGraphBoundaries(nodes);
 	const revision = hash(JSON.stringify([nodes.map(node => [node.id, node.label, node.type, node.scope, node.region.value]), edges.map(edge => [edge.id, edge.evidence.length])]));
 	return deepFreeze({
-		revision, nodes, edges, hubSpokes, cycles, inputs: graphInputs(architecture),
+		revision, nodes, edges, hubSpokes, patterns, boundaries, cycles, inputs: graphInputs(architecture),
 		coverage: { documented: nodes.filter(node => node.reviewStatus === 'documented').length, unreviewed: nodes.filter(node => node.reviewStatus === 'unreviewed').length, unknownRegion: nodes.filter(node => !node.region.known).length },
 	});
 }
@@ -302,7 +312,7 @@ export function applyWaves(snapshot: TechnicalGraphSnapshot): Record<string, num
 	for (const edge of snapshot.edges) { if (edge.ordering && incoming.has(edge.target) && incoming.has(edge.source) && edge.source !== edge.target) { incoming.get(edge.target)!.push(edge.source); } }
 	const wave: Record<string, number | undefined> = {};
 	const visit = (id: string, stack: Set<string>): number | undefined => {
-		if (id in wave) { return wave[id]; }
+		if (Object.hasOwn(wave, id)) { return wave[id]; }
 		if (cyclic.has(id) || stack.has(id)) { wave[id] = undefined; return undefined; }
 		stack.add(id); let level = 0;
 		for (const source of incoming.get(id)!) { const value = visit(source, stack); if (value === undefined) { stack.delete(id); wave[id] = undefined; return undefined; } level = Math.max(level, value + 1); }

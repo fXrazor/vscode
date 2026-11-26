@@ -18,12 +18,15 @@ import { focusResourceField } from './IssuesPanel.tsx';
 import { PaneResizeHandle } from './PaneResizeHandle.tsx';
 import type { LiveSchemaMap } from './liveSchema.ts';
 import type { HostCloudRegionsPayload } from './webviewBridge.ts';
+import type { RevealCode } from './CodeEditor.tsx';
+import type { ResourceDraft, SchemaPreview } from './resourceDraft.ts';
 
 /** One resource, one form and one architecture; code and context are computed projections. */
-export function ResourceWorkspace({ resource, architecture, dispatch, open, onClose, onNavigate, liveSchemas, cloudRegions, moduleInspection, hostDiagnostics, hasSource, onOpenSource, onSaveFile }: {
+export function ResourceWorkspace({ resource, architecture, dispatch, open, onClose, onNavigate, liveSchemas, cloudRegions, moduleInspection, hostDiagnostics, hasSource, onOpenSource, onSaveFile, schemaPreview, onRequestSchemaPreview }: {
 	resource: Resource; architecture: Architecture; dispatch: Dispatch<Action>; open: boolean;
 	onClose: () => void; onNavigate: (id: string) => void;
 	liveSchemas?: LiveSchemaMap; cloudRegions?: Readonly<Partial<Record<'azure' | 'aws' | 'google', HostCloudRegionsPayload>>>; moduleInspection?: ResourceModuleInspectionProps; hostDiagnostics?: readonly Diagnostic[]; hasSource?: boolean; onOpenSource?: () => void; onSaveFile?: (fileName: string) => void;
+	schemaPreview?: SchemaPreview | null; onRequestSchemaPreview?: (resourceId: string, draft: ResourceDraft) => void;
 }) {
 	const dialog = useRef<HTMLDialogElement>(null);
 	const backdropPress = useRef(false);
@@ -33,6 +36,8 @@ export function ResourceWorkspace({ resource, architecture, dispatch, open, onCl
 	const [codeOpen, setCodeOpen] = useState(true);
 	const [contextOpen, setContextOpen] = useState(true);
 	const [codeWidth, setCodeWidth] = useState(420);
+	const [reveal, setReveal] = useState<RevealCode>();
+	function configureTerraform(query?: string) { setCodeOpen(true); setMobileTab('code'); setReveal(previous=>({id:(previous?.id??0)+1,query})); }
 	useEffect(() => {
 		const element = dialog.current;
 		if (!open) { element?.close(); return; }
@@ -82,10 +87,10 @@ export function ResourceWorkspace({ resource, architecture, dispatch, open, onCl
 		<p className="sr-only" id="resource-workspace-description">Edit this resource's Terraform and parameters. Close with Escape, the close button, or the background. Closing preserves edits and unapplied code.</p>
 		<div className="workspace-mobile-tabs" role="group" aria-label="Node details view">{['code', 'parameters', 'context'].map(tab => <button key={tab} aria-pressed={mobileTab === tab} onClick={() => { setMobileTab(tab); if (tab === 'code') { setCodeOpen(true); } if (tab === 'context') { setContextOpen(true); } }}>{tab === 'code' ? 'Terraform' : tab === 'parameters' ? 'Parameters' : 'Context'}</button>)}</div>
 		<div className="workspace-columns">
-			<section className="workspace-code" aria-label="Node Terraform pane"><CodePanel resource={resource} architecture={architecture} dispatch={dispatch} compact hidden={!open || !codeOpen} hasSource={hasSource} onOpenSource={onOpenSource} onSaveFile={onSaveFile} /><PaneResizeHandle side="workspace-code" width={codeWidth} minimum={280} onCommit={setCodeWidth} /></section>
+			<section className="workspace-code" aria-label="Node Terraform pane"><CodePanel resource={resource} architecture={architecture} dispatch={dispatch} compact hidden={!open || !codeOpen} hasSource={hasSource} onOpenSource={onOpenSource} onSaveFile={onSaveFile} liveSchema={liveSchemas?.[metadata.type]} schemaPreview={schemaPreview} onRequestSchemaPreview={onRequestSchemaPreview} reveal={reveal}/><PaneResizeHandle side="workspace-code" width={codeWidth} minimum={280} onCommit={setCodeWidth} /></section>
 			<section className="workspace-parameters" aria-label="Node parameters">
 				<div className="workspace-pane-heading"><SlidersHorizontal size={17} /><div><h3>Parameters</h3><p>Changes update this resource and its Terraform draft.</p></div></div>
-				<ResourceFields resource={resource} architecture={architecture} dispatch={dispatch} liveSchemas={liveSchemas} cloudRegions={cloudRegions} moduleInspection={moduleInspection} hasSource={hasSource} onOpenSource={onOpenSource} onRevealResource={onNavigate} onManageVariables={() => { showContext('variables'); requestAnimationFrame(() => variablesTab.current?.focus()); }} />
+				<ResourceFields resource={resource} architecture={architecture} dispatch={dispatch} compactMetadata liveSchemas={liveSchemas} cloudRegions={cloudRegions} moduleInspection={moduleInspection} hasSource={hasSource} onOpenSource={onOpenSource} onRevealResource={onNavigate} onConfigureTerraform={configureTerraform} onManageVariables={() => { showContext('variables'); requestAnimationFrame(() => variablesTab.current?.focus()); }} />
 			</section>
 			<aside className="workspace-context" aria-label="Node context"><Tabs.Root className="workspace-context-root" value={contextTab} onValueChange={setContextTab}>
 				<Tabs.List className="workspace-context-tabs" aria-label="Node context tabs"><Tabs.Trigger value="links">Connections</Tabs.Trigger><Tabs.Trigger value="variables" ref={variablesTab}>Variables</Tabs.Trigger><Tabs.Trigger value="checks">Checks{issues.length ? <span className="workspace-tab-count">{issues.length}</span> : null}</Tabs.Trigger></Tabs.List>

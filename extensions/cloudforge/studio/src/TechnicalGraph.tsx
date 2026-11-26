@@ -25,6 +25,7 @@ import { relationshipNames } from './infrastructureRelationships.ts';
 import { graphIcons, technicalGraphSvg } from './technicalGraphExport.ts';
 import { bundleLayout } from './technicalGraphBundle.ts';
 import { createForceSimulation, forceSettings, hullPath, nodeRadii, orientForce, settleForce, tickForce, type ForceNode, type ForceSimulation, type NetworkOptions } from './technicalGraphForce.ts';
+import { snapshotTroubleshootingFindings } from './technicalGraphPatterns.ts';
 import { resourceIntelligence } from './providerKnowledge.ts';
 
 type CardData = { outside?: boolean; treeToggle?: { collapsed: boolean; count: number }; onToggleTree?: (id: string) => void; node: GraphNode; lens: GraphPresentation['lens']; /* state 'soft' = hover context */ overlay?: NodeOverlay; badge?: { kind: 'plan' | 'order' | 'impact'; text: string; tone: string; title: string }; match: boolean; compact: boolean; expanded: boolean; state: 'normal' | 'focus' | 'trace' | 'dim' | 'soft'; pinned: boolean; tracedPorts: ReadonlySet<string>; onRename: (id: string, label: string) => void; onEdit: (id: string) => void; onToggleRows: (id: string) => void; onUnpin: (id: string) => void };
@@ -455,12 +456,17 @@ function WhyPanel({ snapshot, edge, node, trace, overlay, wave, focused, onFocus
 	if (!node) { return null; }
 	const profile = resourceIntelligence(node.type);
 	const scope = node.scope ? label(node.scope) : undefined;
+	const nodePatterns = snapshot.patterns.filter(pattern => pattern.memberNodeIds.includes(node.id));
+	const nodeFindings = snapshotTroubleshootingFindings(snapshot).filter(finding => finding.nodeIds.includes(node.id) && finding.kind !== 'ordering-cycle');
+	const nodeCycle = snapshot.cycles.find(cycle => cycle.includes(node.id));
+	const directUses = [...new Set(snapshot.edges.filter(item => item.target === node.id && !item.membership).map(item => item.source))];
+	const directUsedBy = [...new Set(snapshot.edges.filter(item => item.source === node.id && !item.membership).map(item => item.target))];
 	return <aside className="tg-why" aria-label={'Relationships of ' + node.label}>
 		<header><div><strong>{node.label}</strong><code>{node.address}</code></div><button className="tg-icon-button" aria-label="Close" onClick={onClose}>×</button></header>
 		<dl>
 			<dt>Role</dt><dd>{layerLabels[node.layer]}{scope ? ' · in ' + scope : ''}</dd>
-			<dt>Uses</dt><dd>{trace?.upstream.size ?? 0} prerequisite{trace?.upstream.size === 1 ? '' : 's'}</dd>
-			<dt>Used by</dt><dd>{trace?.downstream.size ?? 0} configured dependent{trace?.downstream.size === 1 ? '' : 's'}</dd>
+			<dt>Uses</dt><dd>{trace?.upstream.size ?? 0} prerequisite{trace?.upstream.size === 1 ? '' : 's'}{directUses.length > 0 && <span className="tg-why-peers"> ({directUses.slice(0, 4).map(id => <button key={id} className="tg-link" onClick={() => onSelect(id)}>{label(id)}</button>)}{directUses.length > 4 ? `+${directUses.length - 4}` : ''})</span>}</dd>
+			<dt>Used by</dt><dd>{trace?.downstream.size ?? 0} configured dependent{trace?.downstream.size === 1 ? '' : 's'}{directUsedBy.length > 0 && <span className="tg-why-peers"> ({directUsedBy.slice(0, 4).map(id => <button key={id} className="tg-link" onClick={() => onSelect(id)}>{label(id)}</button>)}{directUsedBy.length > 4 ? `+${directUsedBy.length - 4}` : ''})</span>}</dd>
 			<dt>Apply wave</dt><dd>{wave === undefined ? 'cycle — cannot be ordered' : wave + 1}</dd>
 			<dt>Shared category</dt><dd>{node.blastRadiusCategory}</dd>
 			{!!overlay?.affectedBy?.length && <><dt>Affected by</dt><dd>{overlay.affectedBy.map(id => <button key={id} className="tg-link" onClick={() => onSelect(id)}>{snapshot.nodes.find(item => item.id === id)?.label ?? id}</button>)} <span className="tg-muted">(planned replace or destroy upstream)</span></dd></>}
@@ -472,8 +478,25 @@ function WhyPanel({ snapshot, edge, node, trace, overlay, wave, focused, onFocus
 			<button onClick={() => onEdit(node.id)}><Pencil size={13} />Edit</button>
 			{onOpenSource && <button onClick={() => onOpenSource(node.id)}><FileCode2 size={13} />Source</button>}
 		</div>
+		{nodePatterns.length > 0 && <div className="tg-why-patterns" aria-label="Detected topology patterns">
+			{nodePatterns.map(pattern => {
+				const peers = pattern.memberNodeIds.filter(id => id !== node.id);
+				return <div key={pattern.id} className="tg-why-pattern">
+					<div className="tg-why-pattern-head"><strong>{pattern.title}</strong><span className="tg-chip">{pattern.roles[node.id] ?? 'member'}</span></div>
+					<p>{pattern.evidenceSummary}</p>
+					{peers.length > 0 && <p className="tg-why-pattern-peers">{peers.slice(0, 5).map(id => <button key={id} className="tg-link" onClick={() => onSelect(id)}>{label(id)}</button>)}{peers.length > 5 ? <span className="tg-muted">+{peers.length - 5} more</span> : null}</p>}
+					<small className="tg-muted">{pattern.caveat}</small>
+				</div>;
+			})}
+		</div>}
 		{overlay?.messages.length ? <ul className="tg-why-issues">{overlay.messages.slice(0, 5).map((item, index) => <li key={index} className={'tg-issue-' + item.severity}>{item.severity === 'error' ? <AlertCircle size={12} /> : <AlertTriangle size={12} />}<span>{item.message}</span></li>)}{overlay.messages.length > 5 && <li>{overlay.messages.length - 5} more in Issues</li>}</ul> : null}
-		{node.inCycle && <p className="tg-why-warn"><AlertTriangle size={13} />Part of a reference cycle. Break one reference or move a rule into its own resource.</p>}
+		{node.inCycle && <p className="tg-why-warn"><AlertTriangle size={13} /><span>Part of a reference cycle{nodeCycle ? <> ({nodeCycle.map(id => <button key={id} className="tg-link" onClick={() => onSelect(id)}>{label(id)}</button>)})</> : null}. Break one reference or move a rule into its own resource.</span></p>}
+		{nodeFindings.length > 0 && <ul className="tg-why-issues" aria-label="Evidence checks">{nodeFindings.slice(0, 3).map(finding => <li key={finding.id} className={'tg-issue-' + finding.severity}>{finding.severity === 'warning' ? <AlertTriangle size={12} /> : <AlertCircle size={12} />}<span><strong>{finding.title}:</strong> {finding.detail}</span></li>)}</ul>}
+		{(snapshot.boundaries.mixedProviders || snapshot.boundaries.multiRegion || snapshot.boundaries.kubernetesAdapterStatus === 'manifest-adapter-required') && <p className="tg-why-boundaries">
+			{snapshot.boundaries.mixedProviders && <span className="tg-chip">mixed providers: {snapshot.boundaries.providers.join(', ')}</span>}
+			{snapshot.boundaries.multiRegion && <span className="tg-chip">multi-region: {snapshot.boundaries.knownRegions.length}</span>}
+			{snapshot.boundaries.kubernetesAdapterStatus === 'manifest-adapter-required' && <span className="tg-chip tg-chip-unknown">K8s adapter required</span>}
+		</p>}
 		{profile.troubleshooting.slice(0, 2).map(hint => <p key={hint} className="tg-why-hint">{hint}</p>)}
 		<p className="tg-why-boundary">Configured relationships only. Not an outage, replacement or reachability prediction; run a plan for action impact.</p>
 	</aside>;

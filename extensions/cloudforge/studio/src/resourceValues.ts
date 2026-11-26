@@ -13,6 +13,11 @@ import type { Architecture, Resource, ResourceBlock } from './model.ts';
 import { projectTerraform } from './terraformProjection.ts';
 import type { HostGraphSnapshot } from './webviewBridge.ts';
 import { bindingKey, type FieldTarget } from './fieldBindings.ts';
+import { getDef, type AttrDef } from './cloudlab-core/catalog/index.ts';
+import { resourceDefinition } from './fixture.ts';
+import { parseHcl } from './cloudlab-core/hcl.ts';
+import type { TerraformExtraBody } from './additionalTerraform.ts';
+import { hasTerraformExtras, pruneTerraformExtras } from './additionalTerraform.ts';
 import { variableTypes, type VariableDefinition, type VariableValue } from './variables.ts';
 
 export type FileValue =
@@ -322,6 +327,60 @@ export function hydrateResourceValues(architecture: Architecture, snapshot: Host
 					next.settings[field.name] = String(value);
 					touched = true;
 				}
+			}
+		}
+		// Definitions can arrive after source values. Reconcile the actual source paths once known.
+		// Labelled/dynamic bodies are excluded: this protocol does not carry their labels.
+		if (resource.kind !== 'module') {
+			const definitions = getDef(resourceDefinition(resource).type)?.attributes;
+			if (definitions) {
+				const existingBindings = bindings.get(resource.id) ?? [];
+				const transfer = (source: Pick<FileResourceValues, 'attributes' | 'blocks'>, fields: readonly AttrDef[], previous: readonly ResourceBlock[], oldExtras: TerraformExtraBody | undefined, blockId?: string): { values: Record<string, string>; blocks: ResourceBlock[]; extras: TerraformExtraBody } => {
+					const result: { values: Record<string, string>; blocks: ResourceBlock[]; extras: TerraformExtraBody } = { values: {}, blocks: [], extras: structuredClone(oldExtras ?? { attrs: {}, blocks: [] }) };
+					for (const definition of fields.filter(field => field.type !== 'block' && !field.readOnly)) {
+						const field = source.attributes[definition.name];
+						if (!field || field.kind === 'redacted') { continue; }
+						const key = !blockId ? existingBindings.find(binding => binding.path.length === 1 && binding.path[0] === definition.name && binding.target === 'setting')?.key ?? definition.name : definition.name;
+						const target: FieldTarget = blockId ? { kind: 'block', blockId, name: definition.name } : definition.name === 'name' ? { kind: 'name' } : ['location', 'region'].includes(definition.name) ? { kind: 'region' } : { kind: 'setting', name: key };
+						const clearBinding = () => { const id = bindingKey(target); if (next.fieldBindings?.[id]) { next.fieldBindings = { ...next.fieldBindings }; delete next.fieldBindings[id]; } if (next.resourceRefs?.[id]) { next.resourceRefs = { ...next.resourceRefs }; delete next.resourceRefs[id]; } };
+						if (field.kind === 'expression' && typeof field.text === 'string' && field.text.length < 128 * 1024) {
+							const variable = /^var\.([A-Za-z_][A-Za-z0-9_-]*)$/.exec(field.text.trim())?.[1];
+							if (variable && variableIdByName.has(variable)) { clearBinding(); next.fieldBindings = { ...next.fieldBindings, [bindingKey(target)]: { variableId: variableIdByName.get(variable)! } }; delete result.extras.attrs[definition.name]; continue; }
+							try {
+								const parsed = parseHcl('value = ' + field.text);
+								if (!parsed.blocks.length && Object.keys(parsed.attrs).length === 1 && Object.hasOwn(parsed.attrs, 'value')) { clearBinding(); result.extras.attrs[definition.name] = parsed.attrs.value; }
+							} catch { /* Preserve the source file; do not claim an unparsed expression is configured in the model. */ }
+						} else if (field.kind === 'literal') {
+							clearBinding();
+							delete result.extras.attrs[definition.name];
+							const text = textFor(field.value, blockId ? previous.find(block => block.id === blockId)?.values[key] ?? '' : next.settings[key] ?? '');
+							if (text !== undefined) {
+								if (!blockId && definition.name === 'name') { next.name = text; }
+								else if (!blockId && ['location', 'region'].includes(definition.name)) { if (!next.region || regionCode(next.region) !== regionCode(text)) { next.region = text; } }
+								else { result.values[key] = text; }
+							}
+						}
+					}
+					const occurrences = new Map<string, number>();
+					for (const block of source.blocks) {
+						const definition = fields.find(field => field.type === 'block' && field.name === block.name);
+						if (!definition) { continue; }
+						const index = occurrences.get(block.name) ?? 0; occurrences.set(block.name, index + 1);
+						const existing = previous.filter(item => item.type === block.name)[index];
+						const id = existing?.id ?? crypto.randomUUID();
+						const old = result.extras.blocks.find(item => item.resourceBlockId === id)?.body;
+						const converted = transfer(block, definition.children ?? [], existing?.blocks ?? [], old, id);
+						result.blocks.push({ id, type: block.name, values: { ...existing?.values, ...converted.values }, blocks: converted.blocks });
+						result.extras.blocks = result.extras.blocks.filter(item => item.resourceBlockId !== id);
+						if (hasTerraformExtras(converted.extras)) { result.extras.blocks.push({ type: block.name, labels: [], resourceBlockId: id, body: converted.extras }); }
+					}
+					return result;
+				};
+				const transferred = transfer(file, definitions, next.blocks, next.terraformExtras);
+				next.settings = { ...next.settings, ...transferred.values }; next.blocks = transferred.blocks;
+				next.terraformExtras = pruneTerraformExtras({ ...next, terraformExtras: transferred.extras }, next.blocks);
+				if (!hasTerraformExtras(next.terraformExtras)) { delete next.terraformExtras; }
+				touched ||= JSON.stringify(next) !== JSON.stringify(resource);
 			}
 		}
 		if (!touched) {
