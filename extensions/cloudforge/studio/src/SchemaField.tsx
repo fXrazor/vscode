@@ -9,6 +9,7 @@ import { isSensitiveProperty, type VariableDefinition } from './variables.ts';
 import { VariablePicker } from './VariablePicker.tsx';
 import { ResourceReferencePicker } from './ResourceReferencePicker.tsx';
 import { ContextPopover } from './ContextPopover.tsx';
+import { fieldLabel } from './fieldLabel.ts';
 import { resourceAddress, type InheritedReference } from './resourceHierarchy.ts';
 import { resourceDefinition } from './fixture.ts';
 import type { Architecture, Resource } from './model.ts';
@@ -40,13 +41,14 @@ export function SchemaField({ name, value, definition, onChange, onUnset, variab
 				? variableBindingIssue(binding,variables,definition)
 				: fieldIssue(value,definition);
 	const variable = variables.find(item=>item.id===binding?.variableId);
+	const isToggle = definition?.type==='bool' && !definition.options?.length && (!value || value==='true' || value==='false');
 	const fixed = () => { inheritance?.onInherit(false); onBind?.(undefined); resourceReference?.onSelect(undefined); };
 	const props = {id,value,'aria-invalid':!!issue,'aria-required':!!definition?.required,'aria-describedby':id+'-help',onChange:(event:React.ChangeEvent<HTMLInputElement|HTMLSelectElement|HTMLTextAreaElement>)=>onChange(event.target.value)};
 	return <div className="schema-field" data-field-path={path??name}>
 		<div className="schema-field-heading">
 			<div className="field-label-help">
-			<label id={id+'-label'} htmlFor={binding||reference||refBinding?undefined:id}>{name.replaceAll('_',' ')}{definition?.required&&<span className="field-required" aria-hidden="true"> *</span>}</label>
-			{definition?.description && <ContextPopover compact label={'Help for '+name.replaceAll('_',' ')} icon={<CircleHelp size={13}/>} description="Field type and guidance from the current resource definition."><p className="field-help">{definition.description}</p><p className="field-help">{definition.required?'Required':'Optional'} · {definition.type}{definition.refTypes?.length?' · May reference '+definition.refTypes.join(', '):''}</p>{definition.cidr&&<p className="field-help">Use a CIDR range, such as 10.20.1.0/24. A subnet range must fit inside its parent network.</p>}</ContextPopover>}
+			<label id={id+'-label'} htmlFor={binding||reference||refBinding||isToggle?undefined:id} title={name}>{fieldLabel(name)}{definition?.required&&<span className="field-required" aria-hidden="true"> *</span>}</label>
+			{definition?.description && <ContextPopover compact label={'Help for '+fieldLabel(name)} icon={<CircleHelp size={13}/>} description="Field type and guidance from the current resource definition."><p className="field-help">{definition.description}</p><p className="field-help"><code>{name}</code> · {definition.required?'Required':'Optional'} · {definition.type}{definition.refTypes?.length?' · May reference '+definition.refTypes.join(', '):''}</p>{definition.cidr&&<p className="field-help">Use a CIDR range, such as 10.20.1.0/24. A subnet range must fit inside its parent network.</p>}</ContextPopover>}
 			</div>
 			{onBind && !terraform ? <div className="field-value-mode" role="group" aria-label={name+' value mode'}>
 				<button aria-pressed={!binding&&!reference&&!refBinding} onClick={fixed}>Value</button>
@@ -71,6 +73,7 @@ export function SchemaField({ name, value, definition, onChange, onUnset, variab
 			<code>{definition?.type === 'list' ? '[' + refBinding.refs.map(entry => { const target = resourceReference?.architecture?.resources.find(item => item.id === entry.resourceId); return target ? resourceAddress(target) + '.' + entry.attribute : 'null'; }).join(', ') + ']' : (() => { const target = resourceReference?.architecture?.resources.find(item => item.id === refBinding.refs[0].resourceId); return target ? resourceAddress(target) + '.' + refBinding.refs[0].attribute : 'null'; })()}</code>
 			<button className="inheritance-override" onClick={fixed}>Use own value</button>
 		</div> : binding ? <div className="field-variable-value" id={id} role="group" aria-labelledby={id+'-label'} aria-describedby={id+'-help'}><span className="variable-chip"><Variable size={14}/><span>{variable?.name??'Missing variable'}</span><button aria-label={'Use fixed value for '+name} onClick={()=>onBind?.(undefined)}><X size={12}/></button></span><small>{variable?variablePreview(variable,isSensitiveProperty(name,definition?.sensitive)):'Choose a valid input'}</small></div>
+		: isToggle ? <div className="bool-toggle" id={id} role="radiogroup" aria-labelledby={id+'-label'} aria-describedby={id+'-help'}>{([['','Not set'],['true','On'],['false','Off']] as const).map(([option,text])=><button key={text} type="button" role="radio" aria-checked={value===option} title={option?name+' = '+option:'Leave '+name+' unset (provider default)'} onClick={()=>onChange(option)}>{text}</button>)}</div>
 		: definition?.type==='bool'||definition?.options?.length ? <select {...props}><option value="">Not set</option>{(definition.options??['true','false']).map(option=><option key={option}>{option}</option>)}{value&&!(definition.options??['true','false']).includes(value)&&<option>{value}</option>}</select>
 		: definition?.literalShape && ['object','list','set','map','tuple'].includes(definition.literalShape.kind) ? <LiteralFields value={value} shape={definition.literalShape} name={name} id={id} labelId={id+'-label'} onChange={onChange} onUnset={onUnset}/>
 		: definition?.type==='list'||definition?.type==='map'||definition?.type==='json' ? <textarea {...props} rows={2} spellCheck={false}/>

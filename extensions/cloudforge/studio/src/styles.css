@@ -959,3 +959,8 @@ dialog::backdrop { background: #12152488; backdrop-filter: blur(3px); }
 @media (prefers-reduced-motion: reduce) { .infrastructure-dependency .react-flow__edge-path { animation: none !important; } }
 .shape-workflow-template { width: 100%; margin-top: 24px; padding: 10px; border: 1px solid var(--accent); color: var(--accent); background: var(--selection); font-size: 12px; }
 .studio-action-status { position: fixed; bottom: 78px; left: 50%; transform: translateX(-50%); z-index: 30; max-width: calc(100vw - 50px); padding: 8px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 2px 10px #24283d10; color: var(--muted); font-size: 11px; pointer-events: none; }
+.bool-toggle { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; padding: 2px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; }
+.bool-toggle button { min-height: 28px; border: 0; border-radius: 4px; padding: 4px 8px; font: inherit; font-size: 12px; color: var(--muted); background: transparent; cursor: pointer; }
+.bool-toggle button:hover { color: var(--text); }
+.bool-toggle button[aria-checked=true] { color: var(--accent-ink); background: var(--selection); font-weight: 600; box-shadow: 0 1px 2px #0000001a; }
+.bool-toggle button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
