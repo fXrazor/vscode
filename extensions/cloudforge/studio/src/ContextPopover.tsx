@@ -14,9 +14,9 @@ export function ContextPopover({ label, children, icon, container = null, compac
 		if (next && trigger.current) { const rect = trigger.current.getBoundingClientRect(); const maxHeight = Math.min(420,innerHeight-32); setPosition({left:Math.max(12,Math.min(rect.left,innerWidth-332)),top:rect.bottom+maxHeight+8<=innerHeight?rect.bottom+8:Math.max(12,rect.top-maxHeight-8),maxHeight}); }
 		setOpen(next);
 	}
-	return <Dialog.Root modal={false} open={open} onOpenChange={change}><Dialog.Trigger className={compact?'field-help-trigger':undefined} aria-label={compact?label:undefined} ref={trigger}>{icon}{compact?<span className="sr-only">{label}</span>:label}</Dialog.Trigger><Dialog.Portal container={trigger.current?.closest<HTMLElement>('dialog')??container??trigger.current?.closest<HTMLElement>('.studio')}>
+	return <Dialog.Root modal={false} open={open} onOpenChange={change}><Dialog.Trigger type="button" className={compact?'field-help-trigger':undefined} aria-label={compact?label:undefined} ref={trigger}>{icon}{compact?<span className="sr-only">{label}</span>:label}</Dialog.Trigger><Dialog.Portal container={trigger.current?.closest<HTMLElement>('dialog')??container??trigger.current?.closest<HTMLElement>('.studio')}>
 		<Dialog.Content className="context-popover" style={position} onKeyDown={event=>event.stopPropagation()}>
-			<header><Dialog.Title>{label}</Dialog.Title><Dialog.Close aria-label={'Close '+label.toLowerCase()}><X size={15}/></Dialog.Close></header><Dialog.Description className="sr-only">{description}</Dialog.Description>{children}
+			<header><Dialog.Title>{label}</Dialog.Title><Dialog.Close type="button" aria-label={'Close '+label.toLowerCase()}><X size={15}/></Dialog.Close></header><Dialog.Description className="sr-only">{description}</Dialog.Description>{children}
 		</Dialog.Content>
 	</Dialog.Portal></Dialog.Root>;
 }

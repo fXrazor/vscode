@@ -216,7 +216,7 @@ export class CloudForgeCanvasPanel implements Disposable {
 					this.post({ type: 'catalogueTypes', types });
 				}
 			}
-		});
+		}).catch(() => { });
 	}
 
 	updateIfOpen(graph: CanvasGraphSnapshot | undefined): void {
@@ -369,6 +369,14 @@ export class CloudForgeCanvasPanel implements Disposable {
 		return panel;
 	}
 
+	private isSameGraph(graph: CanvasGraphSnapshot): boolean {
+		return this.panel !== undefined
+			&& this.ready
+			&& this.graph?.workspaceId === graph.workspaceId
+			&& this.graph?.architectureId === graph.architectureId
+			&& this.graph?.sourceRevision === graph.sourceRevision;
+	}
+
 	private async handleMessage(raw: unknown): Promise<void> {
 		const message = parseWebviewMessage(raw);
 		if (!message) {
@@ -389,7 +397,7 @@ export class CloudForgeCanvasPanel implements Disposable {
 						if (this.ready && snapshots.length > 0) {
 							this.post({ type: 'catalogueSnapshots', snapshots });
 						}
-					});
+					}).catch(() => { });
 				}
 				if (this.host.onLoadCatalogueTypes) {
 					void this.host.onLoadCatalogueTypes().then(list => {
@@ -398,7 +406,7 @@ export class CloudForgeCanvasPanel implements Disposable {
 								this.post({ type: 'catalogueTypes', types });
 							}
 						}
-					});
+					}).catch(() => { });
 				}
 				if (this.host.onLoadCloudRegions) {
 					for (const provider of ['azure', 'aws', 'google'] as const) {
@@ -406,7 +414,7 @@ export class CloudForgeCanvasPanel implements Disposable {
 							if (this.ready && data && data.regions.length > 0) {
 								this.post({ type: 'cloudRegions', data });
 							}
-						});
+						}).catch(() => { });
 					}
 				}
 				if (this.host.onDetectEngines) {
@@ -414,7 +422,7 @@ export class CloudForgeCanvasPanel implements Disposable {
 						if (this.ready) {
 							this.post({ type: 'detectedEngines', engines });
 						}
-					});
+					}).catch(() => { });
 				}
 				if (this.pendingValidation) {
 					const pending = this.pendingValidation;
@@ -462,10 +470,13 @@ export class CloudForgeCanvasPanel implements Disposable {
 					return;
 				}
 				const outcome = await this.host.onRequestValidation(graph, message.scope, message.nodeId, run => {
-					if (this.panel && this.ready) {
+					if (this.isSameGraph(graph)) {
 						this.post({ type: 'validationRunUpdate', run });
 					}
 				});
+				if (!this.isSameGraph(graph)) {
+					return;
+				}
 				if (outcome.errorCode === 'STALE_SOURCE') {
 					this.setNotice({
 						kind: 'stale',
@@ -503,6 +514,9 @@ export class CloudForgeCanvasPanel implements Disposable {
 					message.renames,
 					message.baseContents
 				);
+				if (!this.isSameGraph(graph)) {
+					return;
+				}
 				if (!result.ok && result.error.code === 'STALE_SOURCE') {
 					this.setNotice({
 						kind: 'stale',
@@ -529,6 +543,9 @@ export class CloudForgeCanvasPanel implements Disposable {
 					message.contents,
 					message.previewToken
 				);
+				if (!this.isSameGraph(graph)) {
+					return;
+				}
 				if (!result.ok && result.error.code === 'STALE_SOURCE') {
 					this.setNotice({
 						kind: 'stale',
@@ -548,6 +565,9 @@ export class CloudForgeCanvasPanel implements Disposable {
 					return;
 				}
 				const result = await this.host.onPreviewSaveAll(graph.workspaceId, graph.architectureId, graph.sourceRevision, message.files);
+				if (!this.isSameGraph(graph)) {
+					return;
+				}
 				if (!result.ok && result.error.code === 'STALE_SOURCE') {
 					this.setNotice({
 						kind: 'stale',
@@ -567,6 +587,9 @@ export class CloudForgeCanvasPanel implements Disposable {
 					return;
 				}
 				const result = await this.host.onApplySaveAll(graph.workspaceId, graph.architectureId, graph.sourceRevision, message.previewToken);
+				if (!this.isSameGraph(graph)) {
+					return;
+				}
 				if (!result.ok && result.error.code === 'STALE_SOURCE') {
 					this.setNotice({
 						kind: 'stale',
@@ -599,7 +622,7 @@ export class CloudForgeCanvasPanel implements Disposable {
 					return;
 				}
 				const outcome = await this.host.onReadModule(graph.workspaceId, graph.architectureId, graph.sourceRevision, message.modulePath);
-				if (this.panel && this.ready) {
+				if (this.isSameGraph(graph)) {
 					if (outcome.ok) {
 						this.post({ type: 'moduleInspection', modulePath: message.modulePath, inspection: outcome.inspection });
 					} else {
@@ -621,7 +644,7 @@ export class CloudForgeCanvasPanel implements Disposable {
 					graph.architectureId,
 					graph.sourceRevision
 				);
-				if (this.panel && this.ready) {
+				if (this.isSameGraph(graph)) {
 					if (outcome.ok) {
 						this.post({ type: 'schemaDiffReport', report: outcome.report });
 					} else {
@@ -642,7 +665,7 @@ export class CloudForgeCanvasPanel implements Disposable {
 					graph.sourceRevision,
 					message.engine
 				);
-				if (this.panel && this.ready) {
+				if (this.isSameGraph(graph)) {
 					if (outcome.ok) {
 						this.post({ type: 'engineValidateReport', report: outcome.report });
 					} else {
@@ -663,7 +686,7 @@ export class CloudForgeCanvasPanel implements Disposable {
 					graph.sourceRevision,
 					message.engine
 				);
-				if (this.panel && this.ready) {
+				if (this.isSameGraph(graph)) {
 					if (outcome.ok) {
 						this.post({ type: 'enginePlanReport', report: outcome.report });
 					} else {
@@ -684,7 +707,7 @@ export class CloudForgeCanvasPanel implements Disposable {
 					graph.sourceRevision,
 					message.engine
 				);
-				if (this.panel && this.ready) {
+				if (this.isSameGraph(graph)) {
 					if (outcome.ok) {
 						this.post({ type: 'engineInitOfflineReport', report: outcome.report });
 					} else {
@@ -799,34 +822,34 @@ export class CloudForgeCanvasPanel implements Disposable {
 		if (this.host.onReadResourceValues) {
 			const snapshot = this.graph;
 			void this.host.onReadResourceValues(snapshot.workspaceId, snapshot.architectureId, snapshot.sourceRevision).then(values => {
-				if (values !== undefined && this.ready && this.graph?.architectureId === snapshot.architectureId && this.graph?.sourceRevision === snapshot.sourceRevision) {
+				if (values !== undefined && this.isSameGraph(snapshot)) {
 					this.post({ type: 'resourceValues', sourceRevision: snapshot.sourceRevision, values });
 				}
-			});
+			}).catch(() => { });
 		}
 		if (this.host.onInspectDependencies) {
 			const snapshot = this.graph;
 			void this.host.onInspectDependencies(snapshot.workspaceId, snapshot.architectureId, snapshot.sourceRevision).then(report => {
-				if (this.ready && this.graph?.workspaceId === snapshot.workspaceId && this.graph?.architectureId === snapshot.architectureId && this.graph?.sourceRevision === snapshot.sourceRevision) {
+				if (this.isSameGraph(snapshot)) {
 					this.post({ type: 'dependencyReport', report: report ?? null });
 				}
-			});
+			}).catch(() => { });
 		}
 		if (this.host.onAuditExportReadiness) {
 			const snapshot = this.graph;
 			void this.host.onAuditExportReadiness(snapshot.workspaceId, snapshot.architectureId, snapshot.sourceRevision).then(report => {
-				if (this.ready && this.graph?.workspaceId === snapshot.workspaceId && this.graph?.architectureId === snapshot.architectureId && this.graph?.sourceRevision === snapshot.sourceRevision) {
+				if (this.isSameGraph(snapshot)) {
 					this.post({ type: 'exportAuditReport', report: report ?? null });
 				}
-			});
+			}).catch(() => { });
 		}
 		if (this.host.onCheckOfflineMirrorReadiness) {
 			const snapshot = this.graph;
 			void this.host.onCheckOfflineMirrorReadiness(snapshot.workspaceId, snapshot.architectureId, snapshot.sourceRevision).then(report => {
-				if (this.ready && this.graph?.workspaceId === snapshot.workspaceId && this.graph?.architectureId === snapshot.architectureId && this.graph?.sourceRevision === snapshot.sourceRevision) {
+				if (this.isSameGraph(snapshot)) {
 					this.post({ type: 'offlineMirrorReadiness', report: report ?? null });
 				}
-			});
+			}).catch(() => { });
 		}
 	}
 
@@ -869,8 +892,10 @@ export class CloudForgeCanvasPanel implements Disposable {
 	}
 
 	dispose(): void {
+		this.showSequence++;
 		this.panel?.dispose();
 		this.panel = undefined;
+		this.ready = false;
 		for (const item of this.disposables) {
 			item.dispose();
 		}

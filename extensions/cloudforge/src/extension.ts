@@ -176,9 +176,17 @@ class CloudForgeGraphProvider implements TreeDataProvider<GraphTreeItem> {
 	private readonly changeEmitter = new EventEmitter<GraphTreeItem | undefined>();
 	readonly onDidChangeTreeData: Event<GraphTreeItem | undefined> = this.changeEmitter.event;
 	private graph: ArchitectureGraph | undefined;
+	private nodeById = new Map<string, GraphNode>();
+	private connectedNodeIds = new Set<string>();
 
 	setGraph(graph: ArchitectureGraph | undefined): void {
 		this.graph = graph;
+		this.nodeById = new Map((graph?.nodes ?? []).map(node => [node.id, node]));
+		this.connectedNodeIds = new Set<string>();
+		for (const edge of graph?.edges ?? []) {
+			this.connectedNodeIds.add(edge.fromId);
+			this.connectedNodeIds.add(edge.toId);
+		}
 		this.changeEmitter.fire(undefined);
 	}
 
@@ -197,8 +205,7 @@ class CloudForgeGraphProvider implements TreeDataProvider<GraphTreeItem> {
 			return item;
 		}
 		if (element.type === 'resource') {
-			const edges = this.graph?.edges ?? [];
-			const hasConnections = edges.some(edge => edge.fromId === element.node.id || edge.toId === element.node.id);
+			const hasConnections = this.connectedNodeIds.has(element.node.id);
 			const item = new TreeItem(element.node.label, hasConnections ? TreeItemCollapsibleState.Collapsed : TreeItemCollapsibleState.None);
 			const typeLabel = element.node.resourceType ?? element.node.kind;
 			const sourceLabel = element.node.sourceFile
@@ -242,12 +249,12 @@ class CloudForgeGraphProvider implements TreeDataProvider<GraphTreeItem> {
 		const connections: ConnectionTreeItem[] = [];
 		for (const edge of graph.edges) {
 			if (edge.fromId === element.node.id) {
-				const target = graph.nodes.find(node => node.id === edge.toId);
+				const target = this.nodeById.get(edge.toId);
 				if (target) {
 					connections.push(new ConnectionTreeItem(edge.kind + ': ' + target.label, l10n.t('outgoing')));
 				}
 			} else if (edge.toId === element.node.id) {
-				const source = graph.nodes.find(node => node.id === edge.fromId);
+				const source = this.nodeById.get(edge.fromId);
 				if (source) {
 					connections.push(new ConnectionTreeItem(edge.kind + ': ' + source.label, l10n.t('incoming')));
 				}

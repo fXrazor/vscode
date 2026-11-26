@@ -8,6 +8,7 @@ import { commands, Disposable, l10n, ViewColumn, window, type WebviewPanel } fro
 import type { ProjectController } from './controller';
 import { buildGalleryCards, parseArchitectureSummaries, providerLabel, relativeTime, type ArchitectureSummary } from './gallery';
 import { buildGalleryHtml } from './galleryHtml';
+import type { ProjectResult } from './model';
 import { callProjectService } from './service';
 
 type GalleryMessage =
@@ -115,7 +116,7 @@ export class ProjectGalleryPanel implements Disposable {
 		try {
 			do {
 				this.reloadPending = false;
-				const project = this.controller.current;
+				const project: ProjectResult | undefined = this.controller.current;
 				if (!project) {
 					break;
 				}

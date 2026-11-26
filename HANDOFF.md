@@ -2,7 +2,18 @@
 
 ## Audit & skill-driven quality pass (hygiene, panels, Studio React performance & UX) — 26 November 2026
 
-Developed in worktree `Z:\CloudForge-Code\.claude\worktrees\auto-open-stage3-4` on branch `fxrazor/auto-open-and-stage3-4` (pass 1: `0c8b78e83eb`, pass 2: Studio memoization/stale-closure/dialog polish; paired with Rust commits in `E:\Orca\CloudForge\umibozu`). **No desktop installer or release builds were run** per user instruction.
+Developed in worktree `Z:\CloudForge-Code\.claude\worktrees\auto-open-stage3-4` on branch `fxrazor/auto-open-and-stage3-4` (pass 1: `0c8b78e83eb`, pass 2: `de4743fec7f`, pass 3: canvas race guards, graph tree indexing, picker optimization & `tsc` fix; paired with Rust commits in `E:\Orca\CloudForge\umibozu`). **No desktop installer or release builds were run** per user instruction.
+
+### Pass 3 flaws found & fixed
+- **Canvas panel stale-architecture race guards & teardown safety ([canvasPanel.ts](extensions/cloudforge/src/canvas/canvasPanel.ts)):**
+  - Added `isSameGraph(graph)` checking `panel`, `ready`, `workspaceId`, `architectureId`, and `sourceRevision`, and guarded all architecture-scoped async responses (`requestValidation` streaming updates/notices, `requestDraftSavePreview`, `applyDraftSave`, `requestSaveAllPreview`, `applySaveAll`, `requestModule`, `requestSchemaDiff`, `requestEngineValidate`, `requestEnginePlan`, `requestEngineInitOffline`, and `postCurrentState` background fetches) so slow operations from Architecture A can never overwrite Architecture B after switching.
+  - Added `.catch(() => {})` on fire-and-forget background loaders to prevent unhandled promise rejections during teardown, and incremented `showSequence` in `dispose()` so an in-flight `hasStudioAssets()` check cannot create a zombie panel.
+- **Extension `tsc` & tree performance ([galleryPanel.ts](extensions/cloudforge/src/project/galleryPanel.ts), [extension.ts](extensions/cloudforge/src/extension.ts)):**
+  - Fixed `TS7022` in `galleryPanel.ts`'s `do { ... } while` reload loop by annotating `const project: ProjectResult | undefined`.
+  - Indexed `CloudForgeGraphProvider` with `nodeById` (`Map`) and `connectedNodeIds` (`Set`) on `setGraph()` so `getTreeItem()` and `getChildren()` avoid repeated O(E×N) scans.
+- **Studio pickers & variable import ([VariableImport.tsx](extensions/cloudforge/studio/src/VariableImport.tsx), [VariablePicker.tsx](extensions/cloudforge/studio/src/VariablePicker.tsx), [ResourceReferencePicker.tsx](extensions/cloudforge/studio/src/ResourceReferencePicker.tsx), [ContextPopover.tsx](extensions/cloudforge/studio/src/ContextPopover.tsx)):**
+  - Memoized `existingNames` (`Set`), `matches`, and `selectedKeys` (`Set`), avoided double `acceptsVariable()` evaluation per row in `VariablePicker`, fixed singular/plural (`Review 1 variable`), and added explicit `type="button"` on non-submit action and popover buttons.
+- **Verification (pass 3):** `tsc -p extensions/cloudforge/tsconfig.json --noEmit` (`0` errors), `node extensions/cloudforge/esbuild.mts`, `oxlint` (`0` errors), Studio `pnpm run check` + `pnpm run test` (**141/141**) + `pnpm run build`, extension tests (**96/96**), `git diff --check` — all passed.
 
 ### Pass 2 flaws found & fixed
 - **Stale-closure bug & `memo(ResourceCatalogue)` restoration ([App.tsx](extensions/cloudforge/studio/src/App.tsx), [ResourceCatalogue.tsx](extensions/cloudforge/studio/src/ResourceCatalogue.tsx)):**
