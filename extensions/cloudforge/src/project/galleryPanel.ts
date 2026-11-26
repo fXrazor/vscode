@@ -89,7 +89,7 @@ export class ProjectGalleryPanel implements Disposable {
 				}
 				break;
 			case 'newArchitecture':
-				await this.controller.createArchitecture();
+				await this.controller.addArchitecture();
 				break;
 			case 'openTemplates':
 				await commands.executeCommand('cloudforge.openTemplateLibrary');
