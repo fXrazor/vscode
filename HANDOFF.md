@@ -1,6 +1,10 @@
 # CloudForge Code OSS handoff
 
-## Technical Graph pass 2 (Claude) — 26 November 2026 — read first
+## Technical Graph UI passes 2–7 (Claude) — merged to main 26 November 2026 — read first
+
+Branch `claude/project-thread-2irlth` merged to `main`. The Configuration view is now a dedicated `TechnicalGraph` with Layers, Scopes, Tree (horizontal tidy tree with folds), Bundled (radial edge bundling) and Network (force graph, icons, size by connections, Spread dial, cluster hulls, Barnes–Hut above 400 nodes) layouts; lenses incl. Exposure; plan/order/impact overlays; ghost inputs; SVG/PNG export; presentation persisted in `viewState.graph` (never `nodePositions`). Cards are editable (rename, form) but never movable. Studio 194/194 tests, technical-view verify 60/60. Detail and the next steps (wire Antigravity's Phase 1–2 contract/workflow/routing modules into the UI and drop the duplicates) are in `extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md`, "Technical Graph pass 7". Run `build/oxlint.ts`, `build/hygiene.ts` and the extension Node tests on Windows before the next installer build; they could not run in the cloud container.
+
+## Technical Graph pass 2 (Claude) — 26 November 2026
 
 Branch `claude/project-thread-2irlth`, pushed, not merged. Pass 2 finished the pass-1 queue:
 - Rewrote the browser verify script (44/44 in Chromium).
@@ -18,6 +22,35 @@ Studio has 175/175 tests passing. Details, files and the remaining queue (drift 
 ## Technical Graph rebuild pass 1 (Claude) — 26 November 2026
 
 Branch `claude/project-thread-2irlth` (from main `5b66f85c`). Studio now mounts a dedicated `TechnicalGraph` (separate React Flow instance, no project dispatch) in Configuration view. It has a frozen evidence-backed graph snapshot (`technicalGraph.ts`); Layers, Scopes and Ownership-tree layouts; schema-style field rows with stable ports; curved, orthogonal and straight routes; an animated selected trace; a Why panel; graph-only pins; and a narrow edit gate so cards can be renamed and opened for editing but never moved or reparented. 169/169 Studio tests pass. Full detail, gaps and the ordered next actions for Codex are in `extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md` under “Technical Graph rebuild, pass 1”. First next action: update `scripts/technical-view-verify.mjs` for the new DOM.
+## Studio Technical Graph Rebuild — Phase 2 Background Logic & Routing — 26 November 2026
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review` (pushed to `origin/main` atop Phase 1 `e5fc572a702`), owner Antigravity.
+- **Scope (conflict-free pure background logic — zero edits to `App.tsx`, `DesignCanvas.tsx`, `ResourceNode.tsx`, `RelationshipContext.tsx`, `model.ts`, `serviceAdapter.ts`, `liveSchema.ts`, `CodePanel.tsx`, CSS, Rust, or installer scripts):**
+  - Extended [technicalGraphContract.ts](extensions/cloudforge/studio/src/technicalGraphContract.ts) with `TechnicalGraphLens`, `lens`, and `expandedNodeIds` in `TechnicalGraphPresentationState`.
+  - Added [technicalGraphWorkflows.ts](extensions/cloudforge/studio/src/technicalGraphWorkflows.ts) + [technicalGraphWorkflows.test.ts](extensions/cloudforge/studio/src/technicalGraphWorkflows.test.ts): focused lenses (`all`, `dependencies`, `topology`, `runtime`, `observability`) with explicit arrow semantics, upstream/downstream neighborhood & multi-hop shortest-path tracing with per-hop provenance, contextual node inspection & deterministic troubleshooting findings (cycles, CLI errors, stale overlays, missing expected parents/attachments, unverified unknowns), and category-preserving high-degree edge aggregation.
+  - Added [technicalGraphRouting.ts](extensions/cloudforge/studio/src/technicalGraphRouting.ts) + [technicalGraphRouting.test.ts](extensions/cloudforge/studio/src/technicalGraphRouting.test.ts): semantic zoom bands (`overview | standard | detailed`), bounded attachment-row & pill geometry tested across 1/2/6/50/200 attachments, world-space port anchors with overflow fallbacks, deterministic `curved` / `orthogonal` / `straight` SVG route computation, pairwise crossing counter, and route-style comparison benchmark helper.
+  - Updated `extensions/cloudforge/studio/package.json` `"test"` and [STUDIO-CONTINUATION-2026-11-25.md](extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md).
+- **Fresh verification (26 November 2026):**
+  - Studio `check` (`tsc --noEmit`): **PASS**
+  - Studio `test`: **173/173 PASS** (0 skipped; +7 Phase 2 tests)
+  - Studio `build` + `node extensions/cloudforge/esbuild.webview.mts`: **PASS**
+  - `node build/oxlint.ts` + `node --experimental-strip-types build/hygiene.ts`: **PASS** (0 warnings/errors)
+  - Extension Node tests (`CLOUDFORGE_REPO=Z:/CloudForge`): **97/97 PASS** (0 skipped)
+- **Next action:** once Claude's Graph View UI improvements merge to `main`, wire the Phase 1–2 contract, lens/trace/inspector, and port-routing modules into the UI and proceed to **Phase 3** (dedicated `TechnicalGraph` extraction & renderer benchmark).
+
+## Studio Technical Graph Rebuild — Phase 1 — 26 November 2026
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review` (pushed to `origin/main` from base `cf455878505`), owner Antigravity.
+- **Scope (purely additive — zero edits to `App.tsx`, `DesignCanvas.tsx`, `model.ts`, `serviceAdapter.ts`, `product.json`, Rust, or installer scripts):**
+  - Added [technicalGraphContract.ts](extensions/cloudforge/studio/src/technicalGraphContract.ts) and [technicalGraphContract.test.ts](extensions/cloudforge/studio/src/technicalGraphContract.test.ts), wired into `extensions/cloudforge/studio/package.json` `"test"`, and updated [STUDIO-CONTINUATION-2026-11-25.md](extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md).
+  - Delivers the deeply immutable (`deepFreeze`) `TechnicalGraphProjection` contract (`projectionVersion: 1`), explicit HCL reference extraction over existing `FileResourceValues` payloads, structural ownership vs visual grouping separation, bounded peer-keyed `attachmentPorts` (`${nodeId}:${direction}:${field}:${peerNodeId}`) with overflow counts, `sourceRevision`-checked schema/lock/plan/validate overlays (flagging stale revisions and opaque/redacted/unreviewed/Kubernetes-manifest unknowns honestly), Tarjan SCC cycle detection, evidence-backed hub-spoke pattern projection, capability audit, and completely isolated `TechnicalGraphPresentationState` reducers that never mutate `Architecture`, `Resource.positions`, Terraform, Modified state, or project Undo.
+- **Fresh verification (26 November 2026):**
+  - Studio `check` (`tsc --noEmit`): **PASS**
+  - Studio `test`: **166/166 PASS** (0 skipped; +6 Phase 1 tests)
+  - Studio `build` + `node extensions/cloudforge/esbuild.webview.mts`: **PASS**
+  - `node build/oxlint.ts` + `node --experimental-strip-types build/hygiene.ts`: **PASS**
+  - Extension Node tests (`CLOUDFORGE_REPO=Z:/CloudForge`): **97/97 PASS** (0 skipped)
+- **Next action:** **Phase 2 of the Technical Graph rebuild** — engineering inspection workflows (upstream/downstream path tracing, evidence & unknown disclosure, bounded attachment rows, route-style comparison) consuming `projectTechnicalGraph` without mutating the canonical model, before extracting the dedicated `TechnicalGraph` renderer in Phase 3.
 
 ## Current main integration and agent handoff — 25 November 2026
 
@@ -1367,3 +1400,52 @@ Implemented on `fxrazor/auto-open-and-stage3-4` in `Z:\CloudForge-Code\.claude\w
 **Next actions:**
 1. Once `Z:\CFStage` is idle and `CloudForge Proof.exe` is closed, package `d1cc562f0c3` (or latest `main`) with `Z:\CFStage\service-b1f57ac\cloudforge-service.exe` via `build/cloudforge/package-win32-x64.ps1`, run live smoke, and upgrade `%LOCALAPPDATA%\Programs\CloudForge Proof`.
 2. Next roadmap slice (on user approval): signed release build (`-SignCertificateThumbprint` + `-RequireSignedService`) or the AI Builder vertical slice from `Z:\CloudForge\docs\research\bb-agent-ide.md`.
+
+### Full CloudForge Desktop Product Package (`CloudForgeSetup-x64.exe`), Codex `studio-whiteboard-2` Merge, Terraform Autocomplete, & Branded Cold-Launch Welcome (2026-11-25 / 2026-11-26)
+
+Delivered from `E:\Orca\CloudForge-Code\dace` (`fxrazor/continue-project-handoff-review`) onto `origin/main` (packaged commit **`8f3ce7bf340b0ae3631e3eddd84cb82f0931a869`**, plus cold-launch onboarding polish on top of `5b66f85cdba`), combining Stage 10 (`a8e8cfd4609`), Codex's committed whiteboard branch (`6890be48e34`), Terraform Autocomplete (`ba487796b2d`), and full **CloudForge** desktop product branding (`8f3ce7bf340`). Packaged with Rust Stage 10 service `73c5a6590ca3f4f4dc2c5e4d5157f08f783ff1ac` (`3,883,520` bytes, SHA-256 `28b57bb22bf43208653f8a234d90cdcae6cfaa74bcb3951e948281c6ce3598cc`).
+
+- **Merged Codex `codex/studio-whiteboard-2` (`9bdf2d3c157` -> `6890be48e34`):**
+  - Clean zero-conflict merge of all 9 committed whiteboard passes (rotated drawing Appearance dimensions, PenOptions color/weight presets, 4-corner anchored & clamped resize geometry, explicit React Flow `zIndexMode="manual"`, loose & reconnectable design connection endpoints, and architecture name preservation across hosted refresh), preserving Stage 9B & Stage 10 Studio controls. Codex's subsequent annotation follow-up (`64d86b5d17d`) and Technical Graph checkpoint (`5b66f85cdba`) have also landed on `origin/main`.
+- **Terraform Autocomplete & Schema-Aware Snippets (`ba487796b2d`, [terraformCompletions.ts](extensions/cloudforge/src/editor/terraformCompletions.ts), [providers.ts](extensions/cloudforge/src/editor/providers.ts), [extension.ts](extensions/cloudforge/src/extension.ts), [terraformCompletions.test.ts](extensions/cloudforge/test/terraformCompletions.test.ts)):**
+  - Added bounded multi-file `.tf` / `.tofu` symbol indexing (`var.*`, `local.*`, `module.*`, `data.*`, `<resource_type>.<name>.<attr>`), top-level HCL2 & resource block snippets, required-first schema attribute & nested block completions, schema option value completions, and live cached Stage 3/10 provider schema integration.
+- **Full CloudForge Desktop Product Branding (`8f3ce7bf340`, [product.json](product.json), [app.ts](src/vs/code/electron-main/app.ts), [code.iss](build/win32/code.iss), [package-win32-x64.ps1](build/cloudforge/package-win32-x64.ps1), [README.md](build/cloudforge/README.md), [package.nls.json](extensions/cloudforge/package.nls.json)):**
+  - Graduated `product.json` from `CloudForge Proof` / `cloudforge-proof` to full **`CloudForge`** / **`cloudforge`** (`dataFolderName: ".cloudforge"`, `sharedDataFolderName: ".cloudforge-shared"`, `win32DirName: "CloudForge"`, `win32AppUserModelId: "CloudForge.Desktop"`, `urlProtocol: "cloudforge"`, fresh distinct Windows AppId GUIDs).
+  - Updated Electron-main sidecar guard (`app.ts`), Inno Setup (`OutputBaseFilename=CloudForgeSetup-x64` + `[InstallDelete]` for `cloudforge-service`), and `package-win32-x64.ps1` (also gating built-in Terraform grammar assets in the packaged extension payload).
+- **Branded Cold-Launch Welcome Fix ([startupPage.ts](src/vs/workbench/contrib/welcomeGettingStarted/browser/startupPage.ts)):**
+  - Suppressed the upstream first-run `"Welcome to VS Code — Sign in to use GitHub Copilot"` experimental onboarding modal (`onboarding-a-overlay`) when `productService.applicationName` is `'cloudforge'` or `'cloudforge-proof'`, so cold profiles open directly to CloudForge's main Welcome page without a VS Code / Copilot sign-in gate.
+
+| Artifact or check (`8f3ce7bf340` + Rust Stage 10 `73c5a65`, plus cold-launch fix) | Verified result |
+| --- | --- |
+| Studio `check`, `test` (**128/128** on `6890be48e34`), `build`, `esbuild.webview.mts` | Passed (`0` errors). |
+| Extension `esbuild.mts`, TS6, TS7, core `src/tsconfig.json` TS7, `oxlint`, `hygiene` | Passed (`0` errors, `0` warnings). |
+| `CLOUDFORGE_REPO=E:\Orca\CloudForge\umibozu node --test extensions/cloudforge/test/*.test.ts` | **84/84 root extension tests passed** (`0` skipped). |
+| `node build/next/index.ts transpile` & Electron-main tests | **44/44 Electron-main tests passed**. |
+| Full Windows x64 CloudForge Installer | [CloudForgeSetup-x64-8f3ce7bf340.exe](Z:/CFStage/CloudForgeSetup-x64-8f3ce7bf340.exe), unsigned (`ServiceSigned: false`), `324,543,853` bytes, SHA-256 `dc44cb4c14c009a7fcce6778ba68ef6337971f3990ac383d70a1f12a6c4c6788`; Rust Stage 10 `73c5a659...` (`28b57bb2...`), VSIX `7accf785...`. |
+| Live packaged-desktop smoke ([cloudforge-product-smoke.mjs](Z:/CFStage/smoke/cloudforge-product-smoke.mjs), [report-cloudforge-8f3ce7bf340.json](Z:/CFStage/smoke/report-cloudforge-8f3ce7bf340.json)) | **5/5 passed** ([01-packaged-cloudforge-terraform-editor.png](Z:/CFStage/smoke/run-cloudforge-8f3ce7bf340/01-packaged-cloudforge-terraform-editor.png) & [02-packaged-cloudforge-studio-stage10.png](Z:/CFStage/smoke/run-cloudforge-8f3ce7bf340/02-packaged-cloudforge-studio-stage10.png) visually inspected): verified `CloudForge` branding (no `Proof`), `Terraform` language mode + 6 token classes + Breadcrumbs + CloudForge Schema Hover, live Stage 10 offline init (`76 ms`), live Stage 9A validate (`76 ms`), live Stage 9B plan (`202 ms`, zero secret/path leaks), and `0` payload `cloudforge-service.exe` orphans on quit. |
+| Per-user Windows install (`%LOCALAPPDATA%\Programs\CloudForge\CloudForge.exe`) | Exit code `0`; `serviceArtifact.ts --verify` passed (`nameLong=CloudForge`, `applicationName=cloudforge`, `commit=8f3ce7bf340`, Rust Stage 10 `73c5a65`). Note: legacy `CloudForge Proof` in `%LOCALAPPDATA%\Programs\CloudForge Proof` can be uninstalled via Windows Installed Apps without affecting `CloudForge`. |
+| Cold-launch onboarding suppression ([startupPage.ts](src/vs/workbench/contrib/welcomeGettingStarted/browser/startupPage.ts)) | Verified via `src/tsconfig.json` TS7, `oxlint`, `hygiene`, and isolated cold-profile Code OSS launch (`.onboarding-a-overlay` absent). |
+
+**Next actions:**
+1. When ready to cut the next combined `CloudForgeSetup-x64.exe` update incorporating all overnight `origin/main` work (Stage 10B/10C mirror import/eviction/integrity, CloudForge side panel, Codex's annotation follow-up + Technical Graph Phase 0, and this cold-launch onboarding fix), run `build/cloudforge/package-win32-x64.ps1` against the latest verified Rust service artifact (`Z:\CFStage\service-b1f57ac\cloudforge-service.exe`).
+
+### Multi-Window Project Support & Windows Taskbar Jump List Fix (2026-11-26)
+
+Implemented on `fxrazor/continue-project-handoff-review` in `E:\Orca\CloudForge-Code\dace` and pushed to `origin/main`. **Zero overlap with Claude (`Z:\CloudForge` untouched) or Codex (`extensions/cloudforge/studio/**` untouched).**
+
+- **Root Cause & Fix for Taskbar "New Window" Opening Bare Electron ([app.ts](src/vs/code/electron-main/app.ts), [workspacesHistoryMainService.ts](src/vs/platform/workspaces/electron-main/workspacesHistoryMainService.ts)):**
+  - Unbuilt dev runs (`scripts\code.bat` / `.build\electron\CloudForge.exe`) shared the installed `CloudForge.Desktop` Windows AppUserModelId and wrote `program: .build\electron\CloudForge.exe -n` into Windows's taskbar Jump List, causing right-click -> **New Window** on the installed CloudForge icon to launch bare Electron (`default_app.asar`).
+  - Appended `.Dev` to `win32AppUserModelId` whenever `!environmentMainService.isBuilt` and skipped `updateWindowsJumpList()` on unbuilt dev runs so dev launches never corrupt the installed CloudForge taskbar Jump List.
+- **Optional Multi-Window CloudForge Projects ([model.ts](extensions/cloudforge/src/project/model.ts), [controller.ts](extensions/cloudforge/src/project/controller.ts), [index.ts](extensions/cloudforge/src/project/index.ts), [package.json](extensions/cloudforge/package.json), [package.nls.json](extensions/cloudforge/package.nls.json)):**
+  - Added setting `cloudforge.projects.openInNewWindow` (`"ask" | "newWindow" | "currentWindow"`, default `"ask"`) so creating a project while another folder is open lets the user open it in a new window (`{ forceNewWindow: true }`) or replace the current window.
+  - Added **CloudForge: Open Project in New Window…** (`cloudforge.openProjectInNewWindow`) in Command Palette and the `CloudForge Project` view menu, automatically detecting a single `.code-workspace` file inside a chosen project folder and opening it in an independent CloudForge window (which receives its own isolated `cloudforge-service.exe` sidecar via `CloudForgeServiceBroker`).
+- **Tests ([cloudForgeServiceChannel.test.ts](src/vs/code/test/electron-main/cloudForgeServiceChannel.test.ts), [projectIntegrations.test.ts](extensions/cloudforge/test/projectIntegrations.test.ts)):**
+  - Verified **97/97** root extension tests, **48/48** Electron-main tests (including dynamic multi-window broker isolation & per-window sidecar teardown), `esbuild.mts`, TS6, TS7, core `src/tsconfig.json` TS7, `oxlint`, and `hygiene`.
+
+**Next actions:**
+1. Cut a fresh `CloudForgeSetup-x64.exe` build whenever ready to ship this Jump List fix, optional multi-window project UX, cold-launch Welcome fix, Stage 10B/10C mirror commands, CloudForge side panel, and Codex's latest Studio updates together.
+
+#### Packaged Upgrade Verification (`d8c253fd95b` + Rust `f6ccff1af12a`, 2026-11-26)
+- **Installer:** [CloudForgeSetup-x64-d8c253fd95b.exe](Z:/CFStage/CloudForgeSetup-x64-d8c253fd95b.exe) (`324,910,951` bytes, SHA-256 `2269158abd048c8f5d46e62ff57b2601e5f1675ef28608f5ca59675c228b33e1`, unsigned `ServiceSigned: false`), paired with Rust service `f6ccff1af12a8c60911b8e9977f7127700d2df5c` (`4,847,104` bytes, SHA-256 `ee20be59e58febef29b01877ae117914605284ae94d69871ed89fdfa31ba35ba`) and VSIX `7accf785...`.
+- **Live Packaged Smoke ([report-cloudforge-d8c253fd95b.json](Z:/CFStage/smoke/report-cloudforge-d8c253fd95b.json)):** **5/5 passed** ([01-packaged-cloudforge-terraform-editor.png](Z:/CFStage/smoke/run-cloudforge-d8c253fd95b/01-packaged-cloudforge-terraform-editor.png) & [02-packaged-cloudforge-studio-stage10.png](Z:/CFStage/smoke/run-cloudforge-d8c253fd95b/02-packaged-cloudforge-studio-stage10.png) visually inspected): confirmed `CloudForge` title branding, zero VS Code onboarding modal on cold launch, Terraform grammar + Breadcrumbs + Schema Hover, CloudForge Side Panel Activity Bar icon, Codex provider mark/version selector, live Stage 10 offline init (`101 ms`), Stage 9A validate (`75 ms`), Stage 9B plan (`176 ms`, zero secret/path leaks), and `0` payload `cloudforge-service.exe` orphans on quit.
+- **Installed Upgrade (`%LOCALAPPDATA%\Programs\CloudForge\CloudForge.exe`):** Silent per-user upgrade exited `0`; `serviceArtifact.ts --verify` passed (`nameLong=CloudForge`, `applicationName=cloudforge`, `commit=d8c253fd95b`, Rust `f6ccff1af12a`).

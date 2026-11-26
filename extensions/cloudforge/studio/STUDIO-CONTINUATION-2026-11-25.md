@@ -2,11 +2,66 @@
 
 ## Current handoff — read first
 
+### Technical Graph Rebuild — Phase 2 background workflow, tracing & routing engine (26 November 2026)
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review` (pushed to `origin/main` atop Phase 1 `e5fc572a702`), integration owner Antigravity. Resolve the commit with `git log -1 -- extensions/cloudforge/studio/src/technicalGraphWorkflows.ts`.
+- **Conflict-free scope (zero UI / shared authoring edits):** intentionally kept out of `App.tsx`, `DesignCanvas.tsx`, `ResourceNode.tsx`, `RelationshipContext.tsx`, `model.ts`, `serviceAdapter.ts`, `liveSchema.ts`, `CodePanel.tsx`, and CSS while parallel Claude/Codex worktrees evolve the Graph View UI and provider forms.
+  - Extended `extensions/cloudforge/studio/src/technicalGraphContract.ts` (`TechnicalGraphLens`, `lens`, `expandedNodeIds`, `setGraphLens`, `toggleGraphExpandedNode`, and `pruneGraphPresentationState`).
+  - Added `extensions/cloudforge/studio/src/technicalGraphWorkflows.ts` + `technicalGraphWorkflows.test.ts` (4 tests).
+  - Added `extensions/cloudforge/studio/src/technicalGraphRouting.ts` + `technicalGraphRouting.test.ts` (3 tests).
+  - Updated `extensions/cloudforge/studio/package.json` `"test"`, this handoff, and root `HANDOFF.md`.
+- **What Phase 2 background logic delivers:**
+  - **Focused lenses (`TECHNICAL_GRAPH_LENSES`, `filterTechnicalGraphByLens`):** `all`, `dependencies` (prerequisite → consumer, ordering-only), `topology` (ownership + attachment), `runtime` (configured runtime intent, explicitly not observed traffic), and `observability` (telemetry collection → destination), each with explicit arrow semantics and boundary notes.
+  - **Neighborhood & multi-hop path tracing (`traceNodeNeighborhood`, `tracePathsBetweenNodes`):** computes direct/transitive upstream prerequisites, direct/transitive downstream configured dependents, hop distances, cycle members, `selected | upstream | downstream | cycle | dimmed` focus roles, and bounded shortest-first paths with per-hop field/expression provenance.
+  - **Contextual node inspector & troubleshooting findings (`inspectTechnicalGraphNode`, `collectGraphTroubleshootingFindings`):** deterministic, evidence-scoped findings (`ordering-cycle`, `validation-error`, `validation-warning`, `stale-overlay`, `missing-expected-parent`, `missing-expected-attachment`, `unverified-evidence`) with `sourceRevision`, `sourceTarget`, and actionable `nextCheck`; separates configured dependent impact from revision-checked plan action impact; honestly reports unavailable source locations.
+  - **High-degree edge aggregation (`aggregateHighDegreeEdges`):** collapses dense fans above threshold per `(node, direction, category)` into inspectable bundles (e.g., `+12 attachments`) without merging distinct categories, while automatically expanding edges touching focused/expanded nodes.
+  - **Semantic zoom, bounded attachment rows & route-style comparison (`resolveSemanticZoomBand`, `computeNodeAttachmentLayout`, `computeGraphPortAnchors`, `computeTechnicalEdgeRoute`, `countRouteCrossings`, `compareTechnicalRouteStyles`, `buildAttachmentScaleArchitecture`):** collapses rows to category summary pills at overview zoom (`< 0.55`), bounds visible rows (`4/6/8` by density, max `12` expanded) across 1/2/6/50/200-attachment scale fixtures with exact row anchor offsets and overflow fallback anchors, computes deterministic SVG paths for `curved`, `orthogonal` (with rounded corners & backtrack detours), and `straight`, and counts pairwise non-endpoint crossings for Phase 3 renderer benchmarks.
+- **Fresh verification (26 November 2026):**
+  - `corepack pnpm --dir extensions/cloudforge/studio run check` (`tsc --noEmit`): **PASS**
+  - `corepack pnpm --dir extensions/cloudforge/studio run test`: **173/173 PASS** (0 skipped; +7 Phase 2 tests covering 1/2/6/50/200 attachment scaling, lenses, tracing, troubleshooting, aggregation, port anchors, and route comparison)
+  - `corepack pnpm --dir extensions/cloudforge/studio run build` & `node extensions/cloudforge/esbuild.webview.mts`: **PASS**
+  - `node build/oxlint.ts` & `node --experimental-strip-types build/hygiene.ts`: **PASS** (0 warnings/errors)
+  - Extension Node tests (`CLOUDFORGE_REPO=Z:/CloudForge`): **97/97 PASS** (0 skipped)
+- **Exact next action:** once Claude's Graph View UI improvements merge to `main`, connect these pure Phase 1–2 modules (`projectTechnicalGraph`, `filterTechnicalGraphByLens`, `traceNodeNeighborhood`, `inspectTechnicalGraphNode`, `computeNodeAttachmentLayout`, `computeTechnicalEdgeRoute`) into the contextual details pane and begin **Phase 3** (dedicated `TechnicalGraph` renderer extraction + D3/Canvas vs React Flow/ELK benchmark on identical fixtures).
+
+### Technical Graph Rebuild — Phase 1 completed (26 November 2026)
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review` (pushed to `origin/main` from base `cf455878505`), integration owner Antigravity. Resolve the commit with `git log -1 -- extensions/cloudforge/studio/src/technicalGraphContract.ts`.
+- **Files added/changed (strictly additive — zero edits to `App.tsx`, `DesignCanvas.tsx`, `model.ts`, or `serviceAdapter.ts`):**
+  - `extensions/cloudforge/studio/src/technicalGraphContract.ts`
+  - `extensions/cloudforge/studio/src/technicalGraphContract.test.ts`
+  - `extensions/cloudforge/studio/package.json` (added `src/technicalGraphContract.test.ts` to `"test"`)
+  - `extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md` and root `HANDOFF.md`
+- **What Phase 1 delivers:**
+  - Deeply immutable (`deepFreeze`) `TechnicalGraphProjection` (`projectionVersion: 1`, `sourceRevision`, `graphStatus`, `nodes`, `edges`, `patterns`, `cycles`, `capabilities`) projected purely from the canonical `Architecture` plus existing host payloads (`FileResourceValues`, `LiveSchemaMap`, `HostDependencyReport`, `HostEnginePlanReport`, `HostEngineValidateReport`, `HostGraphSnapshot`). Zero new backend APIs; zero inferred links from type compatibility or proximity.
+  - Strict separation of `structuralParentId` (provider-backed `ownership` edge ONLY) from `visualGroupId` (`visualParentId`), plus deterministic peer-keyed `attachmentPorts` (`${nodeId}:${direction}:${field}:${peerNodeId}`) bounded by `maxAttachmentPortsPerNode` with explicit `attachmentOverflowCount`.
+  - `extractFileExpressionEvidence()` extracts explicit HCL references from Rust `readResourceValues` payloads (`FileResourceValues`) while honestly recording `redacted-value`, `opaque-expression`, `unreviewed-type`, `unverified-schema-version`, `partial-source-graph`, `stale-plan`, `stale-validate`, `missing-provider-lock`, and `kubernetes-manifest-unmapped` unknowns.
+  - Revision-bound schema version provenance (`live-matched | locked-only | bundled-fallback | unknown`), `sourceRevision`-checked plan/validate overlays (marking mismatched revisions `stale`), Tarjan SCC ordering cycle detection (`detectOrderingCycles`), evidence-backed hub-spoke pattern projection (`documentedHubSpokes` over both canonical bindings and source expressions), and `TechnicalGraphCapabilityAudit`.
+  - Completely isolated `TechnicalGraphPresentationState` (`pins`, `routeStyle`, `density`, `collapsedGroupIds`, `hiddenCategories`, `selectedNodeId`, `tracedNodeId`) with immutable reducers (`setGraphNodePin`, `clearGraphNodePins`, `setGraphRouteStyle`, `setGraphDensity`, `toggleGraphCollapsedGroup`, `setGraphHiddenCategories`, `setGraphSelection`, `pruneGraphPresentationState`) that NEVER touch `Architecture`, `Resource.positions`, `parentId`, `visualParentId`, container sizes, Terraform, Modified state, or project Undo.
+- **Fresh verification (26 November 2026):**
+  - `corepack pnpm --dir extensions/cloudforge/studio run check` (`tsc --noEmit`): **PASS**
+  - `corepack pnpm --dir extensions/cloudforge/studio run test`: **166/166 PASS** (0 skipped; 6 new Phase 1 contract tests covering zero-mutation deep-freeze invariant, structural vs visual grouping + bounded peer-keyed ports, `FileResourceValues` expression extraction + explicit unknowns, schema version + current/stale plan & validate revision binding, Tarjan SCC cycles + pin pruning, multi-provider AWS/GCP/K8s + positive/negative hub-spoke patterns)
+  - `corepack pnpm --dir extensions/cloudforge/studio run build` & `node extensions/cloudforge/esbuild.webview.mts`: **PASS**
+  - `node build/oxlint.ts` & `node --experimental-strip-types build/hygiene.ts` on all touched files: **PASS**
+  - Extension Node tests (`CLOUDFORGE_REPO=Z:/CloudForge`): **97/97 PASS** (0 skipped)
+  - Note: `research:verify` was not re-verified in this fresh worktree because `output/provider-research/` is gitignored; prior 88/88 hash verification remains inherited from the main integration entry below. No Rust, protocol, dependency, or Windows installer changes were made in this slice.
+- **Remaining Phase 1 / Phase 2 gaps & exact next action:**
+  - AWS research source version applicability (`6.73.1` vs research revision) and Kubernetes Terraform provider adapter remain explicitly flagged as unknowns (`unverified-schema-version`, `kubernetes-manifest-unmapped`) until version-matched live schemas or a dedicated K8s adapter are supplied.
+  - **Exact next action — Phase 2 (Engineering workflows & visual direction):** wire `projectTechnicalGraph` into a read-only contextual inspection/trace lens (dependency path tracing, upstream/downstream configured impact, unknown/plan/cycle disclosure, source navigation, bounded attachment-row design, and curved vs orthogonal vs straight route comparison) verified across light/dark and 1360×860 / 1024×768 before extracting the dedicated `TechnicalGraph` renderer in Phase 3.
+
 Canonical Studio checkpoint: this file. Dale requested consolidation on 25 November 2026; the earlier Claude continuation and Codex whiteboard continuation are retained below as historical evidence. Use the current queue here instead of historical branch commands or pending-approval notes.
 
 Worktree: `C:/Users/dalep/.codex/worktrees/infrastructure-studio/CloudForge-Code`. Branch: `codex/studio-whiteboard-2`. Integration owner: Codex. Initial revision for this continuation: `5963df26af39f3f65365304025df8fa70773ff9d`. Historical starting baseline: Studio check/build passed, **111/111** Node tests and two Edge suites 20/20. Use the main integration verification below for the current merged result.
 
 Dale approved continuing the proposed point-endpoint pass in this chat. No further approval is needed for that plan. Work remains within Studio and handoff documentation; one architecture and one semantic undo history, independent theme/viewport/tool preferences, drawings excluded from Terraform and Rust-owned guarded I/O remain binding.
+
+### Technical Graph pass 7: large graphs, final checks and merge (Claude), 26 November 2026
+
+- Network solver: exact repulsion up to 400 nodes (`forceSettings.exactLimit`), Barnes–Hut (theta 0.9, mass √r) plus a uniform collision grid above it; per-simulation degree/index cache. Bench: 1,000 nodes settle in ~0.4 s, 2,000 in ~1 s; Bundled layout is under 40 ms at 2,000 nodes.
+- Find → Enter in Network re-centres on the found resource without changing zoom.
+- Merged `origin/main` (Antigravity Phase 1–2: `technicalGraphContract.ts`, `technicalGraphWorkflows.ts`, `technicalGraphRouting.ts`) into this branch. No code overlap: those modules are pure logic and not yet wired into the UI. `technicalLayout.test.ts` stays removed (the old module is gone); their three test files are added to `pnpm test`.
+- Checks on the merged tree: Studio `check` pass; `test` 194/194; `technical-view-verify` 60/60; whiteboard 20/20, loose connectors 16/16, annotation 4/4, hosted refresh 20/20 (quick mode). Not run here (no root node_modules in the container): `build/oxlint.ts`, `build/hygiene.ts`, extension Node tests, host `tsc`. The host sanitiser was exercised directly with Node.
+- **Next for whoever continues:** wire Antigravity's contract/workflow/routing modules into `TechnicalGraph.tsx` where they overlap (`technicalGraph.ts` lenses and tracing duplicate parts of `technicalGraphWorkflows.ts`; pick one and delete the other). Then still open: drift overlay (Rust per-address state), module drill-down, service-edge field provenance.
 
 ### Technical Graph pass 6: Network spread dial and sizing fix (Claude), 26 November 2026
 

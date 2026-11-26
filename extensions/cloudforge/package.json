@@ -51,6 +51,16 @@
 					"type": "boolean",
 					"default": true,
 					"description": "%config.editor.codeLens%"
+				},
+				"cloudforge.projects.openInNewWindow": {
+					"type": "string",
+					"enum": [
+						"ask",
+						"newWindow",
+						"currentWindow"
+					],
+					"default": "ask",
+					"description": "%config.projects.openInNewWindow%"
 				}
 			}
 		},
@@ -76,6 +86,12 @@
 				"title": "%command.createProject%",
 				"category": "%displayName%",
 				"icon": "$(new-folder)"
+			},
+			{
+				"command": "cloudforge.openProjectInNewWindow",
+				"title": "%command.openProjectInNewWindow%",
+				"category": "%displayName%",
+				"icon": "$(window)"
 			},
 			{
 				"command": "cloudforge.createArchitecture",
@@ -545,19 +561,24 @@
 					"group": "navigation@4"
 				},
 				{
-					"command": "cloudforge.applyWorkspacePreset",
+					"command": "cloudforge.openProjectInNewWindow",
 					"when": "view =~ /^cloudforge\\.(panel\\.)?projects$/",
 					"group": "project@0"
 				},
 				{
+					"command": "cloudforge.applyWorkspacePreset",
+					"when": "view =~ /^cloudforge\\.(panel\\.)?projects$/",
+					"group": "project@1"
+				},
+				{
 					"command": "cloudforge.resetIgnoredImports",
 					"when": "view =~ /^cloudforge\\.(panel\\.)?projects$/ && cloudforge.projectOpen",
-					"group": "project@1"
+					"group": "project@2"
 				},
 				{
 					"command": "cloudforge.forgetProjectAccess",
 					"when": "view =~ /^cloudforge\\.(panel\\.)?projects$/ && cloudforge.projectOpen",
-					"group": "project@2"
+					"group": "project@3"
 				},
 				{
 					"command": "cloudforge.openCanvas",

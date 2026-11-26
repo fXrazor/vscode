@@ -27,6 +27,9 @@ import {
 	parseCreatedProject,
 	parseInspection,
 	parseProjectResult,
+	parseProjectWindowPreference,
+	pickProjectWorkspaceEntry,
+	resolveProjectWindowOpenAction,
 	sanitizeRemoteUrl,
 	selectDefaultArchitecture,
 	suggestArchitectureName,
@@ -535,8 +538,65 @@ export class ProjectController implements Disposable {
 		}
 	}
 
+	private async chooseForceNewWindow(actionTitle: string, explicitNewWindow?: boolean): Promise<boolean | undefined> {
+		if (explicitNewWindow !== undefined) {
+			return explicitNewWindow;
+		}
+		const hasOpenWorkspace = Boolean(workspace.workspaceFile) || (workspace.workspaceFolders?.length ?? 0) > 0;
+		const configured = parseProjectWindowPreference(workspace.getConfiguration('cloudforge').get<string>('projects.openInNewWindow', 'ask'));
+		const action = resolveProjectWindowOpenAction(configured, hasOpenWorkspace);
+		if (action === 'newWindow') {
+			return true;
+		}
+		if (action === 'currentWindow') {
+			return false;
+		}
+		const picked = await window.showQuickPick(
+			[
+				{ label: `$(window) ${l10n.t('Open in New Window')}`, description: l10n.t('Keep the current project open in this window'), forceNewWindow: true },
+				{ label: `$(folder-opened) ${l10n.t('Open in Current Window')}`, description: l10n.t('Replace the current window with the new project'), forceNewWindow: false },
+			],
+			{
+				title: actionTitle,
+				placeHolder: l10n.t('Choose where to open the CloudForge project'),
+			}
+		);
+		return picked?.forceNewWindow;
+	}
+
+	/** Opens an existing CloudForge project folder or `.code-workspace` file in a new independent window. */
+	async openProjectInNewWindow(): Promise<boolean> {
+		const picked = await window.showOpenDialog({
+			title: l10n.t('Open CloudForge Project in New Window'),
+			openLabel: l10n.t('Open in New Window'),
+			canSelectFiles: true,
+			canSelectFolders: true,
+			canSelectMany: false,
+			filters: { [l10n.t('CloudForge Workspaces')]: ['code-workspace'] },
+		});
+		const target = picked?.[0];
+		if (!target || target.scheme !== 'file') {
+			return false;
+		}
+		let openTarget = target;
+		try {
+			const stat = await workspace.fs.stat(target);
+			if (stat.type === FileType.Directory) {
+				const entries = await workspace.fs.readDirectory(target);
+				const workspaceFile = pickProjectWorkspaceEntry(entries, FileType.File);
+				if (workspaceFile) {
+					openTarget = Uri.joinPath(target, workspaceFile);
+				}
+			}
+		} catch {
+			// Fall back to opening the picked URI directly.
+		}
+		await commands.executeCommand('vscode.openFolder', openTarget, { forceNewWindow: true });
+		return true;
+	}
+
 	/** Creates a project in a folder the user picks (the broker opens the picker) and opens it. */
-	async createProject(): Promise<boolean> {
+	async createProject(explicitNewWindow?: boolean): Promise<boolean> {
 		const name = await window.showInputBox({
 			title: l10n.t('Create a CloudForge project'),
 			prompt: l10n.t('Project name. You will choose the folder to create it in next.'),
@@ -555,7 +615,11 @@ export class ProjectController implements Disposable {
 			showProjectError('SERVICE_ERROR');
 			return false;
 		}
-		await commands.executeCommand('vscode.openFolder', Uri.parse(created.workspaceFile));
+		const forceNewWindow = await this.chooseForceNewWindow(l10n.t('Open {0}', created.folderName), explicitNewWindow);
+		if (forceNewWindow === undefined) {
+			return false;
+		}
+		await commands.executeCommand('vscode.openFolder', Uri.parse(created.workspaceFile), { forceNewWindow });
 		return true;
 	}
 

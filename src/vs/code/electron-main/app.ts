@@ -713,7 +713,12 @@ export class CodeApplication extends Disposable {
 		// portable mode to not interfere with a regularly installed version.
 		const win32AppUserModelId = this.productService.win32AppUserModelId;
 		if (isWindows && win32AppUserModelId) {
-			app.setAppUserModelId(this.environmentMainService.isPortable ? `${win32AppUserModelId}.Portable` : win32AppUserModelId);
+			const appUserModelId = !this.environmentMainService.isBuilt
+				? `${win32AppUserModelId}.Dev`
+				: this.environmentMainService.isPortable
+					? `${win32AppUserModelId}.Portable`
+					: win32AppUserModelId;
+			app.setAppUserModelId(appUserModelId);
 		}
 
 		// Fix native tabs on macOS 10.13
