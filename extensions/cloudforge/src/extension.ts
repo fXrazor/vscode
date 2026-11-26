@@ -1364,7 +1364,9 @@ export function activate(context: ExtensionContext): void {
 		async onExportArtifact(format, suggestedFileName, content, encoding) {
 			const folder = workspace.workspaceFolders?.[0]?.uri;
 			const defaultUri = folder ? Uri.joinPath(folder, suggestedFileName) : Uri.file(suggestedFileName);
-			const filters: Record<string, string[]> = format === 'svg'
+			const filters: Record<string, string[]> = format === 'bundle'
+				? { 'CloudForge Project Bundle': ['zip'] }
+				: format === 'svg'
 				? { 'SVG Diagram': ['svg'] }
 				: format === 'png'
 					? { 'PNG Image': ['png'] }
@@ -1381,7 +1383,7 @@ export function activate(context: ExtensionContext): void {
 				defaultUri,
 				filters,
 				saveLabel: l10n.t('Export'),
-				title: l10n.t('Export CloudForge Architecture'),
+				title: format === 'bundle' ? l10n.t('Export CloudForge Project Bundle') : l10n.t('Export CloudForge Architecture'),
 			});
 			if (!target) {
 				return { ok: false, message: l10n.t('Export cancelled.') };

@@ -16,7 +16,7 @@ export type CanvasGridMode = 'lines' | 'dots' | 'none';
 export type ArchitectureLayer = 'infrastructure' | 'platforms' | 'applications' | 'security' | 'operations';
 export type CanvasFrameColor = 'blue' | 'emerald' | 'amber' | 'violet' | 'slate';
 export type CanvasAnnotationColor = 'amber' | 'blue' | 'emerald' | 'rose';
-export type ExportFormat = 'svg' | 'png' | 'markdown' | 'bicep' | 'arm' | 'cloudformation' | 'k8s';
+export type ExportFormat = 'svg' | 'png' | 'markdown' | 'bicep' | 'arm' | 'cloudformation' | 'k8s' | 'bundle';
 
 export const ARCHITECTURE_LAYERS: readonly ArchitectureLayer[] = [
 	'infrastructure',
@@ -661,6 +661,7 @@ export function isValidExportFileName(value: unknown, format: ExportFormat): val
 		case 'svg': return lower.endsWith('.svg');
 		case 'png': return lower.endsWith('.png');
 		case 'markdown': return lower.endsWith('.md');
+		case 'bundle': return lower.endsWith('.zip');
 		case 'bicep': return lower.endsWith('.bicep');
 		case 'arm': return lower.endsWith('.json');
 		case 'cloudformation':
@@ -1198,6 +1199,7 @@ export function parseWebviewMessage(value: unknown): WebviewToExtensionMessage |
 				&& value.format !== 'arm'
 				&& value.format !== 'cloudformation'
 				&& value.format !== 'k8s'
+				&& value.format !== 'bundle'
 			) {
 				return undefined;
 			}
@@ -1207,7 +1209,7 @@ export function parseWebviewMessage(value: unknown): WebviewToExtensionMessage |
 			if (value.encoding !== 'utf8' && value.encoding !== 'base64') {
 				return undefined;
 			}
-			if (value.format === 'png' && value.encoding !== 'base64') {
+			if ((value.format === 'png' || value.format === 'bundle') && value.encoding !== 'base64') {
 				return undefined;
 			}
 			if (typeof value.content !== 'string' || value.content.length === 0 || value.content.length > MAX_EXPORT_CHARS) {

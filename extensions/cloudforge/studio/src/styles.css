@@ -665,8 +665,9 @@ dialog::backdrop { background: #12152488; backdrop-filter: blur(3px); }
 .shell-modes { display:flex; gap:2px; border-left:1px solid var(--border); padding-left:5px; }
 .shell-modes [aria-pressed=true] { border-color:var(--accent); color:var(--accent); background:var(--selection); }
 .shell-export { position:relative; }.shell-export > summary { list-style:none; display:flex; gap:6px; align-items:center; color:white; background:var(--accent); padding:8px 12px; border-radius:5px; cursor:pointer; }
-.shell-export > div { position:absolute; right:0; top:36px; width:180px; background:var(--surface); border:1px solid var(--border); padding:8px; border-radius:6px; box-shadow:0 5px 20px #0002; }
+.shell-export > div { position:absolute; right:0; top:36px; width:220px; z-index:40; background:var(--surface); border:1px solid var(--border); padding:8px; border-radius:6px; box-shadow:0 5px 20px #0002; }
 .shell-export > div button { width:100%; justify-content:flex-start; }
+.shell-export > div hr { border:0; border-top:1px solid var(--border); margin:6px 2px; }
 .studio .studio-body { height:auto; padding:0; background:var(--canvas); }
 .studio .resource-sidebar { width:var(--library-width); margin:8px 0 8px 8px; padding:0; border:1px solid var(--border); border-radius:10px; box-shadow:0 3px 12px #14233712; background:var(--surface); }
 .studio .inspector { width:var(--inspector-width); margin:0; padding:0 0 16px; background:var(--surface); border-left:1px solid var(--border); }

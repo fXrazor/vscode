@@ -426,7 +426,7 @@ export type HostOutboundMessage =
 	| { readonly type: 'requestEngineValidate'; readonly engine?: 'openTofu' | 'terraform' }
 	| { readonly type: 'requestEnginePlan'; readonly engine?: 'openTofu' | 'terraform' }
 	| { readonly type: 'requestEngineInitOffline'; readonly engine?: 'openTofu' | 'terraform' }
-	| { readonly type: 'exportArtifact'; readonly format: 'svg' | 'png' | 'markdown'; readonly suggestedFileName: string; readonly content: string; readonly encoding: 'utf8' | 'base64' };
+	| { readonly type: 'exportArtifact'; readonly format: 'svg' | 'png' | 'markdown' | 'bundle'; readonly suggestedFileName: string; readonly content: string; readonly encoding: 'utf8' | 'base64' };
 
 interface VsCodeWebviewApi {
 	postMessage(message: unknown): void;

@@ -1,5 +1,9 @@
 # CloudForge Code OSS handoff
 
+## Portable project bundle export/import — Claude — 26 November 2026
+
+Branch `claude/project-thread-8qd376`, not merged. Studio Export menu now has **Project bundle (.zip)** and **Import project bundle…**: one `.cloudforge.zip` with manifest + SHA-256 digests, the canvas model (`architecture.json`), the projected Terraform folder, variables and the SVG diagram. Hosted export uses the existing user Save dialog path (`exportArtifact` format `bundle`); hosted import only loads the model into the canvas, and `.tf` writes still go through Rust Save. Details, files and verification: [Studio continuation](extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md#portable-project-bundle-cloudforgezip--claude-26-november-2026). Technical Graph work on `claude/project-thread-2irlth` is separate; this branch touches `App.tsx` only in two small blocks.
+
 ## Current main integration and agent handoff — 25 November 2026
 
 Dale explicitly authorized finishing this checkpoint and pushing the completed work to **main**. This integration combines main `e9a36e0e73fdf429a0ac1a0cc11474e32ac81e68` with the four Studio commits through `64c01b2b4c31e1f85f459577c0258273f97ca308`. Integration owner: Codex, branch `codex/studio-whiteboard-2`, existing isolated worktree `C:/Users/dalep/.codex/worktrees/infrastructure-studio/CloudForge-Code`. Identify the final integration commit with `git log -1 -- extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md`; successors should start from the latest `origin/main` in their own worktrees.

@@ -39,6 +39,7 @@ import { projectResourceFiles } from './terraformProjection.ts';
 import { DraftSaveDialog } from './DraftSaveDialog.tsx';
 import { SaveAllDialog } from './SaveAllDialog.tsx';
 import { presentationSvg } from './exportPresentation.ts';
+import { buildProjectBundle, bundleConflicts, readProjectBundle, toBase64 } from './projectBundle.ts';
 
 function detectInitialTheme(isHosted: boolean): 'light' | 'dark' {
 	if (!isHosted || typeof document === 'undefined') {
@@ -628,6 +629,62 @@ export function Studio() {
 		})();
 	}, [hostBridge, architecture]);
 
+	const exportProjectBundle = useCallback(() => {
+		void (async () => {
+			try {
+				let svg: string | undefined;
+				try { svg = await presentationSvg(architecture); } catch { svg = undefined; }
+				const bundle = await buildProjectBundle({
+					architecture,
+					svg,
+					source: hostBridge.isHosted
+						? { mode: 'hosted', sourceRevision: hostSnapshot?.sourceRevision, status: hostSnapshot?.status, unsavedChanges: hostBaseline ? history.present !== hostBaseline : history.past.length > 0 }
+						: { mode: 'sample' },
+				});
+				if (hostBridge.isHosted) {
+					hostBridge.post({ type: 'exportArtifact', format: 'bundle', suggestedFileName: bundle.fileName, content: toBase64(bundle.bytes), encoding: 'base64' });
+					return;
+				}
+				const url = URL.createObjectURL(new Blob([bundle.bytes as BlobPart], { type: 'application/zip' }));
+				const anchor = document.createElement('a');
+				anchor.href = url;
+				anchor.download = bundle.fileName;
+				anchor.click();
+				setTimeout(() => URL.revokeObjectURL(url), 1000);
+				setMessage('Exported ' + bundle.fileName + ' · ' + bundle.manifest.files.length + ' files');
+			} catch (err) {
+				setMessage(err instanceof Error ? err.message : 'Project export failed');
+			}
+		})();
+	}, [hostBridge, architecture, hostSnapshot, hostBaseline, history.present, history.past.length]);
+
+	const importProjectBundle = useCallback((file: File) => {
+		void (async () => {
+			try {
+				const bundle = await readProjectBundle(new Uint8Array(await file.arrayBuffer()));
+				const incoming = bundle.architecture;
+				const note = bundle.warnings.length ? ' · ' + bundle.warnings.join(' ') : '';
+				if (!hostBridge.isHosted) {
+					dispatch({ type: 'replace', architecture: incoming });
+					setSelectedIds([]);
+					setMessage('Opened ' + incoming.name + ' · ' + incoming.resources.length + ' resources, ' + incoming.items.length + ' drawings' + note);
+				} else {
+					const clashes = bundleConflicts(architecture, incoming);
+					if (clashes.length) {
+						setMessage('This bundle is already on the canvas (' + clashes.length + ' matching elements). Import it into an empty architecture instead.');
+						return;
+					}
+					dispatch({ type: 'mergeArchitecture', architecture: incoming });
+					setSelectedIds(incoming.resources.map(resource => resource.id));
+					setMessage('Imported ' + incoming.resources.length + ' resources and ' + incoming.items.length + ' drawings from ' + incoming.name + '. Use Save to preview and write the Terraform files.' + note);
+				}
+				requestAnimationFrame(() => requestAnimationFrame(() => { void flow?.fitView({ padding: 0.18 }); }));
+			} catch (err) {
+				setMessage(err instanceof Error ? err.message : 'Unable to import that bundle');
+			}
+		})();
+	}, [hostBridge, architecture, flow]);
+
 	useEffect(() => {
 		function handleKey(event: KeyboardEvent) {
 			if (event.defaultPrevented) { return; }
@@ -748,7 +805,7 @@ export function Studio() {
      onUndo={() => dispatch({ type: 'undo' })} onRedo={() => dispatch({ type: 'redo' })} canRedo={!!history.future.length}
      theme={theme} onTheme={() => setTheme(value => value === 'light' ? 'dark' : 'light')}
 				onRename={name => dispatch({ type: 'renameArchitecture', name })}
-				onTechnical={() => switchMode('technical')} onExport={exportSample}
+				onTechnical={() => switchMode('technical')} onExport={exportSample} onExportBundle={exportProjectBundle} onImportBundle={importProjectBundle}
 				onToggleLibrary={() => setLibraryOpen(value => !value)} onToggleInspector={() => setInspectorOpen(value => !value)}
 				host={hostBridge.isHosted ? {
 					isHosted: true,
