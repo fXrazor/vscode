@@ -1,5 +1,9 @@
 # Studio continuation checkpoint — 25 November 2026
 
+## Guided variable collections — local Codex checkpoint — 26 November 2026
+
+Continue from `codex/guided-variable-values`, source **`28af238269e42fd9032f74b358ad931ec8677627`**, in `C:/Users/dalep/.codex/worktrees/guided-variable-values/CloudForge-Code`, based on merged main `e14d0b22b1a`. [Scope, design, checks and continuation](research/guided-variable-values.md). Non-sensitive list/map variable values now have entry fields and JSON within the existing configurator; Save/Undo, masked sensitive values and explicit null/empty/unset are preserved. **39/39 browser-preview checks**, **229/229 Studio tests**, TypeScript and preview build passed; screenshot evidence includes both themes and narrow layout. This does not replace Claude's Miro-style resource list/reference controls or any earlier provider/Technical Graph backlog. Next: review against refreshed main when integration is requested, then installed Workbench variable/save proof. This branch is local and unmerged; no installer or installed app was changed.
+
 ## Technical Graph service-edge provenance & module drill-down — 26 November 2026
 
 - **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `a10ed3fb214`, owner Antigravity.
