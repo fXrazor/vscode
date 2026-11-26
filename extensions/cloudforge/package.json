@@ -66,6 +66,54 @@
 		},
 		"commands": [
 			{
+				"command": "cloudforge.providers.refresh",
+				"title": "%command.providers.refresh%",
+				"category": "CloudForge",
+				"icon": "$(refresh)"
+			},
+			{
+				"command": "cloudforge.providers.download",
+				"title": "%command.providers.download%",
+				"category": "CloudForge",
+				"icon": "$(cloud-download)"
+			},
+			{
+				"command": "cloudforge.providers.extractSchema",
+				"title": "%command.providers.extractSchema%",
+				"category": "CloudForge",
+				"icon": "$(symbol-structure)"
+			},
+			{
+				"command": "cloudforge.providers.remove",
+				"title": "%command.providers.remove%",
+				"category": "CloudForge",
+				"icon": "$(trash)"
+			},
+			{
+				"command": "cloudforge.providers.openRegistry",
+				"title": "%command.providers.openRegistry%",
+				"category": "CloudForge",
+				"icon": "$(link-external)"
+			},
+			{
+				"command": "cloudforge.providers.verify",
+				"title": "%command.providers.verify%",
+				"category": "CloudForge",
+				"icon": "$(verified)"
+			},
+			{
+				"command": "cloudforge.providers.initOffline",
+				"title": "%command.providers.initOffline%",
+				"category": "CloudForge",
+				"icon": "$(play)"
+			},
+			{
+				"command": "cloudforge.providers.importSchemaFile",
+				"title": "%command.providers.importSchemaFile%",
+				"category": "CloudForge",
+				"icon": "$(file-add)"
+			},
+			{
 				"command": "cloudforge.showProofStatus",
 				"title": "%command.showProofStatus%",
 				"category": "%displayName%"
@@ -405,6 +453,12 @@
 					"name": "%view.resources%"
 				}
 			],
+			"cloudforge-providers": [
+				{
+					"id": "cloudforge.providers",
+					"name": "%view.providers%"
+				}
+			],
 			"cloudforge": [
 				{
 					"id": "cloudforge.status",
@@ -533,6 +587,18 @@
 				{
 					"command": "cloudforge.resetIgnoredImports",
 					"when": "cloudforge.projectOpen"
+				},
+				{
+					"command": "cloudforge.providers.extractSchema",
+					"when": "false"
+				},
+				{
+					"command": "cloudforge.providers.remove",
+					"when": "false"
+				},
+				{
+					"command": "cloudforge.providers.openRegistry",
+					"when": "false"
 				}
 			],
 			"view/title": [
@@ -635,6 +701,31 @@
 					"command": "cloudforge.linkCloudConnection",
 					"when": "view == cloudforge.connections",
 					"group": "navigation@1"
+				},
+				{
+					"command": "cloudforge.providers.download",
+					"when": "view == cloudforge.providers",
+					"group": "navigation@1"
+				},
+				{
+					"command": "cloudforge.providers.refresh",
+					"when": "view == cloudforge.providers",
+					"group": "navigation@2"
+				},
+				{
+					"command": "cloudforge.providers.verify",
+					"when": "view == cloudforge.providers",
+					"group": "2_mirror@1"
+				},
+				{
+					"command": "cloudforge.providers.importSchemaFile",
+					"when": "view == cloudforge.providers",
+					"group": "2_mirror@2"
+				},
+				{
+					"command": "cloudforge.providers.initOffline",
+					"when": "view == cloudforge.providers",
+					"group": "3_engine@1"
 				}
 			],
 			"view/item/context": [
@@ -722,6 +813,36 @@
 					"command": "cloudforge.explainResource",
 					"when": "view =~ /^cloudforge\\.(panel\\.)?resources$/ && viewItem == cloudForgeResource",
 					"group": "inline@1"
+				},
+				{
+					"command": "cloudforge.providers.extractSchema",
+					"when": "view == cloudforge.providers && viewItem =~ /\\.extractSchema/",
+					"group": "inline@1"
+				},
+				{
+					"command": "cloudforge.providers.download",
+					"when": "view == cloudforge.providers && viewItem =~ /^providerProject\\.download/",
+					"group": "inline@1"
+				},
+				{
+					"command": "cloudforge.providers.download",
+					"when": "view == cloudforge.providers && viewItem =~ /^providerInstalled/",
+					"group": "inline@1"
+				},
+				{
+					"command": "cloudforge.providers.openRegistry",
+					"when": "view == cloudforge.providers && viewItem =~ /\\.registry/",
+					"group": "inline@9"
+				},
+				{
+					"command": "cloudforge.providers.remove",
+					"when": "view == cloudforge.providers && viewItem =~ /^providerVersion\\.removable/",
+					"group": "inline@5"
+				},
+				{
+					"command": "cloudforge.providers.initOffline",
+					"when": "view == cloudforge.providers && viewItem == providersSectionProject",
+					"group": "inline@1"
 				}
 			],
 			"editor/context": [
@@ -743,6 +864,11 @@
 					"id": "cloudforge",
 					"title": "%viewContainer.cloudforge%",
 					"icon": "resources/cloudforge-activity.svg"
+				},
+				{
+					"id": "cloudforge-providers",
+					"title": "%viewContainer.providers%",
+					"icon": "resources/providers-activity.svg"
 				}
 			]
 		}

@@ -9,6 +9,7 @@ import {
 	ConfigurationTarget,
 	Diagnostic,
 	DiagnosticSeverity,
+	env,
 	EventEmitter,
 	l10n,
 	languages,
@@ -92,6 +93,8 @@ import {
 	type OfflineMirrorHost
 } from './providerMirror/manager';
 import { formatMirrorBytes, formatMirrorPackageKey, parseMirrorInventory } from './providerMirror/model';
+import { buildProvidersModel, LOCAL_PLATFORM, shortProviderName } from './providers/model';
+import { ProvidersViewProvider, registryPageUrl, type ProvidersNode } from './providers/providersView';
 
 interface WorkspaceArchitecture {
 	readonly architectureId: string;
@@ -2161,20 +2164,80 @@ export function activate(context: ExtensionContext): void {
 			);
 		}
 	}));
-	context.subscriptions.push(commands.registerCommand('cloudforge.extractMirrorSchema', async () => {
+	const providersView = new ProvidersViewProvider(async () => {
+		const listed = await callService<unknown>('listMirrorPackages', {});
+		if (!listed.ok) {
+			return undefined;
+		}
+		const inventory = parseMirrorInventory(listed.value);
+		cachedCatalogueSnapshots = undefined;
+		const snapshots = await loadCatalogueSnapshots();
+		const graph = provider.getGraph();
+		const report = graph ? await inspectArchitectureDependencies(graph.workspaceId, graph.architectureId, graph.sourceRevision) : undefined;
+		return buildProvidersModel({ report, packages: inventory.ok ? inventory.value.packages : [], snapshots });
+	});
+	const providersTree = window.createTreeView('cloudforge.providers', { treeDataProvider: providersView, showCollapseAll: true });
+	context.subscriptions.push(
+		providersTree,
+		providersView.onDidChangeModel(model => {
+			providersTree.badge = model?.attentionCount
+				? { value: model.attentionCount, tooltip: l10n.t('{0} providers need attention in this architecture', model.attentionCount) }
+				: undefined;
+		}),
+		provider.onDidChangeTreeData(() => { void providersView.refresh(); }),
+		commands.registerCommand('cloudforge.providers.refresh', () => providersView.refresh()),
+		commands.registerCommand('cloudforge.providers.extractSchema', async (node?: ProvidersNode) => {
+			const target = node?.type === 'project' || node?.type === 'version' ? node.row : undefined;
+			await commands.executeCommand('cloudforge.extractMirrorSchema', target?.address && target.version ? { address: target.address, version: target.version } : undefined);
+		}),
+		commands.registerCommand('cloudforge.providers.download', async (node?: ProvidersNode) => {
+			const target = node?.type === 'project' || node?.type === 'version' ? node.row : node?.type === 'provider' ? { address: node.row.address, version: node.row.versions[0]?.version } : undefined;
+			await commands.executeCommand('cloudforge.importMirrorPackage', target?.address ? { address: target.address, version: target.version, platform: LOCAL_PLATFORM } : undefined);
+		}),
+		commands.registerCommand('cloudforge.providers.remove', async (node?: ProvidersNode) => {
+			if (node?.type !== 'version' || node.row.schemaOnly) {
+				return;
+			}
+			const row = node.row;
+			const platforms = row.platforms.length > 1
+				? (await window.showQuickPick(row.platforms, { title: l10n.t('Remove {0} {1}', shortProviderName(row.address), row.version), placeHolder: l10n.t('Choose the platform package to remove') }))
+				: row.platforms[0];
+			if (platforms) {
+				await confirmAndEvictMirrorPackage(offlineMirrorHost, { address: row.address, version: row.version, platform: platforms });
+			}
+		}),
+		commands.registerCommand('cloudforge.providers.openRegistry', async (node?: ProvidersNode) => {
+			const target = node?.type === 'project' || node?.type === 'version' ? node.row : node?.type === 'provider' ? node.row : undefined;
+			const url = target?.address ? registryPageUrl(target.address, 'version' in target ? target.version : undefined) : undefined;
+			if (url) {
+				await env.openExternal(Uri.parse(url));
+			}
+		}),
+		commands.registerCommand('cloudforge.providers.verify', () => commands.executeCommand('cloudforge.verifyMirrorIntegrity')),
+		commands.registerCommand('cloudforge.providers.initOffline', () => commands.executeCommand('cloudforge.initArchitectureOffline')),
+		commands.registerCommand('cloudforge.providers.importSchemaFile', async () => {
+			await commands.executeCommand('cloudforge.importProviderSchema');
+			void providersView.refresh();
+		}),
+	);
+	context.subscriptions.push(commands.registerCommand('cloudforge.extractMirrorSchema', async (preset?: { readonly address?: unknown; readonly version?: unknown }) => {
 		const listed = await callService<unknown>('listMirrorPackages', {});
 		if (!listed.ok) {
 			showServiceError(listed.error);
 			return;
 		}
-		const winPackages = parseMirrorPackages(listed.value).filter(pkg => pkg.key.platform === 'windows_amd64');
+		const allWinPackages = parseMirrorPackages(listed.value).filter(pkg => pkg.key.platform === 'windows_amd64');
+		const presetMatch = typeof preset?.address === 'string' && typeof preset.version === 'string'
+			? allWinPackages.filter(pkg => pkg.key.address.toLowerCase() === (preset.address as string).toLowerCase() && pkg.key.version === preset.version)
+			: [];
+		const winPackages = presetMatch.length ? presetMatch : allWinPackages;
 		if (winPackages.length === 0) {
 			void window.showInformationMessage(
 				l10n.t('No verified windows_amd64 provider packages were found in the local CloudForge mirror.')
 			);
 			return;
 		}
-		const picked = await window.showQuickPick(
+		const picked = winPackages.length === 1 && presetMatch.length ? { pkg: winPackages[0] } : await window.showQuickPick(
 			winPackages.map(pkg => ({
 				label: `${pkg.key.address} ${pkg.key.version}`,
 				description: pkg.publisher ? `${pkg.publisher} · ${pkg.sha256.slice(0, 8)}` : pkg.sha256.slice(0, 8),
@@ -2210,16 +2273,21 @@ export function activate(context: ExtensionContext): void {
 		if (graph) {
 			canvas.updateIfOpen(toCanvasSnapshot(graph, currentArchitectureName));
 		}
+		void providersView.refresh();
 		void window.showInformationMessage(
 			l10n.t('Extracted {0} {1} into the CloudForge provider catalogue from the local offline mirror.', picked.pkg.key.address, picked.pkg.key.version)
 		);
 	}));
-	context.subscriptions.push(commands.registerCommand('cloudforge.importMirrorPackage', async () => {
+	context.subscriptions.push(commands.registerCommand('cloudforge.importMirrorPackage', async (preset?: { readonly address?: unknown; readonly version?: unknown; readonly platform?: unknown }) => {
 		const graph = provider.getGraph();
 		let suggestedAddress = 'registry.terraform.io/hashicorp/azurerm';
 		let suggestedVersion = '';
 		let suggestedPlatform = 'windows_amd64';
-		if (graph) {
+		if (typeof preset?.address === 'string') {
+			suggestedAddress = preset.address;
+			suggestedVersion = typeof preset.version === 'string' ? preset.version : '';
+			suggestedPlatform = typeof preset.platform === 'string' ? preset.platform : suggestedPlatform;
+		} else if (graph) {
 			const readiness = await checkArchitectureOfflineMirrorReadiness(graph.workspaceId, graph.architectureId, graph.sourceRevision);
 			const firstMissing = readiness?.missing[0];
 			if (firstMissing) {
@@ -2297,6 +2365,7 @@ export function activate(context: ExtensionContext): void {
 		if (currentGraph) {
 			canvas.updateIfOpen(toCanvasSnapshot(currentGraph, currentArchitectureName));
 		}
+		void providersView.refresh();
 		void window.showInformationMessage(
 			l10n.t('Verified and imported {0} {1} ({2}) into the local offline provider mirror.', address.trim(), version.trim(), platformPick.label)
 		);
@@ -2316,13 +2385,14 @@ export function activate(context: ExtensionContext): void {
 				: undefined;
 		},
 		onMirrorMutated: () => {
+			void providersView.refresh();
 			const currentGraph = provider.getGraph();
 			if (currentGraph) {
 				canvas.updateIfOpen(toCanvasSnapshot(currentGraph, currentArchitectureName));
 			}
 		},
-		runExtractSchema: async () => {
-			await commands.executeCommand('cloudforge.extractMirrorSchema');
+		runExtractSchema: async (key) => {
+			await commands.executeCommand('cloudforge.extractMirrorSchema', key);
 		},
 		runInitOffline: async () => {
 			await commands.executeCommand('cloudforge.initArchitectureOffline');

@@ -63,5 +63,15 @@
 	"command.deleteCloudKey": "Delete Stored Key",
 	"command.removeCloudConnection": "Unlink Cloud Account",
 	"command.checkCloudSignIn": "Check Cloud Sign-In",
-	"command.revealStateResource": "Open Resource Source"
+	"command.revealStateResource": "Open Resource Source",
+	"viewContainer.providers": "Providers",
+	"view.providers": "Providers",
+	"command.providers.refresh": "Refresh Providers",
+	"command.providers.download": "Download Provider Version…",
+	"command.providers.extractSchema": "Extract Schema",
+	"command.providers.remove": "Remove Downloaded Version",
+	"command.providers.openRegistry": "Show in Registry",
+	"command.providers.verify": "Verify Downloaded Providers",
+	"command.providers.initOffline": "Initialize Architecture Offline",
+	"command.providers.importSchemaFile": "Import Schema Snapshot File…"
 }
