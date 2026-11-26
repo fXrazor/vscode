@@ -193,16 +193,19 @@ export interface TechnicalGraphProjectionInput {
 
 export type GraphRouteStyle = 'curved' | 'orthogonal' | 'straight';
 export type GraphDensityMode = 'compact' | 'standard' | 'detailed';
+export type TechnicalGraphLens = 'all' | 'dependencies' | 'topology' | 'runtime' | 'observability';
 
 /**
  * Presentation-only state for the Technical Graph viewer.
  * Stored strictly apart from `Architecture`, `History`, and `Resource.positions`.
  */
 export interface TechnicalGraphPresentationState {
+	readonly lens: TechnicalGraphLens;
 	readonly routeStyle: GraphRouteStyle;
 	readonly density: GraphDensityMode;
 	readonly pins: Readonly<Record<string, Position>>;
 	readonly collapsedGroupIds: readonly string[];
+	readonly expandedNodeIds: readonly string[];
 	readonly hiddenCategories: readonly TechnicalGraphEdgeCategory[];
 	readonly selectedNodeId: string | null;
 	readonly tracedNodeId: string | null;
@@ -900,14 +903,34 @@ export function projectTechnicalGraph(input: TechnicalGraphProjectionInput): Tec
 
 export function createTechnicalGraphPresentationState(): TechnicalGraphPresentationState {
 	return deepFreeze({
+		lens: 'all' as const,
 		routeStyle: 'curved' as const,
 		density: 'standard' as const,
 		pins: {},
 		collapsedGroupIds: [],
+		expandedNodeIds: [],
 		hiddenCategories: [],
 		selectedNodeId: null,
 		tracedNodeId: null,
 	});
+}
+
+export function setGraphLens(
+	state: TechnicalGraphPresentationState,
+	lens: TechnicalGraphLens
+): TechnicalGraphPresentationState {
+	return state.lens === lens ? state : deepFreeze({ ...state, lens });
+}
+
+export function toggleGraphExpandedNode(
+	state: TechnicalGraphPresentationState,
+	nodeId: string
+): TechnicalGraphPresentationState {
+	const exists = state.expandedNodeIds.includes(nodeId);
+	const expandedNodeIds = exists
+		? state.expandedNodeIds.filter(id => id !== nodeId)
+		: [...state.expandedNodeIds, nodeId];
+	return deepFreeze({ ...state, expandedNodeIds });
 }
 
 export function setGraphNodePin(
@@ -996,6 +1019,7 @@ export function pruneGraphPresentationState(
 		...state,
 		pins,
 		collapsedGroupIds: state.collapsedGroupIds.filter(id => validNodeIds.has(id)),
+		expandedNodeIds: state.expandedNodeIds.filter(id => validNodeIds.has(id)),
 		selectedNodeId: state.selectedNodeId && validNodeIds.has(state.selectedNodeId) ? state.selectedNodeId : null,
 		tracedNodeId: state.tracedNodeId && validNodeIds.has(state.tracedNodeId) ? state.tracedNodeId : null,
 	});

@@ -1,5 +1,21 @@
 # CloudForge Code OSS handoff
 
+## Studio Technical Graph Rebuild — Phase 2 Background Logic & Routing — 26 November 2026
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review` (pushed to `origin/main` atop Phase 1 `e5fc572a702`), owner Antigravity.
+- **Scope (conflict-free pure background logic — zero edits to `App.tsx`, `DesignCanvas.tsx`, `ResourceNode.tsx`, `RelationshipContext.tsx`, `model.ts`, `serviceAdapter.ts`, `liveSchema.ts`, `CodePanel.tsx`, CSS, Rust, or installer scripts):**
+  - Extended [technicalGraphContract.ts](extensions/cloudforge/studio/src/technicalGraphContract.ts) with `TechnicalGraphLens`, `lens`, and `expandedNodeIds` in `TechnicalGraphPresentationState`.
+  - Added [technicalGraphWorkflows.ts](extensions/cloudforge/studio/src/technicalGraphWorkflows.ts) + [technicalGraphWorkflows.test.ts](extensions/cloudforge/studio/src/technicalGraphWorkflows.test.ts): focused lenses (`all`, `dependencies`, `topology`, `runtime`, `observability`) with explicit arrow semantics, upstream/downstream neighborhood & multi-hop shortest-path tracing with per-hop provenance, contextual node inspection & deterministic troubleshooting findings (cycles, CLI errors, stale overlays, missing expected parents/attachments, unverified unknowns), and category-preserving high-degree edge aggregation.
+  - Added [technicalGraphRouting.ts](extensions/cloudforge/studio/src/technicalGraphRouting.ts) + [technicalGraphRouting.test.ts](extensions/cloudforge/studio/src/technicalGraphRouting.test.ts): semantic zoom bands (`overview | standard | detailed`), bounded attachment-row & pill geometry tested across 1/2/6/50/200 attachments, world-space port anchors with overflow fallbacks, deterministic `curved` / `orthogonal` / `straight` SVG route computation, pairwise crossing counter, and route-style comparison benchmark helper.
+  - Updated `extensions/cloudforge/studio/package.json` `"test"` and [STUDIO-CONTINUATION-2026-11-25.md](extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md).
+- **Fresh verification (26 November 2026):**
+  - Studio `check` (`tsc --noEmit`): **PASS**
+  - Studio `test`: **173/173 PASS** (0 skipped; +7 Phase 2 tests)
+  - Studio `build` + `node extensions/cloudforge/esbuild.webview.mts`: **PASS**
+  - `node build/oxlint.ts` + `node --experimental-strip-types build/hygiene.ts`: **PASS** (0 warnings/errors)
+  - Extension Node tests (`CLOUDFORGE_REPO=Z:/CloudForge`): **97/97 PASS** (0 skipped)
+- **Next action:** once Claude's Graph View UI improvements merge to `main`, wire the Phase 1–2 contract, lens/trace/inspector, and port-routing modules into the UI and proceed to **Phase 3** (dedicated `TechnicalGraph` extraction & renderer benchmark).
+
 ## Studio Technical Graph Rebuild — Phase 1 — 26 November 2026
 
 - **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review` (pushed to `origin/main` from base `cf455878505`), owner Antigravity.

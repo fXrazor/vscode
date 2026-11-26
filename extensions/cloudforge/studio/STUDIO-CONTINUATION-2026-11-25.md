@@ -2,6 +2,28 @@
 
 ## Current handoff — read first
 
+### Technical Graph Rebuild — Phase 2 background workflow, tracing & routing engine (26 November 2026)
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review` (pushed to `origin/main` atop Phase 1 `e5fc572a702`), integration owner Antigravity. Resolve the commit with `git log -1 -- extensions/cloudforge/studio/src/technicalGraphWorkflows.ts`.
+- **Conflict-free scope (zero UI / shared authoring edits):** intentionally kept out of `App.tsx`, `DesignCanvas.tsx`, `ResourceNode.tsx`, `RelationshipContext.tsx`, `model.ts`, `serviceAdapter.ts`, `liveSchema.ts`, `CodePanel.tsx`, and CSS while parallel Claude/Codex worktrees evolve the Graph View UI and provider forms.
+  - Extended `extensions/cloudforge/studio/src/technicalGraphContract.ts` (`TechnicalGraphLens`, `lens`, `expandedNodeIds`, `setGraphLens`, `toggleGraphExpandedNode`, and `pruneGraphPresentationState`).
+  - Added `extensions/cloudforge/studio/src/technicalGraphWorkflows.ts` + `technicalGraphWorkflows.test.ts` (4 tests).
+  - Added `extensions/cloudforge/studio/src/technicalGraphRouting.ts` + `technicalGraphRouting.test.ts` (3 tests).
+  - Updated `extensions/cloudforge/studio/package.json` `"test"`, this handoff, and root `HANDOFF.md`.
+- **What Phase 2 background logic delivers:**
+  - **Focused lenses (`TECHNICAL_GRAPH_LENSES`, `filterTechnicalGraphByLens`):** `all`, `dependencies` (prerequisite → consumer, ordering-only), `topology` (ownership + attachment), `runtime` (configured runtime intent, explicitly not observed traffic), and `observability` (telemetry collection → destination), each with explicit arrow semantics and boundary notes.
+  - **Neighborhood & multi-hop path tracing (`traceNodeNeighborhood`, `tracePathsBetweenNodes`):** computes direct/transitive upstream prerequisites, direct/transitive downstream configured dependents, hop distances, cycle members, `selected | upstream | downstream | cycle | dimmed` focus roles, and bounded shortest-first paths with per-hop field/expression provenance.
+  - **Contextual node inspector & troubleshooting findings (`inspectTechnicalGraphNode`, `collectGraphTroubleshootingFindings`):** deterministic, evidence-scoped findings (`ordering-cycle`, `validation-error`, `validation-warning`, `stale-overlay`, `missing-expected-parent`, `missing-expected-attachment`, `unverified-evidence`) with `sourceRevision`, `sourceTarget`, and actionable `nextCheck`; separates configured dependent impact from revision-checked plan action impact; honestly reports unavailable source locations.
+  - **High-degree edge aggregation (`aggregateHighDegreeEdges`):** collapses dense fans above threshold per `(node, direction, category)` into inspectable bundles (e.g., `+12 attachments`) without merging distinct categories, while automatically expanding edges touching focused/expanded nodes.
+  - **Semantic zoom, bounded attachment rows & route-style comparison (`resolveSemanticZoomBand`, `computeNodeAttachmentLayout`, `computeGraphPortAnchors`, `computeTechnicalEdgeRoute`, `countRouteCrossings`, `compareTechnicalRouteStyles`, `buildAttachmentScaleArchitecture`):** collapses rows to category summary pills at overview zoom (`< 0.55`), bounds visible rows (`4/6/8` by density, max `12` expanded) across 1/2/6/50/200-attachment scale fixtures with exact row anchor offsets and overflow fallback anchors, computes deterministic SVG paths for `curved`, `orthogonal` (with rounded corners & backtrack detours), and `straight`, and counts pairwise non-endpoint crossings for Phase 3 renderer benchmarks.
+- **Fresh verification (26 November 2026):**
+  - `corepack pnpm --dir extensions/cloudforge/studio run check` (`tsc --noEmit`): **PASS**
+  - `corepack pnpm --dir extensions/cloudforge/studio run test`: **173/173 PASS** (0 skipped; +7 Phase 2 tests covering 1/2/6/50/200 attachment scaling, lenses, tracing, troubleshooting, aggregation, port anchors, and route comparison)
+  - `corepack pnpm --dir extensions/cloudforge/studio run build` & `node extensions/cloudforge/esbuild.webview.mts`: **PASS**
+  - `node build/oxlint.ts` & `node --experimental-strip-types build/hygiene.ts`: **PASS** (0 warnings/errors)
+  - Extension Node tests (`CLOUDFORGE_REPO=Z:/CloudForge`): **97/97 PASS** (0 skipped)
+- **Exact next action:** once Claude's Graph View UI improvements merge to `main`, connect these pure Phase 1–2 modules (`projectTechnicalGraph`, `filterTechnicalGraphByLens`, `traceNodeNeighborhood`, `inspectTechnicalGraphNode`, `computeNodeAttachmentLayout`, `computeTechnicalEdgeRoute`) into the contextual details pane and begin **Phase 3** (dedicated `TechnicalGraph` renderer extraction + D3/Canvas vs React Flow/ELK benchmark on identical fixtures).
+
 ### Technical Graph Rebuild — Phase 1 completed (26 November 2026)
 
 - **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review` (pushed to `origin/main` from base `cf455878505`), integration owner Antigravity. Resolve the commit with `git log -1 -- extensions/cloudforge/studio/src/technicalGraphContract.ts`.
