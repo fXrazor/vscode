@@ -8,6 +8,15 @@ Worktree: `C:/Users/dalep/.codex/worktrees/infrastructure-studio/CloudForge-Code
 
 Dale approved continuing the proposed point-endpoint pass in this chat. No further approval is needed for that plan. Work remains within Studio and handoff documentation; one architecture and one semantic undo history, independent theme/viewport/tool preferences, drawings excluded from Terraform and Rust-owned guarded I/O remain binding.
 
+### Technical Graph pass 5: Network design and options (Claude), 26 November 2026
+
+- Network nodes are sized by configured connections (in + out, membership excluded): radius = 22 × (1 + sizeBy% × √(degree / max degree)). "Size by connections" goes Off, 30–200 %; default 60 %.
+- View menu shows Network options when the Network layout is on: Size by connections, Link length and Spacing (percent of default, clamped 40–300), Clusters (scope / layer / none), Labels (auto / all / hover only) and Link shape (curved / straight). They persist as `viewState.graph.network`, sanitised on the host by `sanitizeNetworkOptions` (protocol.ts) and in the webview by `parseNetworkOptions` (technicalGraphForce.ts).
+- Design: soft dashed cluster hulls (`hullPath`) labelled with the scope or layer; groups repel each other more so clusters separate; the settled layout is turned so its long axis follows the viewport (`orientForce`); curved arcs; hubs get a heavier ring and bigger label; focused links animate (off under reduced motion); labels in auto mode show for hubs, hover, search hits, small graphs or when zoomed in.
+- Changing the cluster mode re-runs the layout from scratch; other option changes keep current positions.
+- Still presentation-only: nothing writes positions, Terraform, Modified or Undo. Tests: 180/180 Studio, verify 56/56 in Chromium.
+- Next ideas: per-category link width, a search "fly to" in Network, large-graph perf (repulsion is O(n²); switch to Barnes–Hut past ~800 nodes).
+
 ### Technical Graph pass 4: Network view and tidy tree (Claude), 26 November 2026
 
 Dale asked for a final graph like [d3 force-directed graph](https://observablehq.com/@d3/force-directed-graph/2), with resource icons as the nodes, and a better tree.

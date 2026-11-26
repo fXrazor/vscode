@@ -24,7 +24,7 @@ import { graphEditAllowed, type GraphPresentation, type GraphPresentationAction,
 import { relationshipNames } from './infrastructureRelationships.ts';
 import { graphIcons, technicalGraphSvg } from './technicalGraphExport.ts';
 import { bundleLayout } from './technicalGraphBundle.ts';
-import { createForceSimulation, forceSettings, settleForce, tickForce, type ForceSimulation } from './technicalGraphForce.ts';
+import { createForceSimulation, forceSettings, hullPath, nodeRadii, orientForce, settleForce, tickForce, type ForceNode, type ForceSimulation, type NetworkOptions } from './technicalGraphForce.ts';
 import { resourceIntelligence } from './providerKnowledge.ts';
 
 type CardData = { treeToggle?: { collapsed: boolean; count: number }; onToggleTree?: (id: string) => void; node: GraphNode; lens: GraphPresentation['lens']; /* state 'soft' = hover context */ overlay?: NodeOverlay; badge?: { kind: 'plan' | 'order' | 'impact'; text: string; tone: string; title: string }; match: boolean; compact: boolean; expanded: boolean; state: 'normal' | 'focus' | 'trace' | 'dim' | 'soft'; pinned: boolean; tracedPorts: ReadonlySet<string>; onRename: (id: string, label: string) => void; onEdit: (id: string) => void; onToggleRows: (id: string) => void; onUnpin: (id: string) => void };
@@ -365,7 +365,7 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme
 	const pinCount = Object.keys(presentation.pins).length;
 	const categoriesShown = categoryOrder.filter(category => visibleEdges.some(edge => edge.category === category));
 	return <main ref={bounds} tabIndex={0} className={'canvas technical-graph theme-' + theme + (compact ? ' is-compact-view' : '')} data-read-only="true" data-graph="technical" aria-label="Technical graph" onKeyDownCapture={handleKeys}>
-		{presentation.layout === 'force' ? <ForceGraph snapshot={snapshot} edges={visibleEdges} membership={membershipEdges} visible={focusSet} selectedId={selectedId} query={query} overlays={overlays} onSelect={id => { setSelectedEdgeId(''); onSelect(id); }} onOpenDetails={onOpenDetails} reducedMotion={reducedMotion} /> :
+		{presentation.layout === 'force' ? <ForceGraph snapshot={snapshot} edges={visibleEdges} membership={membershipEdges} visible={focusSet} selectedId={selectedId} query={query} overlays={overlays} network={presentation.network} onSelect={id => { setSelectedEdgeId(''); onSelect(id); }} onOpenDetails={onOpenDetails} reducedMotion={reducedMotion} /> :
 		bundled ? <BundledGraph snapshot={snapshot} edges={visibleEdges} visible={focusSet} selectedId={selectedId} query={query} onSelect={id => { setSelectedEdgeId(''); onSelect(id); }} onOpenDetails={onOpenDetails} reducedMotion={reducedMotion} /> :
 		<ReactFlow<GraphFlowNode, GraphFlowEdge> nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes}
 			onInit={instance => { setFlow(instance); onInit?.(instance); setZoom(instance.getZoom()); }}
@@ -399,6 +399,7 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme
 				<option value="none">No overlay</option><option value="plan">Plan actions{plan ? '' : ' (no plan)'}</option><option value="order">Apply order</option><option value="impact">Dependents</option></select></label>
 			<details className="tg-view-menu"><summary className="tg-text-button" aria-label="View options"><SlidersHorizontal size={13} />View</summary>
 				<div className="tg-view-panel">
+					{presentation.layout === 'force' ? <NetworkControls value={presentation.network} onChange={patch => onPresentation({ type: 'set', patch: { network: { ...presentation.network, ...patch } } })} /> : <>
 					<label>Routes<select aria-label="Route style" value={presentation.route} onChange={event => onPresentation({ type: 'set', patch: { route: event.target.value as RouteStyle } })}>
 				<option value="curved">Curved</option><option value="orthogonal">Orthogonal</option><option value="straight">Straight</option></select></label>
 					<label>Spacing<select aria-label="Graph spacing" value={String(presentation.spacing)} onChange={event => onPresentation({ type: 'set', patch: { spacing: event.target.value === 'auto' ? 'auto' : Number(event.target.value) } })}>
@@ -407,6 +408,7 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme
 						{[100, 125, 150, 200, 250, 300].map(value => <option key={value} value={value}>{value}%</option>)}</select></label>
 					<label>Detail<select aria-label="Card detail" value={presentation.density} onChange={event => onPresentation({ type: 'set', patch: { density: event.target.value as GraphPresentation['density'] } })}>
 				<option value="auto">Auto</option><option value="detailed">Detailed</option><option value="compact">Compact</option></select></label>
+					</>}
 					<button className="tg-text-button" aria-pressed={presentation.showMembership} title="Show resource group membership as lines (otherwise shown on each card)" onClick={() => onPresentation({ type: 'set', patch: { showMembership: !presentation.showMembership } })}>Membership</button>
 					<button className="tg-text-button" aria-pressed={presentation.showInputs} disabled={!snapshot.inputs.length} title={snapshot.inputs.length ? 'Show variables, locals and data sources as ghost cards above the graph' : 'No var., local. or data. references in this draft'} onClick={() => onPresentation({ type: 'set', patch: { showInputs: !presentation.showInputs } })}>Inputs{snapshot.inputs.length ? ' (' + snapshot.inputs.length + ')' : ''}</button>
 					{onExportImage && <div className="tg-export-row"><span>Save image</span><button className="tg-text-button" disabled={exporting} onClick={() => void exportImage('svg')}>SVG</button><button className="tg-text-button" disabled={exporting} onClick={() => void exportImage('png')}>PNG</button></div>}
@@ -540,30 +542,36 @@ function LaneRuler({ lanes }: { lanes: readonly GraphLane[] }) {
  * layer-coloured ring. Dragging moves a node only inside this view and reheats the simulation; it
  * never pins, moves or edits the project. Hover or select lights up uses and used-by.
  */
-function ForceGraph({ snapshot, edges, membership, visible, selectedId, query, overlays, onSelect, onOpenDetails, reducedMotion }: { snapshot: TechnicalGraphSnapshot; edges: readonly GraphEdge[]; membership: readonly GraphEdge[]; visible?: ReadonlySet<string>; selectedId: string; query: string; overlays: { byNode: Record<string, NodeOverlay> }; onSelect: (id: string) => void; onOpenDetails: (id: string) => void; reducedMotion: boolean }) {
+function ForceGraph({ snapshot, edges, membership, visible, selectedId, query, overlays, network, onSelect, onOpenDetails, reducedMotion }: { snapshot: TechnicalGraphSnapshot; edges: readonly GraphEdge[]; membership: readonly GraphEdge[]; visible?: ReadonlySet<string>; selectedId: string; query: string; overlays: { byNode: Record<string, NodeOverlay> }; network: NetworkOptions; onSelect: (id: string) => void; onOpenDetails: (id: string) => void; reducedMotion: boolean }) {
 	const nodes = useMemo(() => snapshot.nodes.filter(node => !visible || visible.has(node.id)), [snapshot.nodes, visible]);
 	const sim = useRef<ForceSimulation | null>(null);
 	const [, setFrame] = useState(0);
 	const [view, setView] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
 	const [hover, setHover] = useState('');
 	const svg = useRef<SVGSVGElement>(null);
+	const host = useRef<HTMLDivElement>(null);
+	const lastClusters = useRef(network.clusters);
 	const running = useRef(false);
 	const fit = useCallback(() => {
 		const current = sim.current; if (!current?.nodes.length) { return; }
-		const xs = current.nodes.map(node => node.x); const ys = current.nodes.map(node => node.y); const pad = 90;
-		const box = { x: Math.min(...xs) - pad, y: Math.min(...ys) - pad, w: Math.max(...xs) - Math.min(...xs) + pad * 2, h: Math.max(...ys) - Math.min(...ys) + pad * 2 + 20 };
-		const element = svg.current; const aspect = element ? element.clientWidth / Math.max(1, element.clientHeight) : 1.6;
+		const xs = current.nodes.map(node => node.x); const ys = current.nodes.map(node => node.y); const big = Math.max(...current.nodes.map(node => node.r)); const pad = 70 + big;
+		const box = { x: Math.min(...xs) - pad, y: Math.min(...ys) - pad, w: Math.max(...xs) - Math.min(...xs) + pad * 2, h: Math.max(...ys) - Math.min(...ys) + pad * 2 + 70 };
+		const element = host.current; const aspect = element?.clientWidth ? element.clientWidth / Math.max(1, element.clientHeight) : 1.6;
 		if (box.w / box.h < aspect) { const w = box.h * aspect; box.x -= (w - box.w) / 2; box.w = w; } else { const h = box.w / aspect; box.y -= (h - box.h) / 2; box.h = h; }
 		setView(box);
 	}, []);
+	const radii = useMemo(() => nodeRadii(nodes, [...edges, ...membership], network.sizeBy), [nodes, edges, membership, network.sizeBy]);
 	useEffect(() => {
 		const previous = new Map((sim.current?.nodes ?? []).map(node => [node.id, node]));
-		const next = createForceSimulation(nodes, [...edges, ...membership]);
-		let reused = 0; for (const node of next.nodes) { const old = previous.get(node.id); if (old) { node.x = old.x; node.y = old.y; reused++; } }
-		if (reused) { next.alpha = 0.35; }
-		sim.current = settleForce(next, nodes.length > 600 ? 120 : 300);
+		const next = createForceSimulation(nodes, [...edges, ...membership], { radii, network });
+		// A new grouping starts fresh so clusters separate; other changes keep the reader's mental map.
+		const regroup = lastClusters.current !== network.clusters; lastClusters.current = network.clusters;
+		let reused = 0; if (!regroup) { for (const node of next.nodes) { const old = previous.get(node.id); if (old) { node.x = old.x; node.y = old.y; reused++; } } }
+		if (reused) { next.alpha = 0.5; }
+		const settled = settleForce(next, nodes.length > 600 ? 120 : 300);
+		const element = host.current; sim.current = reused ? settled : orientForce(settled, element?.clientWidth ? element.clientWidth / Math.max(1, element.clientHeight) : 1.6);
 		fit(); setFrame(frame => frame + 1);
-	}, [nodes, edges, membership, fit]);
+	}, [nodes, edges, membership, radii, network, fit]);
 	const animate = useCallback(() => {
 		if (running.current || reducedMotion) { return; }
 		running.current = true;
@@ -572,14 +580,34 @@ function ForceGraph({ snapshot, edges, membership, visible, selectedId, query, o
 	}, [reducedMotion]);
 	const toLocal = (event: { clientX: number; clientY: number }) => { const element = svg.current; const matrix = element?.getScreenCTM(); if (!element || !matrix) { return { x: 0, y: 0 }; } const point = new DOMPoint(event.clientX, event.clientY).matrixTransform(matrix.inverse()); return { x: point.x, y: point.y }; };
 	const drag = useRef<{ id?: string; startX: number; startY: number; moved: boolean; view?: { x: number; y: number; w: number; h: number } } | null>(null);
-	const byId = new Map((sim.current?.nodes ?? []).map(node => [node.id, node]));
+	const simNodes = sim.current?.nodes ?? [];
+	const byId = new Map(simNodes.map(node => [node.id, node]));
 	const info = new Map(nodes.map(node => [node.id, node]));
 	const focus = hover || selectedId;
 	const related = new Set(sim.current?.links.flatMap(link => link.source === focus ? [link.target] : link.target === focus ? [link.source] : []) ?? []);
-	const r = forceSettings.radius;
 	const visibleEdges = edges.filter(edge => byId.has(edge.source) && byId.has(edge.target) && edge.source !== edge.target);
 	const categories = [...new Set(visibleEdges.map(edge => edge.category))];
-	return <div className="tg-force" aria-label="Network view"
+	// Screen pixels per graph unit, for zoom-aware labels.
+	const scale = view && svg.current ? svg.current.clientWidth / view.w : 1;
+	const base = forceSettings.radius; const hubRadius = base * (1 + network.sizeBy / 100 * 0.55);
+	const showLabel = (id: string, r: number) => network.labels === 'all' || id === focus || related.has(id) || id === selectedId || (network.labels === 'auto' && (nodes.length <= 36 || scale >= 0.9 || r >= hubRadius || (!!query.trim() && matchesQuery(info.get(id)!, query))));
+	// Soft cluster hulls behind everything, labelled with the scope or layer they gather.
+	const hulls = network.clusters === 'none' ? [] : [...simNodes.reduce((groups, node) => { if (node.group) { groups.set(node.group, [...(groups.get(node.group) ?? []), node]); } return groups; }, new Map<string, ForceNode[]>())].filter(([, members]) => members.length > 1).map(([group, members]) => {
+		const label = network.clusters === 'layer' ? layerLabels[members[0].layer] : info.get(group)?.label ?? snapshot.nodes.find(node => node.id === group)?.label ?? group;
+		const top = members.reduce((best, node) => node.y - node.r < best.y - best.r ? node : best, members[0]);
+		const cx = members.reduce((sum, node) => sum + node.x, 0) / members.length;
+		return { group, label, d: hullPath(members), x: cx, y: top.y - top.r - 30, layer: members[0].layer, dim: !!focus && !members.some(node => node.id === focus) };
+	});
+	const linkPath = (a: { x: number; y: number; r: number }, b: { x: number; y: number; r: number }, endGap: number) => {
+		const dx = b.x - a.x; const dy = b.y - a.y; const l = Math.hypot(dx, dy) || 1; const ux = dx / l; const uy = dy / l;
+		if (network.links === 'straight') { return `M ${a.x + ux * (a.r + 2)} ${a.y + uy * (a.r + 2)} L ${b.x - ux * (b.r + endGap)} ${b.y - uy * (b.r + endGap)}`; }
+		// Gentle arc: rotate the start and end off the chord so arrows meet the disc edge on the curve.
+		const bend = 0.18; const sx = a.x + (ux * Math.cos(bend) - uy * Math.sin(bend)) * (a.r + 2); const sy = a.y + (uy * Math.cos(bend) + ux * Math.sin(bend)) * (a.r + 2);
+		const ex = b.x - (ux * Math.cos(-bend) - uy * Math.sin(-bend)) * (b.r + endGap); const ey = b.y - (uy * Math.cos(-bend) + ux * Math.sin(-bend)) * (b.r + endGap);
+		const mx = (sx + ex) / 2 - uy * l * 0.12; const my = (sy + ey) / 2 + ux * l * 0.12;
+		return `M ${sx} ${sy} Q ${mx} ${my} ${ex} ${ey}`;
+	};
+	return <div ref={host} className={'tg-force' + (reducedMotion ? ' is-still' : '')} aria-label="Network view" data-size-by={network.sizeBy}
 		onWheel={event => { if (!view) { return; } const at = toLocal(event); const factor = event.deltaY < 0 ? 1 / 1.12 : 1.12; setView({ x: at.x - (at.x - view.x) * factor, y: at.y - (at.y - view.y) * factor, w: view.w * factor, h: view.h * factor }); }}>
 		{view && <svg ref={svg} viewBox={`${view.x} ${view.y} ${view.w} ${view.h}`}
 			onPointerDown={event => { const target = (event.target as Element).closest('[data-node]'); drag.current = { id: target?.getAttribute('data-node') ?? undefined, startX: event.clientX, startY: event.clientY, moved: false, view }; (event.currentTarget as Element).setPointerCapture(event.pointerId); }}
@@ -588,7 +616,7 @@ function ForceGraph({ snapshot, edges, membership, visible, selectedId, query, o
 				if (Math.hypot(event.clientX - state.startX, event.clientY - state.startY) > 3) { state.moved = true; }
 				if (!state.moved) { return; }
 				if (state.id && sim.current) { const node = sim.current.nodes.find(item => item.id === state.id); if (node) { const at = toLocal(event); node.fx = at.x; node.fy = at.y; sim.current.alphaTarget = 0.3; if (sim.current.alpha < 0.3) { sim.current.alpha = 0.3; } if (reducedMotion) { node.x = at.x; node.y = at.y; setFrame(frame => frame + 1); } else { animate(); } } }
-				else if (state.view && svg.current) { const scale = state.view.w / svg.current.clientWidth; setView({ ...state.view, x: state.view.x - (event.clientX - state.startX) * scale, y: state.view.y - (event.clientY - state.startY) * scale }); }
+				else if (state.view && svg.current) { const factor = state.view.w / svg.current.clientWidth; setView({ ...state.view, x: state.view.x - (event.clientX - state.startX) * factor, y: state.view.y - (event.clientY - state.startY) * factor }); }
 			}}
 			onPointerUp={() => {
 				const state = drag.current; drag.current = null; if (!state) { return; }
@@ -597,32 +625,51 @@ function ForceGraph({ snapshot, edges, membership, visible, selectedId, query, o
 			}}
 			onDoubleClick={event => { const id = (event.target as Element).closest('[data-node]')?.getAttribute('data-node'); if (id) { onOpenDetails(id); } }}>
 			<defs>{['uses', 'used-by'].map(kind => <marker key={kind} id={'tg-force-arrow-' + kind} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" className={'tg-force-arrow is-' + kind} /></marker>)}{categories.map(category => <marker key={category} id={'tg-force-arrow-' + category} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" className={'tg-force-arrow tg-cat-' + category} /></marker>)}</defs>
+			<g className="tg-force-hulls">{hulls.map(hull => <g key={hull.group} className={'tg-force-hull tg-layer-' + hull.layer + (hull.dim ? ' is-dim' : '')}><path d={hull.d} /><text x={hull.x} y={hull.y} textAnchor="middle">{hull.label}</text></g>)}</g>
 			<g className="tg-force-links">
 				{membership.filter(edge => byId.has(edge.source) && byId.has(edge.target)).map(edge => { const a = byId.get(edge.source)!; const b = byId.get(edge.target)!; return <line key={edge.id} x1={a.x} y1={a.y} x2={b.x} y2={b.y} className={'tg-force-link is-membership' + (focus && edge.source !== focus && edge.target !== focus ? ' is-dim' : '')} />; })}
 				{visibleEdges.map(edge => {
-					const a = byId.get(edge.source)!; const b = byId.get(edge.target)!; const dx = b.x - a.x; const dy = b.y - a.y; const l = Math.hypot(dx, dy) || 1;
+					const a = byId.get(edge.source)!; const b = byId.get(edge.target)!;
 					const state = !focus ? '' : edge.target === focus ? ' is-uses' : edge.source === focus ? ' is-used-by' : ' is-dim';
-					return <line key={edge.id} x1={a.x + dx / l * (r + 2)} y1={a.y + dy / l * (r + 2)} x2={b.x - dx / l * (r + 5)} y2={b.y - dy / l * (r + 5)} className={'tg-force-link tg-cat-' + edge.category + state} markerEnd={'url(#tg-force-arrow-' + (state === ' is-uses' ? 'uses' : state === ' is-used-by' ? 'used-by' : edge.category) + ')'} />;
+					return <path key={edge.id} d={linkPath(a, b, 5)} className={'tg-force-link tg-cat-' + edge.category + state + (state === ' is-uses' || state === ' is-used-by' ? ' is-flow' : '')} markerEnd={'url(#tg-force-arrow-' + (state === ' is-uses' ? 'uses' : state === ' is-used-by' ? 'used-by' : edge.category) + ')'} />;
 				})}
 			</g>
-			{(sim.current?.nodes ?? []).map(simNode => {
+			{[...simNodes].sort((a, b) => a.r - b.r).map(simNode => {
 				const node = info.get(simNode.id); if (!node) { return null; }
+				const r = simNode.r; const icon = Math.round(r * 1.25);
 				const overlay = overlays.byNode[node.id]; const issues = (overlay?.errors ?? 0) + (overlay?.warnings ?? 0);
 				const state = !focus ? '' : node.id === focus ? ' is-focus' : related.has(node.id) ? ' is-related' : ' is-dim';
 				const match = !query.trim() || matchesQuery(node, query);
-				return <g key={node.id} data-node={node.id} className={'tg-force-node tg-layer-' + node.layer + state + (match ? '' : ' is-unmatched') + (node.id === selectedId ? ' is-selected' : '')} transform={`translate(${simNode.x} ${simNode.y})`}
+				return <g key={node.id} data-node={node.id} data-r={r} className={'tg-force-node tg-layer-' + node.layer + state + (match ? '' : ' is-unmatched') + (node.id === selectedId ? ' is-selected' : '') + (r >= hubRadius ? ' is-hub' : '')} transform={`translate(${simNode.x} ${simNode.y})`}
 					role="button" tabIndex={0} aria-label={node.label + ', ' + node.typeLabel} onPointerEnter={() => setHover(node.id)} onPointerLeave={() => setHover('')} onKeyDown={event => { if (event.key === 'Enter') { onSelect(node.id); } }}>
 					<title>{node.address}</title>
 					{node.exposure && node.exposure.kind !== 'behind-entry' && <circle r={r + 7} className="tg-force-exposed" />}
 					<circle r={r + 4} className="tg-force-halo" />
 					<circle r={r} className="tg-force-disc" />
-					<image href={'./assets/' + node.icon} x={-14} y={-14} width={28} height={28} />
+					<image href={'./assets/' + node.icon} x={-icon / 2} y={-icon / 2} width={icon} height={icon} />
 					{issues > 0 && <g transform={`translate(${r * 0.72} ${-r * 0.72})`} className={overlay?.errors ? 'tg-force-issue is-error' : 'tg-force-issue'}><circle r={7.5} /><text dy="0.35em" textAnchor="middle">{issues > 9 ? '9+' : issues}</text></g>}
-					<text y={r + 15} textAnchor="middle" className="tg-force-label">{node.label.length > 24 ? node.label.slice(0, 23) + '…' : node.label}</text>
+					{showLabel(node.id, r) && <text y={r + 15} textAnchor="middle" className="tg-force-label" style={{ fontSize: Math.min(15, 11.5 + (r - base) * 0.12) + 'px' }}>{node.label.length > 24 ? node.label.slice(0, 23) + '…' : node.label}</text>}
 				</g>;
 			})}
 		</svg>}
-		<div className="tg-bundle-key" aria-hidden="true"><span className="is-uses">uses (prerequisite)</span><span className="is-used-by">used by (dependent)</span><span>drag a node to rearrange · scroll to zoom · drag the background to pan</span></div>
+		<div className="tg-bundle-key" aria-hidden="true"><span className="is-uses">uses (prerequisite)</span><span className="is-used-by">used by (dependent)</span>{network.sizeBy > 0 && <span className="tg-force-size-key"><i /><i />size = connections</span>}<span>drag a node to rearrange · scroll to zoom · drag the background to pan</span></div>
 		<button className="tg-force-fit tg-text-button" onClick={() => { fit(); if (sim.current) { sim.current.alpha = 0.6; animate(); } }}><Scan size={13} />Re-run layout</button>
+	</div>;
+}
+
+const percentOptions = (values: readonly number[]) => values.map(value => <option key={value} value={value}>{value}%</option>);
+/** Network view options. Presentation-only: every value lands in viewState.graph.network. */
+function NetworkControls({ value, onChange }: { value: NetworkOptions; onChange: (patch: Partial<NetworkOptions>) => void }) {
+	return <div className="tg-network-options" role="group" aria-label="Network options">
+		<label title="How much bigger the most-connected resource is than one with no links">Size by connections<select aria-label="Size by connections" value={value.sizeBy} onChange={event => onChange({ sizeBy: Number(event.target.value) })}>
+			<option value={0}>Off (all equal)</option>{percentOptions([30, 60, 100, 150, 200])}</select></label>
+		<label>Link length<select aria-label="Link length" value={value.linkLength} onChange={event => onChange({ linkLength: Number(event.target.value) })}>{percentOptions([60, 80, 100, 130, 170, 220])}</select></label>
+		<label title="Repulsion between resources">Spacing<select aria-label="Network spacing" value={value.spacing} onChange={event => onChange({ spacing: Number(event.target.value) })}>{percentOptions([60, 80, 100, 130, 170, 220])}</select></label>
+		<label title="Pull resources together and draw a soft outline around each group">Clusters<select aria-label="Clusters" value={value.clusters} onChange={event => onChange({ clusters: event.target.value as NetworkOptions['clusters'] })}>
+			<option value="scope">By scope</option><option value="layer">By layer</option><option value="none">None</option></select></label>
+		<label>Labels<select aria-label="Labels" value={value.labels} onChange={event => onChange({ labels: event.target.value as NetworkOptions['labels'] })}>
+			<option value="auto">Auto (hubs, hover, zoom)</option><option value="all">All</option><option value="none">On hover only</option></select></label>
+		<label>Links<select aria-label="Link shape" value={value.links} onChange={event => onChange({ links: event.target.value as NetworkOptions['links'] })}>
+			<option value="curved">Curved</option><option value="straight">Straight</option></select></label>
 	</div>;
 }

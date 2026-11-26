@@ -94,6 +94,7 @@ export interface HostGraphViewState {
 	readonly expanded: readonly string[];
 	readonly collapsed?: readonly string[];
 	readonly pins: Readonly<Record<string, HostPoint>>;
+	readonly network?: { readonly sizeBy: number; readonly linkLength: number; readonly spacing: number; readonly clusters: string; readonly labels: string; readonly links: string };
 }
 
 export interface HostCloudRegion {

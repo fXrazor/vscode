@@ -467,6 +467,27 @@ export interface CanvasGraphViewState {
 	readonly expanded: readonly string[];
 	readonly collapsed?: readonly string[];
 	readonly pins: Readonly<Record<string, CanvasPoint>>;
+	/** Network (force) view options; presentation-only. */
+	readonly network?: CanvasNetworkOptions;
+}
+
+export interface CanvasNetworkOptions {
+	readonly sizeBy: number;
+	readonly linkLength: number;
+	readonly spacing: number;
+	readonly clusters: string;
+	readonly labels: string;
+	readonly links: string;
+}
+
+const networkEnums = { clusters: ['scope', 'layer', 'none'], labels: ['auto', 'all', 'none'], links: ['curved', 'straight'] } as const;
+function sanitizeNetworkOptions(value: unknown): CanvasNetworkOptions | undefined {
+	if (!isRecord(value)) {
+		return undefined;
+	}
+	const num = (raw: unknown, min: number, max: number, fallback: number) => typeof raw === 'number' && Number.isFinite(raw) ? Math.min(max, Math.max(min, Math.round(raw))) : fallback;
+	const pick = (key: keyof typeof networkEnums): string => { const raw = value[key]; const allowed: readonly string[] = networkEnums[key]; return typeof raw === 'string' && allowed.includes(raw) ? raw : allowed[0]; };
+	return { sizeBy: num(value.sizeBy, 0, 300, 60), linkLength: num(value.linkLength, 40, 300, 100), spacing: num(value.spacing, 40, 300, 100), clusters: pick('clusters'), labels: pick('labels'), links: pick('links') };
 }
 
 const graphEnums = {
@@ -489,7 +510,7 @@ export function sanitizeGraphViewState(value: unknown): CanvasGraphViewState | u
 	const spacing = value.spacing === 'auto' ? 'auto' : typeof value.spacing === 'number' && Number.isFinite(value.spacing) ? Math.min(300, Math.max(100, Math.round(value.spacing))) : 'auto';
 	const height = typeof value.height === 'number' && Number.isFinite(value.height) ? Math.min(300, Math.max(100, Math.round(value.height))) : 100;
 	const expanded = Array.isArray(value.expanded) ? [...new Set(value.expanded.filter(isOpaqueId))].slice(0, MAX_NODE_POSITIONS) : [];
-	return { lens: pick('lens'), layout: pick('layout'), route: pick('route'), density: pick('density'), overlay: pick('overlay'), spacing, height, showMembership: value.showMembership === true, ...(Array.isArray(value.collapsed) ? { collapsed: [...new Set(value.collapsed.filter(isOpaqueId))].slice(0, MAX_NODE_POSITIONS) } : {}), ...(typeof value.showInputs === 'boolean' ? { showInputs: value.showInputs } : {}), expanded, pins: sanitizeNodePositionMap(value.pins) ?? {} };
+	return { lens: pick('lens'), layout: pick('layout'), route: pick('route'), density: pick('density'), overlay: pick('overlay'), spacing, height, showMembership: value.showMembership === true, ...(Array.isArray(value.collapsed) ? { collapsed: [...new Set(value.collapsed.filter(isOpaqueId))].slice(0, MAX_NODE_POSITIONS) } : {}), ...(typeof value.showInputs === 'boolean' ? { showInputs: value.showInputs } : {}), expanded, pins: sanitizeNodePositionMap(value.pins) ?? {}, ...(sanitizeNetworkOptions(value.network) ? { network: sanitizeNetworkOptions(value.network) } : {}) };
 }
 
 export type CanvasNoticeKind = 'stale' | 'unavailable' | 'info';

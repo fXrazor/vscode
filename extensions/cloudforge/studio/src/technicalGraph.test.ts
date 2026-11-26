@@ -14,7 +14,7 @@ import { defaultGraphPresentation, graphEditAllowed, graphPresentationReducer, p
 import { buildHostViewState } from './serviceAdapter.ts';
 import { technicalGraphSvg } from './technicalGraphExport.ts';
 import { basisPath, bundleLayout, straighten } from './technicalGraphBundle.ts';
-import { createForceSimulation, forceSettings, settleForce } from './technicalGraphForce.ts';
+import { createForceSimulation, forceSettings, hullPath, nodeRadii, parseNetworkOptions, settleForce } from './technicalGraphForce.ts';
 
 const layout = (architecture = hubSpokeArchitecture(), options: Partial<Parameters<typeof layoutTechnicalGraph>[1]> = {}) => {
 	const snapshot = projectTechnicalGraph(architecture);
@@ -299,4 +299,35 @@ test('network view settles deterministically with no overlapping icons and short
 	const at = new Map(a.nodes.map(node => [node.id, node])); const dist = (x: string, y: string) => Math.hypot(at.get(x)!.x - at.get(y)!.x, at.get(x)!.y - at.get(y)!.y);
 	const linked = a.links.map(link => dist(link.source, link.target)); const all = a.nodes.flatMap((p, i) => a.nodes.slice(i + 1).map(q => dist(p.id, q.id)));
 	assert.ok(linked.reduce((x, y) => x + y, 0) / linked.length < all.reduce((x, y) => x + y, 0) / all.length);
+});
+
+test('network nodes grow with their connections, by a percentage, and keep clear of each other', () => {
+	const snapshot = projectTechnicalGraph(hubSpokeArchitecture()); const edges = lensEdges(snapshot, 'all', true);
+	const degree = (id: string) => edges.filter(edge => !edge.membership && (edge.source === id || edge.target === id)).length;
+	const busiest = [...snapshot.nodes].sort((a, b) => degree(b.id) - degree(a.id))[0];
+	const radii = nodeRadii(snapshot.nodes, edges, 100);
+	assert.equal(radii[busiest.id], forceSettings.radius * 2, 'the busiest node is 100% bigger');
+	const leaf = snapshot.nodes.find(node => degree(node.id) === 0);
+	if (leaf) { assert.equal(radii[leaf.id], forceSettings.radius); }
+	for (const node of snapshot.nodes) { assert.ok(radii[node.id] <= radii[busiest.id]); assert.ok(radii[node.id] >= forceSettings.radius); }
+	assert.ok(Object.values(nodeRadii(snapshot.nodes, edges, 0)).every(r => r === forceSettings.radius), 'off means equal sizes');
+	const sim = settleForce(createForceSimulation(snapshot.nodes, edges, { radii, network: { clusters: 'scope' } }));
+	for (const [i, p] of sim.nodes.entries()) { for (const q of sim.nodes.slice(i + 1)) { assert.ok(Math.hypot(p.x - q.x, p.y - q.y) > (p.r + q.r) * 0.8, p.id + ' overlaps ' + q.id); } }
+	// Longer links spread the graph out; options never touch the architecture.
+	const spread = (link: number) => { const s = settleForce(createForceSimulation(snapshot.nodes, edges, { network: { linkLength: link } })); const at = new Map(s.nodes.map(node => [node.id, node])); return s.links.reduce((sum, l) => sum + Math.hypot(at.get(l.source)!.x - at.get(l.target)!.x, at.get(l.source)!.y - at.get(l.target)!.y), 0) / s.links.length; };
+	assert.ok(spread(200) > spread(60));
+});
+
+test('network options persist sanitised, and cluster hulls enclose their members', () => {
+	assert.deepEqual(parseNetworkOptions({ sizeBy: 999, linkLength: 5, spacing: 'x', clusters: 'bogus', labels: 'all', links: 'straight' }), { sizeBy: 300, linkLength: 40, spacing: 100, clusters: 'scope', labels: 'all', links: 'straight' });
+	assert.equal(parseNetworkOptions(null), undefined);
+	const state = graphPresentationReducer(defaultGraphPresentation, { type: 'set', patch: { layout: 'force', network: { ...defaultGraphPresentation.network, sizeBy: 150, clusters: 'layer' } } });
+	const restored = parseGraphPresentation(JSON.parse(JSON.stringify(serialiseGraphPresentation(state))));
+	assert.deepEqual(restored?.network, state.network);
+	const host = readFileSync(new URL('../../src/canvas/protocol.ts', import.meta.url), 'utf8');
+	assert.match(host, /sanitizeNetworkOptions\(value\.network\)/);
+	const d = hullPath([{ x: 0, y: 0, r: 20 }, { x: 200, y: 0, r: 20 }, { x: 100, y: 150, r: 30 }]);
+	assert.match(d, /^M .* Z$/); const xs = [...d.matchAll(/(-?\d+(?:\.\d+)?) (-?\d+(?:\.\d+)?)/g)].map(m => Number(m[1]));
+	assert.ok(Math.min(...xs) < -20 && Math.max(...xs) > 220);
+	assert.equal(hullPath([]), '');
 });

@@ -68,6 +68,14 @@ try {
 			assert.equal(await page.locator('.tg-force-node').count(), original.resources.length);
 			{ const node = await page.locator('[data-node="aks"]').boundingBox(); await page.mouse.move(node.x + node.width / 2, node.y + node.height / 2); await page.mouse.down(); await page.mouse.move(node.x + 160, node.y + 90, { steps: 8 }); await page.mouse.up(); await page.waitForTimeout(400); }
 			assert.deepEqual(await exported(), original); pass('network view shows every resource as an icon and dragging there never changes the project');
+			await view('Size by connections', '0');
+			assert.equal(new Set(await page.locator('.tg-force-node').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-r')))).size, 1);
+			await view('Size by connections', '200');
+			{ const radii = (await page.locator('.tg-force-node').evaluateAll(nodes => nodes.map(node => Number(node.getAttribute('data-r'))))); assert.ok(Math.max(...radii) >= Math.min(...radii) * 1.5, 'hub is much bigger'); }
+			assert.ok(await page.locator('.tg-force-hull').count() > 0);
+			await view('Clusters', 'layer'); await view('Link shape', 'straight'); await view('Labels', 'all');
+			assert.equal(await page.locator('.tg-force-label').count(), original.resources.length);
+			assert.deepEqual(await exported(), original); pass('network options size nodes by connections, cluster and relabel without project changes');
 			await layoutTo('tree');
 			await page.getByRole('button', { name: 'Collapse vnet-spoke-aks', exact: true }).click(); await page.waitForTimeout(300);
 			assert.ok(await page.getByRole('button', { name: 'Expand vnet-spoke-aks', exact: true }).isVisible()); await page.getByRole('button', { name: 'Expand vnet-spoke-aks', exact: true }).click();

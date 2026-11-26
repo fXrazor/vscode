@@ -9,6 +9,7 @@
 import type { Action, Position } from './model.ts';
 import type { GraphLens } from './technicalGraph.ts';
 import type { GraphLayoutKind } from './technicalGraphLayout.ts';
+import { defaultNetworkOptions, parseNetworkOptions, type NetworkOptions } from './technicalGraphForce.ts';
 
 export type RouteStyle = 'curved' | 'orthogonal' | 'straight';
 export interface GraphPresentation {
@@ -32,8 +33,10 @@ export interface GraphPresentation {
 	spacing: 'auto' | number;
 	/** Vertical stretch percentage (100–300), independent of spacing. */
 	height: number;
+	/** Network (force) view: size by connections, link length, spacing, clusters, labels, links. */
+	network: NetworkOptions;
 }
-export const defaultGraphPresentation: GraphPresentation = { lens: 'all', layout: 'layers', route: 'curved', pins: {}, expanded: [], collapsed: [], showMembership: false, showInputs: true, density: 'auto', overlay: 'none', spacing: 'auto', height: 100 };
+export const defaultGraphPresentation: GraphPresentation = { lens: 'all', layout: 'layers', route: 'curved', pins: {}, expanded: [], collapsed: [], showMembership: false, showInputs: true, density: 'auto', overlay: 'none', spacing: 'auto', height: 100, network: defaultNetworkOptions };
 
 export type GraphPresentationAction =
 	| { type: 'set'; patch: Partial<Omit<GraphPresentation, 'pins' | 'expanded' | 'collapsed'>> }
@@ -90,6 +93,7 @@ export function parseGraphPresentation(value: unknown): Partial<GraphPresentatio
 	for (const [key, values] of Object.entries(allowed)) { if (typeof raw[key] === 'string' && (values as readonly string[]).includes(raw[key] as string)) { out[key] = raw[key]; } }
 	if (raw.spacing === 'auto' || (typeof raw.spacing === 'number' && raw.spacing >= 100 && raw.spacing <= 300)) { out.spacing = raw.spacing; }
 	if (typeof raw.height === 'number' && raw.height >= 100 && raw.height <= 300) { out.height = raw.height; }
+	const network = parseNetworkOptions(raw.network); if (network) { out.network = network; }
 	if (typeof raw.showMembership === 'boolean') { out.showMembership = raw.showMembership; }
 	if (typeof raw.showInputs === 'boolean') { out.showInputs = raw.showInputs; }
 	if (Array.isArray(raw.expanded)) { out.expanded = raw.expanded.filter(id => typeof id === 'string'); }
