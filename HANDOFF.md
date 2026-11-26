@@ -1,5 +1,22 @@
 # CloudForge Code OSS handoff
 
+## Miro smart spacing handles, Tidy Up, Copy/Paste Style, Smart Duplicate, Select Similar & Network View SVG Export — 26 November 2026
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `0973f8940d3`, owner Antigravity. Zero overlap with unmerged Claude branches (`2dm0k0`, `ksv8z9`) or Rust.
+- **Scope:**
+  - **Miro-style equalize spacing, Tidy Up & Flip** ([selectionGeometry.ts](extensions/cloudforge/studio/src/selectionGeometry.ts), [SelectionResizeHandle.tsx](extensions/cloudforge/studio/src/SelectionResizeHandle.tsx), [SelectionControls.tsx](extensions/cloudforge/studio/src/SelectionControls.tsx), [styles.css](extensions/cloudforge/studio/src/styles.css)):
+    - Added `'tidy'`, `'flip-h'`, and `'flip-v'` layouts in `layoutSelection()` (auto-detecting 1D rows, 1D columns, or 2D multi-row grids with uniform `24px` gaps) plus a floating Miro **Tidy up** button (`.selection-tidy-button`) on multi-selections and `Align` menu options.
+    - Added `detectSpacingLayout()` and `applyUniformSpacing()` powering live draggable pink **gap handles** (`.selection-spacing-handle`) between adjacent columns/rows of any multi-selection, with ghost preview outlines, a live `px` badge (`.selection-spacing-badge`), arrow-key adjustment, `Escape` cancel, and **1 atomic Undo/Redo step**.
+  - **Additional Miro canvas workflow features** ([DesignCanvas.tsx](extensions/cloudforge/studio/src/DesignCanvas.tsx), [SelectionControls.tsx](extensions/cloudforge/studio/src/SelectionControls.tsx)):
+    - **Copy style / Paste style (`Ctrl+Alt+C` / `Ctrl+Alt+V`)** across drawings/notes/shapes/text (1 atomic Undo step).
+    - **Smart Duplicate step-and-repeat (`Ctrl+D`):** remembers the move delta after `Ctrl+D` or `Alt+Drag` so subsequent `Ctrl+D` presses stamp elements evenly along the same vector.
+    - **Select similar** in the context & More menus (selects all elements of matching board kind or cloud resource type).
+    - Fixed an `autoFit` `requestAnimationFrame` race condition in [DesignCanvas.tsx](extensions/cloudforge/studio/src/DesignCanvas.tsx) where a queued fit could override a user's zoom change right after closing a side panel.
+  - **True Network View SVG/PNG Export** ([technicalGraphExport.ts](extensions/cloudforge/studio/src/technicalGraphExport.ts), [TechnicalGraph.tsx](extensions/cloudforge/studio/src/TechnicalGraph.tsx)):
+    - Added `networkGraphSvg()` exporting the live force-directed Network graph (preserving user-dragged positions, gradual node sizing, sleek `1.6px`–`2.6px` rings, cluster hulls, membership links, issue badges, and colour-preserving Scope Spotlight opacity dimming — zero grayscale).
+  - **Tests:** added unit coverage in [model.test.ts](extensions/cloudforge/studio/src/model.test.ts) and [technicalGraph.test.ts](extensions/cloudforge/studio/src/technicalGraph.test.ts).
+- **Fresh verification (26 November 2026):** Studio `tsc --noEmit` **PASS**, **235/235** Studio unit tests PASS (0 skipped), Studio `build` + `esbuild.webview.mts` **PASS**, `oxlint` & `hygiene` **PASS** (0 errors/warnings), and real Windows Edge (`--channel=msedge`): `whiteboard-controls-verify.mjs` **20/20 PASS** (`1360×860` & `1024×768`, light & dark) + live Miro Smart Duplicate / Copy-Paste Style / Select Similar / Tidy Up / draggable spacing handles (`24px → 89px → Undo 24px`) & Network View Spotlight SVG export **PASS** (0 browser errors).
+
 ## Technical Graph `WhyPanel` shortest dependency path tracer & spotlight-aware SVG/PNG export — 26 November 2026
 
 - **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `df2168b7270`, owner Antigravity. Zero overlap with unmerged Claude branches (`2dm0k0`, `ksv8z9`) or Rust.

@@ -17,7 +17,7 @@ import { additionalBlocks, blockDefinitions, fieldIssue, resourceFormIssues } fr
 import { connectionDash, connectionPath } from './connectionGeometry.ts';
 import { canConnect, connectionAnchor, connectableElements } from './designConnections.ts';
 import { applyCanvasCommand, expandGroups, sceneOrder, selectionFragment } from './canvasOperations.ts';
-import { layoutSelection, selectionUnits } from './selectionGeometry.ts';
+import { applyUniformSpacing, detectSpacingLayout, layoutSelection, selectionUnitBoxes, selectionUnits } from './selectionGeometry.ts';
 import type { Architecture, Action } from './model.ts';
 import { bindingKey, variableBindingIssue, variablePreview, type FieldTarget } from './fieldBindings.ts';
 import { inheritedDependencies } from './resourceHierarchy.ts';
@@ -805,4 +805,55 @@ test('duplicate supports independent X/Y drag deltas (Alt+Drag clone) across ite
 	history = historyReducer(history, { type: 'undo' });
 	assert.equal(history.present.items.length, 1);
 	assert.equal(history.present.connections.length, 1);
+});
+
+test('Miro tidy-up, interactive uniform spacing, and horizontal/vertical flip arrange elements atomically', () => {
+	const mkNote = (id: string, x: number, y: number, width = 100, height = 80): BoardItem => ({
+		id, kind: 'note', text: id, width, height, positions: { visual: { x, y }, technical: { x, y } }, members: [],
+	});
+	// 1) Irregular row -> Tidy up equalizes gaps to 24px and aligns centres
+	const rowArch: Architecture = { name: 'Row', resources: [], items: [mkNote('a', 0, 10), mkNote('b', 180, 34), mkNote('c', 310, 4)], connections: [] };
+	const sizes = { a: { width: 100, height: 80 }, b: { width: 100, height: 80 }, c: { width: 100, height: 80 } };
+	const tidyRow = layoutSelection(rowArch, ['a', 'b', 'c'], 'visual', 'tidy', sizes);
+	assert.equal(tidyRow.a.x, 0);
+	assert.equal(tidyRow.b.x, 124);
+	assert.equal(tidyRow.c.x, 248);
+	assert.equal(tidyRow.a.y, tidyRow.b.y);
+	assert.equal(tidyRow.b.y, tidyRow.c.y);
+
+	// 2) Detect spacing handles & adjust uniform gap to 48px
+	const tidiedArch = applyCanvasCommand(rowArch, { kind: 'move', mode: 'visual', positions: tidyRow });
+	const units = selectionUnitBoxes(tidiedArch, ['a', 'b', 'c'], 'visual', sizes);
+	const detected = detectSpacingLayout(units);
+	assert.ok(detected?.x && detected.x.handles.length === 2 && detected.x.gap === 24);
+	const spaced = applyUniformSpacing(tidiedArch, ['a', 'b', 'c'], 'visual', 'x', 48, sizes);
+	assert.equal(spaced.a.x, 0);
+	assert.equal(spaced.b.x, 148);
+	assert.equal(spaced.c.x, 296);
+
+	// 3) 2D grid -> Tidy up aligns rows and columns, detects BOTH X and Y gap handles
+	const gridArch: Architecture = {
+		name: 'Grid',
+		resources: [],
+		items: [mkNote('g1', 10, 10), mkNote('g2', 190, 18), mkNote('g3', 18, 160), mkNote('g4', 210, 175)],
+		connections: [],
+	};
+	const gridSizes = { g1: { width: 100, height: 80 }, g2: { width: 100, height: 80 }, g3: { width: 100, height: 80 }, g4: { width: 100, height: 80 } };
+	const tidyGrid = layoutSelection(gridArch, ['g1', 'g2', 'g3', 'g4'], 'visual', 'tidy', gridSizes);
+	assert.equal(tidyGrid.g1.x, tidyGrid.g3.x);
+	assert.equal(tidyGrid.g2.x, tidyGrid.g4.x);
+	assert.equal(tidyGrid.g1.y, tidyGrid.g2.y);
+	assert.equal(tidyGrid.g3.y, tidyGrid.g4.y);
+	const tidiedGridArch = applyCanvasCommand(gridArch, { kind: 'move', mode: 'visual', positions: tidyGrid });
+	const gridSpacing = detectSpacingLayout(selectionUnitBoxes(tidiedGridArch, ['g1', 'g2', 'g3', 'g4'], 'visual', gridSizes));
+	assert.ok(gridSpacing?.x?.handles.length === 1 && gridSpacing?.y?.handles.length === 1, '2x2 grid exposes both X and Y gap handles');
+
+	// 4) Flip horizontal & flip vertical mirror positions about selection bounds in 1 undo step
+	const flippedH = layoutSelection(tidiedArch, ['a', 'b', 'c'], 'visual', 'flip-h', sizes);
+	assert.equal(flippedH.a.x, 248);
+	assert.equal(flippedH.b.x, 124);
+	assert.equal(flippedH.c.x, 0);
+	const flippedV = layoutSelection(tidiedGridArch, ['g1', 'g2', 'g3', 'g4'], 'visual', 'flip-v', gridSizes);
+	assert.equal(flippedV.g1.y, tidiedGridArch.items.find(i => i.id === 'g3')!.positions.visual.y);
+	assert.equal(flippedV.g3.y, tidiedGridArch.items.find(i => i.id === 'g1')!.positions.visual.y);
 });

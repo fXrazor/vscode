@@ -12,7 +12,7 @@ import { applyWaves, extractSourceEdgeEvidence, graphOverlays, lensEdges, matche
 import { inputSize, layerOrder, layoutTechnicalGraph, placeInputs, treeLinkPath } from './technicalGraphLayout.ts';
 import { defaultGraphPresentation, graphEditAllowed, graphPresentationReducer, parseGraphPresentation, serialiseGraphPresentation } from './graphPresentation.ts';
 import { buildHostViewState } from './serviceAdapter.ts';
-import { technicalGraphSvg } from './technicalGraphExport.ts';
+import { networkGraphSvg, technicalGraphSvg } from './technicalGraphExport.ts';
 import { basisPath, bundleLayout, straighten } from './technicalGraphBundle.ts';
 import { createForceSimulation, forceSettings, hullPath, nodeRadii, parseNetworkOptions, settleForce } from './technicalGraphForce.ts';
 
@@ -458,4 +458,33 @@ test('technicalGraphSvg preserves colour and softly dims outside cards and edges
 	assert.match(svg, /<g data-id="aks" transform="[^"]+">/, 'spotlighted card keeps full opacity');
 	assert.match(svg, /<g data-id="vnet-hub" transform="[^"]+" opacity="0\.22">/, 'outside card softens to 0.22 opacity');
 	assert.match(svg, /<path d="[^"]+" fill="none" stroke="[^"]+" stroke-width="1\.6"[^<>]* opacity="0\.12" marker-end="/, 'outside edge softens to 0.12 opacity');
+});
+
+test('networkGraphSvg exports live force-directed nodes, gradual sizing, sleek rings, hulls, and colour-preserving spotlight', () => {
+	const architecture = hubSpokeArchitecture();
+	const before = JSON.stringify(architecture);
+	const snapshot = projectTechnicalGraph(architecture);
+	const edges = lensEdges(snapshot, 'all', false);
+	const membership = snapshot.edges.filter(edge => edge.membership);
+	const allSizing = lensEdges(snapshot, 'all', true);
+	const radii = nodeRadii(snapshot.nodes, allSizing, 150, 'all');
+	const sim = settleForce(createForceSimulation(snapshot.nodes, [...edges, ...membership], { radii, network: defaultGraphPresentation.network }));
+	const spotlight = new Set(snapshot.nodes.filter(node => node.id === 'rg-app' || node.scopePath.includes('rg-app')).map(node => node.id));
+
+	const svg = networkGraphSvg({
+		snapshot,
+		simNodes: sim.nodes,
+		edges,
+		membership,
+		network: defaultGraphPresentation.network,
+		theme: 'dark',
+		title: 'Network check',
+		spotlight,
+	});
+	assert.equal(JSON.stringify(architecture), before, 'network SVG export never mutates architecture');
+	assert.ok(!svg.includes('grayscale'), 'network spotlight export stays colour-preserving');
+	assert.match(svg, /<g data-id="aks" data-r="[0-9.]+" transform="translate\([^)]+\)">/, 'spotlighted network node keeps full opacity');
+	assert.match(svg, /<g data-id="vnet-hub" data-r="[0-9.]+" transform="translate\([^)]+\)" opacity="0\.22">/, 'outside network node softens to 0.22');
+	assert.ok(svg.includes('RG-PLATFORM'), 'exports scope cluster hulls with real scope labels');
+	assert.ok(svg.includes('stroke-width="2.6"') || svg.includes('stroke-width="1.6"'), 'preserves bounded sleek ring strokes');
 });

@@ -1050,10 +1050,19 @@ select, summary, label:has(> select), label:has(> input[type=checkbox]), label:h
 /* Selected elements use the same bar shape. */
 .selection-anchor .selection-controls { padding: 3px 4px; border-radius: 10px; gap: 2px; box-shadow: 0 1px 2px #0000000f, 0 10px 28px -10px #00000040; }
 .selection-anchor .selection-controls .selection-quick-actions { gap: 2px; }
-.selection-anchor .selection-controls .selection-quick-actions > button, .selection-anchor .selection-controls .selection-quick-actions summary, .selection-anchor .selection-controls .selection-quick-actions [aria-haspopup] { min-height: 30px; padding: 4px 6px; border-color: transparent; border-radius: 7px; background: transparent; }
+.selection-anchor .selection-controls .selection-quick-actions > button, .selection-anchor .selection-controls .selection-quick-actions summary, .selection-anchor .selection-controls .selection-quick-actions [aria-haspopup] { min-height: 28px; gap: 4px; padding: 3px 6px; border-color: transparent; border-radius: 7px; background: transparent; }
 .selection-anchor .selection-controls .selection-quick-actions > button:hover, .selection-anchor .selection-controls .selection-quick-actions [aria-haspopup]:hover { background: var(--hover, color-mix(in srgb, var(--text) 7%, transparent)); }
-.selection-anchor .selection-controls .selection-quick-actions > select { border-color: transparent; border-radius: 7px; background-color: transparent; }
-.selection-anchor .selection-controls .selection-caption { padding: 0 6px 0 4px; border-right: 1px solid var(--border); margin-right: 2px; }
+.selection-anchor .selection-controls .selection-quick-actions > select { min-height: 28px; padding: 3px 4px; border-color: transparent; border-radius: 7px; background-color: transparent; }
+.selection-anchor .selection-controls .selection-caption { font-size: 11px; padding: 0 5px 0 3px; border-right: 1px solid var(--border); margin-right: 1px; }
 .connection-tools.line-bar > *, .selection-anchor .selection-controls .selection-quick-actions > * { flex: none; }
 .connection-tools.line-bar .line-bar-select { width: auto; max-width: none; }
 .connection-tools.line-bar .line-bar-menu > summary { margin: 0; border: 0; box-shadow: none; }
+/* Miro-style multi-selection smart spacing handles, live gap badge, and Tidy up button. */
+.selection-spacing-handle { position: absolute; pointer-events: auto; display: grid; place-items: center; border-radius: 999px; background: color-mix(in srgb, #e04f9a 18%, transparent); border: 1.5px solid #e04f9a; box-shadow: 0 1px 4px #00000022; transition: background 90ms ease; }
+.selection-spacing-handle:hover, .selection-spacing-handle[data-active] { background: #e04f9a; }
+.selection-spacing-handle[data-axis="x"] { cursor: ew-resize; }
+.selection-spacing-handle[data-axis="y"] { cursor: ns-resize; }
+.selection-spacing-badge { position: absolute; pointer-events: none; transform: translate(-50%, -50%); background: #e04f9a; color: #ffffff; font-weight: 650; white-space: nowrap; box-shadow: 0 2px 8px #00000033; }
+.selection-spacing-ghost { position: absolute; pointer-events: none; border-style: dashed; border-color: #e04f9a; background: color-mix(in srgb, #e04f9a 8%, transparent); border-radius: 6px; }
+.selection-tidy-button { position: absolute; pointer-events: auto; display: grid; place-items: center; padding: 0; min-height: 0; background: var(--panel-solid); color: var(--accent); border: 1.5px solid var(--accent); box-shadow: 0 2px 8px #00000024; cursor: pointer; }
+.selection-tidy-button:hover { background: var(--accent); color: #ffffff; }

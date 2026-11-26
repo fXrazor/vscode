@@ -1,5 +1,11 @@
 # Studio continuation checkpoint — 25 November 2026
 
+## Miro smart spacing handles, Tidy Up, Copy/Paste Style, Smart Duplicate, Select Similar & Network View SVG Export — 26 November 2026
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `0973f8940d3`, owner Antigravity.
+- **Scope:** added Miro **Tidy up** (auto row/column/2D-grid), **Flip H/V**, and interactive pink **gap spacing drag handles** (`src/selectionGeometry.ts`, `src/SelectionResizeHandle.tsx`, `src/styles.css`); wired **Copy/Paste Style (`Ctrl+Alt+C`/`V`)**, **Smart Duplicate step-and-repeat (`Ctrl+D`)**, **Select similar**, and an `autoFit` `rAF` zoom-hijack fix (`src/DesignCanvas.tsx`, `src/SelectionControls.tsx`); added live **Network View SVG/PNG export** (`networkGraphSvg` in `src/technicalGraphExport.ts`, wired into `src/TechnicalGraph.tsx`) with gradual sizing, sleek rings, cluster hulls, and colour-preserving Scope Spotlight. Covered in `src/model.test.ts` and `src/technicalGraph.test.ts`.
+- **Fresh checks:** Studio `tsc --noEmit` **PASS**, **235/235** Studio tests (0 skipped), Studio `build` + `esbuild.webview.mts` **PASS**, `oxlint` & `hygiene` **PASS**, Windows Edge `whiteboard-controls-verify.mjs` **20/20 PASS** + live Miro spacing/tidy-up/copy-style/smart-duplicate/select-similar & Network View Spotlight SVG export **PASS** (0 browser errors).
+
 ## Technical Graph `WhyPanel` shortest dependency path tracer & spotlight-aware SVG/PNG export — 26 November 2026
 
 - **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `df2168b7270`, owner Antigravity.

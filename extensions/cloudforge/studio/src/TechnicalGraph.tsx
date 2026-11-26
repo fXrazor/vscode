@@ -24,7 +24,7 @@ import { applyWaves, graphLenses, graphOverlays, layerLabels, lensEdges, matches
 import { inputSize, layoutTechnicalGraph, placeInputs, treeConnector, treeLinkPath, treeParents, visiblePortCount, type GraphLane } from './technicalGraphLayout.ts';
 import { graphEditAllowed, type GraphPresentation, type GraphPresentationAction, type RouteStyle } from './graphPresentation.ts';
 import { relationshipNames } from './infrastructureRelationships.ts';
-import { graphIcons, technicalGraphSvg } from './technicalGraphExport.ts';
+import { graphIcons, networkGraphSvg, technicalGraphSvg } from './technicalGraphExport.ts';
 import { bundleLayout } from './technicalGraphBundle.ts';
 import { createForceSimulation, forceSettings, hullPath, nodeRadii, orientForce, settleForce, tickForce, type ForceNode, type ForceSimulation, type NetworkOptions } from './technicalGraphForce.ts';
 import { shortestSnapshotPath, snapshotTroubleshootingFindings } from './technicalGraphPatterns.ts';
@@ -388,21 +388,28 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, fileV
 	}
 
 	const [exporting, setExporting] = useState(false);
+	const forceNodesRef = useRef<readonly ForceNode[]>([]);
 	const exportImage = useCallback(async (format: 'svg' | 'png') => {
 		if (!onExportImage) { return; }
 		setExporting(true);
 		try {
+			const lensName = graphLenses.find(item => item.id === presentation.lens)?.label ?? presentation.lens;
+			if (presentation.layout === 'force' && forceNodesRef.current.length > 0) {
+				const visibleNodes = snapshot.nodes.filter(node => !focusSet || focusSet.has(node.id));
+				const svg = networkGraphSvg({ snapshot, simNodes: forceNodesRef.current, edges: visibleEdges, membership: membershipEdges, network: presentation.network, theme, title: architecture.name + ' · Network graph · ' + lensName, overlays, icons: await graphIcons(visibleNodes), spotlight });
+				onExportImage(svg, format);
+				return;
+			}
 			const shown = snapshot.nodes.filter(node => layout.positions[node.id]);
 			const badges = Object.fromEntries(shown.flatMap(node => { const badge = badgeFor(node); return badge ? [[node.id, badge.text]] : []; }));
-			const lensName = graphLenses.find(item => item.id === presentation.lens)?.label ?? presentation.lens;
 			const svg = technicalGraphSvg({ snapshot, layout, edges: presentation.layout === 'tree' ? [] : visibleEdges, inputs: inputLayout, theme, title: architecture.name + ' · Technical graph · ' + lensName, badges, icons: await graphIcons(shown), spotlight });
 			onExportImage(svg, format);
 		} finally { setExporting(false); }
-	}, [onExportImage, snapshot, layout, badgeFor, presentation.lens, presentation.layout, visibleEdges, inputLayout, theme, architecture.name, spotlight]);
+	}, [onExportImage, snapshot, layout, badgeFor, presentation.lens, presentation.layout, presentation.network, visibleEdges, membershipEdges, overlays, focusSet, inputLayout, theme, architecture.name, spotlight]);
 	const pinCount = Object.keys(presentation.pins).length;
 	const categoriesShown = categoryOrder.filter(category => visibleEdges.some(edge => edge.category === category));
 	return <main ref={bounds} tabIndex={0} className={'canvas technical-graph theme-' + theme + (compact ? ' is-compact-view' : '')} data-read-only="true" data-graph="technical" aria-label="Technical graph" onKeyDownCapture={handleKeys}>
-		{presentation.layout === 'force' ? <ForceGraph spotlight={spotlight} onSpotlight={id => onPresentation({ type: 'set', patch: { spotlight: id || undefined } })} snapshot={snapshot} edges={visibleEdges} membership={membershipEdges} visible={focusSet} selectedId={selectedId} pathTargetId={pathTargetId} pathNodes={pathNodes} pathEdges={pathEdges} pathDirection={tracedPath?.direction} query={query} overlays={overlays} network={presentation.network} onSelect={id => { setSelectedEdgeId(''); onSelect(id); }} onOpenDetails={onOpenDetails} reducedMotion={reducedMotion} /> :
+		{presentation.layout === 'force' ? <ForceGraph spotlight={spotlight} onSpotlight={id => onPresentation({ type: 'set', patch: { spotlight: id || undefined } })} snapshot={snapshot} edges={visibleEdges} membership={membershipEdges} visible={focusSet} selectedId={selectedId} pathTargetId={pathTargetId} pathNodes={pathNodes} pathEdges={pathEdges} pathDirection={tracedPath?.direction} query={query} overlays={overlays} network={presentation.network} nodesRef={forceNodesRef} onSelect={id => { setSelectedEdgeId(''); onSelect(id); }} onOpenDetails={onOpenDetails} reducedMotion={reducedMotion} /> :
 		bundled ? <BundledGraph spotlight={spotlight} snapshot={snapshot} edges={visibleEdges} visible={focusSet} selectedId={selectedId} pathTargetId={pathTargetId} pathNodes={pathNodes} pathEdges={pathEdges} pathDirection={tracedPath?.direction} query={query} onSelect={id => { setSelectedEdgeId(''); onSelect(id); }} onOpenDetails={onOpenDetails} reducedMotion={reducedMotion} /> :
 		<ReactFlow<GraphFlowNode, GraphFlowEdge> nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes}
 			onInit={instance => { setFlow(instance); onInit?.(instance); setZoom(instance.getZoom()); }}
@@ -694,7 +701,7 @@ function LaneRuler({ lanes }: { lanes: readonly GraphLane[] }) {
  * layer-coloured ring. Dragging moves a node only inside this view and reheats the simulation; it
  * never pins, moves or edits the project. Hover or select lights up uses and used-by.
  */
-function ForceGraph({ spotlight, onSpotlight, snapshot, edges, membership, visible, selectedId, pathTargetId, pathNodes, pathEdges, pathDirection, query, overlays, network, onSelect, onOpenDetails, reducedMotion }: { spotlight?: ReadonlySet<string>; onSpotlight: (id: string) => void; snapshot: TechnicalGraphSnapshot; edges: readonly GraphEdge[]; membership: readonly GraphEdge[]; visible?: ReadonlySet<string>; selectedId: string; pathTargetId?: string; pathNodes?: ReadonlySet<string>; pathEdges?: ReadonlySet<string>; pathDirection?: 'downstream' | 'upstream'; query: string; overlays: { byNode: Record<string, NodeOverlay> }; network: NetworkOptions; onSelect: (id: string) => void; onOpenDetails: (id: string) => void; reducedMotion: boolean }) {
+function ForceGraph({ spotlight, onSpotlight, snapshot, edges, membership, visible, selectedId, pathTargetId, pathNodes, pathEdges, pathDirection, query, overlays, network, nodesRef, onSelect, onOpenDetails, reducedMotion }: { spotlight?: ReadonlySet<string>; onSpotlight: (id: string) => void; snapshot: TechnicalGraphSnapshot; edges: readonly GraphEdge[]; membership: readonly GraphEdge[]; visible?: ReadonlySet<string>; selectedId: string; pathTargetId?: string; pathNodes?: ReadonlySet<string>; pathEdges?: ReadonlySet<string>; pathDirection?: 'downstream' | 'upstream'; query: string; overlays: { byNode: Record<string, NodeOverlay> }; network: NetworkOptions; nodesRef?: RefObject<readonly ForceNode[]>; onSelect: (id: string) => void; onOpenDetails: (id: string) => void; reducedMotion: boolean }) {
 	const nodes = useMemo(() => snapshot.nodes.filter(node => !visible || visible.has(node.id)), [snapshot.nodes, visible]);
 	const sim = useRef<ForceSimulation | null>(null);
 	const [, setFrame] = useState(0);
@@ -749,6 +756,7 @@ function ForceGraph({ spotlight, onSpotlight, snapshot, edges, membership, visib
 	const lastTap = useRef({ id: '', at: 0 });
 	const drag = useRef<{ id?: string; startX: number; startY: number; moved: boolean; view?: { x: number; y: number; w: number; h: number } } | null>(null);
 	const simNodes = sim.current?.nodes ?? [];
+	if (nodesRef) { nodesRef.current = simNodes; }
 	const byId = new Map(simNodes.map(node => [node.id, node]));
 	const info = new Map(nodes.map(node => [node.id, node]));
 	const focus = hover || selectedId;
