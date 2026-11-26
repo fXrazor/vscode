@@ -338,3 +338,14 @@ test('network options persist sanitised, and cluster hulls enclose their members
 	assert.ok(Math.min(...xs) < -20 && Math.max(...xs) > 220);
 	assert.equal(hullPath([]), '');
 });
+
+test('large networks use the approximate solver and still settle apart', () => {
+	const layers = ['network', 'compute', 'data', 'security'] as const;
+	const nodes = Array.from({ length: 900 }, (_, i) => ({ id: 'n' + i, layer: layers[i % 4], scope: 'rg' + (i % 9), scopePath: ['rg' + (i % 9)] }));
+	const edges = Array.from({ length: 1200 }, (_, i) => ({ source: 'n' + ((i * 7) % 900), target: 'n' + ((i * 13 + 5) % 900), membership: false }));
+	const started = performance.now(); const sim = settleForce(createForceSimulation(nodes, edges, { radii: nodeRadii(nodes, edges, 150) }), 120);
+	assert.ok(performance.now() - started < 5000);
+	assert.ok(sim.nodes.every(node => Number.isFinite(node.x) && Number.isFinite(node.y)));
+	let close = 0; for (const [i, p] of sim.nodes.entries()) { for (const q of sim.nodes.slice(i + 1)) { if (Math.hypot(p.x - q.x, p.y - q.y) < (p.r + q.r) * 0.6) { close++; } } }
+	assert.ok(close < sim.nodes.length * 0.02, close + ' overlapping pairs');
+});

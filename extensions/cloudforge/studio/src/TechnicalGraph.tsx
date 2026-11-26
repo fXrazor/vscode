@@ -578,6 +578,11 @@ function ForceGraph({ snapshot, edges, membership, visible, selectedId, query, o
 		const element = host.current; sim.current = reused ? settled : orientForce(settled, element?.clientWidth ? element.clientWidth / Math.max(1, element.clientHeight) : 1.6);
 		fit(); setFrame(frame => frame + 1);
 	}, [nodes, edges, membership, radii, network, fit]);
+	// Keep the selected resource in view (for example after Find → Enter) without changing the zoom.
+	useEffect(() => {
+		const node = sim.current?.nodes.find(item => item.id === selectedId);
+		setView(current => !node || !current || (node.x > current.x + 60 && node.x < current.x + current.w - 60 && node.y > current.y + 60 && node.y < current.y + current.h - 120) ? current : { ...current, x: node.x - current.w / 2, y: node.y - current.h / 2 });
+	}, [selectedId]);
 	const animate = useCallback(() => {
 		if (running.current || reducedMotion) { return; }
 		running.current = true;

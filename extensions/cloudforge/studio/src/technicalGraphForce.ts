@@ -12,7 +12,7 @@ import { layerOrder } from './technicalGraphLayout.ts';
 
 export interface ForceNode { id: string; layer: GraphNode['layer']; group: string; r: number; x: number; y: number; vx: number; vy: number; fx?: number; fy?: number }
 export interface ForceLink { source: string; target: string }
-export interface ForceSimulation { nodes: ForceNode[]; links: ForceLink[]; alpha: number; alphaTarget: number; options: ForceOptions }
+export interface ForceSimulation { nodes: ForceNode[]; links: ForceLink[]; alpha: number; alphaTarget: number; options: ForceOptions; cache?: { byId: Map<string, ForceNode>; degree: Map<string, number> } }
 
 /** User-facing Network options. Percentages are relative to the defaults below. */
 export interface NetworkOptions {
@@ -44,7 +44,7 @@ export function parseNetworkOptions(value: unknown): NetworkOptions | undefined 
 }
 
 interface ForceOptions { linkDistance: number; charge: number; clusterPull: number; layerPull: number; spread: number }
-export const forceSettings = { radius: 22, linkDistance: 110, charge: -460, labelPad: 20, velocityDecay: 0.4, alphaMin: 0.001, alphaDecay: 1 - Math.pow(0.001, 1 / 300), layerPull: 0.035, clusterPull: 0.06 };
+export const forceSettings = { radius: 22, linkDistance: 110, charge: -460, labelPad: 20, velocityDecay: 0.4, alphaMin: 0.001, alphaDecay: 1 - Math.pow(0.001, 1 / 300), layerPull: 0.035, clusterPull: 0.06, exactLimit: 400 };
 
 /**
  * Node radius from the lines drawn to it. 'all' counts every line, including resource-group
@@ -85,8 +85,9 @@ const clampPercent = (value: number) => Math.max(40, Math.min(300, Number.isFini
 export function tickForce(sim: ForceSimulation): boolean {
 	if (sim.alpha < forceSettings.alphaMin && sim.alphaTarget === 0) { return false; }
 	sim.alpha += (sim.alphaTarget - sim.alpha) * forceSettings.alphaDecay;
-	const { alpha, options } = sim; const byId = new Map(sim.nodes.map(node => [node.id, node]));
-	const degree = new Map<string, number>(); for (const link of sim.links) { degree.set(link.source, (degree.get(link.source) ?? 0) + 1); degree.set(link.target, (degree.get(link.target) ?? 0) + 1); }
+	const { alpha, options } = sim;
+	if (!sim.cache) { const degree = new Map<string, number>(); for (const link of sim.links) { degree.set(link.source, (degree.get(link.source) ?? 0) + 1); degree.set(link.target, (degree.get(link.target) ?? 0) + 1); } sim.cache = { byId: new Map(sim.nodes.map(node => [node.id, node])), degree }; }
+	const { byId, degree } = sim.cache;
 	// Links: springs toward linkDistance (plus both radii so big hubs keep their neighbours readable).
 	for (const link of sim.links) {
 		const s = byId.get(link.source)!; const t = byId.get(link.target)!;
@@ -95,17 +96,9 @@ export function tickForce(sim: ForceSimulation): boolean {
 		dx *= k; dy *= k; const bias = degree.get(s.id)! / (degree.get(s.id)! + degree.get(t.id)!);
 		t.vx -= dx * bias; t.vy -= dy * bias; s.vx += dx * (1 - bias); s.vy += dy * (1 - bias);
 	}
-	// Many-body repulsion (exact; Barnes–Hut is unnecessary at graph-view sizes), scaled by size, and collision with label room.
-	const n = sim.nodes.length; const maxDistance2 = (900 * options.spread) ** 2;
-	for (let i = 0; i < n; i++) {
-		const a = sim.nodes[i];
-		for (let j = i + 1; j < n; j++) {
-			const b = sim.nodes[j]; let dx = b.x - a.x; let dy = b.y - a.y; let d2 = dx * dx + dy * dy;
-			if (d2 === 0) { dx = (j - i) * 1e-3; dy = 1e-3; d2 = dx * dx + dy * dy; }
-			if (d2 < maxDistance2) { const apart = options.clusterPull && a.group && b.group && a.group !== b.group ? 1.8 : 1; const w = options.charge * apart * Math.sqrt(a.r * b.r) / forceSettings.radius * alpha / Math.max(d2, 100); a.vx += dx * w; a.vy += dy * w; b.vx -= dx * w; b.vy -= dy * w; }
-			const min = a.r + b.r + forceSettings.labelPad * options.spread; if (d2 < min * min) { const d = Math.sqrt(d2); const push = (min - d) / d * 0.5; a.vx -= dx * push; a.vy -= dy * push; b.vx += dx * push; b.vy += dy * push; }
-		}
-	}
+	// Many-body repulsion scaled by size, and collision with label room. Exact below
+	// exactLimit nodes; above it Barnes–Hut for repulsion and a grid for collisions.
+	if (sim.nodes.length <= forceSettings.exactLimit) { exactBodies(sim.nodes, options, alpha); } else { approximateBodies(sim.nodes, options, alpha); }
 	// Cluster pull: each node drifts toward its group's centroid (a soft forceX/forceY per group).
 	if (options.clusterPull) {
 		const centres = new Map<string, { x: number; y: number; n: number }>();
@@ -128,6 +121,60 @@ export function tickForce(sim: ForceSimulation): boolean {
 	// Centre force: shift the free nodes so their mean stays at the origin.
 	const free = sim.nodes.filter(node => node.fx === undefined); if (free.length) { cx /= free.length; cy /= free.length; for (const node of free) { node.x -= cx; node.y -= cy; } }
 	return true;
+}
+
+function exactBodies(nodes: ForceNode[], options: ForceOptions, alpha: number): void {
+	const n = nodes.length; const maxDistance2 = (900 * options.spread) ** 2;
+	for (let i = 0; i < n; i++) {
+		const a = nodes[i];
+		for (let j = i + 1; j < n; j++) {
+			const b = nodes[j]; let dx = b.x - a.x; let dy = b.y - a.y; let d2 = dx * dx + dy * dy;
+			if (d2 === 0) { dx = (j - i) * 1e-3; dy = 1e-3; d2 = dx * dx + dy * dy; }
+			if (d2 < maxDistance2) { const apart = options.clusterPull && a.group && b.group && a.group !== b.group ? 1.8 : 1; const w = options.charge * apart * Math.sqrt(a.r * b.r) / forceSettings.radius * alpha / Math.max(d2, 100); a.vx += dx * w; a.vy += dy * w; b.vx -= dx * w; b.vy -= dy * w; }
+			collide(a, b, dx, dy, d2, options);
+		}
+	}
+}
+function collide(a: ForceNode, b: ForceNode, dx: number, dy: number, d2: number, options: ForceOptions): void {
+	const min = a.r + b.r + forceSettings.labelPad * options.spread;
+	if (d2 < min * min) { const d = Math.sqrt(d2); const push = (min - d) / d * 0.5; a.vx -= dx * push; a.vy -= dy * push; b.vx += dx * push; b.vy += dy * push; }
+}
+interface Quad { x0: number; y0: number; size: number; mass: number; cx: number; cy: number; leaf?: ForceNode; kids?: (Quad | undefined)[] }
+/** Barnes–Hut (theta 0.9, as d3-force) with mass sqrt(r), and a uniform grid for collisions. */
+function approximateBodies(nodes: ForceNode[], options: ForceOptions, alpha: number): void {
+	let minX = Infinity; let minY = Infinity; let maxX = -Infinity; let maxY = -Infinity;
+	for (const node of nodes) { minX = Math.min(minX, node.x); minY = Math.min(minY, node.y); maxX = Math.max(maxX, node.x); maxY = Math.max(maxY, node.y); }
+	const root: Quad = { x0: minX - 1, y0: minY - 1, size: Math.max(maxX - minX, maxY - minY) + 2, mass: 0, cx: 0, cy: 0 };
+	const insert = (quad: Quad, node: ForceNode, depth: number): void => {
+		const m = Math.sqrt(node.r); quad.cx = (quad.cx * quad.mass + node.x * m) / (quad.mass + m); quad.cy = (quad.cy * quad.mass + node.y * m) / (quad.mass + m); quad.mass += m;
+		if (!quad.kids && !quad.leaf) { quad.leaf = node; return; }
+		if (depth > 40) { return; }
+		if (!quad.kids) { quad.kids = []; const old = quad.leaf!; quad.leaf = undefined; place(quad, old, depth); }
+		place(quad, node, depth);
+	};
+	const place = (quad: Quad, node: ForceNode, depth: number) => {
+		const half = quad.size / 2; const east = node.x >= quad.x0 + half ? 1 : 0; const south = node.y >= quad.y0 + half ? 1 : 0; const index = east + south * 2;
+		const kid = quad.kids![index] ??= { x0: quad.x0 + east * half, y0: quad.y0 + south * half, size: half, mass: 0, cx: 0, cy: 0 };
+		insert(kid, node, depth + 1);
+	};
+	for (const node of nodes) { insert(root, node, 0); }
+	const scale = options.charge * alpha / forceSettings.radius; const theta2 = 0.81;
+	for (const node of nodes) {
+		const own = Math.sqrt(node.r); const stack: Quad[] = [root];
+		while (stack.length) {
+			const quad = stack.pop()!; if (!quad.mass || quad.leaf === node) { continue; }
+			const dx = quad.cx - node.x; const dy = quad.cy - node.y; const d2 = dx * dx + dy * dy;
+			if (quad.leaf || (quad.size * quad.size) / Math.max(d2, 1e-9) < theta2) { const w = scale * own * quad.mass / Math.max(d2, 100); node.vx += dx * w; node.vy += dy * w; continue; }
+			for (const kid of quad.kids ?? []) { if (kid) { stack.push(kid); } }
+		}
+	}
+	const cell = 2 * Math.max(...nodes.map(node => node.r)) + forceSettings.labelPad * options.spread; const grid = new Map<string, ForceNode[]>();
+	for (const node of nodes) { const key = Math.floor(node.x / cell) + ',' + Math.floor(node.y / cell); (grid.get(key) ?? grid.set(key, []).get(key)!).push(node); }
+	const order = new Map(nodes.map((node, i) => [node, i]));
+	for (const a of nodes) {
+		const gx = Math.floor(a.x / cell); const gy = Math.floor(a.y / cell);
+		for (let ox = -1; ox <= 1; ox++) { for (let oy = -1; oy <= 1; oy++) { for (const b of grid.get((gx + ox) + ',' + (gy + oy)) ?? []) { if (order.get(b)! <= order.get(a)!) { continue; } let dx = b.x - a.x; let dy = b.y - a.y; let d2 = dx * dx + dy * dy; if (d2 === 0) { dx = 1e-3; dy = 1e-3; d2 = 2e-6; } collide(a, b, dx, dy, d2, options); } } }
+	}
 }
 
 /** Run to (near) rest synchronously, for the first frame, reduced motion and tests. */
