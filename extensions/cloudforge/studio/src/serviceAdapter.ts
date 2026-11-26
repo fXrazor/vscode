@@ -484,6 +484,7 @@ export function projectGraphSnapshotToArchitecture(
 		connections,
 		...(groups.length ? { groups } : {}),
 		...(layerOrder ? { layerOrder } : {}),
+		...(options.previousArchitecture?.dependencyStyles ? { dependencyStyles: structuredClone(options.previousArchitecture.dependencyStyles) } : {}),
 	});
 
 	return {

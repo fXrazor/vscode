@@ -5,6 +5,7 @@
 import { shapeDefinitions, type ShapeId } from './shapes.ts';
 import { DesignEdge, type DesignEdgeType } from './DesignEdge.tsx';
 import { ConnectionOverlays } from './ConnectionOverlays.tsx';
+import { DependencyTools, dependencyStyle } from './DependencyTools.tsx';
 import { ConnectionCreate } from './ConnectionCreate.tsx';
 import { canConnect, connectionAnchor } from './designConnections.ts';
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type RefObject, type KeyboardEvent as ReactKeyboardEvent } from 'react';
@@ -95,6 +96,7 @@ export const DesignCanvas = memo(function DesignCanvas({
 	const [minimap, setMinimap] = useState(false);
 	const [zoom, setZoom] = useState(1);
 	const [selectedConnectionId, setSelectedConnectionId] = useState('');
+	const [dependencyPick, setDependencyPick] = useState<{ id: string; left: number; top: number }>();
 	const [showConnections, setShowConnections] = useState(true);
 	const [allDependencies, setAllDependencies] = useState(false);
 	const [dropFeedback, setDropFeedback] = useState<{target?:string;ok:boolean;reason:string}>();
@@ -106,6 +108,13 @@ export const DesignCanvas = memo(function DesignCanvas({
 	const [editRequest, setEditRequest] = useState({ id: '', token: 0 });
 	const selectedConnection = architecture.connections.find(connection => connection.id === selectedConnectionId);
 	const bounds = useRef<HTMLDivElement>(null);
+	// Ctrl / Cmd held while drawing a connector turns off snapping to elements.
+	const freeDrop = useRef(false);
+	useEffect(() => {
+		const track = (event: KeyboardEvent | PointerEvent) => { freeDrop.current = event.ctrlKey || event.metaKey; };
+		window.addEventListener('keydown', track, true); window.addEventListener('keyup', track, true); window.addEventListener('pointermove', track, true);
+		return () => { window.removeEventListener('keydown', track, true); window.removeEventListener('keyup', track, true); window.removeEventListener('pointermove', track, true); };
+	}, []);
 	// An automatic first fit is redone when panels settle (e.g. the inspector opens on load), until the user moves the view.
 	const autoFit = useRef<{ mode?: DesignMode; at: number }>({ at: 0 });
 	useEffect(() => {
@@ -124,6 +133,7 @@ export const DesignCanvas = memo(function DesignCanvas({
 	const diagnostics = useMemo(() => architectureDiagnostics(architecture), [architecture]);
 	const dependencies = useMemo(() => inheritedDependencies(architecture), [architecture]);
 	const relationships = useMemo(() => infrastructureRelationships(architecture), [architecture]);
+	const selectedDependency = dependencyPick && dependencies.find(dependency => dependency.id === dependencyPick.id);
 	// The Technical Graph is a separate renderer (TechnicalGraph.tsx); this canvas only authors the design.
 	const resourcePosition = (id: string): Position => architecture.resources.find(resource => resource.id === id)?.positions[mode] ?? { x: 0, y: 0 };
 
@@ -190,8 +200,8 @@ export const DesignCanvas = memo(function DesignCanvas({
 		data: { connection, showLabel: showLabels }, ariaLabel: 'Design connection: ' + (connection.label || endpointElementId(connection.source) + ' to ' + endpointElementId(connection.target))
 	})), ...dependencies.map(dependency=>{
 		const active=selectedIds.includes(dependency.source)||selectedIds.includes(dependency.target);
-			return {...dependency,sourceHandle:'output',targetHandle:'input',type:'design' as const,hidden:!showConnections||!active&&!allDependencies,animated:false,className:'infrastructure-dependency',data:{connection:{...dependency,source:elementEndpoint(dependency.source),target:elementEndpoint(dependency.target),pattern:'dotted' as const,label:dependency.fields.join(', '),endArrow:false},showLabel:showLabels||active,dependency:true},ariaLabel:'Inherited dependency: '+dependency.fields.join(', ')};
-		})], [architecture.connections, selectedConnectionId, showConnections, showLabels, dependencies, mode, allDependencies, selectedIds]);
+			return {...dependency,sourceHandle:'output',targetHandle:'input',type:'design' as const,hidden:!showConnections||!active&&!allDependencies&&dependency.id!==selectedDependency?.id,animated:false,className:'infrastructure-dependency',selected:dependency.id===selectedDependency?.id,data:{connection:{...dependency,source:elementEndpoint(dependency.source),target:elementEndpoint(dependency.target),pattern:'dotted' as const,...dependencyStyle(architecture,dependency.id),label:dependency.fields.join(', '),endArrow:false},showLabel:showLabels||active||dependency.id===selectedDependency?.id,dependency:true},ariaLabel:'Inherited dependency: '+dependency.fields.join(', ')};
+		})], [architecture.connections, selectedConnectionId, showConnections, showLabels, dependencies, mode, allDependencies, selectedIds, architecture.dependencyStyles, selectedDependency]);
 
 	function createItem(kind: BoardItem['kind']) {
 		if (mode !== 'visual') { return; }
@@ -226,7 +236,7 @@ export const DesignCanvas = memo(function DesignCanvas({
 	}
 	function run(action: SelectionAction) {
 		const ids = expandGroups(architecture, selectedIds);
-		if (action === 'clear') { onSelectionChange([]); setSelectedConnectionId(''); setCreatingConnection(false); setAdditiveSelection(false); bounds.current?.focus(); }
+		if (action === 'clear') { onSelectionChange([]); setSelectedConnectionId(''); setDependencyPick(undefined); setCreatingConnection(false); setAdditiveSelection(false); bounds.current?.focus(); }
 		else if (action === 'selectAll') { onSelectionChange(canvasElements(architecture).map(item => item.id)); }
 		else if (action === 'copy') { copySelection(); }
 		else if (action === 'paste') { if (clipboard.current) { insertCopy(clipboard.current); } }
@@ -384,10 +394,15 @@ export const DesignCanvas = memo(function DesignCanvas({
 				onConnectEnd={(event, state) => {
 					// A connector released on empty canvas offers to create the element it points at.
 					const client = 'changedTouches' in event ? event.changedTouches[0] : event; const area = bounds.current?.getBoundingClientRect();
+					// Holding Ctrl / Cmd drops a free end where the pointer is, even over another element (no snapping).
+					if (freeDrop.current && mode === 'visual' && state.fromNode && state.fromHandle?.type === 'source' && flow && client) {
+						const id = crypto.randomUUID(); dispatch({ type: 'connectEndpoints', id, source: elementEndpoint(state.fromNode.id), target: pointEndpoint(flow.screenToFlowPosition({ x: client.clientX, y: client.clientY })) });
+						onSelectionChange([]); setSelectedConnectionId(id); setShowConnections(true); return;
+					}
 					if (mode !== 'visual' || state.isValid || state.toNode || !state.fromNode || state.fromHandle?.type !== 'source' || !flow || !area || !(client && (event.target as Element | null)?.closest?.('.react-flow__pane'))) { return; }
 					setConnectorDrop({ source: state.fromNode.id, point: flow.screenToFlowPosition({ x: client.clientX, y: client.clientY }), left: Math.min(client.clientX - area.left + 8, area.width - 196), top: Math.min(client.clientY - area.top - 12, area.height - 236) });
 				}}
-				isValidConnection={connection => mode === 'visual' && canConnect(architecture, connection.source, connection.target)}
+				isValidConnection={connection => mode === 'visual' && !freeDrop.current && canConnect(architecture, connection.source, connection.target)}
 				minZoom={0.1} maxZoom={20}
 				onSelectionEnd={() => requestAnimationFrame(() => onSelectionChange(expandGroups(architecture, (flow?.getNodes() ?? []).filter(node => node.selected).map(node => node.id))))}
 				onNodeClick={(event, node) => {
@@ -399,8 +414,12 @@ export const DesignCanvas = memo(function DesignCanvas({
 						} else { onSelectionChange(group); if(node.type==='resource'&&group.length===1){onOpen(node.id);} }
 					}
 				}}
-				onPaneClick={() => { setSelectedConnectionId(''); onSelect(''); }}
-				onEdgeClick={(_, edge) => { setCreatingConnection(false); if(edge.data?.dependency){onOpen(edge.target);}else{setSelectedConnectionId(edge.id); onSelect('');} }}
+				onPaneClick={() => { setSelectedConnectionId(''); setDependencyPick(undefined); onSelect(''); }}
+				onEdgeClick={(event, edge) => { setCreatingConnection(false); if(edge.data?.dependency){
+					// A dependency line is selected for its appearance tools; Enter or the tools open its target.
+					const area = bounds.current?.getBoundingClientRect(); if (!area) { return; }
+					setSelectedConnectionId(''); setDependencyPick({ id: edge.id, left: Math.max(12, Math.min(event.clientX - area.left + 12, area.width - 372)), top: Math.max(12, Math.min(event.clientY - area.top + 12, area.height - 236)) });
+				}else{setDependencyPick(undefined); setSelectedConnectionId(edge.id); onSelect('');} }}
 				onNodeDoubleClick={(_, node) => { if (node.type === 'resource') { onOpenDetails(node.id); } }}
 				onNodeDragStart={(_, node, moved) => { autoFit.current = { at: 0 }; onSelectionChange(expandGroups(architecture, (moved.length ? moved : [node]).map(item=>item.id))); }}
 				onNodeDrag={(event,node,moved)=>{if(moved.length<=1&&'clientX' in event){setDropFeedback(placementAt(node,event));}}}
@@ -421,6 +440,7 @@ export const DesignCanvas = memo(function DesignCanvas({
 				{minimap && <MiniMap<CanvasNode> pannable zoomable nodeColor={node => node.type === 'board' && node.data.item.kind === 'frame' ? 'transparent' : '#8e79d9'} />}
 				{!creatingConnection && !selectedConnection && selectedIds.some(id=>canvasElements(architecture).some(item=>item.id===id)) && <SelectionAnchor ids={selectedIds.filter(id=>canvasElements(architecture).some(item=>item.id===id))} canvas={bounds}>{mode === 'visual' ? <SelectionControls architecture={architecture} ids={selectedIds} dispatch={dispatch} run={run} hasClipboard={hasClipboard} mode={mode} onInspect={onOpen} container={bounds.current}/> : <section className="selection-controls" aria-label="Graph inspection controls">{selectedIds.length === 1 && architecture.resources.some(resource => resource.id === selectedIds[0]) && <button onClick={() => onOpenDetails(selectedIds[0])}>Inspect resource</button>}<button onClick={() => run('fit')}>Focus selection</button><button onClick={() => run('clear')}>Clear selection</button></section>}</SelectionAnchor>}
 			</ReactFlow>
+			{selectedDependency && dependencyPick && mode === 'visual' && <DependencyTools architecture={architecture} dependency={selectedDependency} at={dependencyPick} dispatch={dispatch} onOpen={id => { setDependencyPick(undefined); onOpen(id); }} onClose={() => { setDependencyPick(undefined); bounds.current?.focus(); }}/>}
 			{connectorDrop && <ConnectorDropMenu at={connectorDrop} onClose={() => { setConnectorDrop(undefined); bounds.current?.focus(); }} onKeepLooseEnd={() => {
 				const id = crypto.randomUUID(); dispatch({ type: 'connectEndpoints', id, source: elementEndpoint(connectorDrop.source), target: pointEndpoint(connectorDrop.point) });
 				setConnectorDrop(undefined); onSelectionChange([]); setSelectedConnectionId(id); setShowConnections(true); bounds.current?.focus();

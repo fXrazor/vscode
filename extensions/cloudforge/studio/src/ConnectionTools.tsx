@@ -1,6 +1,7 @@
 import type { Dispatch, ReactNode } from 'react';
 import { ArrowRightLeft, Trash2, X } from 'lucide-react';
 import type { Action, DesignConnection } from './model.ts';
+import { PathPicker } from './DependencyTools.tsx';
 
 export function ConnectionTools({ connection, dispatch, onClose, children }: { connection: DesignConnection; dispatch: Dispatch<Action>; onClose: () => void; children?: ReactNode }) {
 	const update = (patch: Partial<DesignConnection>) => dispatch({ type: 'updateConnection', id: connection.id, patch });
@@ -8,7 +9,7 @@ export function ConnectionTools({ connection, dispatch, onClose, children }: { c
 		<header><strong>{connection.origin ? 'Source graph connection' : 'Design connection'}</strong><span>{connection.origin ? 'Source kind: ' + connection.origin.edgeKind + ' · appearance only' : 'Visual link · no Terraform dependency'}</span><button aria-label="Close connection tools" onClick={onClose}><X size={14}/></button></header>
 		<div className="connection-tool-fields">
 			<label>Label<input aria-label="Connection label" maxLength={200} value={connection.label ?? ''} placeholder="Describe this connection" onChange={event => update({ label: event.target.value })}/></label>
-			<label>Path<select aria-label="Connection path" value={connection.routing ?? 'elbow'} onChange={event => update({ routing: event.target.value as DesignConnection['routing'] })}><option value="straight">Straight</option><option value="elbow">Elbow</option><option value="curve">Curve</option></select></label>
+			<PathPicker label="Connection path" value={connection.routing ?? 'elbow'} onChange={routing => update({ routing })}/>
 			<label>Style<select aria-label="Connection stroke style" value={connection.pattern ?? 'solid'} onChange={event => update({ pattern: event.target.value as DesignConnection['pattern'] })}><option>solid</option><option>dashed</option><option>dotted</option></select></label>
 			<label>Weight<select aria-label="Connection weight" value={connection.width ?? 1.5} onChange={event => update({ width: Number(event.target.value) })}>{[1,1.5,2,3,4,6,8].map(width => <option key={width}>{width}</option>)}</select></label>
 			<label>Colour<input aria-label="Connection colour" type="color" value={connection.stroke ?? '#7565bd'} onChange={event => update({ stroke: event.target.value })}/></label>

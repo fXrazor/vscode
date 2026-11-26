@@ -1,5 +1,9 @@
 # CloudForge Code OSS handoff
 
+## Studio pass 10 (Claude) — 26 November 2026
+
+Miro-style connectors: Ctrl/Cmd free drop, Shift 45° steps, editable dependency lines (curve/straight/elbow, style, weight, colour, per line or all) and redesigned canvas menus, on `claude/project-thread-2irlth` (unmerged). See "Studio pass 10" in the [Studio continuation](extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md).
+
 ## Studio pass 9 (Claude) — 26 November 2026
 
 Object (nested) variables bound as `var.NAME.a.b`, readable field labels, On/Off toggles and a larger resource workspace, on `claude/project-thread-2irlth` (unmerged). See "Studio pass 9" in the [Studio continuation](extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md).

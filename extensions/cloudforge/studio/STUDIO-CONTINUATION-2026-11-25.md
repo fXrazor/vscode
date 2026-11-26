@@ -116,6 +116,24 @@ Worktree: `C:/Users/dalep/.codex/worktrees/infrastructure-studio/CloudForge-Code
 
 Dale approved continuing the proposed point-endpoint pass in this chat. No further approval is needed for that plan. Work remains within Studio and handoff documentation; one architecture and one semantic undo history, independent theme/viewport/tool preferences, drawings excluded from Terraform and Rust-owned guarded I/O remain binding.
 
+### Studio pass 10: Miro-style connectors and menus (Claude), 26 November 2026
+
+Branch `claude/project-thread-2irlth` (unmerged; Antigravity owns merging). Based on Miro's connector help (help.miro.com/hc/articles/360017730733): Ctrl/Cmd turns snapping off while drawing or moving a line end, Shift keeps straight 45° steps, and line type (straight, elbow, curved) is a drawn choice in the line's toolbar.
+
+- `ConnectionOverlays.tsx`: dragging a connector end with Ctrl/Cmd held drops a free canvas point even over an element; Shift constrains it to 45° from the fixed end (`constrainAngle`). Drop feedback says which mode is active.
+- `DesignCanvas.tsx`: drawing a new connector from a port with Ctrl/Cmd held makes a loose end where you release (no element snap, no drop menu). Modifier state is tracked in a ref (`freeDrop`).
+- Dependency lines: `Architecture.dependencyStyles` (keyed by dependency id or `*`), action `styleDependency` (validated, undoable, never written to Terraform; preserved by `serviceAdapter` refreshes). Clicking a dependency line now selects it and opens `DependencyTools.tsx` (path, style, weight, colour, Apply to all lines, Reset, Open target). Enter on a focused dependency line still opens its target.
+- `PathPicker` (drawn Straight / Elbow / Curve radios) replaces the Path dropdown for design connections too; `loose-connectors-verify.mjs` updated.
+- Menus (`SelectionControls.tsx`): right-click and More share `SelectionMenuBody`: heading with selection count, icons, grouped sections with real separators, key hints as keycaps (⌘/⇧ on Mac), Arrange as a submenu, Delete in danger colour. CSS in `styles.css` (`.canvas-context-*`, `.menu-shortcut`, `.path-picker`, `.dependency-tools`). The old nth-child separator hack is gone.
+- Checks: `npm run check`, 214/214 tests (new dependency style test), loose-connectors-verify 16/16, whiteboard-controls-verify 20/20.
+
+Test checklist:
+1. Select a connection end, hold Ctrl, drag it over a resource and release: it stays a loose point where you dropped it.
+2. Hold Shift while dragging an end: the line keeps 0°/45°/90° steps.
+3. Drag from a port with Ctrl held and release over another resource: a loose end is created, not a link.
+4. View > All inherited dependencies, click a dotted line: the Dependency line toolbar opens. Pick Curve, change colour/weight, then Apply to all lines and Reset. Undo/redo works; the Terraform code does not change.
+5. Right-click a resource and open the More (…) menu: icons, separators, keycaps, Arrange submenu, red Delete.
+
 ### Studio pass 9: test view comments, object variables (Claude), 26 November 2026
 
 - Same branch `claude/project-thread-2irlth`, unmerged (Dale is having Antigravity merge it; include commits after 4e46b6f2).

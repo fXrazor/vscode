@@ -52,9 +52,13 @@ export function ConnectionOverlays({ architecture, mode, selectedId, showLabels,
 		return element ? { x: point.x + node.internals.positionAbsolute.x - element.positions[mode].x, y: point.y + node.internals.positionAbsolute.y - element.positions[mode].y } : point;
 	}
 
-	function candidate(clientX: number, clientY: number, side: 'source' | 'target'): Preview {
-		let endpoint = pointEndpoint(flow.screenToFlowPosition({ x: clientX, y: clientY }));
-		const hit = document.elementsFromPoint(clientX, clientY).find(element => element.closest('.react-flow__node'));
+	/** Ctrl / Cmd drops the end freely without snapping to an element (as in Miro); Shift keeps the line at 45° steps. */
+	function candidate(clientX: number, clientY: number, side: 'source' | 'target', keys: { free?: boolean; straight?: boolean } = {}): Preview {
+		let position = flow.screenToFlowPosition({ x: clientX, y: clientY });
+		const other = selected && anchor(selected, side === 'source' ? 'target' : 'source', false);
+		if (keys.straight && other) { position = constrainAngle(other, position); }
+		let endpoint = pointEndpoint(position);
+		const hit = keys.free || keys.straight ? undefined : document.elementsFromPoint(clientX, clientY).find(element => element.closest('.react-flow__node'));
 		const node = hit?.closest<HTMLElement>('.react-flow__node');
 		const id = node?.dataset.id;
 		const target = connectableElements(architecture).find(item => item.id === id);
@@ -64,16 +68,16 @@ export function ConnectionOverlays({ architecture, mode, selectedId, showLabels,
 			endpoint = elementEndpoint(target.id, port === 'input' || port === 'output' ? port : side === 'source' ? 'output' : 'input');
 		}
 		const valid = !!selected && canConnectEndpoints(architecture, side === 'source' ? endpoint : selected.source, side === 'target' ? endpoint : selected.target, selected.id);
-		return { side, endpoint, valid, label: !valid ? 'Cannot connect here' : endpoint.kind === 'point' ? 'Loose canvas endpoint' : 'Attach to ' + target!.label };
+		return { side, endpoint, valid, label: !valid ? 'Cannot connect here' : endpoint.kind === 'point' ? keys.free ? 'Free point · snapping off' : keys.straight ? 'Straight · 45° steps' : 'Loose point · hold Ctrl to place freely' : 'Attach to ' + target!.label };
 	}
 
 	const cancel = () => { drag.current = undefined; setPreview(undefined); };
 	function move(event: ReactPointerEvent<HTMLButtonElement>) {
-		if (drag.current) { setPreview(candidate(event.clientX, event.clientY, drag.current.side)); }
+		if (drag.current) { setPreview(candidate(event.clientX, event.clientY, drag.current.side, modifierKeys(event))); }
 	}
 	function release(event: ReactPointerEvent<HTMLButtonElement>) {
 		const state = drag.current; if (!state || !selected) { return; }
-		const next = candidate(event.clientX, event.clientY, state.side); cancel();
+		const next = candidate(event.clientX, event.clientY, state.side, modifierKeys(event)); cancel();
 		if (next.valid) { dispatch({ type: 'reconnectConnection', id: selected.id, side: state.side, endpoint: next.endpoint }); }
 	}
 	const update = (side: 'source' | 'target', endpoint: DesignEndpoint) => {
@@ -108,7 +112,7 @@ export function ConnectionOverlays({ architecture, mode, selectedId, showLabels,
 		</svg>
 		{selected && !selected.id.includes('->') && (['source', 'target'] as const).map(side => {
 			const point = anchor(selected, side); if (!point) { return null; }
-			return <button key={side} className="connection-endpoint nodrag nopan" data-side={side} data-valid={preview?.side === side ? preview.valid : undefined} aria-label={(side === 'source' ? 'Start' : 'End') + ' connection endpoint'} title="Drag to move or reconnect · Arrow keys move · Shift moves 10 · Escape cancels"
+			return <button key={side} className="connection-endpoint nodrag nopan" data-side={side} data-valid={preview?.side === side ? preview.valid : undefined} aria-label={(side === 'source' ? 'Start' : 'End') + ' connection endpoint'} title="Drag to move or reconnect · Hold Ctrl to place freely without snapping · Shift keeps 45° steps · Arrow keys move · Escape cancels"
 				style={{ transform: `translate(${point.x}px,${point.y}px) scale(${1 / zoom})` }}
 				onPointerDown={event => { if (event.button !== 0) { return; } event.preventDefault(); event.stopPropagation(); event.currentTarget.focus({ preventScroll: true }); event.currentTarget.setPointerCapture(event.pointerId); drag.current = { side }; }}
 				onPointerMove={move} onPointerUp={release} onPointerCancel={cancel} onLostPointerCapture={cancel}
@@ -129,6 +133,15 @@ export function ConnectionOverlays({ architecture, mode, selectedId, showLabels,
 			</ConnectionTools>
 		</div>}
 	</ViewportPortal>;
+}
+
+const modifierKeys = (event: { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }) => ({ free: event.ctrlKey || event.metaKey, straight: event.shiftKey });
+
+/** Keep a dragged end on the nearest 45° ray from the fixed end. */
+export function constrainAngle(from: Position, to: Position): Position {
+	const dx = to.x - from.x; const dy = to.y - from.y; const length = Math.hypot(dx, dy);
+	const angle = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * (Math.PI / 4);
+	return { x: Math.round((from.x + Math.cos(angle) * length) * 100) / 100, y: Math.round((from.y + Math.sin(angle) * length) * 100) / 100 };
 }
 
 function EndpointField({ architecture, connection, side, point, onChange }: { architecture: Architecture; connection: DesignConnection; side: 'source' | 'target'; point: Position; onChange: (endpoint: DesignEndpoint) => void }) {

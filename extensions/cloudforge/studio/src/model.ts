@@ -71,7 +71,11 @@ export interface Architecture {
 	resources: Resource[];
 	items: BoardItem[];
 	connections: DesignConnection[];
+	/** Appearance of derived dependency lines, keyed by dependency id or '*' for all. Never Terraform. */
+	dependencyStyles?: Record<string, DependencyStyle>;
 }
+
+export type DependencyStyle = Partial<Pick<DesignConnection, 'routing' | 'pattern' | 'width' | 'stroke'>>;
 
 export interface DesignConnection {
 	id: string; source: DesignEndpoint; target: DesignEndpoint;
@@ -134,6 +138,7 @@ export type Edit =
 	| { type: 'bindResourceRef'; id: string; target: FieldTarget; refs?: ResourceRefEntry[] }
 	| { type: 'updateConnection'; id: string; patch: Partial<Omit<DesignConnection, 'id' | 'source' | 'target'>> }
 	| { type: 'reverseConnection'; id: string }
+	| { type: 'styleDependency'; key: string; patch: DependencyStyle | null }
 	| { type: 'deleteConnection'; id: string }
 	| { type: 'connectEndpoints'; id: string; source: DesignEndpoint; target: DesignEndpoint }
 	| { type: 'reconnectConnection'; id: string; side: 'source' | 'target'; endpoint: DesignEndpoint }
@@ -255,6 +260,25 @@ function editArchitecture(architecture: Architecture, action: Edit): Architectur
 				|| patch.label !== undefined && patch.label.length > 200) { return architecture; }
 			if (Object.entries(patch).every(([key, value]) => connection[key as keyof DesignConnection] === value)) { return architecture; }
 			return { ...architecture, connections: architecture.connections.map(item => item.id === action.id ? { ...item, ...patch } : item) };
+		}
+		case 'styleDependency': {
+			const styles = { ...architecture.dependencyStyles };
+			if (action.patch === null) {
+				if (!(action.key in styles)) { return architecture; }
+				delete styles[action.key];
+			} else {
+				const patch = action.patch;
+				if (Object.keys(patch).some(key => !['routing', 'pattern', 'width', 'stroke'].includes(key))
+					|| patch.width !== undefined && (!Number.isFinite(patch.width) || patch.width < 1 || patch.width > 8)
+					|| patch.stroke !== undefined && !/^#[0-9a-f]{6}$/i.test(patch.stroke)
+					|| patch.routing !== undefined && !['straight', 'elbow', 'curve'].includes(patch.routing)
+					|| patch.pattern !== undefined && !['solid', 'dashed', 'dotted'].includes(patch.pattern)) { return architecture; }
+				const current = styles[action.key] ?? {};
+				if (Object.entries(patch).every(([key, value]) => current[key as keyof DependencyStyle] === value)) { return architecture; }
+				styles[action.key] = { ...current, ...patch };
+			}
+			const { dependencyStyles: _previous, ...rest } = architecture;
+			return Object.keys(styles).length ? { ...rest, dependencyStyles: styles } : rest;
 		}
 		case 'deleteConnection':
 			return architecture.connections.some(connection => connection.id === action.id && !connection.origin && !connection.id.includes('->')) ? { ...architecture, connections: architecture.connections.filter(connection => connection.id !== action.id) } : architecture;

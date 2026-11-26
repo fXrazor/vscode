@@ -9,6 +9,6 @@ export const DesignEdge = memo(function DesignEdge(props: EdgeProps<DesignEdgeTy
 	const connection = props.data!.connection;
 	const [path, labelX, labelY] = connectionPath(connection, props.sourceX, props.sourceY, props.targetX, props.targetY);
 	return <BaseEdge id={props.id} path={path} markerStart={props.markerStart} markerEnd={props.markerEnd} interactionWidth={24}
-		style={{ stroke: props.data?.dependency ? 'var(--dependency)' : connection.stroke ?? 'var(--accent)', strokeWidth: connection.width ?? 1.5, strokeDasharray: props.data?.category === 'attachment' ? '6 5' : props.data?.category === 'ownership' ? undefined : props.data?.dependency ? '2 6' : props.selected ? '6 4' : connectionDash(connection), strokeLinecap: 'round' }}
+		style={{ stroke: connection.stroke ?? (props.data?.dependency ? 'var(--dependency)' : 'var(--accent)'), strokeWidth: connection.width ?? 1.5, strokeDasharray: props.data?.category === 'attachment' ? '6 5' : props.data?.category === 'ownership' ? undefined : props.data?.dependency ? (connection.pattern === 'dotted' ? '2 6' : connectionDash(connection)) : props.selected ? '6 4' : connectionDash(connection), strokeLinecap: 'round' }}
 		label={props.data!.showLabel || props.selected ? connection.label : undefined} labelX={labelX} labelY={labelY + (connection.labelPosition === 'above' ? -18 : connection.labelPosition === 'below' ? 18 : 0)} labelStyle={{ fill: connection.labelColor ?? 'var(--text)', fontSize: connection.labelFontSize ?? 11 }} labelBgStyle={{ fill: 'var(--panel-solid)' }}/>;
 });

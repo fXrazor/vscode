@@ -739,3 +739,20 @@ test('object variables declare their shape and fields bind one nested value as v
 	assert.equal(imported[0].type, 'object');
 	assert.match(variableDeclarations(imported), /type = object\(\{ location = string \}\)/, 'the imported constraint is written back unchanged');
 });
+
+test('dependency line styles are appearance only, validated, undoable and never touch Terraform', () => {
+	const initial = createHistory(sampleArchitecture());
+	const before = terraformCode(initial.present);
+	let history = historyReducer(initial, { type: 'styleDependency', key: '*', patch: { routing: 'curve', width: 2 } });
+	history = historyReducer(history, { type: 'styleDependency', key: 'dependency:a:b', patch: { stroke: '#123456', pattern: 'solid' } });
+	assert.deepEqual(history.present.dependencyStyles, { '*': { routing: 'curve', width: 2 }, 'dependency:a:b': { stroke: '#123456', pattern: 'solid' } });
+	assert.equal(terraformCode(history.present), before);
+	assert.equal(historyReducer(history, { type: 'styleDependency', key: '*', patch: { width: 99 } }), history);
+	assert.equal(historyReducer(history, { type: 'styleDependency', key: '*', patch: { routing: 'zigzag' as 'curve' } }), history);
+	assert.equal(historyReducer(history, { type: 'styleDependency', key: '*', patch: { routing: 'curve' } }), history);
+	history = historyReducer(history, { type: 'styleDependency', key: 'dependency:a:b', patch: null });
+	history = historyReducer(history, { type: 'styleDependency', key: '*', patch: null });
+	assert.equal(history.present.dependencyStyles, undefined);
+	history = historyReducer(history, { type: 'undo' });
+	assert.deepEqual(history.present.dependencyStyles, { '*': { routing: 'curve', width: 2 } });
+});
