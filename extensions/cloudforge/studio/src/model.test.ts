@@ -20,6 +20,7 @@ import { applyCanvasCommand, expandGroups, sceneOrder, selectionFragment } from 
 import { layoutSelection, selectionUnits } from './selectionGeometry.ts';
 import type { Architecture, Action } from './model.ts';
 import { bindingKey, variableBindingIssue, variablePreview, type FieldTarget } from './fieldBindings.ts';
+import { inheritedDependencies } from './resourceHierarchy.ts';
 import { resourceIconSize } from './resourceGeometry.ts';
 import { alignmentGuides } from './alignmentGuides.ts';
 import { inheritedReferences, resourcePlacement, resourceDimensions, resourceDescendants } from './resourceHierarchy.ts';
@@ -755,4 +756,25 @@ test('dependency line styles are appearance only, validated, undoable and never 
 	assert.equal(history.present.dependencyStyles, undefined);
 	history = historyReducer(history, { type: 'undo' });
 	assert.deepEqual(history.present.dependencyStyles, { '*': { routing: 'curve', width: 2 } });
+});
+
+test('list fields mix typed values, variables and resource references entry by entry', () => {
+	const architecture = sampleArchitecture();
+	architecture.variables = [{ id: 'v-nic', name: 'extra_nic_id', type: 'string', description: '', sensitive: false }];
+	const target = { kind: 'setting' as const, name: 'network_interface_ids' };
+	let history = historyReducer(createHistory(architecture), { type: 'setListEntries', id: 'vm', target, items: [
+		{ kind: 'ref', resourceId: 'nic', attribute: 'id' }, { kind: 'variable', variableId: 'v-nic' }, { kind: 'value', value: '/subscriptions/x/nic3' },
+	] });
+	const vm = history.present.resources.find(resource => resource.id === 'vm')!;
+	assert.deepEqual(vm.resourceRefs?.[bindingKey(target)]?.refs, [{ resourceId: 'nic', attribute: 'id' }]);
+	const code = terraformCode(history.present);
+	assert.match(code, /network_interface_ids\s*=\s*\[\s*azurerm_network_interface\.[\w-]+\.id,\s*var\.extra_nic_id,\s*"\/subscriptions\/x\/nic3",?\s*\]/);
+	assert.ok(inheritedDependencies(history.present).some(edge => edge.source === 'nic' && edge.target === 'vm'), 'a reference entry is a dependency');
+	assert.equal(historyReducer(history, { type: 'setListEntries', id: 'vm', target, items: [{ kind: 'variable', variableId: 'missing' }] }), history);
+	history = historyReducer(history, { type: 'setListEntries', id: 'vm', target, items: [{ kind: 'value', value: 'a' }, { kind: 'value', value: 'b' }] });
+	const plain = history.present.resources.find(resource => resource.id === 'vm')!;
+	assert.equal(plain.resourceRefs?.[bindingKey(target)], undefined);
+	assert.equal(plain.settings.network_interface_ids, '["a","b"]');
+	history = historyReducer(history, { type: 'undo' });
+	assert.equal(history.present.resources.find(resource => resource.id === 'vm')!.resourceRefs?.[bindingKey(target)]?.items?.length, 3);
 });

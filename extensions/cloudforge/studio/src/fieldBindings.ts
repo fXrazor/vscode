@@ -13,7 +13,17 @@ export type FieldTarget = { kind: 'name' } | { kind: 'region' } | { kind: 'setti
 /** `path` picks one attribute of an object variable: { variableId, path: ['dns', 'enabled'] } writes var.NAME.dns.enabled. */
 export type VariableBinding = { variableId: string; path?: string[] };
 export type ResourceRefEntry = { resourceId: string; attribute: string };
-export type ResourceRefBinding = { refs: ResourceRefEntry[] };
+/** One entry of a mixed list: a typed value, a variable or a resource reference, written in order as [a, var.b, type.name.id]. */
+export type ListEntry = { kind: 'value'; value: string } | { kind: 'variable'; variableId: string; path?: string[] } | { kind: 'ref'; resourceId: string; attribute: string };
+/** `refs` lists every referenced resource (dependencies, cycles, validation); `items`, when set, is the full mixed list in order. */
+export type ResourceRefBinding = { refs: ResourceRefEntry[]; items?: ListEntry[] };
+export const hasRefBinding = (binding?: ResourceRefBinding) => !!(binding?.refs.length || binding?.items?.length);
+export function listEntryExpression(entry: ListEntry, architecture?: Architecture): string {
+	if (entry.kind === 'value') { return JSON.stringify(entry.value); }
+	if (entry.kind === 'variable') { return variableBindingExpression(architecture?.variables?.find(item => item.id === entry.variableId), entry); }
+	const source = architecture?.resources.find(item => item.id === entry.resourceId);
+	return source ? resourceAddress(source) + '.' + entry.attribute : 'Missing resource';
+}
 export type ResourceRefCandidate = { resource: Resource; attribute: string; expression: string };
 export const fieldAliases: Record<string, string> = {
 	'Address space': 'address_space', 'Address prefix': 'address_prefixes', SKU: 'sku.name', Capacity: 'sku.capacity',
@@ -116,6 +126,7 @@ export function fieldExpression(resource: Resource, target: FieldTarget, variabl
 	if (inherited) { return inherited.expression; }
 	const key = bindingKey(target);
 	const refBinding = resource.resourceRefs?.[key];
+	if (refBinding?.items?.length) { return '[' + refBinding.items.map(entry => listEntryExpression(entry, architecture)).join(', ') + ']'; }
 	if (refBinding?.refs.length) {
 		const parts = refBinding.refs.map(entry => {
 			const source = architecture?.resources.find(item => item.id === entry.resourceId);
@@ -192,6 +203,13 @@ export function acceptsResourceRefs(architecture: Architecture, resource: Resour
 }
 
 export function resourceRefBindingIssue(binding: ResourceRefBinding | undefined, architecture: Architecture | undefined, resource: Resource, definition?: AttrDef): string | undefined {
+	if (binding?.items?.length) {
+		if (definition && definition.type !== 'list') { return 'Only list fields can mix values, variables and references.'; }
+		for (const entry of binding.items) {
+			if (entry.kind === 'variable' && architecture && !architecture.variables?.some(item => item.id === entry.variableId)) { return 'A variable in this list no longer exists. Choose another variable or a value.'; }
+			if (entry.kind === 'value' && !entry.value.trim()) { return 'An entry in this list is empty. Fill it in or remove it.'; }
+		}
+	}
 	if (!binding || !binding.refs.length) { return undefined; }
 	if (!definition?.refTypes?.length || isSensitiveProperty(definition.name, definition.sensitive)) {
 		return 'This field does not support typed resource references.';

@@ -7,7 +7,7 @@ import { canConnect, canConnectEndpoints } from './designConnections.ts';
 import { elementEndpoint, endpointKey, normaliseArchitectureConnections, type ArchitectureInput, type DesignEndpoint } from './connectionEndpoints.ts';
 export type { DesignEndpoint } from './connectionEndpoints.ts';
 import { applyCanvasCommand, canvasElements, type CanvasCommand } from './canvasOperations.ts';
-import { bindingKey, acceptsResourceRefs, acceptsVariable, canBindField, fieldDefinition, fieldTargetPath, findResourceBlock, pruneBlockBindings, pruneBlockResourceRefs, type FieldTarget, type ResourceRefBinding, type ResourceRefEntry, type VariableBinding } from './fieldBindings.ts';
+import { bindingKey, acceptsResourceRefs, acceptsVariable, canBindField, fieldDefinition, fieldTargetPath, findResourceBlock, pruneBlockBindings, pruneBlockResourceRefs, type FieldTarget, type ResourceRefBinding, type ResourceRefEntry, type VariableBinding, type ListEntry } from './fieldBindings.ts';
 import { fitResourceContainers, isResourceContainer, reparentResource, resourcePlacement, visualResourcePlacement, terraformIdentifier } from './resourceHierarchy.ts';
 import type { ShapeId } from './shapes.ts';
 import { rebaseHistory } from './historyRebase.ts';
@@ -135,6 +135,7 @@ export type Edit =
 	| { type: 'canvas'; command: CanvasCommand }
 	| { type: 'resizeResource'; id: string; position: Position; iconSize: number }
 	| { type: 'bindVariable'; id: string; target: FieldTarget; variableId?: string; path?: string[] }
+	| { type: 'setListEntries'; id: string; target: FieldTarget; items: ListEntry[] | null }
 	| { type: 'bindResourceRef'; id: string; target: FieldTarget; refs?: ResourceRefEntry[] }
 	| { type: 'updateConnection'; id: string; patch: Partial<Omit<DesignConnection, 'id' | 'source' | 'target'>> }
 	| { type: 'reverseConnection'; id: string }
@@ -232,6 +233,36 @@ function editArchitecture(architecture: Architecture, action: Edit): Architectur
 			if (target.kind === 'setting' && refs) { settings[target.name] ??= ''; }
 			if (target.kind === 'block' && refs) { const block = findResourceBlock(blocks, target.blockId)!; block.values[target.name] ??= ''; }
 			const inheritanceOverrides = refs ? [...new Set([...(resource.inheritanceOverrides ?? []), fieldTargetPath(resource, target).join('.')])] : resource.inheritanceOverrides;
+			return { ...architecture, resources: architecture.resources.map(item => item.id === action.id ? { ...item, fieldBindings, resourceRefs, blocks, settings, inheritanceOverrides } : item) };
+		}
+		case 'setListEntries': {
+			// A list that mixes typed values, variables and references. A list of plain values collapses back to an ordinary literal.
+			const resource = architecture.resources.find(item => item.id === action.id);
+			if (!resource || !canBindField(resource, action.target)) { return architecture; }
+			const target = action.target;
+			if (target.kind === 'block' && !findResourceBlock(resource.blocks, target.blockId)) { return architecture; }
+			const definition = fieldDefinition(resource, target);
+			if (definition && definition.type !== 'list') { return architecture; }
+			const key = bindingKey(target); const items = action.items;
+			const resourceRefs = { ...resource.resourceRefs }; const fieldBindings = { ...resource.fieldBindings };
+			const blocks = structuredClone(resource.blocks); const settings = { ...resource.settings };
+			const write = (text: string) => { if (target.kind === 'setting') { settings[target.name] = text; } else if (target.kind === 'block') { findResourceBlock(blocks, target.blockId)!.values[target.name] = text; } };
+			const mixed = !!items && items.some(entry => entry.kind !== 'value');
+			if (!mixed) {
+				if (!resourceRefs[key]?.items && !items) { return architecture; }
+				delete resourceRefs[key];
+				if (items) { const numeric = (definition?.literalShape?.kind === 'list' || definition?.literalShape?.kind === 'set') && definition.literalShape.element?.kind === 'number'; write(items.length ? JSON.stringify(items.map(entry => { const text = entry.kind === 'value' ? entry.value : ''; return numeric && text.trim() && Number.isFinite(Number(text)) ? Number(text) : text; })) : ''); }
+			} else {
+				if (items.some(entry => entry.kind === 'variable' && !architecture.variables?.some(variable => variable.id === entry.variableId))) { return architecture; }
+				const refs = items.flatMap(entry => entry.kind === 'ref' ? [{ resourceId: entry.resourceId, attribute: entry.attribute }] : []);
+				if (refs.length && !acceptsResourceRefs(architecture, resource, refs, definition)) { return architecture; }
+				const next = { refs, items: structuredClone(items) };
+				if (JSON.stringify(resourceRefs[key] ?? null) === JSON.stringify(next) && !fieldBindings[key]) { return architecture; }
+				resourceRefs[key] = next; delete fieldBindings[key];
+				if (target.kind === 'setting') { settings[target.name] ??= ''; }
+				if (target.kind === 'block') { findResourceBlock(blocks, target.blockId)!.values[target.name] ??= ''; }
+			}
+			const inheritanceOverrides = mixed ? [...new Set([...(resource.inheritanceOverrides ?? []), fieldTargetPath(resource, target).join('.')])] : resource.inheritanceOverrides;
 			return { ...architecture, resources: architecture.resources.map(item => item.id === action.id ? { ...item, fieldBindings, resourceRefs, blocks, settings, inheritanceOverrides } : item) };
 		}
 		case 'resizeResource': {

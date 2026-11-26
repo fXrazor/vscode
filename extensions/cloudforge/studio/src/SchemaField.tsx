@@ -1,10 +1,11 @@
 import { useId } from 'react';
 import { LiteralFields } from './LiteralFields.tsx';
+import { ListEntries } from './ListEntries.tsx';
 import type { AttrDef } from './cloudlab-core/catalog/index.ts';
 import { fieldIssue } from './formDefinition.ts';
 import { CircleHelp, CornerDownRight, Link2, TriangleAlert, Variable, X, Code2 } from 'lucide-react';
 import type { FieldImpact } from './fieldImpact.ts';
-import { resourceRefBindingIssue, variableBindingIssue, variablePreview, type ResourceRefBinding, type ResourceRefCandidate, type ResourceRefEntry, type VariableBinding } from './fieldBindings.ts';
+import { resourceRefBindingIssue, variableBindingIssue, variablePreview, type ListEntry, type ResourceRefBinding, type ResourceRefCandidate, type ResourceRefEntry, type VariableBinding } from './fieldBindings.ts';
 import { isSensitiveProperty, type VariableDefinition } from './variables.ts';
 import { VariablePicker } from './VariablePicker.tsx';
 import { ResourceReferencePicker } from './ResourceReferencePicker.tsx';
@@ -15,6 +16,7 @@ import { resourceDefinition } from './fixture.ts';
 import type { Architecture, Resource } from './model.ts';
 
 export type FieldInheritance = { reference?: InheritedReference; available?: InheritedReference; onInherit: (enabled:boolean)=>void; onReveal?: (id:string)=>void };
+export type FieldList = { binding?: ResourceRefBinding; candidates: ResourceRefCandidate[]; issue?: string; onChange: (items: ListEntry[] | null) => void };
 export type FieldResourceReference = {
 	binding?: ResourceRefBinding;
 	candidates: ResourceRefCandidate[];
@@ -24,17 +26,23 @@ export type FieldResourceReference = {
 	onReveal?: (id: string) => void;
 };
 /** Literal, input, typed resource reference and inherited modes share the same field in both resource editors. */
-export function SchemaField({ name, value, definition, onChange, onUnset, variables = [], binding, onBind, onManageVariables, inheritance, resourceReference, path, impact, terraform }: {
+export function SchemaField({ name, value, definition, onChange, onUnset, variables = [], binding, onBind, onManageVariables, inheritance, resourceReference, list, path, impact, terraform }: {
 	name:string; value:string; definition?:AttrDef; onChange:(value:string)=>void; variables?:VariableDefinition[]; binding?:VariableBinding;
 	onBind?:(variableId?:string,path?:string[])=>void; onManageVariables?:()=>void; inheritance?:FieldInheritance; resourceReference?:FieldResourceReference; path?:string; impact?:FieldImpact;
 	terraform?: { expression: string; onConfigure?: () => void };
-	onUnset?: () => void;
+	onUnset?: () => void; list?: FieldList;
 }) {
 	const id = useId(); const reference = inheritance?.reference;
-	const refBinding = resourceReference?.binding?.refs.length ? resourceReference.binding : undefined;
+	const mixed = list?.binding?.items?.length ? list.binding.items : undefined;
+	const refBinding = !mixed && resourceReference?.binding?.refs.length ? resourceReference.binding : undefined;
+	const shape = definition?.literalShape;
+	const scalarList = !!list && definition?.type === 'list' && (!shape || (shape.kind === 'list' || shape.kind === 'set') && (shape.element?.kind === 'string' || shape.element?.kind === 'number'));
+	const literalEntries = (() => { if (!scalarList) { return undefined; } if (!value.trim()) { return []; } try { const parsed = JSON.parse(value); return Array.isArray(parsed) && parsed.every(item => typeof item === 'string' || typeof item === 'number') ? parsed.map(item => ({ kind: 'value' as const, value: String(item) })) : undefined; } catch { return undefined; } })();
+	const entries = mixed ?? literalEntries;
 	const canReference = !!resourceReference && !!definition?.refTypes?.length && !isSensitiveProperty(name, definition.sensitive);
 	const issue = terraform ? undefined : reference
 		? undefined
+		: mixed ? list?.issue
 		: refBinding
 			? resourceRefBindingIssue(refBinding, resourceReference?.architecture, resourceReference!.resource!, definition)
 			: binding
@@ -42,7 +50,7 @@ export function SchemaField({ name, value, definition, onChange, onUnset, variab
 				: fieldIssue(value,definition);
 	const variable = variables.find(item=>item.id===binding?.variableId);
 	const isToggle = definition?.type==='bool' && !definition.options?.length && (!value || value==='true' || value==='false');
-	const fixed = () => { inheritance?.onInherit(false); onBind?.(undefined); resourceReference?.onSelect(undefined); };
+	const fixed = () => { inheritance?.onInherit(false); onBind?.(undefined); if (!mixed) { resourceReference?.onSelect(undefined); } };
 	const props = {id,value,'aria-invalid':!!issue,'aria-required':!!definition?.required,'aria-describedby':id+'-help',onChange:(event:React.ChangeEvent<HTMLInputElement|HTMLSelectElement|HTMLTextAreaElement>)=>onChange(event.target.value)};
 	return <div className="schema-field" data-field-path={path??name}>
 		<div className="schema-field-heading">
@@ -75,6 +83,7 @@ export function SchemaField({ name, value, definition, onChange, onUnset, variab
 		</div> : binding ? <div className="field-variable-value" id={id} role="group" aria-labelledby={id+'-label'} aria-describedby={id+'-help'}><span className="variable-chip"><Variable size={14}/><span>{variable?(binding?.path?.length?[variable.name,...binding.path].join(' › '):variable.name):'Missing variable'}</span><button aria-label={'Use fixed value for '+name} onClick={()=>onBind?.(undefined)}><X size={12}/></button></span><small>{variable?variablePreview(variable,isSensitiveProperty(name,definition?.sensitive),binding?.path):'Choose a valid input'}</small></div>
 		: isToggle ? <div className="bool-toggle" id={id} role="radiogroup" aria-labelledby={id+'-label'} aria-describedby={id+'-help'}>{([['','Not set'],['true','On'],['false','Off']] as const).map(([option,text])=><button key={text} type="button" role="radio" aria-checked={value===option} title={option?name+' = '+option:'Leave '+name+' unset (provider default)'} onClick={()=>onChange(option)}>{text}</button>)}</div>
 		: definition?.type==='bool'||definition?.options?.length ? <select {...props}><option value="">Not set</option>{(definition.options??['true','false']).map(option=><option key={option}>{option}</option>)}{value&&!(definition.options??['true','false']).includes(value)&&<option>{value}</option>}</select>
+		: entries && list ? <ListEntries id={id} labelId={id+'-label'} name={name} entries={entries} element={{type: shape?.element?.kind === 'number' ? 'number' : 'string'}} variables={variables} candidates={list.candidates} onChange={items => list.onChange(items)} onUnset={onUnset ?? (() => list.onChange([]))}/>
 		: definition?.literalShape && ['object','list','set','map','tuple'].includes(definition.literalShape.kind) ? <LiteralFields value={value} shape={definition.literalShape} name={name} id={id} labelId={id+'-label'} onChange={onChange} onUnset={onUnset}/>
 		: definition?.type==='list'||definition?.type==='map'||definition?.type==='json' ? <textarea {...props} rows={2} spellCheck={false}/>
 		: <input {...props} type={isSensitiveProperty(name,definition?.sensitive)?'password':'text'} inputMode={definition?.type==='number'?'decimal':undefined} placeholder={definition?.placeholder}/>}

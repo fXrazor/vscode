@@ -5,7 +5,7 @@ import { getDef, type AttrDef } from './cloudlab-core/catalog/index.ts';
 import { emptyProject, isExpr, isRef, type ArchNode, type Project, type Value } from './cloudlab-core/model.ts';
 import { generate, nodeBlock } from './cloudlab-core/terraform.ts';
 import { blockToConfig, parseHcl, type HclBlock } from './cloudlab-core/hcl.ts';
-import { bindingKey, boundVariable, variableBindingExpression, regionAttribute, fieldAliases as aliases, type FieldTarget } from './fieldBindings.ts';
+import { bindingKey, boundVariable, variableBindingExpression, regionAttribute, fieldAliases as aliases, type FieldTarget, listEntryExpression } from './fieldBindings.ts';
 import { inheritedReferences } from './resourceHierarchy.ts';
 import { includeAdditionalTerraform, resourceFromTerraform } from './additionalTerraform.ts';
 import type { HostFormSchema } from './liveSchema.ts';
@@ -61,6 +61,11 @@ export function projectTerraform(architecture: Architecture): Projected {
 		const resolve = (target: FieldTarget, fallback: Value, attr?: Pick<AttrDef, 'type'>): Value => {
 			const key = bindingKey(target);
 			const refBind = resource.resourceRefs?.[key];
+			if (refBind?.items?.length) {
+				return refBind.items.map((entry): Value => entry.kind === 'ref' ? { $ref: entry.resourceId, attr: entry.attribute }
+					: entry.kind === 'variable' ? { $expr: listEntryExpression(entry, architecture) }
+					: entry.value);
+			}
 			if (refBind?.refs.length) {
 				return attr?.type === 'list'
 					? refBind.refs.map(entry => ({ $ref: entry.resourceId, attr: entry.attribute }))
