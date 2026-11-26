@@ -1,5 +1,31 @@
 # CloudForge Code OSS handoff
 
+## Audit & skill-driven quality pass (hygiene, panels, Studio React performance & UX) — 26 November 2026
+
+Verified commit on `main` (`0c8b78e83eb`, developed in worktree `Z:\CloudForge-Code\.claude\worktrees\auto-open-stage3-4` on branch `fxrazor/auto-open-and-stage3-4`, paired with Rust quality commit in `E:\Orca\CloudForge\umibozu`). **No desktop installer or release builds were run** per user instruction.
+
+### Flaws found & fixed
+- **Hygiene & oxlint (`local/code-no-in-operator`):** Fixed all 5 violations introduced on merged `main` across [cloudForgeServiceChannel.ts](src/vs/code/electron-main/cloudForgeServiceChannel.ts), [protocol.ts](extensions/cloudforge/src/canvas/protocol.ts), and [sidePanel.ts](extensions/cloudforge/src/sidePanel/sidePanel.ts) (using `Object.hasOwn` and a discriminated union for `checkSignIn`).
+- **Gallery panel ([galleryPanel.ts](extensions/cloudforge/src/project/galleryPanel.ts), [galleryHtml.ts](extensions/cloudforge/src/project/galleryHtml.ts)):** Queued overlapping reloads (`reloadPending`) so updates are never silently dropped, scoped panel disposables to panel disposal instead of leaking into `this.subscriptions`, passed `activeId` on render and reveal so `.card[aria-current="true"]` highlights the active architecture, and removed the trailing `"Projects / "` slash when `projectName` is empty.
+- **Side panel & Project Status ([sidePanel.ts](extensions/cloudforge/src/sidePanel/sidePanel.ts), [model.ts](extensions/cloudforge/src/sidePanel/model.ts), [sidePanel.test.ts](extensions/cloudforge/test/sidePanel.test.ts)):** Parallelized `summarizeState` + `listCloudConnections` with `Promise.all` (`vercel-react-best-practices: async-parallel`), fixed Escape/Cancel on the optional label prompt in `linkConnection` (previously submitted the link anyway), wired live `checking` sign-in state + disabled `aria-busy="true"` buttons into Project Status, and aligned typography/headings/focus rings with `galleryHtml.ts` (`frontend-design`, removed all-caps `h3`).
+- **Studio React performance & closed gap ([App.tsx](extensions/cloudforge/studio/src/App.tsx), [ResourceWorkspace.tsx](extensions/cloudforge/studio/src/ResourceWorkspace.tsx), [IssuesPanel.tsx](extensions/cloudforge/studio/src/IssuesPanel.tsx), [TEST-CHECKLIST-ksv8z9.md](extensions/cloudforge/TEST-CHECKLIST-ksv8z9.md)):**
+  - Stabilized `requestSchemaPreview` with `useCallback` so `CodePanel`'s `useMemo` and 400 ms `renderResourceDraft` debounce are no longer reset on every `App` render.
+  - Wired `liveSchema`, `schemaPreview`, and `onRequestSchemaPreview` into `ResourceWorkspace`'s `<CodePanel />`, closing the known gap where the live provider schema check only appeared in the inspector Code tab.
+  - Memoized derived maps/lists (`resourceById`, `itemById`, `incoming`/`outgoing`, `issues`, `inheritedSources`, `explicitSources`, `children`, `boundIds`, `resourceNameById`, and single-pass `errorCount`/`warningCount`), and updated `ResourceWorkspace` Checks tab copy so it no longer contradicts live service/CLI diagnostics.
+  - Added `host.initializingOffline` to `IssuesPanel` button disable guards to prevent concurrent CLI actions during offline init.
+- **Studio save dialogs & UI copy ([draftSaveMerge.ts](extensions/cloudforge/studio/src/draftSaveMerge.ts), [draftSaveMerge.test.ts](extensions/cloudforge/studio/src/draftSaveMerge.test.ts), [DraftSaveDialog.tsx](extensions/cloudforge/studio/src/DraftSaveDialog.tsx), [SaveAllDialog.tsx](extensions/cloudforge/studio/src/SaveAllDialog.tsx), [ResourceFields.tsx](extensions/cloudforge/studio/src/ResourceFields.tsx), [CodePanel.tsx](extensions/cloudforge/studio/src/CodePanel.tsx), [VisualTopbar.tsx](extensions/cloudforge/studio/src/VisualTopbar.tsx)):** Added plain-English descriptions for save finding codes (`SENSITIVE_LITERAL`, `TFVARS_FILE`, `STATE_FILE`, `PROVIDER_CACHE`), added guarded backdrop dismissal to both save dialogs, fixed singular/plural grammar, replaced internal jargon (`"Guarded Terraform Save"`, `"Rust Stage 7"`, `"Code OSS editor"`), and added Escape/click-to-close on `VisualTopbar`'s Export dropdown.
+
+### Verification (all passed, 0 failures)
+- `node build/hygiene.ts` (all 7 modified non-Studio files): **PASS (`0` errors)**
+- `node build/oxlint.ts src/vs/code/electron-main/cloudForgeServiceChannel.ts`: **PASS (`0` errors)**
+- Studio `pnpm run check` + `pnpm run test` + `pnpm run build:webview`: **PASS (141/141 tests)**
+- Root extension tests `node --test extensions/cloudforge/test/*.test.ts`: **PASS (96/96 tests)**
+- `node extensions/cloudforge/esbuild.mts` & `node extensions/cloudforge/esbuild.webview.mts`: **PASS**
+- `node build/next/index.ts transpile` + Electron-main tests (`cloudForgeServiceChannel.test.ts`, `cloudForgeService.test.ts`): **PASS (47/47 tests)**
+
+### Next action
+- Continue project quality/feature work without packaging until Dale asks for a new desktop build; when ready to bundle JSON Crack, run `node build/cloudforge/pinOpenVsx.ts` on Windows and commit `product.json`.
+
 ## JSON Crack graph viewer — branch `claude/project-thread-jvga4j` — 25 November 2026
 
 Dale asked to bundle [JSON Crack](https://github.com/AykutSarac/jsoncrack.com/tree/main/apps/vscode) (`AykutSarac.jsoncrack-vscode`, MIT, fully offline; adds a graph button to the editor title on `.json` files and "Open with JSON Crack" on a selection). It ships as a built-in VSIX the same way as the JavaScript Debugger. The cloud container cannot reach Open VSX, so the hash is **not pinned yet**: run `node build/cloudforge/pinOpenVsx.ts` once on Windows (it picks the newest Open VSX version, checks engine `<=` this build, manifest id/version, MIT licence and licence file, saves `.build/cloudforge/AykutSarac.jsoncrack-vscode.<v>.vsix` and writes the `product.json` entry), then commit `product.json`. `package-win32-x64.ps1` re-downloads the pinned archive when missing, checks the SHA-256, checks the packaged extension's MIT licence, prints `JsonCrackSha256`, and only warns if the entry is absent. Tests: `cd build && node --test lib/test/cloudforgePinOpenVsx.test.ts` 4/4. Not run: the script against Open VSX, PowerShell changes, packaging.
