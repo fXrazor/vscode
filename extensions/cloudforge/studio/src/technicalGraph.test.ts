@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import { hubSpokeArchitecture } from './graphFixtures.ts';
 import { sampleArchitecture } from './fixture.ts';
 import { createHistory, historyReducer, type Action } from './model.ts';
-import { lensEdges, orderingCycles, portId, projectTechnicalGraph, traceNode } from './technicalGraph.ts';
+import { applyWaves, graphOverlays, lensEdges, matchesQuery, neighbourhood, orderingCycles, portId, projectTechnicalGraph, traceNode } from './technicalGraph.ts';
 import { layerOrder, layoutTechnicalGraph } from './technicalGraphLayout.ts';
 import { defaultGraphPresentation, graphEditAllowed, graphPresentationReducer } from './graphPresentation.ts';
 
@@ -115,4 +115,29 @@ test('the graph renderer has no project dispatch and App gives it only the guard
 	const usage = app.slice(app.indexOf('<TechnicalGraph'), app.indexOf('/>', app.indexOf('<TechnicalGraph')));
 	assert.ok(usage.includes('onEdit={graphEdit}') && !/dispatch=\{/.test(usage));
 	assert.match(app, /const graphEdit = useCallback\(\(action: Action\) => \{ if \(graphEditAllowed\(action\)\)/);
+});
+
+test('apply waves follow ordering edges, overlays join plan by address, and focus/search narrow the view', () => {
+	const snapshot = projectTechnicalGraph(hubSpokeArchitecture());
+	const waves = applyWaves(snapshot);
+	assert.equal(waves['rg-app'], 0);
+	assert.ok(waves['vnet-aks']! < waves['snet-aks']! && waves['snet-aks']! < waves.aks!);
+	assert.ok(waves['ra-kv']! > waves['id-aks']!);
+	const aksAddress = snapshot.nodes.find(node => node.id === 'aks')!.address;
+	const { byNode, unmatchedPlan } = graphOverlays(snapshot, [{ resourceId: 'aks', severity: 'error', message: 'Subnet too small' }, { resourceId: 'missing', severity: 'warning', message: 'x' }], [
+		{ address: aksAddress, actionKind: 'update', changedAttributePaths: ['default_node_pool.node_count'], hasSensitiveAttributes: false },
+		{ address: snapshot.nodes.find(node => node.id === 'nic-app')!.address + '[0]', actionKind: 'create', changedAttributePaths: [], hasSensitiveAttributes: false },
+		{ address: snapshot.nodes.find(node => node.id === 'nic-app')!.address + '[1]', actionKind: 'replace', changedAttributePaths: ['ip_configuration'], hasSensitiveAttributes: true },
+		{ address: 'module.net.azurerm_subnet.x', actionKind: 'create', changedAttributePaths: [], hasSensitiveAttributes: false },
+		{ address: 'data.azurerm_client_config.current', mode: 'data', actionKind: 'read', changedAttributePaths: [], hasSensitiveAttributes: false },
+	]);
+	assert.equal(byNode.aks.errors, 1); assert.equal(byNode.aks.plan?.action, 'update'); assert.equal(byNode.missing, undefined);
+	assert.deepEqual({ action: byNode['nic-app'].plan?.action, instances: byNode['nic-app'].plan?.instances, sensitive: byNode['nic-app'].plan?.sensitive }, { action: 'replace', instances: 2, sensitive: true });
+	assert.equal(unmatchedPlan, 1);
+	const near = neighbourhood(lensEdges(snapshot, 'all', false), 'aks', 1);
+	assert.ok(near.has('snet-aks') && near.has('log') && !near.has('vnet-hub'));
+	const focused = layoutTechnicalGraph(snapshot, { layout: 'layers', expanded: new Set(), compact: false, pins: {}, edges: lensEdges(snapshot, 'all', false), visible: near });
+	assert.deepEqual(Object.keys(focused.positions).sort(), [...near].sort());
+	assert.ok(matchesQuery(snapshot.nodes.find(node => node.id === 'aks')!, 'KUBERNETES_cluster'));
+	assert.ok(!matchesQuery(snapshot.nodes.find(node => node.id === 'kv')!, 'aks'));
 });

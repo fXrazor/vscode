@@ -20,8 +20,12 @@ export interface GraphPresentation {
 	expanded: string[];
 	showMembership: boolean;
 	density: 'auto' | 'detailed' | 'compact';
+	/** Card badge overlay: plan actions, Terraform apply waves or configured dependents. */
+	overlay: 'none' | 'plan' | 'order' | 'impact';
+	/** Show only the neighbourhood of one resource. */
+	focus?: { id: string; depth: number };
 }
-export const defaultGraphPresentation: GraphPresentation = { lens: 'all', layout: 'layers', route: 'curved', pins: {}, expanded: [], showMembership: false, density: 'auto' };
+export const defaultGraphPresentation: GraphPresentation = { lens: 'all', layout: 'layers', route: 'curved', pins: {}, expanded: [], showMembership: false, density: 'auto', overlay: 'none' };
 
 export type GraphPresentationAction =
 	| { type: 'set'; patch: Partial<Omit<GraphPresentation, 'pins' | 'expanded'>> }

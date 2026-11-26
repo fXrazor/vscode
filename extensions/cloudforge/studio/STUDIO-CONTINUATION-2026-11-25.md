@@ -41,6 +41,28 @@ Branch `claude/project-thread-2irlth` in fXrazor/vscode, based on main `5b66f85c
 
 **Spacing pass (Dale's annotation, same day):** the toolbar is now a single non-wrapping row ("Membership" is a toggle button; field captions hide below 1180 px). Card layout heights now match the measured DOM (80 px header, +26 px per row, +10 px footer). Before this, a 15 px underestimate let cards in adjacent lines crowd each other. Card, chip and lane-label padding are larger. Same-band links between non-adjacent cards route underneath the line instead of across neighbouring cards. Edge labels appear only for a clicked edge (trace rows already name the field). Fit padding is 84/40 px. If card markup changes, re-measure with Detail set to Detailed and update `graphMetrics`.
 
+**Engineer features pass (Dale: "continue looking through engineer docs … what DevOps engineers need to see").** This was a desk review against the Terraform docs: [dependency graph](https://developer.hashicorp.com/terraform/internals/graph) (walks run concurrently up to `-parallelism`, default 10; destroy reverses the order), [`terraform graph`](https://developer.hashicorp.com/terraform/cli/commands/graph), the [plan JSON format](https://developer.hashicorp.com/terraform/internals/json-format) (`resource_changes[].change.actions`, which can be create/update/delete/read/no-op, with `["delete","create"]` meaning replace) and [resource addressing](https://developer.hashicorp.com/terraform/cli/state/resource-addressing) (`type.name[index]`, `module.x.`); and against what Rover, Pluralith, Inframap and Brainboard put on a graph. No pages were fetched this pass, so check the details against those links. These were **built**:
+- **Overlay selector**, which shows a badge on every card:
+  - *Plan actions*: `+ create`, `~ update`, `± replace`, `− destroy`, `↻ read`, ×instances. It uses App's existing `enginePlanReport` joined by root-module address (indexed instances fold into the base address, data sources are skipped). A banner says when the plan is stale (source revision differs, or the draft has changed since the baseline) and how many planned changes live in modules or resources that aren't drawn.
+  - *Apply order*: a wave number = the longest ordering chain (`applyWaves`). Cycle members show "cycle".
+  - *Dependents*: the configured downstream count, explicitly not an outage prediction.
+- **Issue badges**: the error or warning count from `findings` (local + host diagnostics). The Why panel lists the first five.
+- **Find**: matches name, address, type and source file. Non-matches dim; Enter selects the first match and zooms to it.
+- **Focus 2 hops**: neighbourhood-only layout from the Why panel, with a toolbar chip to clear it. It is presentation-only (`focus` in GraphPresentation).
+- **Why panel actions**: Edit (focused form), Source (hosted, when `hasSourceById`), the apply wave, planned attributes and the source file:line chip on cards.
+- **Toolbar**: Find, Lens, Overlay and a **View** popover (Layout, Routes, Detail, Membership), so the bar never wraps. Card action icons appear only on hover or selection, so names get the room.
+- Tests: `applyWaves`, `graphOverlays` (address join, `[n]` folding, unmatched count, data skipped), `neighbourhood`, focus layout and `matchesQuery`. **170/170 Studio tests pass.**
+
+**Engineer needs still open, in priority order for Codex:**
+- (a) **Destroy/replace blast preview**: when the plan overlay shows replace/delete, highlight configured dependents of those nodes.
+- (b) **External and unknown nodes**: references to `data.*`, `var.*`, remote state and module outputs that have no card should appear as small ghost nodes.
+- (c) **Variable inputs** on cards (`fieldBindings` → `var.NAME` rows).
+- (d) **Drift and state overlay** once Rust exposes per-address state (Stage 11 summarizeState is structure-only today).
+- (e) **Security exposure lens**: public IP/listener → workload path, built only from configured attachments, labelled as configured intent.
+- (f) **Cost category chips** from the registry (category, never price).
+- (g) **Export graph** as SVG/PNG, reusing `exportPresentation.ts`.
+- (h) **Module boundaries** as collapsible groups when source summaries carry `moduleAddress`.
+
 **Binding rules (unchanged):** graph drag, layout, pins, expansion and selection never write Resource.positions, parentId, visualParentId, container sizes, Terraform, Modified state or Undo. Configuration edits from the graph go only through `graphEditAllowed`.
 
 ### Main integration and portable agent handoff — 25 November 2026

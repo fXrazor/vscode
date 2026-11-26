@@ -784,7 +784,9 @@ export function Studio() {
 					<div className="canvas-shell">
 						{mode === 'technical' ? <TechnicalGraph architecture={architecture} theme={theme} presentation={graphPresentation} onPresentation={presentGraph}
 							selectedId={selectedId} onSelect={setSelectedId} onOpenDetails={openDetails} onEdit={graphEdit}
-							onInit={instance => setFlow(instance as never)} viewports={viewport} /> :
+							onInit={instance => setFlow(instance as never)} viewports={viewport}
+							diagnostics={findings} hasSource={hasSourceById} onOpenSource={hostBridge.isHosted ? id => hostBridge.post({ type: 'openSource', nodeId: id }) : undefined}
+							plan={enginePlanReport ? { sourceRevision: enginePlanReport.sourceRevision, stale: enginePlanReport.sourceRevision !== hostSnapshot?.sourceRevision || (hostBaseline ? history.present !== hostBaseline : false), changes: enginePlanReport.resourceChanges } : undefined} /> :
 						<DesignCanvas architecture={architecture} mode={mode} theme={theme} onThemeChange={setTheme} selectedId={selectedId} selectedIds={selectedIds} onSelectionChange={setSelectedIds} dispatch={dispatch}
 							onSelect={id => { setSelectedId(id); if (id && inspectorCategory === 'resources' && !architecture.resources.some(resource => resource.id === id)) { setDetailTab('form'); } }} onOpen={openResource} onOpenDetails={openDetails} onInit={setFlow} viewports={viewport}
 							onOpenShapes={openShapes} onAddItem={addItem} onAddResource={addResource}

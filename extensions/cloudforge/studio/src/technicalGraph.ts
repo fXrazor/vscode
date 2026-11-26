@@ -209,3 +209,74 @@ export function traceNode(edges: readonly GraphEdge[], id: string): { upstream: 
 
 export const layerLabels: Record<InfrastructureLayer, string> = { scope: 'Scope', identity: 'Identity', network: 'Networking', security: 'Security', compute: 'Compute', application: 'Application', data: 'Data', monitoring: 'Monitoring', unknown: 'Unclassified' };
 export { infrastructureLayers };
+
+/**
+ * Terraform apply waves: the longest prerequisite chain before each resource (0 = no ordering inputs).
+ * Terraform walks the same dependency graph and runs independent nodes concurrently (default
+ * parallelism 10), so equal waves can be created together. Cycle members get no wave.
+ */
+export function applyWaves(snapshot: TechnicalGraphSnapshot): Record<string, number | undefined> {
+	const cyclic = new Set(snapshot.cycles.flat());
+	const incoming = new Map(snapshot.nodes.map(node => [node.id, [] as string[]]));
+	for (const edge of snapshot.edges) { if (edge.ordering && incoming.has(edge.target) && incoming.has(edge.source) && edge.source !== edge.target) { incoming.get(edge.target)!.push(edge.source); } }
+	const wave: Record<string, number | undefined> = {};
+	const visit = (id: string, stack: Set<string>): number | undefined => {
+		if (id in wave) { return wave[id]; }
+		if (cyclic.has(id) || stack.has(id)) { wave[id] = undefined; return undefined; }
+		stack.add(id); let level = 0;
+		for (const source of incoming.get(id)!) { const value = visit(source, stack); if (value === undefined) { stack.delete(id); wave[id] = undefined; return undefined; } level = Math.max(level, value + 1); }
+		stack.delete(id); wave[id] = level; return level;
+	};
+	for (const node of snapshot.nodes) { visit(node.id, new Set()); }
+	return wave;
+}
+
+export type PlanAction = 'create' | 'update' | 'replace' | 'delete' | 'read' | 'noOp';
+export interface NodeOverlay {
+	readonly errors: number;
+	readonly warnings: number;
+	readonly messages: readonly { severity: 'error' | 'warning'; message: string }[];
+	readonly plan?: { readonly action: PlanAction; readonly instances: number; readonly changed: readonly string[]; readonly sensitive: boolean };
+}
+type PlanChangeInput = { address: string; mode?: string; actionKind: PlanAction; changedAttributePaths: readonly string[]; hasSensitiveAttributes: boolean };
+const actionRank: Record<PlanAction, number> = { delete: 5, replace: 4, create: 3, update: 2, read: 1, noOp: 0 };
+
+/**
+ * Join diagnostics by resource id and plan changes by Terraform address (root module only; an
+ * indexed instance `type.name[0]`/`["key"]` belongs to `type.name`). Unmatched plan entries are
+ * returned so the view can say they exist outside the drawn graph instead of hiding them.
+ */
+export function graphOverlays(snapshot: TechnicalGraphSnapshot, diagnostics: readonly { resourceId: string; severity: 'error' | 'warning'; message: string }[], plan?: readonly PlanChangeInput[]): { byNode: Record<string, NodeOverlay>; unmatchedPlan: number } {
+	const byAddress = new Map(snapshot.nodes.map(node => [node.address, node.id]));
+	const byNode: Record<string, { errors: number; warnings: number; messages: { severity: 'error' | 'warning'; message: string }[]; plan?: { action: PlanAction; instances: number; changed: string[]; sensitive: boolean } }> = {};
+	const entry = (id: string) => byNode[id] ??= { errors: 0, warnings: 0, messages: [] };
+	for (const item of diagnostics) { if (!byAddress.size || !snapshot.nodes.some(node => node.id === item.resourceId)) { continue; } const target = entry(item.resourceId); target[item.severity === 'error' ? 'errors' : 'warnings']++; target.messages.push({ severity: item.severity, message: item.message }); }
+	let unmatchedPlan = 0;
+	for (const change of plan ?? []) {
+		if (change.mode === 'data') { continue; }
+		const base = change.address.replace(/\[[^\]]*\]$/, '');
+		const id = byAddress.get(base);
+		if (!id) { if (change.actionKind !== 'noOp') { unmatchedPlan++; } continue; }
+		const target = entry(id); const current = target.plan;
+		target.plan = !current ? { action: change.actionKind, instances: 1, changed: [...change.changedAttributePaths], sensitive: change.hasSensitiveAttributes }
+			: { action: actionRank[change.actionKind] > actionRank[current.action] ? change.actionKind : current.action, instances: current.instances + 1, changed: [...new Set([...current.changed, ...change.changedAttributePaths])], sensitive: current.sensitive || change.hasSensitiveAttributes };
+	}
+	return { byNode, unmatchedPlan };
+}
+
+/** Nodes within `depth` hops of `id` over the given edges (both directions). */
+export function neighbourhood(edges: readonly Pick<GraphEdge, 'source' | 'target'>[], id: string, depth: number): Set<string> {
+	const seen = new Set([id]); let frontier = [id];
+	for (let hop = 0; hop < depth; hop++) {
+		const next: string[] = [];
+		for (const edge of edges) { for (const [a, b] of [[edge.source, edge.target], [edge.target, edge.source]]) { if (frontier.includes(a) && !seen.has(b)) { seen.add(b); next.push(b); } } }
+		frontier = next;
+	}
+	return seen;
+}
+
+/** Case-insensitive match on name, label, address, type label and source file. */
+export function matchesQuery(node: GraphNode, query: string): boolean {
+	const q = query.trim().toLowerCase(); if (!q) { return true; }
+	return [node.label, node.name, node.address, node.typeLabel, node.sourceFile ?? ''].some(value => value.toLowerCase().includes(q));
+}
