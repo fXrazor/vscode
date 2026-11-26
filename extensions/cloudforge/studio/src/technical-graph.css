@@ -211,7 +211,7 @@
 /* Bundled (radial hierarchical edge bundling) view. */
 .tg-bundle { position: absolute; inset: 64px 0 52px 0; overflow: hidden; background: var(--canvas); cursor: grab; touch-action: none; }
 .tg-bundle:active { cursor: grabbing; }
-.tg-bundle svg { width: 100%; height: 100%; transform-origin: 50% 50%; }
+.tg-bundle > svg { width: 100%; height: 100%; transform-origin: 50% 50%; }
 .tg-bundle-group path:first-child { fill: none; stroke: var(--tg-layer); stroke-width: 6; stroke-linecap: round; opacity: .55; }
 .tg-bundle-group text { font-size: 13px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; fill: var(--muted); }
 .tg-bundle-path { fill: none; stroke: var(--tg-cat, var(--tg-edge-unclassified)); stroke-width: 1.4; opacity: .5; mix-blend-mode: multiply; transition: opacity .15s, stroke-width .15s; }
@@ -251,3 +251,38 @@
 .tg-issues { order: 99; margin-left: auto; display: inline-flex; gap: 4px; }
 .tg-issues:empty { display: none; }
 .tg-row code { max-width: 58%; font-weight: 550; }
+
+/* Ownership-tree fold toggle on the card's right edge, where the branch leaves. */
+.tg-tree-toggle { position: absolute; right: -12px; top: 28px; z-index: 2; min-width: 24px; height: 24px; min-height: 0; padding: 0 6px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); font-size: 11.5px; font-weight: 700; line-height: 22px; cursor: pointer; box-shadow: 0 1px 3px #1a1b2618; }
+.tg-tree-toggle:hover { color: var(--accent); border-color: var(--accent); }
+.tg-tree-toggle.is-collapsed { color: var(--accent); background: var(--selection); border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.tg-card.is-compact .tg-tree-toggle { top: 50%; transform: translateY(-50%); height: 32px; min-width: 34px; border-radius: 16px; font-size: 15px; line-height: 30px; }
+
+/* Network (force-directed) view. */
+.tg-force { position: absolute; inset: 64px 0 52px 0; overflow: hidden; background: var(--canvas); touch-action: none; }
+.tg-force > svg { width: 100%; height: 100%; cursor: grab; user-select: none; }
+.tg-force > svg:active { cursor: grabbing; }
+.tg-force-link { stroke: var(--tg-cat, var(--tg-edge-unclassified)); stroke-width: 1.6; opacity: .62; transition: opacity .15s, stroke-width .15s; }
+.tg-force-link.tg-cat-reference, .tg-force-link.tg-cat-unclassified { stroke-dasharray: 5 4; }
+.tg-force-link.tg-cat-observability { stroke-dasharray: 2 4; stroke-linecap: round; }
+.tg-force-link.is-dim { opacity: .08; }
+.tg-force-link.is-uses { stroke: #2d6ad3; stroke-width: 2.6; opacity: 1; }
+.tg-force-link.is-used-by { stroke: #d2582a; stroke-width: 2.6; opacity: 1; }
+.theme-dark .tg-force-link.is-uses { stroke: #79a7f2; } .theme-dark .tg-force-link.is-used-by { stroke: #f3a07e; }
+.tg-force-arrow { fill: var(--tg-cat, var(--tg-edge-unclassified)); }
+.tg-force-node { cursor: pointer; transition: opacity .15s; }
+.tg-force-disc { fill: var(--node); stroke: var(--tg-layer); stroke-width: 2.5; filter: drop-shadow(0 2px 4px #1a1b2622); }
+.tg-force-halo { fill: none; stroke: transparent; stroke-width: 3; }
+.tg-force-node:hover .tg-force-halo, .tg-force-node.is-related .tg-force-halo { stroke: color-mix(in srgb, var(--tg-layer) 35%, transparent); }
+.tg-force-node.is-selected .tg-force-halo, .tg-force-node.is-focus .tg-force-halo { stroke: var(--accent); stroke-width: 3; }
+.tg-force-exposed { fill: none; stroke: var(--danger); stroke-width: 1.5; stroke-dasharray: 3 3; }
+.tg-force-label { font-size: 11.5px; font-weight: 600; fill: var(--text); paint-order: stroke; stroke: var(--canvas); stroke-width: 4px; stroke-linejoin: round; pointer-events: none; }
+.tg-force-node.is-dim { opacity: .22; }
+.tg-force-node.is-unmatched { opacity: .18; }
+.tg-force-issue circle { fill: var(--warning); stroke: var(--node); stroke-width: 2; }
+.tg-force-issue.is-error circle { fill: var(--danger); }
+.tg-force-issue text { font-size: 9px; font-weight: 750; fill: #fff; }
+.tg-force-fit { position: absolute; right: 16px; bottom: 12px; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 0 10px; height: 30px; }
+.tg-force-link.is-membership { stroke: var(--tg-edge-ownership); stroke-dasharray: 1 5; stroke-linecap: round; opacity: .35; }
+.tg-force-arrow.is-uses { fill: #2d6ad3; } .tg-force-arrow.is-used-by { fill: #d2582a; }
+.theme-dark .tg-force-arrow.is-uses { fill: #79a7f2; } .theme-dark .tg-force-arrow.is-used-by { fill: #f3a07e; }

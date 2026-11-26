@@ -44,7 +44,7 @@ try {
 				await page.getByLabel(label, { exact: true }).selectOption(value);
 				await page.getByLabel('View options', { exact: true }).click(); await page.waitForTimeout(500);
 			};
-			const layoutTo = async id => { await page.getByRole('radio', { name: { layers: 'Layers', scopes: 'Scopes', tree: 'Ownership tree', bundled: 'Bundled' }[id], exact: true }).click(); await page.waitForTimeout(500); };
+			const layoutTo = async id => { await page.getByRole('radio', { name: { layers: 'Layers', scopes: 'Scopes', tree: 'Ownership tree', bundled: 'Bundled', force: 'Network' }[id], exact: true }).click(); await page.waitForTimeout(500); };
 			const noOverlap = async () => {
 				const boxes = await page.locator('.react-flow__node-card').evaluateAll(nodes => nodes.map(node => { const box = node.getBoundingClientRect(); return { id: node.dataset.id, x: box.x, y: box.y, w: box.width, h: box.height }; }));
 				for (const a of boxes) { for (const b of boxes) { if (a.id < b.id) { assert.ok(a.x + a.w <= b.x + 0.5 || b.x + b.w <= a.x + 0.5 || a.y + a.h <= b.y + 0.5 || b.y + b.h <= a.y + 0.5, a.id + ' overlaps ' + b.id); } } }
@@ -64,6 +64,14 @@ try {
 			await page.getByRole('button', { name: 'snet-aks-nodes', exact: true }).click();
 			assert.ok(await page.locator('.tg-bundle-path.is-uses, .tg-bundle-path.is-used-by').count() > 0); pass('bundled view shows every resource and highlights its relationships');
 			await page.keyboard.press('Escape');
+			await layoutTo('force');
+			assert.equal(await page.locator('.tg-force-node').count(), original.resources.length);
+			{ const node = await page.locator('[data-node="aks"]').boundingBox(); await page.mouse.move(node.x + node.width / 2, node.y + node.height / 2); await page.mouse.down(); await page.mouse.move(node.x + 160, node.y + 90, { steps: 8 }); await page.mouse.up(); await page.waitForTimeout(400); }
+			assert.deepEqual(await exported(), original); pass('network view shows every resource as an icon and dragging there never changes the project');
+			await layoutTo('tree');
+			await page.getByRole('button', { name: 'Collapse vnet-spoke-aks', exact: true }).click(); await page.waitForTimeout(300);
+			assert.ok(await page.getByRole('button', { name: 'Expand vnet-spoke-aks', exact: true }).isVisible()); await page.getByRole('button', { name: 'Expand vnet-spoke-aks', exact: true }).click();
+			assert.deepEqual(await exported(), original); pass('tree branches fold and unfold without project changes');
 			await layoutTo('layers'); pass('layers, scopes and tree layouts have no overlapping cards');
 			assert.ok(await page.locator('.react-flow__node-card[data-id="aks"] .tg-row').count() >= 3); pass('AKS shows its configured input rows');
 			// Drag AKS far away: a graph pin appears and the project is unchanged.

@@ -92,6 +92,7 @@ export interface HostGraphViewState {
 	readonly showMembership: boolean;
 	readonly showInputs?: boolean;
 	readonly expanded: readonly string[];
+	readonly collapsed?: readonly string[];
 	readonly pins: Readonly<Record<string, HostPoint>>;
 }
 

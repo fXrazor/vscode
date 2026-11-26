@@ -8,6 +8,24 @@ Worktree: `C:/Users/dalep/.codex/worktrees/infrastructure-studio/CloudForge-Code
 
 Dale approved continuing the proposed point-endpoint pass in this chat. No further approval is needed for that plan. Work remains within Studio and handoff documentation; one architecture and one semantic undo history, independent theme/viewport/tool preferences, drawings excluded from Terraform and Rust-owned guarded I/O remain binding.
 
+### Technical Graph pass 4: Network view and tidy tree (Claude), 26 November 2026
+
+Dale asked for a final graph like [d3 force-directed graph](https://observablehq.com/@d3/force-directed-graph/2), with resource icons as the nodes, and a better tree.
+- **Network view** (`layout: 'force'`, toolbar "Network"). `technicalGraphForce.ts` is a d3-force-style simulation with no dependency:
+  - Forces: link springs (strength 1/min degree, degree-biased), exact many-body repulsion, collision, a weak per-layer directional pull and centring.
+  - Integration: velocity Verlet, alpha cooling over ~300 ticks.
+  - Start: deterministic phyllotaxis, so a project always settles the same way.
+  
+  `ForceGraph` in `TechnicalGraph.tsx` draws icon nodes in a layer-coloured ring with issue badges, an exposure ring and haloed labels.
+  - Resource-group membership edges are faint, arrowless links that cluster members.
+  - Hover or select shows uses (blue) and used-by (orange), including arrowheads.
+  - Dragging fixes the node (`fx`/`fy`) and reheats the simulation like d3. Positions are view-local and never pins or project state.
+  - Wheel zoom and background pan use the viewBox, with a Re-run layout button.
+  - Reduced motion settles synchronously and moves dragged nodes without animation.
+- **Tidy tree.** `treeLayout` is now horizontal, after `d3.tree`: depth runs left to right, siblings stack, and parents sit at the centre of their children. Links are `linkHorizontal` S-curves (`treeConnector`). A parent with more than 6 leaf children wraps them into a block of columns (`treeBlocks`, at most 6 rows) reached by one bus above the block and a bracket per column (`treeLinkPath`). **Fold toggles** (−/+N on the card's right edge) are stored in `GraphPresentation.collapsed`, persisted in `viewState.graph.collapsed` and sanitised by the host. Auto density spacing is skipped for the tree; explicit percentages still apply.
+- Tests: deterministic force settle, no icon overlap, links shorter than average, parents centred, folding, block wrapping, and links never crossing a card. **178/178** pass. The browser verify is **52/52** and adds a Network drag with the export unchanged and a tree fold/unfold.
+- Next: Barnes–Hut or a grid for the force view above ~800 nodes, and an optional canvas renderer for it.
+
 ### Technical Graph pass 3: design refinement (Claude), 26 November 2026
 
 Dale asked where the tree view was (it was hidden in View) and asked for further design refinement. Changes in `TechnicalGraph.tsx`, `technicalGraphLayout.ts` and `technical-graph.css`:

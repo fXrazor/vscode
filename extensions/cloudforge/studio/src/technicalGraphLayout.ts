@@ -12,10 +12,10 @@ import { layerLabels, type GraphEdge, type GraphNode, type TechnicalGraphSnapsho
 import type { Position } from './model.ts';
 
 /** `bundled` is drawn radially by technicalGraphBundle.ts; card layout falls back to layers (used by image export). */
-export type GraphLayoutKind = 'layers' | 'scopes' | 'tree' | 'bundled';
+export type GraphLayoutKind = 'layers' | 'scopes' | 'tree' | 'bundled' | 'force';
 export type GraphSize = { width: number; height: number };
 export interface GraphLane { id: string; label: string; x: number; y: number; width: number; height: number; kind: 'layer' | 'scope' | 'inputs'; members?: string[] }
-export interface GraphLayoutResult { positions: Record<string, Position>; sizes: Record<string, GraphSize>; lanes: GraphLane[]; columns: GraphLane[] }
+export interface GraphLayoutResult { positions: Record<string, Position>; sizes: Record<string, GraphSize>; lanes: GraphLane[]; columns: GraphLane[]; /** Tree only: parent id → leaf children wrapped into a multi-column block. */ treeBlocks?: Record<string, string[]> }
 
 /** Engineering reading order: scope, then the network a workload lands in, the controls on it, the workload, its data and telemetry. */
 export const layerOrder: InfrastructureLayer[] = ['scope', 'network', 'security', 'identity', 'compute', 'application', 'data', 'monitoring', 'unknown'];
@@ -65,13 +65,14 @@ function centreHubs(band: string[], snapshot: TechnicalGraphSnapshot): string[] 
 
 /** `auto` opens gaps that many lines cross; a number scales all spacing (100 = default). */
 export type GraphSpacing = 'auto' | number;
-interface Options { layout: GraphLayoutKind; expanded: ReadonlySet<string>; compact: boolean; pins: Readonly<Record<string, Position>>; visible?: ReadonlySet<string>; edges: readonly GraphEdge[]; spacing?: GraphSpacing; /** Extra vertical stretch in percent (100 = none). */ height?: number }
+interface Options { layout: GraphLayoutKind; expanded: ReadonlySet<string>; compact: boolean; pins: Readonly<Record<string, Position>>; visible?: ReadonlySet<string>; edges: readonly GraphEdge[]; spacing?: GraphSpacing; /** Extra vertical stretch in percent (100 = none). */ height?: number; /** Tree only: subtrees folded under these ids. */ collapsed?: ReadonlySet<string> }
 
 export function layoutTechnicalGraph(snapshot: TechnicalGraphSnapshot, options: Options): GraphLayoutResult {
 	const nodes = snapshot.nodes.filter(node => !options.visible || options.visible.has(node.id));
 	const sizes: Record<string, GraphSize> = Object.fromEntries(nodes.map(node => [node.id, graphNodeSize(node, options.expanded.has(node.id), options.compact)]));
-	const result = options.layout === 'tree' ? treeLayout(nodes, sizes) : gridLayout(snapshot, nodes, sizes, options.edges, options.layout === 'scopes');
-	spread(result, options.edges, options.spacing ?? 'auto', options.height ?? 100);
+	const result = options.layout === 'tree' ? treeLayout(nodes, sizes, options.collapsed) : gridLayout(snapshot, nodes, sizes, options.edges, options.layout === 'scopes');
+	// The tidy tree has no card rows for density gaps; only an explicit percentage scales it.
+	spread(result, options.edges, options.layout === 'tree' && options.spacing === 'auto' ? 100 : options.spacing ?? 'auto', options.height ?? 100);
 	for (const [id, pin] of Object.entries(options.pins)) { if (result.positions[id]) { result.positions[id] = { x: pin.x, y: pin.y }; } }
 	return result;
 }
@@ -124,46 +125,59 @@ function gridLayout(snapshot: TechnicalGraphSnapshot, nodes: readonly GraphNode[
 }
 
 /** Tidy top-down ownership tree (resource group → network → subnet → attached resources). */
-function treeLayout(nodes: readonly GraphNode[], sizes: Record<string, GraphSize>): GraphLayoutResult {
-	const m = graphMetrics; const ids = new Set(nodes.map(node => node.id));
-	const parentOf = (node: GraphNode) => { const parent = [...node.scopePath].reverse().find(id => ids.has(id) && id !== node.id); return parent; };
+/** Parent of each node in the ownership tree (nearest configured scope ancestor that is shown). */
+export function treeParents(nodes: readonly GraphNode[]): Map<string, string | undefined> {
+	const ids = new Set(nodes.map(node => node.id));
+	return new Map(nodes.map(node => [node.id, [...node.scopePath].reverse().find(id => ids.has(id) && id !== node.id)]));
+}
+/**
+ * Horizontal tidy tree (after d3.tree): depth runs left to right, siblings stack vertically and each
+ * parent is centred on its children. Collapsed subtrees are omitted from the layout.
+ */
+function treeLayout(nodes: readonly GraphNode[], sizes: Record<string, GraphSize>, collapsed: ReadonlySet<string> = new Set()): GraphLayoutResult {
+	const m = graphMetrics; const parents = treeParents(nodes);
 	const children = new Map<string | undefined, string[]>();
-	for (const node of nodes) { const parent = parentOf(node); (children.get(parent) ?? children.set(parent, []).get(parent)!).push(node.id); }
+	for (const node of nodes) { const parent = parents.get(node.id); (children.get(parent) ?? children.set(parent, []).get(parent)!).push(node.id); }
 	const layerIndex = new Map(nodes.map(node => [node.id, layerOrder.indexOf(node.layer)]));
-	for (const list of children.values()) { list.sort((a, b) => layerIndex.get(a)! - layerIndex.get(b)!); }
-	// Leaves under one parent wrap into a small grid; branches sit beside them. Keeps wide scopes readable.
-	const vGap = m.bandGap + 24; const leafCols = 3;
-	const box = new Map<string, { width: number; height: number; leafW: number; leafCols: number }>();
-	const measure = (id: string): { width: number; height: number } => {
-		const kids = children.get(id) ?? []; const leaves = kids.filter(kid => !children.get(kid)?.length); const branches = kids.filter(kid => children.get(kid)?.length);
-		const cols = Math.min(leafCols, leaves.length); const leafW = cols ? cols * m.width + (cols - 1) * m.gapX : 0;
-		let leafH = 0; for (let i = 0; i < leaves.length; i += cols) { leafH += Math.max(...leaves.slice(i, i + cols).map(kid => sizes[kid].height)) + m.gapY; } leafH = Math.max(0, leafH - m.gapY);
-		const branchBoxes = branches.map(measure);
-		const branchW = branchBoxes.reduce((sum, b) => sum + b.width, 0) + Math.max(0, branches.length - 1) * m.gapX;
-		const childW = leafW + (leafW && branchW ? m.columnGap : 0) + branchW; const childH = Math.max(leafH, ...branchBoxes.map(b => b.height), 0);
-		const result = { width: Math.max(m.width, childW), height: sizes[id].height + (kids.length ? vGap + childH : 0), leafW, leafCols: cols };
-		box.set(id, result); return result;
+	const label = new Map(nodes.map(node => [node.id, node.label]));
+	for (const list of children.values()) { list.sort((a, b) => layerIndex.get(a)! - layerIndex.get(b)! || label.get(a)!.localeCompare(label.get(b)!)); }
+	const kids = (id: string) => collapsed.has(id) ? [] : children.get(id) ?? [];
+	const leafGap = 14; const branchGap = 30; const column = m.width + 120; const blockRows = 6; const blockColGap = 56; const busRoom = 30;
+	// Many leaf children wrap into columns of up to six (a "block") reached by one bus, so wide scopes stay on screen.
+	type Item = { kind: 'node'; id: string } | { kind: 'block'; ids: string[]; cols: number; rowHeights: number[] };
+	const items = (id: string): Item[] => {
+		const list = kids(id); const leaves = list.filter(kid => !kids(kid).length);
+		if (leaves.length <= blockRows) { return list.map(kid => ({ kind: 'node', id: kid })); }
+		const cols = Math.ceil(leaves.length / blockRows); const rows = Math.ceil(leaves.length / cols);
+		const rowHeights = Array.from({ length: rows }, (_, r) => Math.max(...leaves.filter((_, i) => i % rows === r).map(kid => sizes[kid].height)));
+		return [{ kind: 'block', ids: leaves, cols, rowHeights }, ...list.filter(kid => kids(kid).length).map(kid => ({ kind: 'node' as const, id: kid }))];
 	};
-	const roots = children.get(undefined) ?? [];
-	roots.forEach(measure);
-	const positions: Record<string, Position> = {};
-	const place = (id: string, left: number, top: number) => {
-		const b = box.get(id)!; positions[id] = { x: left + (b.width - m.width) / 2, y: top };
-		const kids = children.get(id) ?? []; if (!kids.length) { return; }
-		const leaves = kids.filter(kid => !children.get(kid)?.length); const branches = kids.filter(kid => children.get(kid)?.length);
-		const branchW = branches.reduce((sum, kid) => sum + box.get(kid)!.width, 0) + Math.max(0, branches.length - 1) * m.gapX;
-		const childW = b.leafW + (b.leafW && branchW ? m.columnGap : 0) + branchW;
-		let x = left + (b.width - childW) / 2; const y = top + sizes[id].height + vGap;
-		let rowTop = y;
-		for (let i = 0; i < leaves.length; i += b.leafCols) {
-			const row = leaves.slice(i, i + b.leafCols); row.forEach((kid, j) => { positions[kid] = { x: x + j * (m.width + m.gapX), y: rowTop }; });
-			rowTop += Math.max(...row.map(kid => sizes[kid].height)) + m.gapY;
-		}
-		x += b.leafW + (b.leafW && branchW ? m.columnGap : 0);
-		for (const kid of branches) { place(kid, x, y); x += box.get(kid)!.width + m.gapX; }
+	const height = new Map<string, number>();
+	const itemHeight = (item: Item): number => item.kind === 'node' ? height.get(item.id)! : busRoom + item.rowHeights.reduce((sum, h) => sum + h, 0) + (item.rowHeights.length - 1) * leafGap;
+	const gapBetween = (a: Item, b: Item) => a.kind === 'block' || b.kind === 'block' || kids(a.id).length || kids(b.id).length ? branchGap : leafGap;
+	const measure = (id: string): number => {
+		const list = items(id); for (const item of list) { if (item.kind === 'node') { measure(item.id); } else { item.ids.forEach(measure); } }
+		const total = list.reduce((sum, item, i) => sum + itemHeight(item) + (i ? gapBetween(list[i - 1], item) : 0), 0);
+		const h = Math.max(sizes[id].height, total); height.set(id, h); return h;
 	};
-	let left = 0; for (const root of roots) { place(root, left, 0); left += box.get(root)!.width + m.columnGap; }
-	return { positions, sizes, lanes: [], columns: [] };
+	const positions: Record<string, Position> = {}; const treeBlocks: Record<string, string[]> = {};
+	const place = (id: string, depth: number, top: number): number => {
+		const list = items(id); const own = sizes[id].height; const span = height.get(id)!;
+		if (!list.length) { positions[id] = { x: depth * column, y: top + (span - own) / 2 }; return top + span / 2; }
+		const total = list.reduce((sum, item, i) => sum + itemHeight(item) + (i ? gapBetween(list[i - 1], item) : 0), 0);
+		let y = top + (span - total) / 2; const centres: number[] = [];
+		list.forEach((item, i) => {
+			if (i) { y += gapBetween(list[i - 1], item); }
+			if (item.kind === 'node') { centres.push(place(item.id, depth + 1, y)); y += height.get(item.id)!; return; }
+			treeBlocks[id] = item.ids; const rows = item.rowHeights.length; let rowTop = y + busRoom;
+			item.rowHeights.forEach((rowHeight, r) => { item.ids.forEach((kid, k) => { if (k % rows === r) { positions[kid] = { x: (depth + 1) * column + Math.floor(k / rows) * (m.width + blockColGap), y: rowTop }; } }); rowTop += rowHeight + leafGap; });
+			centres.push(y + busRoom / 2); y += itemHeight(item);
+		});
+		const centre = Math.min(Math.max((centres[0] + centres.at(-1)!) / 2, top + own / 2), top + span - own / 2);
+		positions[id] = { x: depth * column, y: centre - own / 2 }; return centre;
+	};
+	let top = 0; for (const root of children.get(undefined) ?? []) { measure(root); place(root, 0, top); top += height.get(root)! + 64; }
+	return { positions, sizes, lanes: [], columns: [], treeBlocks };
 }
 
 /** Extra vertical room for a gap, from the number of lines that cross it. */
@@ -242,15 +256,24 @@ export function elbowPath(points: readonly Position[], radius = 8): string {
 	}
 	const last = points.at(-1)!; return d + ` L ${last.x} ${last.y}`;
 }
+/** Ownership-tree link (d3.linkHorizontal): parent's right edge to the child's left edge, in the column gap. */
+export function treeConnector(parent: Position & GraphSize, child: Position & GraphSize): { d: string; side: 'left' } {
+	const sx = parent.x + parent.width; const sy = parent.y + Math.min(parent.height / 2, 40);
+	const tx = child.x; const ty = child.y + Math.min(child.height / 2, 40); const mx = (sx + tx) / 2;
+	return { side: 'left', d: `M ${sx} ${sy} C ${mx} ${sy}, ${mx} ${ty}, ${tx} ${ty}` };
+}
+
 /**
- * Ownership-tree connector: a bus just below the parent, then a straight drop to first-row
- * children, or a comb spine in the column gap into the side of wrapped leaf rows. Never crosses a card.
+ * Tree link for one child. Ordinary children get a horizontal S-curve. Children in a wrapped block
+ * share a bus above the block, then drop down a bracket on the left of their column and step in.
  */
-export function treeConnector(parent: Position & GraphSize, child: Position & GraphSize): { d: string; side: 'top' | 'left' } {
-	const m = graphMetrics; const vGap = m.bandGap + 24;
-	const parentX = parent.x + parent.width / 2; const parentBottom = parent.y + parent.height; const bus = parentBottom + vGap / 2;
-	const firstRow = child.y <= parentBottom + vGap + 1;
-	if (firstRow || child.y < parentBottom) { const childX = child.x + child.width / 2; return { side: 'top', d: Math.abs(childX - parentX) < 1 ? `M ${parentX} ${parentBottom} L ${childX} ${child.y}` : elbowPath([{ x: parentX, y: parentBottom }, { x: parentX, y: bus }, { x: childX, y: bus }, { x: childX, y: child.y }]) }; }
-	const spine = child.x - m.gapX / 2; const entry = child.y + Math.min(40, child.height / 2);
-	return { side: 'left', d: elbowPath([{ x: parentX, y: parentBottom }, { x: parentX, y: bus }, { x: spine, y: bus }, { x: spine, y: entry }, { x: child.x, y: entry }]) };
+export function treeLinkPath(layout: GraphLayoutResult, parent: string, child: string): string {
+	const box = (id: string) => ({ ...layout.positions[id], ...layout.sizes[id] });
+	const block = layout.treeBlocks?.[parent];
+	if (!block?.includes(child)) { return treeConnector(box(parent), box(child)).d; }
+	const p = box(parent); const c = box(child); const members = block.filter(id => layout.positions[id]).map(box);
+	const sx = p.x + p.width; const sy = p.y + Math.min(p.height / 2, 40);
+	const busY = Math.min(...members.map(item => item.y)) - 16; const startX = Math.min(...members.map(item => item.x)) - 18; const colX = c.x - 18; const ty = c.y + Math.min(c.height / 2, 40);
+	const mx = (sx + startX) / 2;
+	return `M ${sx} ${sy} C ${mx} ${sy}, ${mx} ${busY}, ${startX} ${busY}` + elbowPath([{ x: startX, y: busY }, { x: colX, y: busY }, { x: colX, y: ty }, { x: c.x, y: ty }]).replace(/^M [^ ]+ [^ ]+/, '');
 }

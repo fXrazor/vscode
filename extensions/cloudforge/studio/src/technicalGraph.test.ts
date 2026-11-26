@@ -9,11 +9,12 @@ import { hubSpokeArchitecture } from './graphFixtures.ts';
 import { sampleArchitecture } from './fixture.ts';
 import { createHistory, historyReducer, type Action } from './model.ts';
 import { applyWaves, graphOverlays, lensEdges, matchesQuery, neighbourhood, orderingCycles, portId, projectTechnicalGraph, traceNode } from './technicalGraph.ts';
-import { inputSize, layerOrder, layoutTechnicalGraph, placeInputs, treeConnector } from './technicalGraphLayout.ts';
+import { inputSize, layerOrder, layoutTechnicalGraph, placeInputs, treeLinkPath } from './technicalGraphLayout.ts';
 import { defaultGraphPresentation, graphEditAllowed, graphPresentationReducer, parseGraphPresentation, serialiseGraphPresentation } from './graphPresentation.ts';
 import { buildHostViewState } from './serviceAdapter.ts';
 import { technicalGraphSvg } from './technicalGraphExport.ts';
 import { basisPath, bundleLayout, straighten } from './technicalGraphBundle.ts';
+import { createForceSimulation, forceSettings, settleForce } from './technicalGraphForce.ts';
 
 const layout = (architecture = hubSpokeArchitecture(), options: Partial<Parameters<typeof layoutTechnicalGraph>[1]> = {}) => {
 	const snapshot = projectTechnicalGraph(architecture);
@@ -81,7 +82,7 @@ test('scope and tree layouts follow configured ownership, never names or proximi
 	const scopes = layout(hubSpokeArchitecture(), { layout: 'scopes' }).result;
 	assert.deepEqual(scopes.columns.map(column => column.label).sort(), ['rg-connectivity', 'rg-platform']);
 	const tree = layout(hubSpokeArchitecture(), { layout: 'tree' }).result;
-	assert.ok(tree.positions['rg-hub'].y < tree.positions['vnet-hub'].y && tree.positions['vnet-hub'].y < tree.positions['snet-fw'].y);
+	assert.ok(tree.positions['rg-hub'].x < tree.positions['vnet-hub'].x && tree.positions['vnet-hub'].x < tree.positions['snet-fw'].x);
 });
 
 test('trace finds prerequisites and dependents; cycles are reported', () => {
@@ -253,14 +254,14 @@ test('bundled view places every resource on the circle grouped by layer and bund
 	assert.equal(focused.leaves.length, 2);
 });
 
-test('ownership-tree connectors are orthogonal and never pass through another card', () => {
+test('ownership-tree links stay in the column gap and never pass through another card', () => {
 	const snapshot = projectTechnicalGraph(hubSpokeArchitecture());
 	const layout = layoutTechnicalGraph(snapshot, { layout: 'tree', expanded: new Set(), compact: false, pins: {}, edges: snapshot.edges });
 	const box = (id: string) => ({ ...layout.positions[id], ...layout.sizes[id] });
 	let checked = 0;
 	for (const node of snapshot.nodes) {
 		const parent = [...node.scopePath].reverse().find(id => id !== node.id && layout.positions[id]); if (!parent) { continue; }
-		const { d } = treeConnector(box(parent), box(node.id));
+		const d = treeLinkPath(layout, parent, node.id);
 		const numbers = [...d.matchAll(/-?\d+(?:\.\d+)?/g)].map(match => Number(match[0]));
 		const points = []; for (let i = 0; i < numbers.length; i += 2) { points.push({ x: numbers[i], y: numbers[i + 1] }); }
 		for (let i = 1; i < points.length; i++) {
@@ -272,4 +273,30 @@ test('ownership-tree connectors are orthogonal and never pass through another ca
 		checked++;
 	}
 	assert.ok(checked > 20);
+});
+
+test('tidy tree centres parents on their children and folds collapsed branches', () => {
+	const snapshot = projectTechnicalGraph(hubSpokeArchitecture());
+	const tree = layoutTechnicalGraph(snapshot, { layout: 'tree', expanded: new Set(), compact: false, pins: {}, edges: snapshot.edges });
+	const centre = (id: string) => tree.positions[id].y + tree.sizes[id].height / 2;
+	const subnets = ['snet-aks', 'snet-app'].filter(id => snapshot.nodes.find(node => node.id === id)!.scopePath.includes('vnet-aks'));
+	assert.ok(subnets.length >= 1 && Math.abs(centre('vnet-aks') - (Math.min(...subnets.map(centre)) + Math.max(...subnets.map(centre))) / 2) < 40);
+	const folded = layoutTechnicalGraph(snapshot, { layout: 'tree', expanded: new Set(), compact: false, pins: {}, edges: snapshot.edges, collapsed: new Set(['rg-app']) });
+	assert.ok(folded.positions['rg-app'] && !folded.positions['vnet-aks'] && !folded.positions['aks']);
+	assert.ok(folded.positions['vnet-hub']);
+	// rg-platform's many leaf children wrap into a block of columns no taller than six cards.
+	const block = tree.treeBlocks?.['rg-app'] ?? [];
+	assert.ok(block.length > 6); assert.ok(new Set(block.map(id => tree.positions[id].x)).size >= 2);
+	assert.ok(new Set(block.map(id => tree.positions[id].y)).size <= 6);
+});
+
+test('network view settles deterministically with no overlapping icons and short links', () => {
+	const snapshot = projectTechnicalGraph(hubSpokeArchitecture()); const edges = lensEdges(snapshot, 'all', false);
+	const a = settleForce(createForceSimulation(snapshot.nodes, edges)); const b = settleForce(createForceSimulation(snapshot.nodes, edges));
+	assert.deepEqual(a.nodes.map(node => [node.x, node.y]), b.nodes.map(node => [node.x, node.y]));
+	assert.equal(a.nodes.length, snapshot.nodes.length); assert.ok(a.alpha < 0.01);
+	for (const [i, p] of a.nodes.entries()) { assert.ok(Number.isFinite(p.x) && Number.isFinite(p.y)); for (const q of a.nodes.slice(i + 1)) { assert.ok(Math.hypot(p.x - q.x, p.y - q.y) > forceSettings.radius * 1.6, p.id + ' overlaps ' + q.id); } }
+	const at = new Map(a.nodes.map(node => [node.id, node])); const dist = (x: string, y: string) => Math.hypot(at.get(x)!.x - at.get(y)!.x, at.get(x)!.y - at.get(y)!.y);
+	const linked = a.links.map(link => dist(link.source, link.target)); const all = a.nodes.flatMap((p, i) => a.nodes.slice(i + 1).map(q => dist(p.id, q.id)));
+	assert.ok(linked.reduce((x, y) => x + y, 0) / linked.length < all.reduce((x, y) => x + y, 0) / all.length);
 });
