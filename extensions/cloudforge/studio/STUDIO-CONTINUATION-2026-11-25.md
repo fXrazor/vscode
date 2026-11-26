@@ -1,5 +1,13 @@
 # Studio continuation checkpoint — 25 November 2026
 
+## Technical Graph service-edge provenance & module drill-down — 26 November 2026
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `a10ed3fb214`, owner Antigravity.
+- **Scope:**
+  - **Service-edge field provenance (`src/technicalGraph.ts`, `src/App.tsx`, `src/TechnicalGraph.tsx`, `src/technicalGraph.test.ts`):** added `extractSourceEdgeEvidence()` (identifier-bounded regex over `FileResourceValues` attributes & nested/repeated blocks) and passed `sourceValues` from `App.tsx` into `projectTechnicalGraph(architecture, fileValues)` so `source-graph` edges surface real Terraform field paths and expressions on card ports and `WhyPanel` without mutating `architecture`. Also fixed module card source reading for capitalised `Source`.
+  - **Module drill-down (`src/TechnicalGraph.tsx`, `src/App.tsx`, `src/technical-graph.css`):** added read-only `Module drill-down` in `WhyPanel` backed by existing Stage 7 `requestModule` / `moduleInspection` messages, showing internal resource/link counts and addresses, declared inputs/outputs, and clickable nested child module paths with breadcrumbs (zero Undo steps).
+- **Fresh checks:** Studio `tsc --noEmit` **PASS**, **219/219** Studio tests (0 skipped), Studio `build` + `esbuild.webview.mts` **PASS**, `oxlint` & `hygiene` **PASS**, and real Windows Edge: `technical-view-verify.mjs` **64/64 PASS**, `hosted-refresh-verify.mjs` **20/20 PASS**, hosted provenance + nested `requestModule` drill-down **PASS** (0 browser errors, 0 Undo steps).
+
 ## Post-PR #4 follow-up: colour-preserving Scope Spotlight, mixed-list HCL hydration & mirror prefill — 26 November 2026
 
 - **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `532f839a3de`, owner Antigravity.
