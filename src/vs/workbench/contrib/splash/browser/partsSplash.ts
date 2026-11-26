@@ -185,6 +185,11 @@ export class PartsSplash {
 			element.style.display = 'none';
 		}
 
+		// CloudForge startup screen (vs/code/electron-browser/workbench/cloudForgeStartupScreen.ts):
+		// the workbench is usable now, so ask it to fade out.
+		// eslint-disable-next-line eslint-js/no-restricted-syntax
+		mainWindow.document.getElementById('cloudforge-startup-screen')?.dispatchEvent(new Event('cloudforge-dismiss'));
+
 		// remove initial colors
 		// eslint-disable-next-line eslint-js/no-restricted-syntax
 		const defaultStyles = mainWindow.document.head.getElementsByClassName('initialShellColors');

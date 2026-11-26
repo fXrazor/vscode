@@ -152,6 +152,7 @@ export interface CanvasPanelHost {
 export class CloudForgeCanvasPanel implements Disposable {
 	private panel: WebviewPanel | undefined;
 	private ready = false;
+	private readonly pendingBundleLayouts = new Map<string, unknown>();
 	private showSequence = 0;
 	private graph: CanvasGraphSnapshot | undefined;
 	private readonly schemaRequests = new Map<string, number>();
@@ -302,6 +303,25 @@ export class CloudForgeCanvasPanel implements Disposable {
 			this.post({ type: 'openExport' });
 		} else {
 			this.pendingOpenExport = true;
+		}
+	}
+
+	/**
+	 * Queues a bundle's canvas model for one architecture. It is sent with that architecture's next
+	 * graph (or straight away when it is already showing), then dropped.
+	 */
+	seedBundleLayout(architectureId: string, architecture: unknown): void {
+		this.pendingBundleLayouts.set(architectureId, architecture);
+		if (this.ready && this.graph?.architectureId === architectureId) {
+			this.flushBundleLayout(architectureId);
+		}
+	}
+
+	private flushBundleLayout(architectureId: string): void {
+		const layout = this.pendingBundleLayouts.get(architectureId);
+		if (layout !== undefined) {
+			this.pendingBundleLayouts.delete(architectureId);
+			this.post({ type: 'applyBundleLayout', architecture: layout });
 		}
 	}
 
@@ -805,6 +825,7 @@ export class CloudForgeCanvasPanel implements Disposable {
 			viewState,
 			notice: this.notice,
 		});
+		this.flushBundleLayout(this.graph.architectureId);
 		if (this.host.onReadResourceValues) {
 			const snapshot = this.graph;
 			void this.host.onReadResourceValues(snapshot.workspaceId, snapshot.architectureId, snapshot.sourceRevision).then(values => {

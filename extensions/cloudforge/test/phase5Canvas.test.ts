@@ -210,6 +210,23 @@ test('Phase 5 protocol sanitization and exportArtifact validation reject unsafe 
 		encoding: 'utf8',
 	}), undefined);
 
+	assert.equal(isValidExportFileName('hub.cloudforge.zip', 'bundle'), true);
+	assert.equal(isValidExportFileName('hub.tf', 'bundle'), false);
+	assert.ok(parseWebviewMessage({
+		type: 'exportArtifact',
+		format: 'bundle',
+		suggestedFileName: 'hub.cloudforge.zip',
+		content: 'UEsFBgAAAAAAAAAAAAAAAAAAAAAAAA==',
+		encoding: 'base64',
+	}));
+	assert.equal(parseWebviewMessage({
+		type: 'exportArtifact',
+		format: 'bundle',
+		suggestedFileName: 'hub.cloudforge.zip',
+		content: 'PK',
+		encoding: 'utf8',
+	}), undefined);
+
 	const sanitized = sanitizeViewState({
 		hiddenLayers: ['security', 'bogus', 'security'],
 		snapToGrid: false,

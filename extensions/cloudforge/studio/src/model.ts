@@ -148,6 +148,10 @@ export type Edit =
 	| { type: 'applyResourceCode'; resources: Resource[] }
 	| { type: 'add'; resource: Resource }
 	| { type: 'insert'; architecture: Architecture }
+	/** Merge an imported project bundle: elements, connectors, groups, layer order and new variables, as one undo step. */
+	| { type: 'mergeArchitecture'; architecture: Architecture }
+	/** Swap in a precomputed architecture (bundle layout restore) as one undo step. */
+	| { type: 'applyContent'; architecture: Architecture }
 	| { type: 'delete'; id: string }
 	| { type: 'addItem'; item: BoardItem }
 	/** Drop a connector on empty canvas: create the drawing there and link to it, as one undo step. */
@@ -367,6 +371,19 @@ function editArchitecture(architecture: Architecture, action: Edit): Architectur
 		case 'move': return applyCanvasCommand(architecture,{kind:'move',mode:action.mode,positions:{[action.id]:action.position}});
 		case 'insert':
    return fitResourceContainers({ ...architecture, resources: [...architecture.resources, ...action.architecture.resources], items: [...architecture.items, ...action.architecture.items], connections: [...architecture.connections, ...action.architecture.connections] });
+  case 'applyContent':
+			return fitResourceContainers(action.architecture);
+  case 'mergeArchitecture': {
+			const taken = new Set([...architecture.resources.map(item => item.id), ...architecture.items.map(item => item.id)]);
+			const incoming = action.architecture;
+			if ([...incoming.resources, ...incoming.items].some(item => taken.has(item.id))) { return architecture; }
+			const names = new Set((architecture.variables ?? []).map(variable => variable.name));
+			const variables = [...(architecture.variables ?? []), ...(incoming.variables ?? []).filter(variable => !names.has(variable.name))];
+			const groups = [...(architecture.groups ?? []), ...(incoming.groups ?? [])];
+			const layerOrder = architecture.layerOrder || incoming.layerOrder ? [...(architecture.layerOrder ?? []), ...(incoming.layerOrder ?? [])] : undefined;
+			return fitResourceContainers({ ...architecture, resources: [...architecture.resources, ...incoming.resources], items: [...architecture.items, ...incoming.items], connections: [...architecture.connections, ...incoming.connections],
+				...(variables.length ? { variables } : {}), ...(groups.length ? { groups } : {}), ...(layerOrder ? { layerOrder } : {}) });
+		}
   case 'add':
 			return fitResourceContainers({ ...architecture, resources: [...architecture.resources, action.resource] });
 		case 'delete':
