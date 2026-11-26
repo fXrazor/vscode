@@ -364,5 +364,5 @@ test('multi-cloud estate: every top-level scope gets its own cluster, kept apart
 	const discs = [...groups.values()].map(members => { const x = members.reduce((s, n) => s + n.x, 0) / members.length; const y = members.reduce((s, n) => s + n.y, 0) / members.length; return { x, y, r: Math.max(...members.map(n => Math.hypot(n.x - x, n.y - y) + n.r)) }; });
 	for (const [i, a] of discs.entries()) { for (const b of discs.slice(i + 1)) { assert.ok(Math.hypot(a.x - b.x, a.y - b.y) >= a.r + b.r, 'scope clusters overlap'); } }
 	const scopes = layoutTechnicalGraph(snapshot, { layout: 'scopes', expanded: new Set(), compact: false, pins: {}, edges });
-	const prod = scopes.columns.find(column => column.id === 'column:rg-prod')!; assert.ok(new Set(prod.members.map(id => scopes.positions[id].x)).size >= 4, 'a large resource group wraps into a block, not a thin column');
+	const prod = scopes.columns.find(column => column.id === 'column:rg-prod')!; assert.ok(new Set((prod.members ?? []).map(id => scopes.positions[id].x)).size >= 4, 'a large resource group wraps into a block, not a thin column');
 });
