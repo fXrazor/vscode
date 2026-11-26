@@ -285,7 +285,7 @@ h1 { font-size: 19px; font-weight: 650; letter-spacing: -0.4px; display: flex; a
 .canvas-shortcuts > summary { cursor: pointer; font-size: 11px; }
 .canvas-shortcuts p { font-size: 11px; color: var(--muted); line-height: 1.7; margin-top: 8px; max-width: 280px; }
 .canvas-context-menu { z-index: 100; width: 264px; max-width: calc(100vw - 16px); max-height: var(--radix-context-menu-content-available-height); overflow: auto; padding: 5px; background: var(--panel-solid); color: var(--text); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 8px 24px #00000020; font-size: 12px; }
-.canvas-context-item { display: flex; align-items: center; justify-content: space-between; padding: 7px 9px; border-radius: 3px; cursor: default; outline: none; }
+.canvas-context-item { display: flex; align-items: center; justify-content: space-between; padding: 7px 9px; border-radius: 3px; cursor: pointer; outline: none; }
 .canvas-context-item[data-highlighted] { background: var(--selection); color: var(--accent); }
 .canvas-context-item[data-disabled] { opacity: 0.4; }
 .canvas-context-item:nth-child(3), .canvas-context-item:nth-child(7), .canvas-context-item:nth-child(11) { margin-bottom: 4px; border-bottom: 1px solid var(--border); border-radius: 0; }
@@ -969,3 +969,11 @@ dialog::backdrop { background: #12152488; backdrop-filter: blur(3px); }
 .variable-picker-list > button.variable-picker-path > span:last-child { font-size: 11px; color: var(--muted); }
 .variable-picker .variable-picker-list { display: flex; flex-direction: column; }
 .variable-picker-list > .variable-picker-group { flex: none; margin-left: 14px; padding: 6px 7px 2px; border-left: 2px solid var(--border); font-size: 11px; font-weight: 600; color: var(--muted); }
+/* Pointer audit: anything you click shows the finger pointer; grabbing appears only while something is actually being dragged. */
+select, summary, label:has(> select), label:has(> input[type=checkbox]), label:has(> input[type=radio]), input[type=checkbox], input[type=radio], input[type=range], input[type=color],
+[role=button], [role=tab], [role=radio], [role=menuitem], [role=option], [role=switch], a[href] { cursor: pointer; }
+:is(select, input, [role=button], [role=tab], [role=radio], [role=menuitem], [role=option]):disabled, [aria-disabled=true] { cursor: default; }
+.studio .tile-pick:active, .studio .res-pick:active { cursor: grabbing; }
+.studio .react-flow__node, .studio .react-flow__node.draggable { cursor: pointer; }
+.studio .react-flow__node.dragging { cursor: grabbing; }
+.studio .react-flow__edge { cursor: pointer; }
