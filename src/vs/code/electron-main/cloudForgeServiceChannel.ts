@@ -44,7 +44,10 @@ const cloudForgeMethods: ReadonlySet<string> = new Set<CloudForgeServiceMethod>(
 	'diffCatalogueSnapshots', 'auditExportReadiness',
 	'detectEngines', 'runEngineValidate', 'runEnginePlan',
 	'listMirrorPackages', 'checkOfflineMirrorReadiness', 'runEngineInitOffline', 'extractProviderSchemaFromMirror',
-	'importMirrorPackage', 'evictMirrorPackage', 'verifyMirrorIntegrity', 'planMirrorCleanup'
+	'importMirrorPackage', 'evictMirrorPackage', 'verifyMirrorIntegrity', 'planMirrorCleanup',
+	'selectTerraformSkills', 'listBuiltinSkills', 'getTopologyBlueprint',
+	'getLearningRecord', 'saveLearningRecord', 'submitProposal', 'reviewProposal',
+	'issueMcpGrant', 'listMcpGrants', 'revokeMcpGrant'
 ]);
 
 /** The service allows `installGit` 10 minutes; the broker waits a little longer for its reply. */
@@ -900,6 +903,201 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 				...(configuredRegions === undefined ? {} : { configuredRegions })
 			};
 		}
+		case 'selectTerraformSkills': {
+			const validKinds = new Set(['generate', 'diagram', 'topology', 'refactor', 'review', 'test']);
+			if (!hasOnlyKeys(value, ['taskKind', 'prompt', 'runtime']) || typeof value.taskKind !== 'string' || !validKinds.has(value.taskKind)) {
+				return undefined;
+			}
+			if (value.prompt !== undefined && (typeof value.prompt !== 'string' || value.prompt.length > 4096 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(value.prompt))) {
+				return undefined;
+			}
+			if (value.runtime !== undefined && value.runtime !== 'openTofu' && value.runtime !== 'terraform' && value.runtime !== 'auto') {
+				return undefined;
+			}
+			return {
+				taskKind: value.taskKind,
+				...(value.prompt === undefined ? {} : { prompt: value.prompt }),
+				...(value.runtime === undefined ? {} : { runtime: value.runtime })
+			};
+		}
+		case 'listBuiltinSkills': {
+			const validCategories = new Set(['cloudforge-diagram', 'cloudforge-topology', 'cloudforge-workflow', 'terraform']);
+			if (!hasOnlyKeys(value, ['category'])) {
+				return undefined;
+			}
+			if (value.category !== undefined && (typeof value.category !== 'string' || !validCategories.has(value.category))) {
+				return undefined;
+			}
+			return value.category === undefined ? {} : { category: value.category };
+		}
+		case 'getTopologyBlueprint': {
+			if (!hasOnlyKeys(value, ['blueprintId'])) {
+				return undefined;
+			}
+			if (value.blueprintId !== undefined && (typeof value.blueprintId !== 'string' || !/^[a-z0-9-]{1,64}$/.test(value.blueprintId))) {
+				return undefined;
+			}
+			return value.blueprintId === undefined ? {} : { blueprintId: value.blueprintId };
+		}
+		case 'getLearningRecord': {
+			if (!hasOnlyKeys(value, ['workspaceId', 'architectureId']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId)) {
+				return undefined;
+			}
+			return { workspaceId: value.workspaceId, architectureId: value.architectureId };
+		}
+		case 'saveLearningRecord': {
+			if (!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'task', 'notes']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId)) {
+				return undefined;
+			}
+			const result: Record<string, unknown> = { workspaceId: value.workspaceId, architectureId: value.architectureId };
+			if (value.task !== undefined) {
+				if (value.task !== null) {
+					if (!isRecord(value.task) || !hasOnlyKeys(value.task, ['title', 'mode', 'objective', 'requirements', 'assumptions', 'skillIds'])) {
+						return undefined;
+					}
+					if (typeof value.task.title !== 'string' || value.task.title.length === 0 || value.task.title.length > 200) {
+						return undefined;
+					}
+					if (value.task.mode !== 'hint' && value.task.mode !== 'guided' && value.task.mode !== 'workedExample') {
+						return undefined;
+					}
+					if (typeof value.task.objective !== 'string' || value.task.objective.length > 4000) {
+						return undefined;
+					}
+					if (value.task.requirements !== undefined && (!Array.isArray(value.task.requirements) || value.task.requirements.length > 64)) {
+						return undefined;
+					}
+					if (value.task.assumptions !== undefined && (!Array.isArray(value.task.assumptions) || value.task.assumptions.length > 32)) {
+						return undefined;
+					}
+					if (value.task.skillIds !== undefined && (!Array.isArray(value.task.skillIds) || value.task.skillIds.length > 16)) {
+						return undefined;
+					}
+				}
+				result.task = value.task;
+			}
+			if (value.notes !== undefined) {
+				if (!isRecord(value.notes) || Object.keys(value.notes).length > 256) {
+					return undefined;
+				}
+				result.notes = value.notes;
+			}
+			return result;
+		}
+		case 'submitProposal': {
+			if (
+				!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'origin', 'title', 'summary', 'baseSourceRevision', 'skillIds', 'requirementIds', 'files']) ||
+				!isOpaqueId(value.workspaceId) ||
+				!isOpaqueId(value.architectureId) ||
+				typeof value.title !== 'string' || value.title.trim().length === 0 || value.title.length > 200 ||
+				typeof value.summary !== 'string' || value.summary.length > 2000 ||
+				typeof value.baseSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(value.baseSourceRevision) ||
+				!Array.isArray(value.files) || value.files.length === 0 || value.files.length > 16
+			) {
+				return undefined;
+			}
+			if (value.origin !== undefined && (typeof value.origin !== 'string' || value.origin.length === 0 || value.origin.length > 64 || !/^[A-Za-z0-9:_-]+$/.test(value.origin))) {
+				return undefined;
+			}
+			if (value.skillIds !== undefined && (!Array.isArray(value.skillIds) || value.skillIds.length > 16 || !value.skillIds.every(item => typeof item === 'string' && /^[a-z0-9-]{1,64}$/.test(item)))) {
+				return undefined;
+			}
+			if (value.requirementIds !== undefined && (!Array.isArray(value.requirementIds) || value.requirementIds.length > 64 || !value.requirementIds.every(item => isOpaqueId(item)))) {
+				return undefined;
+			}
+			const files: { fileName: string; contents: string; rationale?: string }[] = [];
+			const seen = new Set<string>();
+			let totalBytes = 0;
+			for (const file of value.files) {
+				if (
+					!isRecord(file) || !hasOnlyKeys(file, ['fileName', 'contents', 'rationale']) ||
+					!isPathComponent(file.fileName) || file.fileName.startsWith('.') || !file.fileName.toLowerCase().endsWith('.tf') || file.fileName.length <= 3 ||
+					typeof file.contents !== 'string' || Buffer.byteLength(file.contents, 'utf8') > maxDraftBytes ||
+					(file.rationale !== undefined && (typeof file.rationale !== 'string' || file.rationale.length > 500))
+				) {
+					return undefined;
+				}
+				const lower = file.fileName.toLowerCase();
+				if (seen.has(lower)) {
+					return undefined;
+				}
+				seen.add(lower);
+				totalBytes += Buffer.byteLength(file.contents, 'utf8');
+				files.push({
+					fileName: file.fileName,
+					contents: file.contents,
+					...(file.rationale === undefined ? {} : { rationale: file.rationale })
+				});
+			}
+			if (totalBytes > maxBatchBytes) {
+				return undefined;
+			}
+			return {
+				workspaceId: value.workspaceId,
+				architectureId: value.architectureId,
+				...(value.origin === undefined ? {} : { origin: value.origin }),
+				title: value.title,
+				summary: value.summary,
+				baseSourceRevision: value.baseSourceRevision,
+				...(value.skillIds === undefined ? {} : { skillIds: [...value.skillIds as string[]] }),
+				...(value.requirementIds === undefined ? {} : { requirementIds: [...value.requirementIds as string[]] }),
+				files
+			};
+		}
+		case 'reviewProposal': {
+			if (
+				!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'proposalId', 'action']) ||
+				!isOpaqueId(value.workspaceId) ||
+				!isOpaqueId(value.architectureId) ||
+				!isOpaqueId(value.proposalId) ||
+				(value.action !== 'markAccepted' && value.action !== 'reject')
+			) {
+				return undefined;
+			}
+			return {
+				workspaceId: value.workspaceId,
+				architectureId: value.architectureId,
+				proposalId: value.proposalId,
+				action: value.action
+			};
+		}
+		case 'issueMcpGrant': {
+			if (!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'clientLabel', 'ttlMinutes']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId)) {
+				return undefined;
+			}
+			if (value.clientLabel !== undefined && (typeof value.clientLabel !== 'string' || value.clientLabel.trim().length === 0 || value.clientLabel.length > 64 || !/^[A-Za-z0-9._ -]+$/.test(value.clientLabel))) {
+				return undefined;
+			}
+			if (value.ttlMinutes !== undefined && (typeof value.ttlMinutes !== 'number' || !Number.isSafeInteger(value.ttlMinutes) || value.ttlMinutes < 5 || value.ttlMinutes > 1440)) {
+				return undefined;
+			}
+			return {
+				workspaceId: value.workspaceId,
+				architectureId: value.architectureId,
+				...(value.clientLabel === undefined ? {} : { clientLabel: value.clientLabel.trim() }),
+				...(value.ttlMinutes === undefined ? {} : { ttlMinutes: value.ttlMinutes })
+			};
+		}
+		case 'listMcpGrants': {
+			if (!hasOnlyKeys(value, ['workspaceId', 'architectureId'])) {
+				return undefined;
+			}
+			const hasWs = value.workspaceId !== undefined;
+			const hasArch = value.architectureId !== undefined;
+			if (hasWs !== hasArch) {
+				return undefined;
+			}
+			if (hasWs && (!isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId))) {
+				return undefined;
+			}
+			return hasWs ? { workspaceId: value.workspaceId, architectureId: value.architectureId } : {};
+		}
+		case 'revokeMcpGrant': {
+			if (!hasOnlyKeys(value, ['grantId']) || !isOpaqueId(value.grantId)) {
+				return undefined;
+			}
+			return { grantId: value.grantId };
+		}
 	}
 }
 
@@ -1039,6 +1237,21 @@ function completeCreateProject(value: unknown, parentPath: unknown): unknown {
 	return { folderName: value.folderName, workspaceFileName: value.workspaceFileName, workspaceFile: workspaceFile.toString() };
 }
 
+/**
+ * Adds the packaged `cloudforge-service.exe` command path to an `issueMcpGrant` response so
+ * VS Code's open-source Agent View (`McpStdioServerDefinition`) and external CLI configs can
+ * launch the verified sidecar without ever letting extensions or webviews supply executable paths.
+ */
+function completeIssueMcpGrant(value: unknown, appRoot: string): unknown {
+	if (!isRecord(value) || typeof value.grantId !== 'string' || !Array.isArray(value.mcpArgs) || !value.mcpArgs.every(arg => typeof arg === 'string')) {
+		throw new CloudForgeServiceError('SERVICE_ERROR');
+	}
+	return {
+		...value,
+		mcpCommand: join(appRoot, 'cloudforge-service', 'cloudforge-service.exe')
+	};
+}
+
 function safeFailure(error: unknown): CloudForgeCallFailure {
 	const code = error instanceof CloudForgeServiceError && Object.hasOwn(serviceErrorMessages, error.code) ? error.code : 'SERVICE_ERROR';
 	return { ok: false, error: { code, message: serviceErrorMessages[code] } };
@@ -1125,6 +1338,8 @@ export class CloudForgeServiceBroker implements IServerChannel<string> {
 			let value = await service.call(method, request.params, timeoutMs);
 			if (method === 'createProject') {
 				value = completeCreateProject(value, request.params.parentPath);
+			} else if (method === 'issueMcpGrant') {
+				value = completeIssueMcpGrant(value, this.appRoot);
 			}
 			const result: CloudForgeCallSuccess = { ok: true, value };
 			return result as T;

@@ -742,4 +742,80 @@ suite('CloudForgeServiceChannel', () => {
 
 		await Promise.all([cancelled, unc, local].map(item => item.broker.stop()));
 	});
+
+	test('validates Stage 12A skills, blueprints, learning, proposals, and scoped MCP grant parameters and attaches broker mcpCommand', async () => {
+		const rev = 'c'.repeat(64);
+		assert.deepStrictEqual(validateCloudForgeServiceParams('selectTerraformSkills', { taskKind: 'topology', prompt: 'Azure hub spoke', runtime: 'openTofu' }), { taskKind: 'topology', prompt: 'Azure hub spoke', runtime: 'openTofu' });
+		assert.strictEqual(validateCloudForgeServiceParams('selectTerraformSkills', { taskKind: 'deploy' }), undefined);
+		assert.deepStrictEqual(validateCloudForgeServiceParams('listBuiltinSkills', {}), {});
+		assert.deepStrictEqual(validateCloudForgeServiceParams('listBuiltinSkills', { category: 'cloudforge-diagram' }), { category: 'cloudforge-diagram' });
+		assert.strictEqual(validateCloudForgeServiceParams('listBuiltinSkills', { category: 'arbitrary' }), undefined);
+		assert.deepStrictEqual(validateCloudForgeServiceParams('getTopologyBlueprint', {}), {});
+		assert.deepStrictEqual(validateCloudForgeServiceParams('getTopologyBlueprint', { blueprintId: 'azure-hub-spoke' }), { blueprintId: 'azure-hub-spoke' });
+		assert.strictEqual(validateCloudForgeServiceParams('getTopologyBlueprint', { blueprintId: '../escape' }), undefined);
+
+		assert.deepStrictEqual(validateCloudForgeServiceParams('getLearningRecord', { workspaceId, architectureId: `${workspaceId}-architecture-1` }), { workspaceId, architectureId: `${workspaceId}-architecture-1` });
+		assert.strictEqual(validateCloudForgeServiceParams('getLearningRecord', { workspaceId, architectureId: `${workspaceId}-architecture-1`, path: 'C:\\x' }), undefined);
+		assert.ok(validateCloudForgeServiceParams('saveLearningRecord', {
+			workspaceId,
+			architectureId: `${workspaceId}-architecture-1`,
+			task: { title: 'Hub lab', mode: 'guided', objective: 'Build a VNet', requirements: [], assumptions: [], skillIds: ['terraform-style-guide'] },
+			notes: {}
+		}));
+		assert.strictEqual(validateCloudForgeServiceParams('saveLearningRecord', {
+			workspaceId,
+			architectureId: `${workspaceId}-architecture-1`,
+			task: { title: 'Bad mode', mode: 'auto', objective: 'x' }
+		}), undefined);
+
+		const validProposal = {
+			workspaceId,
+			architectureId: `${workspaceId}-architecture-1`,
+			origin: 'mcp:codex',
+			title: 'Add subnet',
+			summary: 'Adds snet-app',
+			baseSourceRevision: rev,
+			skillIds: ['cloudforge-diagram-authoring'],
+			requirementIds: ['req-1'],
+			files: [{ fileName: 'network.tf', contents: 'resource "azurerm_subnet" "app" {}\n', rationale: 'App tier' }]
+		};
+		assert.deepStrictEqual(validateCloudForgeServiceParams('submitProposal', validProposal), validProposal);
+		assert.strictEqual(validateCloudForgeServiceParams('submitProposal', { ...validProposal, files: [{ fileName: '../escape.tf', contents: 'a' }] }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('submitProposal', { ...validProposal, files: [{ fileName: 'secrets.tfvars', contents: 'a' }] }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('submitProposal', { ...validProposal, files: [{ fileName: 'main.tf', contents: 'a' }, { fileName: 'MAIN.tf', contents: 'b' }] }), undefined);
+
+		assert.deepStrictEqual(validateCloudForgeServiceParams('reviewProposal', { workspaceId, architectureId: `${workspaceId}-architecture-1`, proposalId: 'prop-1', action: 'markAccepted' }), { workspaceId, architectureId: `${workspaceId}-architecture-1`, proposalId: 'prop-1', action: 'markAccepted' });
+		assert.strictEqual(validateCloudForgeServiceParams('reviewProposal', { workspaceId, architectureId: `${workspaceId}-architecture-1`, proposalId: 'prop-1', action: 'apply' }), undefined);
+
+		assert.deepStrictEqual(validateCloudForgeServiceParams('issueMcpGrant', { workspaceId, architectureId: `${workspaceId}-architecture-1`, clientLabel: 'vscode-agent', ttlMinutes: 60 }), { workspaceId, architectureId: `${workspaceId}-architecture-1`, clientLabel: 'vscode-agent', ttlMinutes: 60 });
+		assert.strictEqual(validateCloudForgeServiceParams('issueMcpGrant', { workspaceId, architectureId: `${workspaceId}-architecture-1`, ttlMinutes: 2 }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('issueMcpGrant', { workspaceId, architectureId: `${workspaceId}-architecture-1`, ttlMinutes: 9999 }), undefined);
+		assert.deepStrictEqual(validateCloudForgeServiceParams('listMcpGrants', {}), {});
+		assert.strictEqual(validateCloudForgeServiceParams('listMcpGrants', { workspaceId }), undefined);
+		assert.deepStrictEqual(validateCloudForgeServiceParams('revokeMcpGrant', { grantId: 'cfmcp-1234' }), { grantId: 'cfmcp-1234' });
+
+		const { broker, call } = createBroker([contosoWindow], {
+			reply: () => ({
+				grantId: 'cfmcp-deadbeef',
+				grantIdPreview: 'cfmcp-de…ef',
+				displayName: 'Contoso Hub',
+				clientLabel: 'vscode-agent',
+				readOnly: false,
+				createdAt: '2026-11-26T00:00:00Z',
+				expiresAtEpoch: 1999999999,
+				active: true,
+				revoked: false,
+				mcpArgs: ['--mcp', '--grant', 'cfmcp-deadbeef']
+			})
+		});
+		const issued = await call(1, 'issueMcpGrant', { workspaceId, architectureId: `${workspaceId}-architecture-1`, clientLabel: 'vscode-agent' });
+		assert.strictEqual(issued.ok, true);
+		if (issued.ok) {
+			const payload = issued.value as Record<string, unknown>;
+			assert.strictEqual(payload.grantId, 'cfmcp-deadbeef');
+			assert.strictEqual(typeof payload.mcpCommand, 'string');
+			assert.ok(String(payload.mcpCommand).endsWith('cloudforge-service.exe'));
+		}
+		await broker.stop();
+	});
 });

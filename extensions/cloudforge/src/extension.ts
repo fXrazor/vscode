@@ -54,6 +54,7 @@ import { isValidTfFileName, type CanvasCatalogueSnapshot, type CanvasCatalogueTy
 import { lookupBundledSchema, type FormSchema } from './canvas/schemaForm';
 import { findTemplateById } from './canvas/templateLibrary';
 import { activateSidePanel } from './sidePanel/sidePanel';
+import { activateLearning } from './learning/learningPanel';
 import {
 	draftSaveErrorMessage,
 	formatEnginePlanReportText,
@@ -2516,5 +2517,26 @@ export function activate(context: ExtensionContext): void {
 		projectWorkspaceId: () => projectControllerRef.current?.current?.workspaceId,
 		onDidChangeProject: projectChanged.event,
 		openNodeSource: (graph, nodeId) => openNodeSource(graph.workspaceId, graph.architectureId, graph.sourceRevision, nodeId),
+	});
+
+	// Stage 12B: Learning Studio, 12 baked-in skills, 5 multi-cloud starter blueprints,
+	// guarded proposal review, and VS Code open-source Agent View MCP auto-discovery.
+	activateLearning(context, {
+		callService,
+		getGraph: () => provider.getGraph(),
+		onDidChangeGraph: provider.onDidChangeTreeData,
+		architectureName: () => provider.getGraph() ? currentArchitectureName : undefined,
+		async reloadActiveArchitecture() {
+			const current = provider.getGraph();
+			if (!current) {
+				return;
+			}
+			const refreshed = await showGraph(provider, treeView, current.workspaceId, current.architectureId);
+			if (refreshed) {
+				updateStatusBar(refreshed);
+				syncProblems(refreshed);
+				canvas.updateIfOpen(toCanvasSnapshot(refreshed, currentArchitectureName));
+			}
+		}
 	});
 }

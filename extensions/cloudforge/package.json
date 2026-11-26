@@ -347,6 +347,36 @@
 				"command": "cloudforge.revealStateResource",
 				"title": "%command.revealStateResource%",
 				"category": "%displayName%"
+			},
+			{
+				"command": "cloudforge.openLearningStudio",
+				"title": "%command.openLearningStudio%",
+				"category": "%displayName%",
+				"icon": "$(mortar-board)"
+			},
+			{
+				"command": "cloudforge.refreshLearning",
+				"title": "%command.refreshLearning%",
+				"category": "%displayName%",
+				"icon": "$(refresh)"
+			},
+			{
+				"command": "cloudforge.copyMcpConfig",
+				"title": "%command.copyMcpConfig%",
+				"category": "%displayName%",
+				"icon": "$(plug)"
+			},
+			{
+				"command": "cloudforge.revokeMcpGrants",
+				"title": "%command.revokeMcpGrants%",
+				"category": "%displayName%",
+				"icon": "$(debug-disconnect)"
+			}
+		],
+		"mcpServerDefinitionProviders": [
+			{
+				"id": "cloudforge.mcp",
+				"label": "%mcp.provider%"
 			}
 		],
 		"keybindings": [
@@ -405,6 +435,10 @@
 				{
 					"id": "cloudforge.connections",
 					"name": "%view.connections%"
+				},
+				{
+					"id": "cloudforge.learn",
+					"name": "%view.learn%"
 				}
 			]
 		},
@@ -608,6 +642,21 @@
 					"command": "cloudforge.linkCloudConnection",
 					"when": "view == cloudforge.connections",
 					"group": "navigation@1"
+				},
+				{
+					"command": "cloudforge.openLearningStudio",
+					"when": "view == cloudforge.learn",
+					"group": "navigation@1"
+				},
+				{
+					"command": "cloudforge.copyMcpConfig",
+					"when": "view == cloudforge.learn",
+					"group": "navigation@2"
+				},
+				{
+					"command": "cloudforge.refreshLearning",
+					"when": "view == cloudforge.learn",
+					"group": "navigation@9"
 				}
 			],
 			"view/item/context": [

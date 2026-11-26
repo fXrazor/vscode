@@ -60,5 +60,11 @@
 	"command.deleteCloudKey": "Delete Stored Key",
 	"command.removeCloudConnection": "Unlink Cloud Account",
 	"command.checkCloudSignIn": "Check Cloud Sign-In",
-	"command.revealStateResource": "Open Resource Source"
+	"command.revealStateResource": "Open Resource Source",
+	"view.learn": "Learn, Skills & AI Agents",
+	"mcp.provider": "CloudForge Architecture MCP",
+	"command.openLearningStudio": "Open Learning Studio",
+	"command.refreshLearning": "Refresh Learning & Proposals",
+	"command.copyMcpConfig": "Copy Scoped MCP Config (Codex / Claude Code)…",
+	"command.revokeMcpGrants": "Revoke Active MCP Grant…"
 }
