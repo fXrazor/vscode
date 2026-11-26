@@ -35,7 +35,7 @@ export function ResourceWorkspace({ resource, architecture, dispatch, open, onCl
 	const [mobileTab, setMobileTab] = useState('parameters');
 	const [codeOpen, setCodeOpen] = useState(true);
 	const [contextOpen, setContextOpen] = useState(true);
-	const [codeWidth, setCodeWidth] = useState(420);
+	const [codeWidth, setCodeWidth] = useState(630);
 	const [reveal, setReveal] = useState<RevealCode>();
 	function configureTerraform(query?: string) { setCodeOpen(true); setMobileTab('code'); setReveal(previous=>({id:(previous?.id??0)+1,query})); }
 	useEffect(() => {
