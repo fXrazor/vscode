@@ -29,6 +29,8 @@ import {
 	type TreeView
 } from 'vscode';
 import { activateProjects } from './project/index';
+import { StartupSequence } from './startup/startupSequence';
+import { showStartupStatus } from './startup/startupStatus';
 import { registerTerraformEditorProviders } from './editor/providers';
 import {
 	extractTerraformReferenceAtPosition,
@@ -2834,4 +2836,71 @@ export function activate(context: ExtensionContext): void {
 		onDidChangeProject: projectChanged.event,
 		openNodeSource: (graph, nodeId) => openNodeSource(graph.workspaceId, graph.architectureId, graph.sourceRevision, nodeId),
 	});
+
+	void runStartupSequence();
+
+	/**
+	 * Startup warm-up, behind a usable window: start the service and reopen the project and last
+	 * architecture, load provider schemas so Studio forms open instantly, then check this
+	 * architecture's providers (which raises the Get Ready prompt when something is missing).
+	 * Nothing here downloads or reaches the network.
+	 */
+	async function runStartupSequence(): Promise<void> {
+		const startupOutput = window.createOutputChannel(l10n.t('CloudForge Startup'));
+		const sequence = new StartupSequence([
+			{ id: 'project', label: l10n.t('Start the service and open the project') },
+			{ id: 'schemas', label: l10n.t('Load provider schemas') },
+			{ id: 'providers', label: l10n.t('Check this architecture\'s providers') },
+		]);
+		context.subscriptions.push(startupOutput, showStartupStatus(sequence, startupOutput));
+		await sequence.run('project', async () => {
+			const controller = projectControllerRef.current;
+			if (!controller) {
+				return { skipped: l10n.t('projects are not available') };
+			}
+			// Done when the last architecture is on screen, without waiting for later prompts.
+			let subscription: { dispose(): void } | undefined;
+			const graphShown = new Promise<void>(resolve => {
+				subscription = provider.onDidChangeTreeData(() => { if (provider.getGraph()) { resolve(); } });
+			});
+			try {
+				await Promise.race([controller.connect(), graphShown]);
+			} finally {
+				subscription?.dispose();
+			}
+			const project = controller.current;
+			if (!project) {
+				return { skipped: l10n.t('no CloudForge project in this window') };
+			}
+			return provider.getGraph()
+				? l10n.t('{0} open, {1} architectures', currentArchitectureName, project.architectures.length)
+				: l10n.t('{0} architectures, none open', project.architectures.length);
+		});
+		if (!workspace.getConfiguration('cloudforge').get<boolean>('startup.preload', true)) {
+			sequence.skip('schemas', l10n.t('turned off in settings'));
+			sequence.skip('providers', l10n.t('turned off in settings'));
+			return;
+		}
+		await sequence.run('schemas', async () => {
+			const snapshots = await loadCatalogueSnapshots();
+			if (!snapshots.length) {
+				return { skipped: l10n.t('none downloaded yet') };
+			}
+			await loadCatalogueTypes();
+			return l10n.t('{0} schemas', snapshots.length);
+		});
+		await sequence.run('providers', async () => {
+			if (!provider.getGraph()) {
+				return { skipped: l10n.t('no architecture open') };
+			}
+			await providersView.refresh();
+			const model = providersView.current;
+			if (!model) {
+				throw new Error(l10n.t('the provider report could not be read'));
+			}
+			return model.attentionCount
+				? l10n.t('{0} of {1} need attention', model.attentionCount, model.project.length)
+				: l10n.t('{0} ready', model.project.length);
+		});
+	}
 }

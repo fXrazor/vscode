@@ -52,6 +52,11 @@
 					"default": true,
 					"description": "%config.editor.codeLens%"
 				},
+				"cloudforge.startup.preload": {
+					"type": "boolean",
+					"default": true,
+					"description": "%config.startup.preload%"
+				},
 				"cloudforge.projects.openInNewWindow": {
 					"type": "string",
 					"enum": [
@@ -118,6 +123,11 @@
 				"title": "%command.providers.importArchive%",
 				"category": "CloudForge",
 				"icon": "$(file-zip)"
+			},
+			{
+				"command": "cloudforge.showStartupLog",
+				"title": "%command.showStartupLog%",
+				"category": "CloudForge"
 			},
 			{
 				"command": "cloudforge.getReady",
