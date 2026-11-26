@@ -11,7 +11,8 @@ import { bindingKey } from './fieldBindings.ts';
 import { configuredImpact, documentedHubSpokes, infrastructureRelationships, type InfrastructureRelationship } from './infrastructureRelationships.ts';
 import { projectGraphSnapshotToArchitecture } from './serviceAdapter.ts';
 import { selectionFragment } from './canvasOperations.ts';
-import { technicalLayout } from './technicalLayout.ts';
+import { projectTechnicalGraph } from './technicalGraph.ts';
+import { layoutTechnicalGraph } from './technicalGraphLayout.ts';
 
 function node(id: string, type: string, refs: Record<string, string> = {}): Resource {
 	const base = sampleArchitecture().resources.find(resource => resource.id === 'vm')!;
@@ -66,6 +67,7 @@ test('hub/spoke recognition requires peering endpoints and arranges a documented
 	assert.deepEqual(documentedHubSpokes(architecture, infrastructureRelationships(architecture)), []);
 	architecture.resources.push(node('peer-a', 'azurerm_virtual_network_peering', { virtual_network_name: 'hub', remote_virtual_network_id: 'spoke-a' }), node('peer-b', 'azurerm_virtual_network_peering', { virtual_network_name: 'hub', remote_virtual_network_id: 'spoke-b' }));
 	const links = infrastructureRelationships(architecture); assert.equal(documentedHubSpokes(architecture, links)[0].hub, 'hub');
-	const layout = technicalLayout(architecture); const x = (id: string) => architecture.resources.find(resource => resource.id === id)!.positions.technical.x + layout.offsets[id].x;
+	const snapshot = projectTechnicalGraph(architecture); const layout = layoutTechnicalGraph(snapshot, { layout: 'layers', expanded: new Set(), compact: true, pins: {}, edges: snapshot.edges });
+	const x = (id: string) => layout.positions[id].x;
 	assert.ok(x('spoke-a') < x('hub') && x('hub') < x('spoke-b'));
 });

@@ -12,9 +12,15 @@ export type AttrType =
   | "bool"
   | "list"
   | "map"
+  | "json"
   | "block";
 
 export interface AttrDef {
+  /** Exact imported literal shape and member access; absent in inferred documentation. */
+  literalShape?: import('../../../../src/canvas/literalSchema.ts').LiteralShape;
+  readOnly?: boolean;
+  minItems?: number;
+  maxItems?: number;
   name: string;
   type: AttrType;
   required?: boolean;
@@ -48,6 +54,8 @@ export interface InheritRule {
 }
 
 export interface ResourceDef {
+  /** Version of a captured executable schema, independent of the documentation catalogue version. */
+  schemaVersion?: string;
   /** Terraform resource type, also the catalogue id. */
   type: string;
   provider: ProviderId;

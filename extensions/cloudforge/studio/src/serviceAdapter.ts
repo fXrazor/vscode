@@ -31,6 +31,7 @@ import type {
 	HostPoint,
 	HostValidationRun,
 	HostViewport,
+	HostGraphViewState,
 	HostViewState,
 } from './webviewBridge.ts';
 
@@ -95,6 +96,9 @@ function defaultIconFor(provider: Provider, resourceType: string | null): string
 	const def = resourceType ? getDef(resourceType) : undefined;
 	if (def?.icon) {
 		const fileName = def.icon.replace(/^\/?icons\//, '');
+		if (fileName.startsWith('catalog-icons/')) {
+			return fileName;
+		}
 		if (fileName.includes('/')) {
 			return 'catalog-icons/' + fileName;
 		}
@@ -170,9 +174,10 @@ function createResourceFromNode(node: HostNodeSummary, fallbackPosition: Positio
 		...(node.sourceFile ? { sourceFile: node.sourceFile } : preserved?.sourceFile ? { sourceFile: preserved.sourceFile } : {}),
 		...(node.sourceLine !== undefined ? { sourceLine: node.sourceLine } : preserved?.sourceLine !== undefined ? { sourceLine: preserved.sourceLine } : {}),
 		...(node.label && node.label !== node.name ? { label: node.label } : {}),
-		region: preserved?.region ?? providerRegions[provider][0],
+		region: preserved?.region ?? (mappedKind === 'generic' ? '' : providerRegions[provider][0]),
 		settings: preserved ? { ...defaultSettings, ...preserved.settings } : defaultSettings,
 		blocks: preserved ? structuredClone(preserved.blocks) : [],
+		...(preserved?.terraformExtras ? { terraformExtras: structuredClone(preserved.terraformExtras) } : {}),
 		...(preserved?.fieldBindings ? { fieldBindings: structuredClone(preserved.fieldBindings) } : {}),
 		...(preserved?.resourceRefs ? { resourceRefs: structuredClone(preserved.resourceRefs) } : {}),
 		...(preserved?.inheritanceOverrides ? { inheritanceOverrides: [...preserved.inheritanceOverrides] } : {}),
@@ -482,6 +487,7 @@ export function projectGraphSnapshotToArchitecture(
 		connections,
 		...(groups.length ? { groups } : {}),
 		...(layerOrder ? { layerOrder } : {}),
+		...(options.previousArchitecture?.dependencyStyles ? { dependencyStyles: structuredClone(options.previousArchitecture.dependencyStyles) } : {}),
 	});
 
 	return {
@@ -773,6 +779,8 @@ export function buildHostViewState(params: {
 	readonly inspectorOpen: boolean;
 	readonly libraryOpen: boolean;
 	readonly viewports?: Partial<Record<'visual' | 'technical', HostViewport>>;
+	/** Graph presentation, persisted under its own key so pins never become design positions. */
+	readonly graph?: HostGraphViewState;
 }): HostViewState {
 	const visualPositions: Record<string, HostPoint> = {};
 	const technicalPositions: Record<string, HostPoint> = {};
@@ -819,6 +827,7 @@ export function buildHostViewState(params: {
 		},
 		checkpoints: [],
 		sampleContext: null,
+		...(params.graph ? { graph: params.graph } : {}),
 	};
 }
 

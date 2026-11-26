@@ -4,11 +4,14 @@
  *--------------------------------------------------------------------------------------------*/
 import type { Architecture, DesignConnection, Position } from './model.ts';
 
-export type DesignEndpoint = { kind: 'element'; elementId: string; port?: 'input' | 'output' } | { kind: 'point'; position: Position };
+/** Element sides: input = left, output = right, plus top and bottom (four points like Miro). */
+export type EndpointPort = 'input' | 'output' | 'top' | 'bottom';
+export const endpointPorts: readonly EndpointPort[] = ['input', 'output', 'top', 'bottom'];
+export type DesignEndpoint = { kind: 'element'; elementId: string; port?: EndpointPort } | { kind: 'point'; position: Position };
 type LegacyConnection = Omit<DesignConnection, 'source' | 'target'> & { source: DesignEndpoint | string; target: DesignEndpoint | string };
 export type ArchitectureInput = Omit<Architecture, 'connections'> & { connections: (DesignConnection | LegacyConnection)[] };
 
-export const elementEndpoint = (elementId: string, port?: 'input' | 'output'): DesignEndpoint => ({ kind: 'element', elementId, ...(port ? { port } : {}) });
+export const elementEndpoint = (elementId: string, port?: EndpointPort): DesignEndpoint => ({ kind: 'element', elementId, ...(port ? { port } : {}) });
 export const pointEndpoint = (position: Position): DesignEndpoint => ({ kind: 'point', position: { ...position } });
 
 /** Single compatibility boundary for diagrams saved with element-id strings. */
@@ -16,7 +19,7 @@ export function normaliseEndpoint(value: unknown): DesignEndpoint | undefined {
 	if (typeof value === 'string' && value) { return elementEndpoint(value); }
 	if (!value || typeof value !== 'object') { return undefined; }
 	const endpoint = value as DesignEndpoint;
-	if (endpoint.kind === 'element' && typeof endpoint.elementId === 'string' && endpoint.elementId && (endpoint.port === undefined || endpoint.port === 'input' || endpoint.port === 'output')) { return endpoint; }
+	if (endpoint.kind === 'element' && typeof endpoint.elementId === 'string' && endpoint.elementId && (endpoint.port === undefined || endpointPorts.includes(endpoint.port))) { return endpoint; }
 	if (endpoint.kind === 'point' && endpoint.position && Number.isFinite(endpoint.position.x) && Number.isFinite(endpoint.position.y)) { return endpoint; }
 	return undefined;
 }

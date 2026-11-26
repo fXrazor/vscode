@@ -4,7 +4,8 @@ import { applyTerraformDraft, terraformCode } from './terraformProjection.ts';
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-import { importVariableDraft, exportableArchitecture, variableDeclarations, variableUses, type VariableDefinition } from './variables.ts';
+import { importVariableDraft, exportableArchitecture, objectVariablePaths, variableDeclarations, variableError, variableUses, type VariableDefinition } from './variables.ts';
+import { acceptsVariable } from './fieldBindings.ts';
 import type { BoardItem } from './model.ts';
 import { presentationSvg } from './exportPresentation.ts';
 import { shapeDefinitions } from './shapes.ts';
@@ -19,6 +20,7 @@ import { applyCanvasCommand, expandGroups, sceneOrder, selectionFragment } from 
 import { layoutSelection, selectionUnits } from './selectionGeometry.ts';
 import type { Architecture, Action } from './model.ts';
 import { bindingKey, variableBindingIssue, variablePreview, type FieldTarget } from './fieldBindings.ts';
+import { inheritedDependencies } from './resourceHierarchy.ts';
 import { resourceIconSize } from './resourceGeometry.ts';
 import { alignmentGuides } from './alignmentGuides.ts';
 import { inheritedReferences, resourcePlacement, resourceDimensions, resourceDescendants } from './resourceHierarchy.ts';
@@ -544,7 +546,7 @@ test('variable declaration and tfvars imports distinguish defaults, assigned val
 
 test('variable imports refuse unsupported expressions, validations and structural types', () => {
  assert.throws(() => importVariableDraft('input_value = var.other', [], 'tfvars'), /Expression/);
- assert.throws(() => importVariableDraft('variable "x" {\n type = object({ a = string })\n}', [], 'tf'), /structural type/);
+ assert.throws(() => importVariableDraft('variable "x" {\n type = tuple([string, number])\n}', [], 'tf'), /structural type/);
  assert.throws(() => importVariableDraft('variable "x" {\n type = string\n validation {\n condition = true\n error_message = "bad"\n }\n}', [], 'tf'), /advanced attributes/);
 });
 
@@ -715,4 +717,64 @@ test('typed variable feedback rejects wrong values and expressions before a save
  assert.ok(variableInputIssue('','number'));
  assert.equal(variableInputIssue('0','number'),undefined);
  assert.equal(variableInputIssue('','string'),undefined);
+});
+
+test('object variables declare their shape and fields bind one nested value as var.NAME.path', () => {
+	const network = { id: 'input-network', name: 'network', type: 'object' as const, description: 'Shared network settings', sensitive: false, defaultValue: { location: 'uksouth', dns: { servers: ['10.0.0.4'], zone: 'corp.local' } } };
+	assert.match(variableDeclarations([network]), /type = object\(\{ location = string, dns = object\(\{ servers = list\(string\), zone = string \}\) \}\)/);
+	assert.deepEqual(objectVariablePaths(network).map(entry => entry.path.join('.')), ['location', 'dns', 'dns.servers', 'dns.zone']);
+	assert.equal(acceptsVariable(network, { type: 'string' }), false);
+	assert.equal(acceptsVariable(network, { type: 'string' }, ['location']), true);
+	assert.equal(acceptsVariable(network, { type: 'string' }, ['dns', 'servers']), false);
+	assert.equal(acceptsVariable(network, { type: 'list' }, ['dns', 'servers']), true);
+	assert.equal(acceptsVariable(network, { type: 'string' }, ['missing']), false);
+	const architecture = { ...sampleArchitecture(), variables: [network] };
+	const bound = historyReducer(createHistory(architecture), { type: 'bindVariable', id: 'network', target: { kind: 'region' }, variableId: 'input-network', path: ['location'] });
+	assert.match(terraformCode(bound.present, 'network'), /location\s*=\s*var\.network\.location/);
+	assert.deepEqual(bound.present.resources.find(item => item.id === 'network')!.fieldBindings?.[JSON.stringify(['region'])], { variableId: 'input-network', path: ['location'] });
+	assert.ok(variableUses(bound.present).get('network')?.has('network'));
+	assert.equal(historyReducer(bound, { type: 'bindVariable', id: 'network', target: { kind: 'region' }, variableId: 'input-network', path: ['dns', 'servers'] }), bound, 'a list value cannot bind to a text field');
+	assert.equal(variableBindingIssue({ variableId: 'input-network', path: ['gone'] }, [network], { type: 'string' }), 'var.network.gone no longer exists in the object. Choose another value.');
+	assert.equal(variableError({ ...network, defaultValue: ['not', 'an', 'object'] }, []), 'The default and value must match the selected type.');
+	const imported = importVariableDraft('variable "network" {\n  type = object({ location = string })\n  default = { location = "uksouth" }\n}', [], 'tf');
+	assert.equal(imported[0].type, 'object');
+	assert.match(variableDeclarations(imported), /type = object\(\{ location = string \}\)/, 'the imported constraint is written back unchanged');
+});
+
+test('dependency line styles are appearance only, validated, undoable and never touch Terraform', () => {
+	const initial = createHistory(sampleArchitecture());
+	const before = terraformCode(initial.present);
+	let history = historyReducer(initial, { type: 'styleDependency', key: '*', patch: { routing: 'curve', width: 2 } });
+	history = historyReducer(history, { type: 'styleDependency', key: 'dependency:a:b', patch: { stroke: '#123456', pattern: 'solid' } });
+	assert.deepEqual(history.present.dependencyStyles, { '*': { routing: 'curve', width: 2 }, 'dependency:a:b': { stroke: '#123456', pattern: 'solid' } });
+	assert.equal(terraformCode(history.present), before);
+	assert.equal(historyReducer(history, { type: 'styleDependency', key: '*', patch: { width: 99 } }), history);
+	assert.equal(historyReducer(history, { type: 'styleDependency', key: '*', patch: { routing: 'zigzag' as 'curve' } }), history);
+	assert.equal(historyReducer(history, { type: 'styleDependency', key: '*', patch: { routing: 'curve' } }), history);
+	history = historyReducer(history, { type: 'styleDependency', key: 'dependency:a:b', patch: null });
+	history = historyReducer(history, { type: 'styleDependency', key: '*', patch: null });
+	assert.equal(history.present.dependencyStyles, undefined);
+	history = historyReducer(history, { type: 'undo' });
+	assert.deepEqual(history.present.dependencyStyles, { '*': { routing: 'curve', width: 2 } });
+});
+
+test('list fields mix typed values, variables and resource references entry by entry', () => {
+	const architecture = sampleArchitecture();
+	architecture.variables = [{ id: 'v-nic', name: 'extra_nic_id', type: 'string', description: '', sensitive: false }];
+	const target = { kind: 'setting' as const, name: 'network_interface_ids' };
+	let history = historyReducer(createHistory(architecture), { type: 'setListEntries', id: 'vm', target, items: [
+		{ kind: 'ref', resourceId: 'nic', attribute: 'id' }, { kind: 'variable', variableId: 'v-nic' }, { kind: 'value', value: '/subscriptions/x/nic3' },
+	] });
+	const vm = history.present.resources.find(resource => resource.id === 'vm')!;
+	assert.deepEqual(vm.resourceRefs?.[bindingKey(target)]?.refs, [{ resourceId: 'nic', attribute: 'id' }]);
+	const code = terraformCode(history.present);
+	assert.match(code, /network_interface_ids\s*=\s*\[\s*azurerm_network_interface\.[\w-]+\.id,\s*var\.extra_nic_id,\s*"\/subscriptions\/x\/nic3",?\s*\]/);
+	assert.ok(inheritedDependencies(history.present).some(edge => edge.source === 'nic' && edge.target === 'vm'), 'a reference entry is a dependency');
+	assert.equal(historyReducer(history, { type: 'setListEntries', id: 'vm', target, items: [{ kind: 'variable', variableId: 'missing' }] }), history);
+	history = historyReducer(history, { type: 'setListEntries', id: 'vm', target, items: [{ kind: 'value', value: 'a' }, { kind: 'value', value: 'b' }] });
+	const plain = history.present.resources.find(resource => resource.id === 'vm')!;
+	assert.equal(plain.resourceRefs?.[bindingKey(target)], undefined);
+	assert.equal(plain.settings.network_interface_ids, '["a","b"]');
+	history = historyReducer(history, { type: 'undo' });
+	assert.equal(history.present.resources.find(resource => resource.id === 'vm')!.resourceRefs?.[bindingKey(target)]?.items?.length, 3);
 });

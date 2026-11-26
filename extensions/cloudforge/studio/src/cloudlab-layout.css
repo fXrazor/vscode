@@ -119,7 +119,7 @@
 .studio .resource-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(66px, 1fr)); gap: 6px; padding: 0 0 12px; }
 .studio .resource-tile { position: relative; min-width: 0; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--panel); }
 .studio .resource-tile:hover, .studio .resource-tile:focus-within, .studio .resource-tile:has([aria-pressed="true"]) { border-color: color-mix(in srgb, var(--accent) 45%, var(--panel-solid)); }
-.studio .tile-pick { width: 100%; height: 78px; padding: 9px 4px 7px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: transparent; border: 0; border-radius: inherit; cursor: grab; }
+.studio .tile-pick { width: 100%; height: 78px; padding: 9px 4px 7px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: transparent; border: 0; border-radius: inherit; cursor: pointer; }
 .studio .tile-pick:hover { background: var(--accent-soft); }
 .studio .tile-pick img { width: 29px; height: 29px; flex: none; }
 .studio .tile-pick .t-name { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10.5px; }
@@ -141,7 +141,7 @@
 .studio .lib-modules { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 2px 12px; font-size: 12px; }
 .studio .res-row { position: relative; border-radius: var(--r-sm); }
 .studio .res-row:hover, .studio .res-row:focus-within { background: var(--accent-soft); }
-.studio .res-pick { width: 100%; display: flex; align-items: center; gap: 10px; padding: 6px 30px 6px 6px; border: 0; background: none; text-align: left; cursor: grab; border-radius: inherit; }
+.studio .res-pick { width: 100%; display: flex; align-items: center; gap: 10px; padding: 6px 30px 6px 6px; border: 0; background: none; text-align: left; cursor: pointer; border-radius: inherit; }
 .studio .res-pick:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .studio .res-pick img, .studio .res-icon { width: 28px; height: 28px; flex: none; display: grid; place-items: center; }
 .studio .res-text { display: flex; flex-direction: column; min-width: 0; }
@@ -159,7 +159,8 @@
 .studio .lab-tabs [data-state=active] { color:var(--text); background:var(--panel-2); box-shadow:inset 0 -2px var(--accent); }
 .studio .lab-tabs .lib-count { padding-right:0; font-size:10.5px; }
 .spacer { flex:1; }.faint { color:var(--faint); }
-.studio .cat-head { padding:10px; flex-shrink:0; }
+.studio .cat-head { display:grid; gap:8px; padding:12px 10px 10px; flex-shrink:0; }
+.studio .cat-head .lib-docs { margin-top:-2px; padding-left:2px; }
 .studio .lib-provider select { min-height:30px; padding:4px 9px; }
 .studio .lib-version { align-items:center; justify-content:center; display:flex; padding:0 8px; border:1px solid var(--border-strong); border-radius:6px; width:95px; font:11px Consolas,monospace; }
 .studio .lab-search { position:relative; display:flex; align-items:center; }

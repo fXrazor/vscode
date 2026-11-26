@@ -43,6 +43,7 @@ export function activateProjects(context: ExtensionContext, graph: GraphHost): P
 		commands.registerCommand('cloudforge.cloneRepository', (provider?: unknown) =>
 			controller.cloneRepository(typeof provider === 'string' && providers.has(provider) ? provider as CloneProvider : undefined)),
 		commands.registerCommand('cloudforge.createProject', () => controller.createProject()),
+		commands.registerCommand('cloudforge.openProjectInNewWindow', () => controller.openProjectInNewWindow()),
 		commands.registerCommand('cloudforge.createArchitecture', () => controller.createArchitecture()),
 		commands.registerCommand('cloudforge.openProjectGallery', () => gallery.show()),
 		commands.registerCommand('cloudforge.switchArchitecture', () => controller.switchArchitecture()),

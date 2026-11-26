@@ -3,6 +3,158 @@
 ## Portable project bundle export/import — Claude — 26 November 2026
 
 Branch `claude/project-thread-8qd376`, not merged. Studio Export menu now has **Project bundle (.zip)** and **Import project bundle…**: one `.cloudforge.zip` with manifest + SHA-256 digests, the canvas model (`architecture.json`), the projected Terraform folder, variables and the SVG diagram. Hosted export uses the existing user Save dialog path (`exportArtifact` format `bundle`); hosted import only loads the model into the canvas, and `.tf` writes still go through Rust Save. Details, files and verification: [Studio continuation](extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md#portable-project-bundle-cloudforgezip--claude-26-november-2026). Technical Graph work on `claude/project-thread-2irlth` is separate; this branch touches `App.tsx` only in two small blocks.
+## Studio pass 10 (Claude) — 26 November 2026
+
+Miro-style connectors: Ctrl/Cmd free drop, Shift 45° steps, editable dependency lines (curve/straight/elbow, style, weight, colour, per line or all) and redesigned canvas menus, on `claude/project-thread-2irlth` (merged to main 26 November 2026). See "Studio pass 10" in the [Studio continuation](extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md).
+
+## Studio pass 9 (Claude) — 26 November 2026
+
+Object (nested) variables bound as `var.NAME.a.b`, readable field labels, On/Off toggles and a larger resource workspace, on `claude/project-thread-2irlth` (merged to main 26 November 2026). See "Studio pass 9" in the [Studio continuation](extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md).
+
+## Technical Graph pass 8 (Claude) — 26 November 2026
+
+Branch `claude/project-thread-2irlth`, merged to main 26 November 2026: scope spotlight, multi-cloud estate sample (126 resources), separated scope clusters, AWS/GCP core icons and a browser test view (`extensions/cloudforge/studio/scripts/build-test-view.mjs`). Details, checks and a test checklist are under "Technical Graph pass 8" in the [Studio continuation](extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md).
+
+## Approved main merge and complete continuation handoff — 26 November 2026
+
+Dale explicitly requested **push, merge and complete the handoff**, superseding the historical local-only/no-merge notes below for these checkpoints. Integration owner: Codex. Desktop main `4bb840d2718` is merged with installed verification `8b3d5dee698` and readiness repair `cb1c18465b7` in the owned `codex/provider-installed-verification` worktree. The installer upgrade record and all Technical Graph/design work are preserved. Resolve the final desktop integration SHA with `git log -1 --grep="Merge provider mirror workflow fixes"`; the push destination is `fXrazor/vscode` main and the retained feature branch.
+
+**Rust is merged and pushed:** `fXrazor/CloudForge` main and `codex/provider-mirror-long-paths` both resolve to **`53539fd9d13ec5177b7a3f4ef0aa15fae0b10f32`**, including repair `fb68db9…` and current main's engine-plan, variable-secret and state-summary hardening. The service worktree is `C:/Users/dalep/.codex/worktrees/provider-mirror-long-paths/CloudForge`; desktop worktree is `C:/Users/dalep/.codex/worktrees/release-readiness/CloudForge-Code`. Both repository boundaries remain separate; protocol is still 1.
+
+**Fresh merged verification:** 52/52 Rust unit tests, 5/5 Stage 10 mirror integration tests, Clippy/formatting; 109/109 extension tests, extension and both runner TypeScript checks, extension bundle, targeted oxlint with warnings denied and whitespace checks. The authentic AzureRM ZIP passed 10/10 service checks against the exact merged Rust build. That debug verification executable has SHA-256 **`313d6be092318674d171a710e90146bb9909ddedc36dfe704b86c9818862c270`**; it is not a packaged release artifact. Evidence: ignored `studio/output/desktop-mirror-merged-53539fd/mirror-service-results.json` under the desktop extension. The earlier 12 UI assertions and 13 empty-mirror/editor assertions are inherited installed observations, not rerun by this merge.
+
+**Continue here:** read the [canonical Studio continuation](extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md) and [populated-mirror evidence](extensions/cloudforge/studio/research/populated-mirror-verification.md), then use fresh owned worktrees from both remote main branches. Build/stage a matching service release and exact manifest without replacing the user's installed files ad hoc. Verify native first import into an empty mirror, final removal/reclaimed bytes, active leases and selected-package schema extraction in a controlled staged desktop. Then finish installed variables/additional Terraform, live schema-import/render states, and AWS/Google samples. The generic publish-error wording and lost package-details extraction prefill remain review items. No installer upgrade, provider execution or cloud plan/apply was performed during this merge/handoff. Preserve the current installed `930b9d7af51` / service `f6ccff1…` upgrade record below as its own historical proof.
+
+## Populated mirror repairs and real-archive proof — 26 November 2026
+
+Codex continued the next phase in the existing isolated `codex/provider-installed-verification` worktree (base `8b3d5dee698`) and a separate Rust `codex/provider-mirror-long-paths` worktree. Two actual defects were found: Windows publication failed beyond MAX_PATH, fixed in Rust **`fb68db9fd4fb4fa07c32a81fade842343f24728a`**; and missing Linux packages hid otherwise-ready Windows initialization, fixed in this extension with separately validated platform readiness. Integration owner: Codex. [Exact sources, provenance, checks, limitations and next action](extensions/cloudforge/studio/research/populated-mirror-verification.md).
+
+Fresh: **49/49 Rust unit**, **5/5 mirror integration**, **109/109 extension** tests, TypeScript/build, Clippy/oxlint, and **10/10 authentic-archive service checks** against the exact committed Rust build. **12 installed-manager UI assertions**, including the readiness regression and its corrected state, cover populated inventory/integrity, native removal review/cancel and pinned cleanup. Native first import after packaging the Rust fix, final removal, leases and extraction remain integration work; no installed app files or installer were changed. Engine discovery used version probes; no provider execution, initialization, plan/apply or cloud operation ran. Preserve all Technical Graph/design worktrees. Changes are local checkpoints; no new main merge/push is implied.
+
+## Installed provider workflow proof — 26 November 2026
+
+Dale explicitly resumed development after Antigravity's merge. Codex reused the isolated `C:/Users/dalep/.codex/worktrees/release-readiness/CloudForge-Code` worktree on `codex/provider-installed-verification`, from merged `930b9d7af51`. The new [installed verification runner and evidence](extensions/cloudforge/studio/research/installed-provider-verification.md) passed **13/13 real Workbench + packaged Rust checks**: locked VMSS source/nested forms, semantic Undo, no-write preview, guarded one-field save and refresh; native mirror empty inventory/integrity, zero quota, and missing-package readiness. Installed desktop `d8c253fd95b686bfd258b04429cdef70d2c59e4c` / service `f6ccff1af12a8c60911b8e9977f7127700d2df5c` protocol 1 were tested with this worktree's freshly bundled development extension/media. Packaged service SHA-256 matched its manifest. This is an installed **development-extension** integration proof, not a new product installer build.
+
+Only the runner and documentation change. Production UI, Technical Graph worktrees, Rust/protocol and installed files remain untouched. Terraform writes targeted the disposable fixture. Initial startup used the default shared app storage despite a separate profile; the final run also isolates `--shared-data-dir`, confirmed in its startup log. Populated mirror import/removal/protection, live snapshot import/render checks, installed variables/additional Terraform, AWS/Google samples and remaining opaque-source hydration are explicit next actions in the linked evidence. The earlier stop/merge-only instruction below is historical; the latest continuation request authorizes this phase. No new main merge/push is inferred.
+## Packaged CloudForge Installer Upgrade (`930b9d7af51`) — 26 November 2026
+
+- **Staged installer:** `Z:/CFStage/CloudForgeSetup-x64-930b9d7af51.exe` (`329,087,007` bytes, SHA-256 `259ea68dae705aa127cd127a5794667b065cf039d661f9f27d8ddb68d27a1c83`) built from clean detached checkout `Z:/CFStage/Code` at desktop commit `930b9d7af51e2a4fdf814d9679e5fb74485b8e05`.
+- **Bundled Rust service:** commit `f6ccff1af12a8c60911b8e9977f7127700d2df5c`, protocol `1`, `x64`, `4,847,104` bytes, SHA-256 `ee20be59e58febef29b01877ae117914605284ae94d69871ed89fdfa31ba35ba` (unsigned dev binary, `ServiceSigned: false`); bundled `ms-vscode.js-debug@1.140.1` VSIX SHA-256 `7accf7857ea4f4717b6211a2b75f5b434faf477033203a8919b6d26b6abc1897`.
+- **Included features since `d8c253fd95b`:** Claude PR #3 dedicated `TechnicalGraph.tsx` (Layers, Scopes, Tidy Tree, Bundled radial, Barnes-Hut Network force graph, Spread dial, cluster hulls, ghost inputs, Exposure lens, SVG/PNG export), Technical Graph Phases 1/2/4/5 (immutable contract, lenses, tracing, 5 cloud topology patterns, boundaries, `WhyPanel` evidence), Codex's 4,271 signed executable provider schemas (AzureRM 5.14.0, AWS 6.73.0, Google 8.10.0) with lock-aware selection & nested literal editor, Native Offline Provider-Package Manager (`CloudForge: Manage Offline Provider Packages…`) + truthful-state fixes, and hosted icon double-prefix 404 fix.
+- **Installed upgrade verification:** silently upgraded `%LOCALAPPDATA%\Programs\CloudForge\CloudForge.exe`; verified `product.json` (`nameLong: "CloudForge"`, `commit: "930b9d7af51e2a4fdf814d9679e5fb74485b8e05"`), passed `node build/cloudforge/serviceArtifact.ts --verify` on the installed app directory, and verified installed `extension.js`, `studio.js`, `studio.css`, and all three signed provider-form JSON bundles (`azurerm`, `aws`, `google`).
+
+## Offline Provider-Package Native Manager, Hosted Icon Bugfix & Windows Edge Verification — 26 November 2026
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review` (pushed to `origin/main` atop `fc7a6e675aa`, zero edits to `TechnicalGraph.tsx` / `technicalGraphForce.ts` / `technical-graph.css` so Claude's auto-resuming `claude/project-thread-2irlth` thread has zero overlap), owner Antigravity.
+- **Offline Provider-Package Management Native QuickPick Manager (from [offline-provider-management-spec.md](docs/cloudforge/offline-provider-management-spec.md)):**
+  - Added pure validated model & strict bounded response adapters in [providerMirror/model.ts](extensions/cloudforge/src/providerMirror/model.ts) + [providerMirror.test.ts](extensions/cloudforge/test/providerMirror.test.ts) (5 suites) and native Workbench QuickPick manager in [providerMirror/manager.ts](extensions/cloudforge/src/providerMirror/manager.ts), registered as **`CloudForge: Manage Offline Provider Packages…`** (`cloudforge.manageOfflineMirror`) in [extension.ts](extensions/cloudforge/src/extension.ts), [package.json](extensions/cloudforge/package.json), and [package.nls.json](extensions/cloudforge/package.nls.json).
+  - Fixed all 4 Stage 10B/10C truthful-state & eviction bugs across both the new hub and existing `evictMirrorPackage`, `verifyMirrorIntegrity`, and `planMirrorCleanup` commands:
+    1. Rejects missing/malformed/inconsistent integrity counters (`{}` never reports 0 intact packages) and opens searchable issue rows.
+    2. Never evicts on cleanup QuickPick row selection — enforces unified explicit modal `Remove Package` confirmation and validates `bytesReclaimed` without falling back to old inventory size.
+    3. Preserves and separates **Eligible for Review**, **In Use (Active Lease)** (`protectedActive`), and **Pinned by Active Architecture** (`pinnedRequiringReview`) rows, rejects unsafe/overflowing MiB quotas while accepting `0`, and explicitly reports *"Quota cannot be reached with the current protections"* with exact shortfall when over quota.
+    4. Distinguishes validated empty mirror vs invalid inventory and tracks session integrity staleness (`Not checked since change`) + scope/sourceRevision drift.
+- **Hosted Icon Double-Prefix Fix & Real Windows Edge Proof:**
+  - Running real Windows Edge browser verification caught a 404 on `assets/catalog-icons/catalog-icons/azure/azure-key-vaults.svg` in [serviceAdapter.ts](extensions/cloudforge/studio/src/serviceAdapter.ts) (`defaultIconFor()` prepended `catalog-icons/` a second time on already-prefixed signed-catalogue icon paths). Fixed in `serviceAdapter.ts`, added regression test in [serviceAdapter.test.ts](extensions/cloudforge/studio/src/serviceAdapter.test.ts), and added `<link rel="icon" href="data:,">` to [index.html](extensions/cloudforge/studio/index.html).
+- **Fresh verification (26 November 2026):**
+  - Studio `check` (`tsc --noEmit`): **PASS**; Studio `test`: **211/211 PASS** (0 skipped); Studio `build` + `esbuild.webview.mts`: **PASS**
+  - Extension `tsc --noEmit` + `esbuild.mts`: **PASS**; Extension Node tests (`CLOUDFORGE_REPO=Z:/CloudForge`): **108/108 PASS** (0 skipped)
+  - `build/hygiene.ts` + `build/oxlint.ts` on all touched files: **PASS** (0 errors/warnings)
+  - Real Windows Edge browser suites against merged `fc7a6e675aa` + icon fix: `technical-view-verify.mjs` **60/60 PASS** (zero browser errors), `hosted-refresh-verify.mjs` **20/20 PASS** (zero browser errors)
+
+## Merged main checkpoint: Provider schemas (4,271) + Technical Graph Phases 1-5 — 26 November 2026
+
+Completed Codex's requested merge of `codex/provider-editor-coverage` (`9cbd4e5902a`, signed executable AzureRM 5.14.0 / AWS 6.73.0 / Google 8.10.0 schemas, lock-aware selection, recursive nested literal editor, source hydration) into `origin/main` atop `04f0c8354af` (Claude PR #3 dedicated `TechnicalGraph.tsx` + Antigravity Phases 1-5), then fast-forwarded `codex/provider-editor-coverage` so Codex's worktree resumes clean with zero conflicts. Fresh merged verification: Studio `tsc --noEmit` **PASS**, **210/210** Studio Node tests (0 skipped), Studio `build` + `esbuild.webview.mts` **PASS**, extension `tsc --noEmit` **PASS**, **103/103** extension Node tests (0 skipped). Both handoff histories below are preserved in full.
+
+## Provider editor merge checkpoint — 26 November 2026
+
+Dale requested **merge, hand off and continue later** after the provider-schema continuation. This explicitly supersedes the earlier no-merge checkpoint note for this work. Integration owner Codex; implementation remains isolated on `codex/provider-editor-coverage` in `C:/Users/dalep/.codex/worktrees/release-readiness/CloudForge-Code`. Preserve the concurrent Technical Graph work on main and all other worktrees. Resolve the final merged checkpoint with `git log -1 -- extensions/cloudforge/studio/research/provider-form-coverage.md` and start successors from current `origin/main`.
+
+The catalogue now uses **4,271 real resource types** from signed executable schemas: AzureRM 5.14.0 (1,109), AWS 6.73.0 (1,766), Google 8.10.0 (1,396). The old AWS 6.73.1 registry endpoint returned 404; no project lock was changed. Synthetic Google IAM documentation names are replaced in discovery by real policy/binding/member types. Exact lock-aware schema selection, typed nested member controls/read-only access, source block/expression hydration, shared Undo/review and spacing refinements supplement the earlier editor changes. [Current evidence and remaining gaps](extensions/cloudforge/studio/research/provider-form-coverage.md) replaces the original prose-only coverage assessment.
+
+Use the copyable provider continuation at the top of the [single canonical Studio handoff](extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md). Installed Workbench/service interaction and full extra-configuration/example validation remain unfinished. The isolated installed app was launched and stopped before those interactions were verified. No installer or installed files were changed. No cloud plan/apply ran. Finish only the merge/checkpoint in this chat; resume implementation later.
+
+## Provider forms and detailed editor — 26 November 2026
+
+Dale's missing-VMSS/spacing report and approved coordinated addition are implemented on `codex/provider-editor-coverage`, in the isolated `C:/Users/dalep/.codex/worktrees/release-readiness/CloudForge-Code` worktree from `1e0f8b87be3c95c21470b23bc5e31c0baf706d0a`; integration owner Codex. Resolve the checkpoint with `git log -1 -- extensions/cloudforge/studio/research/provider-form-coverage.md`. Current scope includes Studio forms/editor, recursive provider assets/importer, two extension schema adapters/tests and handoff/provenance. Other desktop/design-board/Rust worktrees, dependencies, service protocol and installers are untouched. This branch has not been merged or pushed; Dale cancelled the intervening merge/handoff request and asked to continue.
+
+The editor loads recursive definitions for all **4,078** current palette resources, including VMSS required/NIC/IP/disk fields, timeouts, lists/maps and imported tuple/dynamic literals. Recursive service blocks, authoritative schema/HCL field types, computed-only output handling, label-adjacent accessible help and responsive spacing are corrected. Additional expressions/dynamic code reveal the existing resource code pane, preserve applied sparse configuration and share semantic Undo; explicit review and existing guarded save remain. No new persistent panel or second architecture exists.
+
+Read the [canonical Studio continuation](extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md) and [supporting research/implementation evidence](extensions/cloudforge/studio/research/provider-form-coverage.md) for verification, file ownership and exact next actions. The documentation capture is thorough but not complete provider semantic verification: **45 pages** have ambiguous/unmapped names; version applicability, lock-aware snapshot choice, nested JSON member metadata, existing opaque source hydration and installed integration remain explicit gaps. Latest source checks: **169/169 Studio**, **97/97 extension** tests and both TypeScript checks; preview/minified builds passed. Browser evidence is recorded in the canonical continuation. No engine/cloud operation or installed desktop/installer proof is claimed.
+
+Final staged-build browser verification for the provider editor: **125/125 Edge checks** (85 editor, 20 technical graph isolation, 20 hosted refresh), zero console/page errors. Provenance digests, new documentation links/fences and whitespace passed. Installed desktop/service checks remain outstanding.
+
+## Offline provider-package management spec — 26 November 2026
+
+Dale selected **Offline provider-package management workflow**, then **Native QuickPick manager with guided steps**, as a separate handoff from design-board work. Integration owner Codex; branch `codex/offline-provider-management-spec`, isolated worktree `C:/Users/dalep/.codex/worktrees/release-readiness/CloudForge-Code`, source base `5b66f85cdba4564d2c4f8cf076714edcd0306785`. [Reviewable spec](docs/cloudforge/offline-provider-management-spec.md) and [evidence/ownership/continuation](docs/cloudforge/offline-provider-management-handoff.md) cover inventory, trusted-digest import, integrity results, cleanup protections and explicit removal review, readiness, schema extraction and offline init using the existing Stage 10B/10C service. Source review found unvalidated integrity-counter fallbacks, immediate cleanup eviction and omitted active-lease rows; these are documented findings, not fixed product code.
+
+This pass changes only the two linked docs and this entry. `extensions/cloudforge/studio/**`, the Studio continuation, existing main/Claude worktrees, Rust/protocol, dependencies and installer outputs remain outside its ownership. Fresh Node 24.22.1 Stage 10 adapter selector: **1 passed, zero failed/skipped**; **13 relative links**, documentation whitespace/fences and three-file diff scope verified. The Studio, original desktop and Rust checkouts remained clean. No desktop/service build or installed smoke is claimed. Tempo issue/Docs/canvas/link tools were unavailable and plugin discovery found no Tempo connection; the requested clickable canvas and issue↔doc/canvas links remain outstanding, so this is not a completed spec-design-feature run. Exact next action: review the detailed native journeys, then create/link and visually review the native-component design artifacts in a capable session before implementation. Resolve this local documentation checkpoint with `git log -1 -- docs/cloudforge/offline-provider-management-spec.md`; no remote branch was pushed.
+
+## Studio Technical Graph Rebuild — Phase 4 Topology Patterns & Phase 5 WhyPanel Evidence — 26 November 2026
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review` (integrated atop `origin/main` `c39a66477bc` including Claude's PR #3 dedicated `TechnicalGraph.tsx`), owner Antigravity.
+- **Scope (conflict-free with Codex's active `codex/provider-editor-coverage` worktree — zero edits to `App.tsx`, `protocol.ts`, `liveSchema.ts`, `resourceValues.ts`, `CodePanel.tsx`, `ResourceFields.tsx`, `SchemaField.tsx`, `assets/*`, Rust, or installer scripts):**
+  - Added [technicalGraphPatterns.ts](extensions/cloudforge/studio/src/technicalGraphPatterns.ts) + [technicalGraphPatterns.test.ts](extensions/cloudforge/studio/src/technicalGraphPatterns.test.ts): evidence-backed Phase 4 topology pattern detection (**Azure Hub-Spoke**, **AWS VPC Network**, **AWS Organizations Landing Zone**, **Managed Kubernetes AKS/EKS/GKE**, **GCP Regional vs Global HTTP LB Chains**) with positive & negative fixtures, honest multi-region/mixed-provider/module/Kubernetes-adapter boundary summaries (`summarizeGraphBoundaries`), and Phase 5 deterministic troubleshooting findings & bounded shortest-path provenance (`snapshotTroubleshootingFindings`, `shortestSnapshotPath`).
+  - Integrated `patterns` and `boundaries` additively into [technicalGraph.ts](extensions/cloudforge/studio/src/technicalGraph.ts), and rendered detected topology patterns, clickable direct `Uses`/`Used by`/cycle peer links, deterministic evidence checks, and boundary chips cleanly inside `WhyPanel` in [TechnicalGraph.tsx](extensions/cloudforge/studio/src/TechnicalGraph.tsx) + [technical-graph.css](extensions/cloudforge/studio/src/technical-graph.css).
+  - Updated `extensions/cloudforge/studio/package.json` `"test"` and [STUDIO-CONTINUATION-2026-11-25.md](extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md).
+- **Fresh verification (26 November 2026):**
+  - Studio `check` (`tsc --noEmit`): **PASS**
+  - Studio `test`: **198/198 PASS** (0 skipped; +4 Phase 4/5 suites atop Claude's merged 194/194)
+  - Studio `build` + `node extensions/cloudforge/esbuild.webview.mts`: **PASS**
+  - `node build/oxlint.ts` + `node --experimental-strip-types build/hygiene.ts` on all pure TS/CSS/JSON targets: **PASS** (0 warnings/errors)
+  - Extension Node tests (`CLOUDFORGE_REPO=Z:/CloudForge`): **97/97 PASS** (0 skipped)
+- **Next action:** once Codex's `codex/provider-editor-coverage` lands on `main`, wire `readResourceValues` field-level provenance into `technicalGraph.ts` (promoting `source-graph` edges via `App.tsx`) and run Phase 6 Windows Edge + installed Code OSS save/refresh/Undo proof.
+
+## Technical Graph UI passes 2–7 (Claude) — merged to main 26 November 2026 — read first
+
+Branch `claude/project-thread-2irlth` merged to `main`. The Configuration view is now a dedicated `TechnicalGraph` with Layers, Scopes, Tree (horizontal tidy tree with folds), Bundled (radial edge bundling) and Network (force graph, icons, size by connections, Spread dial, cluster hulls, Barnes–Hut above 400 nodes) layouts; lenses incl. Exposure; plan/order/impact overlays; ghost inputs; SVG/PNG export; presentation persisted in `viewState.graph` (never `nodePositions`). Cards are editable (rename, form) but never movable. Studio 194/194 tests, technical-view verify 60/60. Detail and the next steps (wire Antigravity's Phase 1–2 contract/workflow/routing modules into the UI and drop the duplicates) are in `extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md`, "Technical Graph pass 7". Run `build/oxlint.ts`, `build/hygiene.ts` and the extension Node tests on Windows before the next installer build; they could not run in the cloud container.
+
+## Technical Graph pass 2 (Claude) — 26 November 2026
+
+Branch `claude/project-thread-2irlth`, pushed, not merged. Pass 2 finished the pass-1 queue:
+- Rewrote the browser verify script (44/44 in Chromium).
+- Removed the dead DesignCanvas technical mode and `technicalLayout.ts`.
+- Graph presentation and pins now persist under `viewState.graph`, never `nodePositions`.
+- Plan overlay flags dependents of a planned replace or destroy.
+- Ghost cards for `var.`/`local.`/`data.` inputs.
+- Exposure lens.
+- SVG/PNG export of the graph.
+- Module-call chips with planned changes folded in.
+- Radial **Bundled** (edge-bundling) view, with no new dependency.
+
+Studio has 175/175 tests passing. Details, files and the remaining queue (drift is blocked on Rust; cost chips; module drill-down) are in `extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md` under "Technical Graph pass 2".
+
+## Technical Graph rebuild pass 1 (Claude) — 26 November 2026
+
+Branch `claude/project-thread-2irlth` (from main `5b66f85c`). Studio now mounts a dedicated `TechnicalGraph` (separate React Flow instance, no project dispatch) in Configuration view. It has a frozen evidence-backed graph snapshot (`technicalGraph.ts`); Layers, Scopes and Ownership-tree layouts; schema-style field rows with stable ports; curved, orthogonal and straight routes; an animated selected trace; a Why panel; graph-only pins; and a narrow edit gate so cards can be renamed and opened for editing but never moved or reparented. 169/169 Studio tests pass. Full detail, gaps and the ordered next actions for Codex are in `extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md` under “Technical Graph rebuild, pass 1”. First next action: update `scripts/technical-view-verify.mjs` for the new DOM.
+## Studio Technical Graph Rebuild — Phase 2 Background Logic & Routing — 26 November 2026
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review` (pushed to `origin/main` atop Phase 1 `e5fc572a702`), owner Antigravity.
+- **Scope (conflict-free pure background logic — zero edits to `App.tsx`, `DesignCanvas.tsx`, `ResourceNode.tsx`, `RelationshipContext.tsx`, `model.ts`, `serviceAdapter.ts`, `liveSchema.ts`, `CodePanel.tsx`, CSS, Rust, or installer scripts):**
+  - Extended [technicalGraphContract.ts](extensions/cloudforge/studio/src/technicalGraphContract.ts) with `TechnicalGraphLens`, `lens`, and `expandedNodeIds` in `TechnicalGraphPresentationState`.
+  - Added [technicalGraphWorkflows.ts](extensions/cloudforge/studio/src/technicalGraphWorkflows.ts) + [technicalGraphWorkflows.test.ts](extensions/cloudforge/studio/src/technicalGraphWorkflows.test.ts): focused lenses (`all`, `dependencies`, `topology`, `runtime`, `observability`) with explicit arrow semantics, upstream/downstream neighborhood & multi-hop shortest-path tracing with per-hop provenance, contextual node inspection & deterministic troubleshooting findings (cycles, CLI errors, stale overlays, missing expected parents/attachments, unverified unknowns), and category-preserving high-degree edge aggregation.
+  - Added [technicalGraphRouting.ts](extensions/cloudforge/studio/src/technicalGraphRouting.ts) + [technicalGraphRouting.test.ts](extensions/cloudforge/studio/src/technicalGraphRouting.test.ts): semantic zoom bands (`overview | standard | detailed`), bounded attachment-row & pill geometry tested across 1/2/6/50/200 attachments, world-space port anchors with overflow fallbacks, deterministic `curved` / `orthogonal` / `straight` SVG route computation, pairwise crossing counter, and route-style comparison benchmark helper.
+  - Updated `extensions/cloudforge/studio/package.json` `"test"` and [STUDIO-CONTINUATION-2026-11-25.md](extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md).
+- **Fresh verification (26 November 2026):**
+  - Studio `check` (`tsc --noEmit`): **PASS**
+  - Studio `test`: **173/173 PASS** (0 skipped; +7 Phase 2 tests)
+  - Studio `build` + `node extensions/cloudforge/esbuild.webview.mts`: **PASS**
+  - `node build/oxlint.ts` + `node --experimental-strip-types build/hygiene.ts`: **PASS** (0 warnings/errors)
+  - Extension Node tests (`CLOUDFORGE_REPO=Z:/CloudForge`): **97/97 PASS** (0 skipped)
+- **Next action:** once Claude's Graph View UI improvements merge to `main`, wire the Phase 1–2 contract, lens/trace/inspector, and port-routing modules into the UI and proceed to **Phase 3** (dedicated `TechnicalGraph` extraction & renderer benchmark).
+
+## Studio Technical Graph Rebuild — Phase 1 — 26 November 2026
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review` (pushed to `origin/main` from base `cf455878505`), owner Antigravity.
+- **Scope (purely additive — zero edits to `App.tsx`, `DesignCanvas.tsx`, `model.ts`, `serviceAdapter.ts`, `product.json`, Rust, or installer scripts):**
+  - Added [technicalGraphContract.ts](extensions/cloudforge/studio/src/technicalGraphContract.ts) and [technicalGraphContract.test.ts](extensions/cloudforge/studio/src/technicalGraphContract.test.ts), wired into `extensions/cloudforge/studio/package.json` `"test"`, and updated [STUDIO-CONTINUATION-2026-11-25.md](extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md).
+  - Delivers the deeply immutable (`deepFreeze`) `TechnicalGraphProjection` contract (`projectionVersion: 1`), explicit HCL reference extraction over existing `FileResourceValues` payloads, structural ownership vs visual grouping separation, bounded peer-keyed `attachmentPorts` (`${nodeId}:${direction}:${field}:${peerNodeId}`) with overflow counts, `sourceRevision`-checked schema/lock/plan/validate overlays (flagging stale revisions and opaque/redacted/unreviewed/Kubernetes-manifest unknowns honestly), Tarjan SCC cycle detection, evidence-backed hub-spoke pattern projection, capability audit, and completely isolated `TechnicalGraphPresentationState` reducers that never mutate `Architecture`, `Resource.positions`, Terraform, Modified state, or project Undo.
+- **Fresh verification (26 November 2026):**
+  - Studio `check` (`tsc --noEmit`): **PASS**
+  - Studio `test`: **166/166 PASS** (0 skipped; +6 Phase 1 tests)
+  - Studio `build` + `node extensions/cloudforge/esbuild.webview.mts`: **PASS**
+  - `node build/oxlint.ts` + `node --experimental-strip-types build/hygiene.ts`: **PASS**
+  - Extension Node tests (`CLOUDFORGE_REPO=Z:/CloudForge`): **97/97 PASS** (0 skipped)
+- **Next action:** **Phase 2 of the Technical Graph rebuild** — engineering inspection workflows (upstream/downstream path tracing, evidence & unknown disclosure, bounded attachment rows, route-style comparison) consuming `projectTechnicalGraph` without mutating the canonical model, before extracting the dedicated `TechnicalGraph` renderer in Phase 3.
 
 ## Current main integration and agent handoff — 25 November 2026
 
@@ -1380,3 +1532,24 @@ Delivered from `E:\Orca\CloudForge-Code\dace` (`fxrazor/continue-project-handoff
 
 **Next actions:**
 1. When ready to cut the next combined `CloudForgeSetup-x64.exe` update incorporating all overnight `origin/main` work (Stage 10B/10C mirror import/eviction/integrity, CloudForge side panel, Codex's annotation follow-up + Technical Graph Phase 0, and this cold-launch onboarding fix), run `build/cloudforge/package-win32-x64.ps1` against the latest verified Rust service artifact (`Z:\CFStage\service-b1f57ac\cloudforge-service.exe`).
+
+### Multi-Window Project Support & Windows Taskbar Jump List Fix (2026-11-26)
+
+Implemented on `fxrazor/continue-project-handoff-review` in `E:\Orca\CloudForge-Code\dace` and pushed to `origin/main`. **Zero overlap with Claude (`Z:\CloudForge` untouched) or Codex (`extensions/cloudforge/studio/**` untouched).**
+
+- **Root Cause & Fix for Taskbar "New Window" Opening Bare Electron ([app.ts](src/vs/code/electron-main/app.ts), [workspacesHistoryMainService.ts](src/vs/platform/workspaces/electron-main/workspacesHistoryMainService.ts)):**
+  - Unbuilt dev runs (`scripts\code.bat` / `.build\electron\CloudForge.exe`) shared the installed `CloudForge.Desktop` Windows AppUserModelId and wrote `program: .build\electron\CloudForge.exe -n` into Windows's taskbar Jump List, causing right-click -> **New Window** on the installed CloudForge icon to launch bare Electron (`default_app.asar`).
+  - Appended `.Dev` to `win32AppUserModelId` whenever `!environmentMainService.isBuilt` and skipped `updateWindowsJumpList()` on unbuilt dev runs so dev launches never corrupt the installed CloudForge taskbar Jump List.
+- **Optional Multi-Window CloudForge Projects ([model.ts](extensions/cloudforge/src/project/model.ts), [controller.ts](extensions/cloudforge/src/project/controller.ts), [index.ts](extensions/cloudforge/src/project/index.ts), [package.json](extensions/cloudforge/package.json), [package.nls.json](extensions/cloudforge/package.nls.json)):**
+  - Added setting `cloudforge.projects.openInNewWindow` (`"ask" | "newWindow" | "currentWindow"`, default `"ask"`) so creating a project while another folder is open lets the user open it in a new window (`{ forceNewWindow: true }`) or replace the current window.
+  - Added **CloudForge: Open Project in New Window…** (`cloudforge.openProjectInNewWindow`) in Command Palette and the `CloudForge Project` view menu, automatically detecting a single `.code-workspace` file inside a chosen project folder and opening it in an independent CloudForge window (which receives its own isolated `cloudforge-service.exe` sidecar via `CloudForgeServiceBroker`).
+- **Tests ([cloudForgeServiceChannel.test.ts](src/vs/code/test/electron-main/cloudForgeServiceChannel.test.ts), [projectIntegrations.test.ts](extensions/cloudforge/test/projectIntegrations.test.ts)):**
+  - Verified **97/97** root extension tests, **48/48** Electron-main tests (including dynamic multi-window broker isolation & per-window sidecar teardown), `esbuild.mts`, TS6, TS7, core `src/tsconfig.json` TS7, `oxlint`, and `hygiene`.
+
+**Next actions:**
+1. Cut a fresh `CloudForgeSetup-x64.exe` build whenever ready to ship this Jump List fix, optional multi-window project UX, cold-launch Welcome fix, Stage 10B/10C mirror commands, CloudForge side panel, and Codex's latest Studio updates together.
+
+#### Packaged Upgrade Verification (`d8c253fd95b` + Rust `f6ccff1af12a`, 2026-11-26)
+- **Installer:** [CloudForgeSetup-x64-d8c253fd95b.exe](Z:/CFStage/CloudForgeSetup-x64-d8c253fd95b.exe) (`324,910,951` bytes, SHA-256 `2269158abd048c8f5d46e62ff57b2601e5f1675ef28608f5ca59675c228b33e1`, unsigned `ServiceSigned: false`), paired with Rust service `f6ccff1af12a8c60911b8e9977f7127700d2df5c` (`4,847,104` bytes, SHA-256 `ee20be59e58febef29b01877ae117914605284ae94d69871ed89fdfa31ba35ba`) and VSIX `7accf785...`.
+- **Live Packaged Smoke ([report-cloudforge-d8c253fd95b.json](Z:/CFStage/smoke/report-cloudforge-d8c253fd95b.json)):** **5/5 passed** ([01-packaged-cloudforge-terraform-editor.png](Z:/CFStage/smoke/run-cloudforge-d8c253fd95b/01-packaged-cloudforge-terraform-editor.png) & [02-packaged-cloudforge-studio-stage10.png](Z:/CFStage/smoke/run-cloudforge-d8c253fd95b/02-packaged-cloudforge-studio-stage10.png) visually inspected): confirmed `CloudForge` title branding, zero VS Code onboarding modal on cold launch, Terraform grammar + Breadcrumbs + Schema Hover, CloudForge Side Panel Activity Bar icon, Codex provider mark/version selector, live Stage 10 offline init (`101 ms`), Stage 9A validate (`75 ms`), Stage 9B plan (`176 ms`, zero secret/path leaks), and `0` payload `cloudforge-service.exe` orphans on quit.
+- **Installed Upgrade (`%LOCALAPPDATA%\Programs\CloudForge\CloudForge.exe`):** Silent per-user upgrade exited `0`; `serviceArtifact.ts --verify` passed (`nameLong=CloudForge`, `applicationName=cloudforge`, `commit=d8c253fd95b`, Rust `f6ccff1af12a`).

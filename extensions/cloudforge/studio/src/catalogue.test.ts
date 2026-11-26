@@ -34,6 +34,16 @@ test('provider catalogue snapshots contain unique types and only bundled icon pa
  }
 });
 
+test('captured provider types replace aggregate documentation names and invalid version labels', () => {
+ const google=JSON.parse(readFileSync(new URL('../assets/catalogue/gcp.json',import.meta.url),'utf8'));
+ const names=new Set(google.entries.map((entry:CatalogueEntry)=>entry.type));
+ assert.equal(names.has('google_compute_instance_iam'),false);
+ for(const name of ['google_compute_instance_iam_policy','google_compute_instance_iam_binding','google_compute_instance_iam_member']) {assert.ok(names.has(name),name);}
+ const aws=JSON.parse(readFileSync(new URL('../assets/catalogue/aws.json',import.meta.url),'utf8'));
+ assert.equal(aws.version,'6.73.0');
+ assert.equal(google.entries.length,1396);
+});
+
 test('service grouping merges parenthetical names and favours the curated representative icon', () => {
  const entry=(type:string,service:string,icon:string,curated=false):CatalogueEntry=>({type,service,icon,curated,label:type,category:'Networking',fields:[]});
  const groups=groupServices([entry('long_attachment','VPC (Virtual Private Cloud)','attachment.svg'),entry('vpc','VPC','vpc.svg',true)]);
