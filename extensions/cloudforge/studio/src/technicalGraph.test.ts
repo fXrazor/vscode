@@ -12,6 +12,7 @@ import { applyWaves, graphOverlays, lensEdges, matchesQuery, neighbourhood, orde
 import { inputSize, layerOrder, layoutTechnicalGraph, placeInputs } from './technicalGraphLayout.ts';
 import { defaultGraphPresentation, graphEditAllowed, graphPresentationReducer, parseGraphPresentation, serialiseGraphPresentation } from './graphPresentation.ts';
 import { buildHostViewState } from './serviceAdapter.ts';
+import { technicalGraphSvg } from './technicalGraphExport.ts';
 
 const layout = (architecture = hubSpokeArchitecture(), options: Partial<Parameters<typeof layoutTechnicalGraph>[1]> = {}) => {
 	const snapshot = projectTechnicalGraph(architecture);
@@ -208,4 +209,16 @@ test('exposure lens shows configured public entry, public access and what sits b
 	assert.ok(edges.some(edge => edge.source === 'pip-fw' && edge.target === 'afw'));
 	assert.ok(edges.length < lensEdges(snapshot, 'dependencies', false).length);
 	assert.ok(edges.every(edge => !edge.membership));
+});
+
+test('graph image export draws every laid-out card, edge and input without touching the project', () => {
+	const architecture = hubSpokeArchitecture(); const before = JSON.stringify(architecture);
+	const snapshot = projectTechnicalGraph(architecture); const edges = lensEdges(snapshot, 'all', false);
+	const layout = layoutTechnicalGraph(snapshot, { layout: 'layers', expanded: new Set(), compact: false, pins: {}, edges });
+	const svg = technicalGraphSvg({ snapshot, layout, edges, inputs: placeInputs(snapshot.inputs, layout), theme: 'dark', title: 'Hub <&> spoke', badges: { aks: '± replace' } });
+	assert.equal((svg.match(/<g data-id=/g) ?? []).length, snapshot.nodes.length);
+	assert.equal((svg.match(/marker-end=/g) ?? []).length, edges.length);
+	assert.ok(svg.includes('var.kubernetes_version') && svg.includes('± replace') && svg.includes('Hub &lt;&amp;&gt; spoke'));
+	assert.ok(!svg.includes('NaN') && !svg.includes('undefined'));
+	assert.equal(JSON.stringify(architecture), before);
 });

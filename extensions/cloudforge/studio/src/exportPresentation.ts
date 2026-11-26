@@ -108,3 +108,22 @@ export async function exportPresentation(architecture: Architecture, format: 'sv
   link.href = url; link.download = 'cloudforge-architecture.' + format; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
  } catch (error) { printWindow?.close(); window.alert(error instanceof Error ? error.message : 'Export failed'); }
 }
+
+/** Download an SVG string as SVG or a 2x PNG (outside the VS Code host). */
+export async function downloadSvg(svg: string, format: 'svg' | 'png', fileName: string) {
+ let blob = new Blob([svg], { type: 'image/svg+xml' });
+ if (format === 'png') { blob = await svgToPng(svg); }
+ const url = URL.createObjectURL(blob); const link = document.createElement('a');
+ link.href = url; link.download = fileName + '.' + format; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+export async function svgToPng(svg: string): Promise<Blob> {
+ const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
+ try {
+  const image = new Image(); image.src = url; await image.decode();
+  const canvas = document.createElement('canvas'); const scale = Math.min(2, 8192 / Math.max(image.width, image.height));
+  canvas.width = Math.ceil(image.width * scale); canvas.height = Math.ceil(image.height * scale);
+  const context = canvas.getContext('2d'); if (!context) { throw new Error('PNG canvas unavailable'); }
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  return await new Promise<Blob>((resolve, reject) => canvas.toBlob(value => value ? resolve(value) : reject(new Error('PNG export failed')), 'image/png'));
+ } finally { URL.revokeObjectURL(url); }
+}

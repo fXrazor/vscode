@@ -201,3 +201,5 @@
 .tg-exposure-entry, .tg-exposure-public-access { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); }
 .tg-exposure-behind-entry { color: #b4541a; background: color-mix(in srgb, #c0532b 8%, transparent); border-style: dashed; }
 .theme-dark .tg-exposure-behind-entry { color: #f3a07e; }
+.tg-export-row { display: flex; align-items: center; gap: 6px; padding-top: 6px; border-top: 1px solid var(--border); margin-top: 2px; }
+.tg-export-row span { font-size: 11.5px; color: var(--muted); margin-right: auto; }

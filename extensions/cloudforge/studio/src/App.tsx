@@ -42,7 +42,7 @@ import { buildDraftSavePayload, buildHostViewState, changedFilePayloads, refresh
 import { projectResourceFiles } from './terraformProjection.ts';
 import { DraftSaveDialog } from './DraftSaveDialog.tsx';
 import { SaveAllDialog } from './SaveAllDialog.tsx';
-import { presentationSvg } from './exportPresentation.ts';
+import { downloadSvg, presentationSvg } from './exportPresentation.ts';
 
 function detectInitialTheme(isHosted: boolean): 'light' | 'dark' {
 	if (!isHosted || typeof document === 'undefined') {
@@ -591,18 +591,18 @@ export function Studio() {
 		hostBridge.post({ type: 'applySaveAll', previewToken: saveAllPreview.previewToken });
 	}, [hostBridge, saveAllPreview]);
 
-	const exportHostArtifact = useCallback((format: 'svg' | 'png') => {
+	const exportHostArtifact = useCallback((format: 'svg' | 'png', prepared?: string, suffix = '') => {
 		if (!hostBridge.isHosted) {
 			return;
 		}
 		void (async () => {
 			try {
-				const svg = await presentationSvg(architecture);
+				const svg = prepared ?? await presentationSvg(architecture);
 				if (format === 'svg') {
 					hostBridge.post({
 						type: 'exportArtifact',
 						format: 'svg',
-						suggestedFileName: sanitizeDraftTfFileName(architecture.name).replace(/\.tf$/, '.svg'),
+						suggestedFileName: sanitizeDraftTfFileName(architecture.name).replace(/\.tf$/, suffix + '.svg'),
 						content: svg,
 						encoding: 'utf8',
 					});
@@ -628,7 +628,7 @@ export function Studio() {
 					hostBridge.post({
 						type: 'exportArtifact',
 						format: 'png',
-						suggestedFileName: sanitizeDraftTfFileName(architecture.name).replace(/\.tf$/, '.png'),
+						suggestedFileName: sanitizeDraftTfFileName(architecture.name).replace(/\.tf$/, suffix + '.png'),
 						content: base64,
 						encoding: 'base64',
 					});
@@ -792,6 +792,7 @@ export function Studio() {
 						{mode === 'technical' ? <TechnicalGraph architecture={architecture} theme={theme} presentation={graphPresentation} onPresentation={presentGraph}
 							selectedId={selectedId} onSelect={setSelectedId} onOpenDetails={openDetails} onEdit={graphEdit}
 							onInit={instance => setFlow(instance as never)} viewports={viewport}
+							onExportImage={(svg, format) => { if (hostBridge.isHosted) { exportHostArtifact(format, svg, '-graph'); } else { void downloadSvg(svg, format, sanitizeDraftTfFileName(architecture.name).replace(/\.tf$/, '') + '-graph').catch(() => setMessage('Graph export failed')); } }}
 							diagnostics={findings} hasSource={hasSourceById} onOpenSource={hostBridge.isHosted ? id => hostBridge.post({ type: 'openSource', nodeId: id }) : undefined}
 							plan={enginePlanReport ? { sourceRevision: enginePlanReport.sourceRevision, stale: enginePlanReport.sourceRevision !== hostSnapshot?.sourceRevision || (hostBaseline ? history.present !== hostBaseline : false), changes: enginePlanReport.resourceChanges } : undefined} /> :
 						<DesignCanvas architecture={architecture} mode={mode} theme={theme} onThemeChange={setTheme} selectedId={selectedId} selectedIds={selectedIds} onSelectionChange={setSelectedIds} dispatch={dispatch}

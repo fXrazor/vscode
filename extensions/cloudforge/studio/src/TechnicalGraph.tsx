@@ -22,6 +22,7 @@ import { applyWaves, graphLenses, graphOverlays, layerLabels, lensEdges, matches
 import { inputSize, layoutTechnicalGraph, placeInputs, visiblePortCount, type GraphLane } from './technicalGraphLayout.ts';
 import { graphEditAllowed, type GraphPresentation, type GraphPresentationAction, type RouteStyle } from './graphPresentation.ts';
 import { relationshipNames } from './infrastructureRelationships.ts';
+import { graphIcons, technicalGraphSvg } from './technicalGraphExport.ts';
 import { resourceIntelligence } from './providerKnowledge.ts';
 
 type CardData = { node: GraphNode; lens: GraphPresentation['lens']; /* state 'soft' = hover context */ overlay?: NodeOverlay; badge?: { kind: 'plan' | 'order' | 'impact'; text: string; tone: string; title: string }; match: boolean; compact: boolean; expanded: boolean; state: 'normal' | 'focus' | 'trace' | 'dim' | 'soft'; pinned: boolean; tracedPorts: ReadonlySet<string>; onRename: (id: string, label: string) => void; onEdit: (id: string) => void; onToggleRows: (id: string) => void; onUnpin: (id: string) => void };
@@ -154,6 +155,8 @@ export interface TechnicalGraphProps {
 	onOpenSource?: (id: string) => void;
 	hasSource?: Readonly<Record<string, boolean>>;
 	viewports?: RefObject<Partial<Record<DesignMode, Viewport>>>;
+	/** Receives a portable SVG of the graph as currently shown; the host decides where it goes. */
+	onExportImage?: (svg: string, format: 'svg' | 'png') => void;
 }
 
 /** Refuse any action that could move or restructure the project. */
@@ -162,7 +165,7 @@ export function dispatchGraphEdit(onEdit: (action: Action) => void, action: Acti
 	onEdit(action); return true;
 }
 
-export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme, presentation, onPresentation, selectedId, onSelect, onOpenDetails, onEdit, onInit, viewports, diagnostics = [], plan, onOpenSource, hasSource = {} }: TechnicalGraphProps) {
+export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme, presentation, onPresentation, selectedId, onSelect, onOpenDetails, onEdit, onInit, viewports, diagnostics = [], plan, onOpenSource, hasSource = {}, onExportImage }: TechnicalGraphProps) {
 	const snapshot: TechnicalGraphSnapshot = useMemo(() => projectTechnicalGraph(architecture), [architecture]);
 	const [zoom, setZoom] = useState(1);
 	const [query, setQuery] = useState('');
@@ -314,6 +317,18 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme
 		if (['Delete', 'Backspace'].includes(event.key) || (event.ctrlKey || event.metaKey) && ['z', 'y', 'd', 'v', 'x'].includes(event.key.toLowerCase())) { event.preventDefault(); event.stopPropagation(); }
 	}
 
+	const [exporting, setExporting] = useState(false);
+	const exportImage = useCallback(async (format: 'svg' | 'png') => {
+		if (!onExportImage) { return; }
+		setExporting(true);
+		try {
+			const shown = snapshot.nodes.filter(node => layout.positions[node.id]);
+			const badges = Object.fromEntries(shown.flatMap(node => { const badge = badgeFor(node); return badge ? [[node.id, badge.text]] : []; }));
+			const lensName = graphLenses.find(item => item.id === presentation.lens)?.label ?? presentation.lens;
+			const svg = technicalGraphSvg({ snapshot, layout, edges: presentation.layout === 'tree' ? [] : visibleEdges, inputs: inputLayout, theme, title: architecture.name + ' · Technical graph · ' + lensName, badges, icons: await graphIcons(shown) });
+			onExportImage(svg, format);
+		} finally { setExporting(false); }
+	}, [onExportImage, snapshot, layout, badgeFor, presentation.lens, presentation.layout, visibleEdges, inputLayout, theme, architecture.name]);
 	const pinCount = Object.keys(presentation.pins).length;
 	const categoriesShown = categoryOrder.filter(category => visibleEdges.some(edge => edge.category === category));
 	return <main ref={bounds} tabIndex={0} className={'canvas technical-graph theme-' + theme + (compact ? ' is-compact-view' : '')} data-read-only="true" data-graph="technical" aria-label="Technical graph" onKeyDownCapture={handleKeys}>
@@ -357,6 +372,7 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme
 				<option value="auto">Auto</option><option value="detailed">Detailed</option><option value="compact">Compact</option></select></label>
 					<button className="tg-text-button" aria-pressed={presentation.showMembership} title="Show resource group membership as lines (otherwise shown on each card)" onClick={() => onPresentation({ type: 'set', patch: { showMembership: !presentation.showMembership } })}>Membership</button>
 					<button className="tg-text-button" aria-pressed={presentation.showInputs} disabled={!snapshot.inputs.length} title={snapshot.inputs.length ? 'Show variables, locals and data sources as ghost cards above the graph' : 'No var., local. or data. references in this draft'} onClick={() => onPresentation({ type: 'set', patch: { showInputs: !presentation.showInputs } })}>Inputs{snapshot.inputs.length ? ' (' + snapshot.inputs.length + ')' : ''}</button>
+					{onExportImage && <div className="tg-export-row"><span>Save image</span><button className="tg-text-button" disabled={exporting} onClick={() => void exportImage('svg')}>SVG</button><button className="tg-text-button" disabled={exporting} onClick={() => void exportImage('png')}>PNG</button></div>}
 				</div>
 			</details>
 			{presentation.focus && <button className="tg-text-button" aria-pressed="true" title="Show the whole graph again" onClick={() => onPresentation({ type: 'set', patch: { focus: undefined } })}><Crosshair size={13} />Focused: {snapshot.nodes.find(node => node.id === presentation.focus!.id)?.label ?? 'resource'}<X size={12} /></button>}
