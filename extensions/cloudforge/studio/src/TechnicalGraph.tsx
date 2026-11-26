@@ -24,7 +24,7 @@ import { graphEditAllowed, type GraphPresentation, type GraphPresentationAction,
 import { relationshipNames } from './infrastructureRelationships.ts';
 import { resourceIntelligence } from './providerKnowledge.ts';
 
-type CardData = { node: GraphNode; overlay?: NodeOverlay; badge?: { kind: 'plan' | 'order' | 'impact'; text: string; tone: string; title: string }; match: boolean; compact: boolean; expanded: boolean; state: 'normal' | 'focus' | 'trace' | 'dim'; pinned: boolean; tracedPorts: ReadonlySet<string>; onRename: (id: string, label: string) => void; onEdit: (id: string) => void; onToggleRows: (id: string) => void; onUnpin: (id: string) => void };
+type CardData = { node: GraphNode; /* state 'soft' = hover context */ overlay?: NodeOverlay; badge?: { kind: 'plan' | 'order' | 'impact'; text: string; tone: string; title: string }; match: boolean; compact: boolean; expanded: boolean; state: 'normal' | 'focus' | 'trace' | 'dim' | 'soft'; pinned: boolean; tracedPorts: ReadonlySet<string>; onRename: (id: string, label: string) => void; onEdit: (id: string) => void; onToggleRows: (id: string) => void; onUnpin: (id: string) => void };
 type LaneData = { lane: GraphLane };
 type CardNode = Node<CardData, 'card'>;
 type LaneNode = Node<LaneData, 'lane'>;
@@ -70,7 +70,6 @@ const GraphCard = memo(function GraphCard({ data, selected }: NodeProps<CardNode
 		</div>
 		{data.badge && <span className={'tg-overlay-badge tg-tone-' + data.badge.tone} title={data.badge.title}>{data.badge.text}</span>}
 		<div className="tg-chips">
-			<span className="tg-chip tg-chip-layer">{layerLabels[node.layer]}</span>
 			{node.region.known ? <span className="tg-chip">{node.region.value}</span> : <span className="tg-chip tg-chip-unknown" title="No region value in this draft">region unknown</span>}
 			{compact && node.ports.length > 0 && <span className="tg-chip">{node.ports.length} input{node.ports.length === 1 ? '' : 's'}</span>}
 			{node.sourceFile && <span className="tg-chip" title={node.sourceFile + (node.sourceLine ? ':' + node.sourceLine : '')}>{node.sourceFile.split(/[\\/]/).pop()}{node.sourceLine ? ':' + node.sourceLine : ''}</span>}
@@ -99,13 +98,17 @@ const LaneBand = memo(function LaneBand({ data }: NodeProps<LaneNode>) {
 function GraphRoute(props: EdgeProps<GraphFlowEdge>) {
 	const { sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, data, markerEnd, id } = props;
 	const route = data?.route ?? 'curved';
-	const [path, labelX, labelY] = route === 'straight' ? getStraightPath({ sourceX, sourceY, targetX, targetY })
+	const under = sourcePosition === HandlePosition.Bottom && targetPosition === HandlePosition.Bottom && Math.abs(sourceY - targetY) < 40;
+	const dip = Math.max(sourceY, targetY) + 36 + Math.min(90, Math.abs(targetX - sourceX) * 0.12);
+	const [path, labelX, labelY] = under ? [route === 'orthogonal' ? `M ${sourceX} ${sourceY} L ${sourceX} ${dip} L ${targetX} ${dip} L ${targetX} ${targetY}` : `M ${sourceX} ${sourceY} C ${sourceX} ${dip}, ${targetX} ${dip}, ${targetX} ${targetY}`, (sourceX + targetX) / 2, dip - 4] as [string, number, number]
+		: route === 'straight' ? getStraightPath({ sourceX, sourceY, targetX, targetY })
 		: route === 'orthogonal' ? getSmoothStepPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, borderRadius: 12, offset: 18 })
 			: getBezierPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, curvature: 0.32 });
 	const category = data?.tree ? 'tree' : data?.edge?.category ?? 'unclassified';
 	const state = data?.state ?? 'normal';
 	return <>
-		<BaseEdge id={id} path={path} markerEnd={markerEnd} className={'tg-edge tg-cat-' + category + ' tg-edge-' + state} interactionWidth={14} />
+		{state !== 'dim' && <path d={path} className={'tg-edge-halo tg-edge-halo-' + state} />}
+		<BaseEdge id={id} path={path} markerEnd={markerEnd} className={'tg-edge tg-cat-' + category + ' tg-edge-' + state} interactionWidth={18} />
 		{data?.animate && state !== 'dim' && <circle r={3.2} className={'tg-pulse tg-cat-' + category}><animateMotion dur="2.4s" repeatCount="indefinite" path={path} /></circle>}
 		{state === 'selected' && data?.label && <EdgeLabelRenderer>
 			<div className={'tg-edge-label tg-cat-' + category} style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}>{data.label}</div>
@@ -147,6 +150,8 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme
 	const snapshot: TechnicalGraphSnapshot = useMemo(() => projectTechnicalGraph(architecture), [architecture]);
 	const [zoom, setZoom] = useState(1);
 	const [query, setQuery] = useState('');
+	const [hoverNode, setHoverNode] = useState('');
+	const [hoverEdge, setHoverEdge] = useState('');
 	const overlays = useMemo(() => graphOverlays(snapshot, diagnostics, plan?.changes), [snapshot, diagnostics, plan]);
 	const waves = useMemo(() => applyWaves(snapshot), [snapshot]);
 	const [selectedEdgeId, setSelectedEdgeId] = useState('');
@@ -156,7 +161,7 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme
 	const visibleEdges = useMemo(() => lensEdges(snapshot, presentation.lens, presentation.showMembership), [snapshot, presentation.lens, presentation.showMembership]);
 	const expanded = useMemo(() => new Set(presentation.expanded), [presentation.expanded]);
 	const focusSet = useMemo(() => presentation.focus && snapshot.nodes.some(node => node.id === presentation.focus!.id) ? neighbourhood(visibleEdges, presentation.focus.id, presentation.focus.depth) : undefined, [presentation.focus, snapshot, visibleEdges]);
-	const layout = useMemo(() => layoutTechnicalGraph(snapshot, { layout: presentation.layout, expanded, compact: false, pins: presentation.pins, edges: visibleEdges, visible: focusSet, spacing: presentation.spacing }), [snapshot, presentation.layout, expanded, presentation.pins, visibleEdges, focusSet, presentation.spacing]);
+	const layout = useMemo(() => layoutTechnicalGraph(snapshot, { layout: presentation.layout, expanded, compact: false, pins: presentation.pins, edges: visibleEdges, visible: focusSet, spacing: presentation.spacing, height: presentation.height }), [snapshot, presentation.layout, expanded, presentation.pins, visibleEdges, focusSet, presentation.spacing, presentation.height]);
 	const impact = useMemo(() => Object.fromEntries(snapshot.nodes.map(node => [node.id, traceNode(visibleEdges.filter(edge => edge.ordering), node.id).downstream.size])), [snapshot, visibleEdges]);
 	const badgeFor = useCallback((node: GraphNode): CardData['badge'] => {
 		if (presentation.overlay === 'plan') {
@@ -182,17 +187,23 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme
 	const tracedPorts = useMemo(() => new Set(visibleEdges.filter(edge => trace?.edges.has(edge.id)).map(edge => edge.targetPort)), [visibleEdges, trace]);
 	const computedNodes = useMemo<GraphFlowNode[]>(() => {
 		const lanes: LaneNode[] = [...layout.columns, ...layout.lanes].map(lane => ({ id: lane.id, type: 'lane', position: { x: lane.x, y: lane.y }, data: { lane }, draggable: false, selectable: false, focusable: false, connectable: false, deletable: false, zIndex: -2 }));
+		const hoveredEdge = hoverEdge ? visibleEdges.find(edge => edge.id === hoverEdge) : undefined;
+		const hoverPeers = hoverNode ? new Set(visibleEdges.flatMap(edge => edge.source === hoverNode ? [edge.target] : edge.target === hoverNode ? [edge.source] : [])) : undefined;
 		const cards: CardNode[] = snapshot.nodes.filter(node => layout.positions[node.id]).map(node => {
-			const state: CardData['state'] = !selectedNode ? 'normal' : node.id === selectedNode.id ? 'focus' : trace?.upstream.has(node.id) || trace?.downstream.has(node.id) ? 'trace' : 'dim';
+			const state: CardData['state'] = hoveredEdge ? (node.id === hoveredEdge.source || node.id === hoveredEdge.target ? 'trace' : 'soft')
+				: hoverNode && !selectedNode ? (node.id === hoverNode ? 'focus' : hoverPeers!.has(node.id) ? 'trace' : 'soft')
+				: !selectedNode ? 'normal' : node.id === selectedNode.id ? 'focus' : trace?.upstream.has(node.id) || trace?.downstream.has(node.id) ? 'trace' : 'dim';
 			return { id: node.id, type: 'card', position: layout.positions[node.id], selected: node.id === selectedId, draggable: true, connectable: false, deletable: false,
 				ariaLabel: node.label + ', ' + node.typeLabel + ', ' + layerLabels[node.layer],
 				data: { node, overlay: overlays.byNode[node.id], badge: badgeFor(node), match: !query.trim() || matchesQuery(node, query), compact, expanded: expanded.has(node.id), state, pinned: !!presentation.pins[node.id], tracedPorts, onRename: rename, onEdit: onOpenDetails, onToggleRows: toggleRows, onUnpin: unpin } };
 		});
 		return [...lanes, ...cards];
-	}, [layout, snapshot, selectedNode, selectedId, trace, compact, expanded, presentation.pins, tracedPorts, rename, onOpenDetails, toggleRows, unpin, overlays, badgeFor, query]);
+	}, [layout, snapshot, selectedNode, selectedId, trace, compact, expanded, presentation.pins, tracedPorts, rename, onOpenDetails, toggleRows, unpin, overlays, badgeFor, query, hoverNode, hoverEdge, visibleEdges]);
 	// Local copy only so React Flow can show a drag in progress. It is rebuilt from layout + pins.
 	const [nodes, setNodes] = useState<GraphFlowNode[]>(computedNodes);
-	useEffect(() => setNodes(computedNodes), [computedNodes]);
+	// Keep React Flow's measurements when presentation changes (hover, selection, overlays), otherwise
+	// nodes are hidden until re-measured and the graph flickers or blanks.
+	useEffect(() => setNodes(current => { const previous = new Map(current.map(node => [node.id, node])); return computedNodes.map(node => { const old = previous.get(node.id); return old?.measured ? { ...node, measured: old.measured } as GraphFlowNode : node; }); }), [computedNodes]);
 	const onNodesChange: OnNodesChange<GraphFlowNode> = useCallback(changes => {
 		// Never apply removals, additions or replacements; positions are graph-local until a pin is stored.
 		if ([...changes].some(change => change.type === 'remove' || change.type === 'add' || change.type === 'replace')) { return; }
@@ -222,11 +233,16 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme
 		const treeMode = presentation.layout === 'tree';
 		const graphEdges: GraphFlowEdge[] = visibleEdges.filter(edge => cardIds.has(edge.source) && cardIds.has(edge.target) && (!treeMode || trace?.edges.has(edge.id) || edge.id === selectedEdgeId)).map(edge => {
 			const [sourceHandle, targetHandle] = handles(edge);
-			const state: EdgeData['state'] = edge.id === selectedEdgeId ? 'selected' : !trace ? 'normal' : trace.edges.has(edge.id) ? 'trace' : 'dim';
+			const hovered = edge.id === hoverEdge || (!!hoverNode && !selectedNode && (edge.source === hoverNode || edge.target === hoverNode));
+			const state: EdgeData['state'] = edge.id === selectedEdgeId || edge.id === hoverEdge ? 'selected'
+				: hoverEdge ? 'dim'
+				: hoverNode && !selectedNode ? (hovered ? 'trace' : 'dim')
+				: !trace ? 'normal' : trace.edges.has(edge.id) ? 'trace' : 'dim';
+			const sourceLabel = snapshot.nodes.find(node => node.id === edge.source)?.label ?? edge.source;
 			return { id: edge.id, type: 'graph', source: edge.source, target: edge.target, sourceHandle, targetHandle, selectable: true, deletable: false, focusable: true,
 				ariaLabel: categoryNames[edge.category] + ' from ' + (snapshot.nodes.find(node => node.id === edge.source)?.label ?? edge.source) + ' to ' + (snapshot.nodes.find(node => node.id === edge.target)?.label ?? edge.target),
-				markerEnd: { type: 'arrowclosed' as never, width: 14, height: 14, color: 'var(--tg-edge-' + edge.category + ')' },
-				data: { edge, route: presentation.route, state, animate: !reducedMotion && (state === 'trace' || state === 'selected'), label: categoryNames[edge.category] + ' · ' + [...new Set(edge.evidence.map(item => item.field))].join(', ') } };
+				markerEnd: { type: 'arrowclosed' as never, width: 16, height: 16, color: 'var(--tg-edge-' + edge.category + ')' },
+				data: { edge, route: presentation.route, state, animate: !reducedMotion && !!trace && (state === 'trace' || edge.id === selectedEdgeId), label: sourceLabel + ' → ' + [...new Set(edge.evidence.map(item => item.field))].join(', ') + ' · ' + categoryNames[edge.category] } };
 		});
 		if (presentation.layout === 'tree') {
 			for (const node of snapshot.nodes) {
@@ -235,19 +251,19 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme
 			}
 		}
 		return graphEdges;
-	}, [visibleEdges, layout, snapshot, compact, expanded, selectedEdgeId, trace, presentation.route, presentation.layout, reducedMotion, selectedId]);
+	}, [visibleEdges, layout, snapshot, compact, expanded, selectedEdgeId, trace, presentation.route, presentation.layout, reducedMotion, selectedId, hoverNode, hoverEdge, selectedNode]);
 
 	const bounds = useRef<HTMLDivElement>(null);
 	const lastFit = useRef('');
 	useEffect(() => {
 		// Refit when the layout kind or the set of resources changes, not on every edit or pin.
 		if (!flow) { return; }
-		const key = presentation.layout + ':' + presentation.spacing + ':' + (presentation.focus ? presentation.focus.id + '/' + presentation.focus.depth : '') + ':' + snapshot.nodes.map(node => node.id).join(',');
+		const key = presentation.layout + ':' + presentation.spacing + ':' + presentation.height + ':' + (presentation.focus ? presentation.focus.id + '/' + presentation.focus.depth : '') + ':' + snapshot.nodes.map(node => node.id).join(',');
 		if (lastFit.current === key) { return; }
 		const first = !lastFit.current; lastFit.current = key;
 		const saved = first ? viewports?.current?.technical : undefined;
 		requestAnimationFrame(() => { if (saved) { void flow.setViewport(saved); } else { void flow.fitView({ padding: fitPadding, maxZoom: 1, duration: first ? 0 : 280 }); } });
-	}, [flow, presentation.layout, presentation.spacing, presentation.focus, snapshot.nodes, viewports]);
+	}, [flow, presentation.layout, presentation.spacing, presentation.height, presentation.focus, snapshot.nodes, viewports]);
 
 	function handleKeys(event: ReactKeyboardEvent) {
 		const target = event.target as HTMLElement;
@@ -261,13 +277,15 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme
 
 	const pinCount = Object.keys(presentation.pins).length;
 	const categoriesShown = categoryOrder.filter(category => visibleEdges.some(edge => edge.category === category));
-	return <main ref={bounds} tabIndex={0} className={'canvas technical-graph theme-' + theme} data-read-only="true" data-graph="technical" aria-label="Technical graph" onKeyDownCapture={handleKeys}>
+	return <main ref={bounds} tabIndex={0} className={'canvas technical-graph theme-' + theme + (compact ? ' is-compact-view' : '')} data-read-only="true" data-graph="technical" aria-label="Technical graph" onKeyDownCapture={handleKeys}>
 		<ReactFlow<GraphFlowNode, GraphFlowEdge> nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes}
 			onInit={instance => { setFlow(instance); onInit?.(instance); setZoom(instance.getZoom()); }}
 			onNodesChange={onNodesChange}
 			onNodeDragStop={(_, node) => { if (node.type === 'card') { onPresentation({ type: 'pin', id: node.id, position: node.position }); } }}
 			onNodeClick={(_, node) => { if (node.type === 'card') { setSelectedEdgeId(''); onSelect(node.id); } }}
 			onNodeDoubleClick={(_, node) => { if (node.type === 'card') { onOpenDetails(node.id); } }}
+			onNodeMouseEnter={(_, node) => { if (node.type === 'card') { setHoverNode(node.id); } }} onNodeMouseLeave={() => setHoverNode('')}
+			onEdgeMouseEnter={(_, edge) => { if (!edge.id.startsWith('tree:')) { setHoverEdge(edge.id); } }} onEdgeMouseLeave={() => setHoverEdge('')}
 			onEdgeClick={(_, edge) => { if (!edge.id.startsWith('tree:')) { setSelectedEdgeId(edge.id); } }}
 			onPaneClick={() => { onSelect(''); setSelectedEdgeId(''); }}
 			onMove={(_, viewport) => setZoom(current => Math.abs(current - viewport.zoom) > 0.02 ? viewport.zoom : current)}
@@ -294,6 +312,8 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme
 				<option value="curved">Curved</option><option value="orthogonal">Orthogonal</option><option value="straight">Straight</option></select></label>
 					<label>Spacing<select aria-label="Graph spacing" value={String(presentation.spacing)} onChange={event => onPresentation({ type: 'set', patch: { spacing: event.target.value === 'auto' ? 'auto' : Number(event.target.value) } })}>
 						<option value="auto">Auto (by line density)</option><option value="100">100%</option><option value="125">125%</option><option value="150">150%</option><option value="200">200%</option></select></label>
+					<label>Height<select aria-label="Graph height" value={String(presentation.height)} onChange={event => onPresentation({ type: 'set', patch: { height: Number(event.target.value) } })}>
+						{[100, 125, 150, 200, 250, 300].map(value => <option key={value} value={value}>{value}%</option>)}</select></label>
 					<label>Detail<select aria-label="Card detail" value={presentation.density} onChange={event => onPresentation({ type: 'set', patch: { density: event.target.value as GraphPresentation['density'] } })}>
 				<option value="auto">Auto</option><option value="detailed">Detailed</option><option value="compact">Compact</option></select></label>
 					<button className="tg-text-button" aria-pressed={presentation.showMembership} title="Show resource group membership as lines (otherwise shown on each card)" onClick={() => onPresentation({ type: 'set', patch: { showMembership: !presentation.showMembership } })}>Membership</button>

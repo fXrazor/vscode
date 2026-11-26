@@ -26,8 +26,10 @@ export interface GraphPresentation {
 	focus?: { id: string; depth: number };
 	/** 'auto' opens gaps crossed by many lines; a percentage scales all spacing. */
 	spacing: 'auto' | number;
+	/** Vertical stretch percentage (100–300), independent of spacing. */
+	height: number;
 }
-export const defaultGraphPresentation: GraphPresentation = { lens: 'all', layout: 'layers', route: 'curved', pins: {}, expanded: [], showMembership: false, density: 'auto', overlay: 'none', spacing: 'auto' };
+export const defaultGraphPresentation: GraphPresentation = { lens: 'all', layout: 'layers', route: 'curved', pins: {}, expanded: [], showMembership: false, density: 'auto', overlay: 'none', spacing: 'auto', height: 100 };
 
 export type GraphPresentationAction =
 	| { type: 'set'; patch: Partial<Omit<GraphPresentation, 'pins' | 'expanded'>> }

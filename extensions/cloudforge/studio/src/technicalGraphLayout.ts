@@ -18,7 +18,7 @@ export interface GraphLayoutResult { positions: Record<string, Position>; sizes:
 
 /** Engineering reading order: scope, then the network a workload lands in, the controls on it, the workload, its data and telemetry. */
 export const layerOrder: InfrastructureLayer[] = ['scope', 'network', 'security', 'identity', 'compute', 'application', 'data', 'monitoring', 'unknown'];
-export const graphMetrics = { width: 248, header: 80, row: 26, footer: 10, compactHeight: 80, gapX: 48, gapY: 32, bandGap: 36, bandHeader: 28, gutter: 130, perLine: 7, columnGap: 72, columnHeader: 40, rowLimit: 5 };
+export const graphMetrics = { width: 248, header: 80, row: 26, footer: 10, compactHeight: 80, gapX: 48, gapY: 32, bandGap: 36, bandHeader: 28, gutter: 170, perLine: 7, columnGap: 72, columnHeader: 40, rowLimit: 5 };
 
 export function visiblePortCount(node: GraphNode, expanded: boolean): { shown: number; hidden: number } {
 	const total = node.ports.length; if (expanded || total <= graphMetrics.rowLimit) { return { shown: total, hidden: 0 }; }
@@ -64,13 +64,13 @@ function centreHubs(band: string[], snapshot: TechnicalGraphSnapshot): string[] 
 
 /** `auto` opens gaps that many lines cross; a number scales all spacing (100 = default). */
 export type GraphSpacing = 'auto' | number;
-interface Options { layout: GraphLayoutKind; expanded: ReadonlySet<string>; compact: boolean; pins: Readonly<Record<string, Position>>; visible?: ReadonlySet<string>; edges: readonly GraphEdge[]; spacing?: GraphSpacing }
+interface Options { layout: GraphLayoutKind; expanded: ReadonlySet<string>; compact: boolean; pins: Readonly<Record<string, Position>>; visible?: ReadonlySet<string>; edges: readonly GraphEdge[]; spacing?: GraphSpacing; /** Extra vertical stretch in percent (100 = none). */ height?: number }
 
 export function layoutTechnicalGraph(snapshot: TechnicalGraphSnapshot, options: Options): GraphLayoutResult {
 	const nodes = snapshot.nodes.filter(node => !options.visible || options.visible.has(node.id));
 	const sizes: Record<string, GraphSize> = Object.fromEntries(nodes.map(node => [node.id, graphNodeSize(node, options.expanded.has(node.id), options.compact)]));
 	const result = options.layout === 'tree' ? treeLayout(nodes, sizes) : gridLayout(snapshot, nodes, sizes, options.edges, options.layout === 'scopes');
-	spread(result, options.edges, options.spacing ?? 'auto');
+	spread(result, options.edges, options.spacing ?? 'auto', options.height ?? 100);
 	for (const [id, pin] of Object.entries(options.pins)) { if (result.positions[id]) { result.positions[id] = { x: pin.x, y: pin.y }; } }
 	return result;
 }
@@ -173,7 +173,7 @@ export function densityGap(crossing: number): number { return Math.min(220, Math
  * scale and opens each horizontal gap between rows by the number of lines crossing it (lines that
  * stay within a row route underneath it, so they count for the gap below). Lanes are refitted.
  */
-function spread(result: GraphLayoutResult, edges: readonly GraphEdge[], spacing: GraphSpacing) {
+function spread(result: GraphLayoutResult, edges: readonly GraphEdge[], spacing: GraphSpacing, heightPercent: number) {
 	const ids = Object.keys(result.positions); if (!ids.length) { return; }
 	const scale = spacing === 'auto' ? 1 : Math.max(1, Math.min(3, spacing / 100));
 	if (scale !== 1) { for (const id of ids) { const p = result.positions[id]; result.positions[id] = { x: p.x * scale, y: p.y * scale }; } }
@@ -190,7 +190,9 @@ function spread(result: GraphLayoutResult, edges: readonly GraphEdge[], spacing:
 		const shift = tops.map((_, index) => crossing.slice(0, index).reduce((sum, count) => sum + densityGap(count), 0));
 		for (const id of ids) { const p = result.positions[id]; result.positions[id] = { x: p.x, y: p.y + shift[rowOf(id)] }; }
 	}
-	if (scale === 1 && spacing !== 'auto') { return; }
+	const stretch = Math.max(1, Math.min(4, heightPercent / 100));
+	if (stretch !== 1) { for (const id of ids) { const p = result.positions[id]; result.positions[id] = { x: p.x, y: p.y * stretch }; } }
+	if (scale === 1 && spacing !== 'auto' && stretch === 1) { return; }
 	const right = Math.max(...ids.map(id => result.positions[id].x + result.sizes[id].width));
 	const bottom = Math.max(...ids.map(id => result.positions[id].y + result.sizes[id].height));
 	for (const lane of result.lanes) {
