@@ -1,5 +1,19 @@
 # Studio continuation checkpoint — 25 November 2026
 
+## Merged main continuation — 26 November 2026
+
+Dale authorized pushing and merging both checkpoints and completing this handoff. Desktop integration preserves main `4bb840d2718` plus `8b3d5dee698` / `cb1c18465b7`; resolve the final desktop merge with `git log -1 --grep="Merge provider mirror workflow fixes"`. Rust main and its retained feature branch are published at **`53539fd9d13ec5177b7a3f4ef0aa15fae0b10f32`**, including `fb68db9…` and the latest service hardening. Codex is the cross-repository integration owner. Fresh merged checks: **52 Rust unit + 5 mirror integration + 109 extension tests**, TypeScript/build/lint and **10 authentic-archive service checks**. Older local-only/merge-pending instructions below are historical and superseded for these checkpoints.
+
+Start a successor from both latest remote main branches in owned worktrees. Read both `HANDOFF.md` files and [the populated-mirror evidence](research/populated-mirror-verification.md). Next is a controlled staged Code OSS + exact service release/manifest proof: native first import into an empty mirror, final removal/reclaimed bytes, active leases and selected-package extraction. The user's installed files were not replaced. After that, continue installed variable/additional-Terraform flows, live schema import/render and AWS/Google samples. Preserve every Technical Graph backlog item below and coordinate ownership before renderer edits. One architecture and shared semantic Undo remain mandatory.
+
+## Populated mirror continuation — 26 November 2026
+
+The next phase found and repaired Windows long-path mirror publication in separate Rust commit **`fb68db9fd4fb4fa07c32a81fade842343f24728a`** and separated local Windows readiness from default Windows+Linux readiness in the native manager. Codex owns integration across the two isolated worktrees. [Detailed proof and continuation](research/populated-mirror-verification.md): 10 real-archive service checks, 12 recorded installed-manager assertions, 49 Rust unit/5 mirror integration/109 extension tests. Native review/cancel and pinned cleanup are proved; a newly packaged service's native first import/final removal/extraction remain. No Studio renderer, assets or Technical Graph files changed. Preserve the earlier graph backlog below and resume its installed variable/code/schema/provider work after the controlled desktop/service integration proof.
+
+## Installed provider continuation — 26 November 2026
+
+Dale resumed development after the merged `930b9d7af51` checkpoint. Codex's isolated `codex/provider-installed-verification` adds a repeatable installed-host runner: **13/13 passed** with the real packaged Rust service and development extension, covering locked VMSS source/nested values, semantic Undo, exact guarded save/refresh and native empty-mirror/integrity/zero-quota/readiness flows. See [exact artifacts, reproduction and limits](research/installed-provider-verification.md). Other worktrees and production UI/Rust/installer files were not edited. Next: populated mirror import/removal/protection and installed variable/additional-Terraform journeys, then AWS/Google and live schema-import states. Preserve every Technical Graph backlog item below; this phase does not claim those remaining workflows complete.
+
 ## Provider forms merge handoff — 26 November 2026
 
 Dale requested merging the current provider-editor checkpoint and continuing the unfinished work later. That latest instruction authorizes this merge and supersedes the preceding local-only/no-main-merge notes for the provider branch. Integration owner: Codex. Owned implementation worktree: `C:/Users/dalep/.codex/worktrees/release-readiness/CloudForge-Code`, branch `codex/provider-editor-coverage`; previous checkpoint `d2e4732c658`. Merge current main's Technical Graph work without replacing it, preserve all other worktrees and retain every graph backlog entry below. Final commit: resolve with `git log -1 -- extensions/cloudforge/studio/research/provider-form-coverage.md`.
@@ -118,7 +132,7 @@ Dale approved continuing the proposed point-endpoint pass in this chat. No furth
 
 ### Studio pass 10: Miro-style connectors and menus (Claude), 26 November 2026
 
-Branch `claude/project-thread-2irlth` (unmerged; Antigravity owns merging). Based on Miro's connector help (help.miro.com/hc/articles/360017730733): Ctrl/Cmd turns snapping off while drawing or moving a line end, Shift keeps straight 45° steps, and line type (straight, elbow, curved) is a drawn choice in the line's toolbar.
+Branch `claude/project-thread-2irlth` (merged to main on Dale's request, 26 November 2026). Based on Miro's connector help (help.miro.com/hc/articles/360017730733): Ctrl/Cmd turns snapping off while drawing or moving a line end, Shift keeps straight 45° steps, and line type (straight, elbow, curved) is a drawn choice in the line's toolbar.
 
 - `ConnectionOverlays.tsx`: dragging a connector end with Ctrl/Cmd held drops a free canvas point even over an element; Shift constrains it to 45° from the fixed end (`constrainAngle`). Drop feedback says which mode is active.
 - `DesignCanvas.tsx`: drawing a new connector from a port with Ctrl/Cmd held makes a loose end where you release (no element snap, no drop menu). Modifier state is tracked in a ref (`freeDrop`).
@@ -144,7 +158,7 @@ Test checklist:
 
 ### Studio pass 9: test view comments, object variables (Claude), 26 November 2026
 
-- Same branch `claude/project-thread-2irlth`, unmerged (Dale is having Antigravity merge it; include commits after 4e46b6f2).
+- Same branch `claude/project-thread-2irlth`, merged to main on Dale's request (26 November 2026).
 - Field labels read as sentences with acronyms (`src/fieldLabel.ts`, "Enable DNS hostnames"); raw names stay in tooltips and help. True/false arguments use a Not set / On / Off toggle (`.bool-toggle`, role radiogroup). Add property lists readable names.
 - Resource workspace is larger: up to 1920×1200, code pane defaults to 630px (was 420), right panel `clamp(300px, 27vw, 440px)`.
 - **Object variables:** new variable type `object` (JSON editor). A field binding can carry `path` (`{ variableId, path: ['prod','cidr'] }`), projected as `var.aws_network.prod.cidr`. The Variable picker lists each value inside an object (nested groups as headings), type-checks the leaf against the field, and shows `aws_network › prod › cidr` in the chip. Import reads `var.NAME.a.b` back into a path binding and accepts `object({...})` declarations, keeping the declared constraint in `typeConstraint` so optional()/types are written back unchanged; otherwise the constraint is derived from the default. Missing paths show a field issue. No variables-inside-variables (Terraform can't); use locals for derived values.

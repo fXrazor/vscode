@@ -84,6 +84,14 @@ import {
 	parseSchemaPreview,
 	type ServicePollEvent
 } from './canvas/serviceAdapters';
+import {
+	confirmAndEvictMirrorPackage,
+	runGuidedMirrorCleanup,
+	runOfflineProviderMirrorManager,
+	runVerifiedMirrorIntegrityCheck,
+	type OfflineMirrorHost
+} from './providerMirror/manager';
+import { formatMirrorBytes, formatMirrorPackageKey, parseMirrorInventory } from './providerMirror/model';
 
 interface WorkspaceArchitecture {
 	readonly architectureId: string;
@@ -2291,178 +2299,73 @@ export function activate(context: ExtensionContext): void {
 			l10n.t('Verified and imported {0} {1} ({2}) into the local offline provider mirror.', address.trim(), version.trim(), platformPick.label)
 		);
 	}));
+	const offlineMirrorHost: OfflineMirrorHost = {
+		callService,
+		showServiceError,
+		getScope: () => {
+			const graph = provider.getGraph();
+			return graph
+				? {
+					workspaceId: graph.workspaceId,
+					architectureId: graph.architectureId,
+					architectureName: currentArchitectureName ?? graph.architectureId,
+					sourceRevision: graph.sourceRevision,
+				}
+				: undefined;
+		},
+		onMirrorMutated: () => {
+			const currentGraph = provider.getGraph();
+			if (currentGraph) {
+				canvas.updateIfOpen(toCanvasSnapshot(currentGraph, currentArchitectureName));
+			}
+		},
+		runExtractSchema: async () => {
+			await commands.executeCommand('cloudforge.extractMirrorSchema');
+		},
+		runInitOffline: async () => {
+			await commands.executeCommand('cloudforge.initArchitectureOffline');
+		},
+	};
+	context.subscriptions.push(commands.registerCommand('cloudforge.manageOfflineMirror', async () => {
+		await runOfflineProviderMirrorManager(offlineMirrorHost);
+	}));
 	context.subscriptions.push(commands.registerCommand('cloudforge.evictMirrorPackage', async () => {
 		const listed = await callService<unknown>('listMirrorPackages', {});
 		if (!listed.ok) {
 			showServiceError(listed.error);
 			return;
 		}
-		const packages = parseMirrorPackages(listed.value);
-		if (packages.length === 0) {
+		const inventory = parseMirrorInventory(listed.value);
+		if (!inventory.ok) {
+			void window.showErrorMessage(inventory.reason);
+			return;
+		}
+		if (inventory.value.packages.length === 0) {
 			void window.showInformationMessage(l10n.t('The local CloudForge provider mirror is currently empty.'));
 			return;
 		}
 		const picked = await window.showQuickPick(
-			packages.map(pkg => ({
-				label: `${pkg.key.address} ${pkg.key.version} (${pkg.key.platform})`,
-				description: `${pkg.sizeBytes} bytes · ${pkg.sha256.slice(0, 8)}`,
+			inventory.value.packages.map(pkg => ({
+				label: formatMirrorPackageKey(pkg.key),
+				description: `${formatMirrorBytes(pkg.sizeBytes)} · ${pkg.sha256.slice(0, 8)}`,
 				detail: pkg.publisher ? l10n.t('{0} · recorded {1}', pkg.publisher, pkg.recordedAt) : l10n.t('Recorded {0}', pkg.recordedAt),
 				pkg,
 			})),
 			{
 				title: l10n.t('Remove Package from Local Offline Mirror'),
-				placeHolder: l10n.t('Select a mirrored provider archive to remove'),
+				placeHolder: l10n.t('Select a mirrored provider archive to review removal'),
 			}
 		);
 		if (!picked) {
 			return;
 		}
-		const confirmAction = l10n.t('Remove Package');
-		const confirm = await window.showWarningMessage(
-			l10n.t('Remove {0} {1} ({2}) from the local offline provider mirror?', picked.pkg.key.address, picked.pkg.key.version, picked.pkg.key.platform),
-			{ modal: true },
-			confirmAction
-		);
-		if (confirm !== confirmAction) {
-			return;
-		}
-		const evicted = await callService<unknown>('evictMirrorPackage', {
-			address: picked.pkg.key.address,
-			version: picked.pkg.key.version,
-			platform: picked.pkg.key.platform,
-		});
-		if (!evicted.ok) {
-			showServiceError(evicted.error);
-			return;
-		}
-		const bytesReclaimed = isRecord(evicted.value) && typeof evicted.value.bytesReclaimed === 'number' ? evicted.value.bytesReclaimed : picked.pkg.sizeBytes;
-		const currentGraph = provider.getGraph();
-		if (currentGraph) {
-			canvas.updateIfOpen(toCanvasSnapshot(currentGraph, currentArchitectureName));
-		}
-		void window.showInformationMessage(
-			l10n.t('Removed {0} {1} ({2}) from the local mirror ({3} bytes reclaimed).', picked.pkg.key.address, picked.pkg.key.version, picked.pkg.key.platform, bytesReclaimed)
-		);
+		await confirmAndEvictMirrorPackage(offlineMirrorHost, picked.pkg.key, picked.pkg.sizeBytes);
 	}));
 	context.subscriptions.push(commands.registerCommand('cloudforge.verifyMirrorIntegrity', async () => {
-		const verified = await window.withProgress(
-			{
-				location: ProgressLocation.Notification,
-				title: l10n.t('CloudForge: Verifying local offline provider mirror integrity…'),
-				cancellable: false,
-			},
-			() => callService<unknown>('verifyMirrorIntegrity', {})
-		);
-		if (!verified.ok) {
-			showServiceError(verified.error);
-			return;
-		}
-		if (!isRecord(verified.value)) {
-			void window.showErrorMessage(l10n.t('The CloudForge service returned an invalid mirror verification report.'));
-			return;
-		}
-		const verifiedCount = typeof verified.value.verifiedCount === 'number' ? verified.value.verifiedCount : 0;
-		const missingCount = typeof verified.value.missingArchiveCount === 'number' ? verified.value.missingArchiveCount : 0;
-		const corruptedCount = typeof verified.value.corruptedCount === 'number' ? verified.value.corruptedCount : 0;
-		const totalBytes = typeof verified.value.totalBytes === 'number' ? verified.value.totalBytes : 0;
-		const totalMiB = (totalBytes / (1024 * 1024)).toFixed(1);
-		if (missingCount === 0 && corruptedCount === 0) {
-			void window.showInformationMessage(
-				l10n.t('Local provider mirror verified: {0} intact package(s) ({1} MiB total).', verifiedCount, totalMiB)
-			);
-			return;
-		}
-		void window.showWarningMessage(
-			l10n.t('Local provider mirror integrity issues found: {0} verified, {1} missing archive(s), {2} corrupted.', verifiedCount, missingCount, corruptedCount)
-		);
+		await runVerifiedMirrorIntegrityCheck(offlineMirrorHost);
 	}));
 	context.subscriptions.push(commands.registerCommand('cloudforge.planMirrorCleanup', async () => {
-		const quotaText = await window.showInputBox({
-			title: l10n.t('Target Local Provider Mirror Quota (MiB)'),
-			value: '512',
-			placeHolder: '512',
-			validateInput: text => /^\d+$/.test(text.trim()) ? undefined : l10n.t('Enter a non-negative integer quota in MiB.'),
-		});
-		if (quotaText === undefined) {
-			return;
-		}
-		const quotaBytes = Number(quotaText.trim()) * 1024 * 1024;
-		const graph = provider.getGraph();
-		const params: Record<string, unknown> = graph
-			? {
-				quotaBytes,
-				workspaceId: graph.workspaceId,
-				architectureId: graph.architectureId,
-				expectedSourceRevision: graph.sourceRevision,
-			}
-			: { quotaBytes };
-		const planned = await callService<unknown>('planMirrorCleanup', params);
-		if (!planned.ok) {
-			showServiceError(planned.error);
-			return;
-		}
-		if (!isRecord(planned.value)) {
-			void window.showErrorMessage(l10n.t('The CloudForge service returned an invalid mirror cleanup plan.'));
-			return;
-		}
-		const evictable = Array.isArray(planned.value.evictable) ? planned.value.evictable : [];
-		const pinned = Array.isArray(planned.value.pinnedRequiringReview) ? planned.value.pinnedRequiringReview : [];
-		const totalBytes = typeof planned.value.totalBytes === 'number' ? planned.value.totalBytes : 0;
-		const bytesOverQuota = typeof planned.value.bytesOverQuota === 'number' ? planned.value.bytesOverQuota : 0;
-		if (evictable.length === 0 && pinned.length === 0) {
-			void window.showInformationMessage(
-				l10n.t('Local provider mirror is within quota ({0} MiB used; {1} MiB limit).', (totalBytes / (1024 * 1024)).toFixed(1), quotaText.trim())
-			);
-			return;
-		}
-		type CleanupPick = {
-			readonly label: string;
-			readonly description: string;
-			readonly detail?: string;
-			readonly evictKey?: { readonly address: string; readonly version: string; readonly platform: string };
-		};
-		const picks: CleanupPick[] = [];
-		for (const item of evictable) {
-			if (!isRecord(item) || !isRecord(item.key) || typeof item.key.address !== 'string' || typeof item.key.version !== 'string' || typeof item.key.platform !== 'string') {
-				continue;
-			}
-			const bytes = typeof item.bytes === 'number' ? item.bytes : 0;
-			picks.push({
-				label: `$(trash) ${item.key.address} ${item.key.version} (${item.key.platform})`,
-				description: l10n.t('Evictable · {0} bytes', bytes),
-				detail: l10n.t('Select to remove this unpinned mirrored archive now'),
-				evictKey: { address: item.key.address, version: item.key.version, platform: item.key.platform },
-			});
-		}
-		for (const item of pinned) {
-			if (!isRecord(item) || !isRecord(item.key) || typeof item.key.address !== 'string' || typeof item.key.version !== 'string' || typeof item.key.platform !== 'string') {
-				continue;
-			}
-			const bytes = typeof item.bytes === 'number' ? item.bytes : 0;
-			picks.push({
-				label: `$(pin) ${item.key.address} ${item.key.version} (${item.key.platform})`,
-				description: l10n.t('Pinned by active architecture · {0} bytes (protected)', bytes),
-			});
-		}
-		const selected = await window.showQuickPick(picks, {
-			title: l10n.t('Mirror Cleanup Plan ({0} MiB over quota)', (bytesOverQuota / (1024 * 1024)).toFixed(1)),
-			placeHolder: l10n.t('Choose an unpinned candidate to remove, or press Escape to cancel'),
-		});
-		if (!selected?.evictKey) {
-			return;
-		}
-		const evicted = await callService<unknown>('evictMirrorPackage', selected.evictKey);
-		if (!evicted.ok) {
-			showServiceError(evicted.error);
-			return;
-		}
-		const currentGraph = provider.getGraph();
-		if (currentGraph) {
-			canvas.updateIfOpen(toCanvasSnapshot(currentGraph, currentArchitectureName));
-		}
-		void window.showInformationMessage(
-			l10n.t('Removed {0} {1} ({2}) from the local offline provider mirror.', selected.evictKey.address, selected.evictKey.version, selected.evictKey.platform)
-		);
+		await runGuidedMirrorCleanup(offlineMirrorHost);
 	}));
 	let opening: Promise<void> | undefined;
 	context.subscriptions.push(commands.registerCommand('cloudforge.openWorkspace', () => {

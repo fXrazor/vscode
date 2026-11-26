@@ -96,6 +96,9 @@ function defaultIconFor(provider: Provider, resourceType: string | null): string
 	const def = resourceType ? getDef(resourceType) : undefined;
 	if (def?.icon) {
 		const fileName = def.icon.replace(/^\/?icons\//, '');
+		if (fileName.startsWith('catalog-icons/')) {
+			return fileName;
+		}
 		if (fileName.includes('/')) {
 			return 'catalog-icons/' + fileName;
 		}

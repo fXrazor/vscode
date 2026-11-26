@@ -9,14 +9,12 @@ import { liveSchemaAttributes, liveSchemaBlocks, liveSchemaOutputs, type HostFor
 import { additionalBlocks, editableFields } from './formDefinition.ts';
 import { architectureDiagnostics, isStaleDiagnostic } from './diagnostics.ts';
 import { sourceChanges, buildDraftSavePayload, changedFilePayloads, refreshPrevious, adoptSavedFiles, buildHostViewState, defaultTargetTfFile, projectGraphSnapshotToArchitecture, projectHostDiagnostics, resolveProviderRegions } from './serviceAdapter.ts';
-import { projectResourceFiles } from './terraformProjection.ts';
+import { projectResourceFiles, terraformCode, terraformCode as codeFor } from './terraformProjection.ts';
 import { describeMerge } from './draftSaveMerge.ts';
 import { buildResourceDraft, parseSchemaPreview } from './resourceDraft.ts';
 import { hydrateResourceValues, parseResourceValues } from './resourceValues.ts';
-import { terraformCode as codeFor } from './terraformProjection.ts';
 import { sampleArchitecture as schemaSample } from './fixture.ts';
 import { explicitResourceReferences, inheritedDependencies } from './resourceHierarchy.ts';
-import { terraformCode } from './terraformProjection.ts';
 import type { HostCloudRegionsPayload, HostEngineValidateReport, HostGraphSnapshot, HostValidationRun } from './webviewBridge.ts';
 
 const SAMPLE_LIVE_SCHEMA: HostFormSchema = {
@@ -506,4 +504,22 @@ test('after a save the saved files take the canvas version in the next baseline'
 	assert.equal(adoptSavedFiles(baseline, saved, new Set(['other.tf'])).resources.find(resource => resource.id === target.id)?.name, target.name);
 	const deleted = { ...baseline, resources: baseline.resources.filter(resource => resource.id !== target.id) };
 	assert.equal(adoptSavedFiles(baseline, deleted, new Set([file])).resources.some(resource => resource.id === target.id), false);
+});
+
+test('hosted snapshot icon projection never double-prefixes catalog-icons paths', () => {
+	const projected = projectGraphSnapshotToArchitecture({
+		workspaceId: 'ws-icon',
+		architectureId: 'arch-icon',
+		architectureName: 'IconCheck',
+		sourceRevision: 'a'.repeat(64),
+		status: 'complete',
+		nodes: [
+			{ id: 'kv-1', kind: 'resource', resourceType: 'azurerm_key_vault', name: 'kvmain', label: 'kvmain', hasSource: true },
+		],
+		edges: [],
+		diagnostics: [],
+	});
+	const kv = projected.architecture.resources.find(r => r.id === 'kv-1');
+	assert.ok(kv?.catalogue?.icon);
+	assert.doesNotMatch(kv.catalogue.icon, /^catalog-icons\/catalog-icons\//);
 });
