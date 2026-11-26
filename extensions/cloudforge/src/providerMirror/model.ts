@@ -91,6 +91,54 @@ export interface MirrorScopeContext {
 	readonly sourceRevision: string;
 }
 
+export interface MirrorReadiness {
+	readonly sourceRevision: string;
+	readonly engine: 'terraform' | 'openTofu';
+	readonly lockState: 'valid' | 'absent' | 'invalid' | 'unreadable';
+	readonly isReady: boolean;
+	readonly ready: readonly MirrorPackageKey[];
+	readonly missing: readonly MirrorPackageKey[];
+	readonly corrupted: readonly { readonly key: MirrorPackageKey; readonly reason: string }[];
+}
+
+/** Readiness must be complete, internally consistent, and for the exact requested scope/platforms. */
+export function parseMirrorReadiness(value: unknown, scope: MirrorScopeContext, platforms: readonly string[]): ParseResult<MirrorReadiness> {
+	const unavailable = { ok: false, reason: 'The service returned an invalid or stale offline readiness report.' } as const;
+	if (!isRecord(value) || value.workspaceId !== scope.workspaceId || value.architectureId !== scope.architectureId
+		|| value.sourceRevision !== scope.sourceRevision || !isSha256(value.sourceRevision)
+		|| (value.engine !== 'terraform' && value.engine !== 'openTofu') || typeof value.engineInferred !== 'boolean'
+		|| !['valid', 'absent', 'invalid', 'unreadable'].includes(String(value.lockState))
+		|| typeof value.isReady !== 'boolean' || !Array.isArray(value.ready) || !Array.isArray(value.missing)
+		|| !Array.isArray(value.corrupted) || value.ready.length + value.missing.length + value.corrupted.length > MAX_PACKAGES) {
+		return unavailable;
+	}
+	const seen = new Set<string>();
+	const key = (raw: unknown): MirrorPackageKey | undefined => {
+		const parsed = parseMirrorPackageKeyStrict(raw);
+		if (!parsed || !platforms.includes(parsed.platform)) { return undefined; }
+		const identity = JSON.stringify([parsed.address, parsed.version, parsed.platform]);
+		if (seen.has(identity)) { return undefined; }
+		seen.add(identity);
+		return parsed;
+	};
+	const ready: MirrorPackageKey[] = [];
+	const missing: MirrorPackageKey[] = [];
+	const corrupted: { key: MirrorPackageKey; reason: string }[] = [];
+	for (const raw of value.ready) { const parsed = key(raw); if (!parsed) { return unavailable; } ready.push(parsed); }
+	for (const raw of value.missing) { const parsed = key(raw); if (!parsed) { return unavailable; } missing.push(parsed); }
+	for (const raw of value.corrupted) {
+		if (!isRecord(raw) || !isNonEmptyString(raw.reason, 1024)) { return unavailable; }
+		const parsed = key(raw.key);
+		if (!parsed) { return unavailable; }
+		corrupted.push({ key: parsed, reason: raw.reason });
+	}
+	const lockState = value.lockState as MirrorReadiness['lockState'];
+	if (value.isReady !== ((lockState === 'valid' || lockState === 'absent') && missing.length === 0 && corrupted.length === 0)) {
+		return unavailable;
+	}
+	return { ok: true, value: { sourceRevision: value.sourceRevision, engine: value.engine, lockState, isReady: value.isReady, ready, missing, corrupted } };
+}
+
 export interface CleanupPickRow {
 	readonly kind: 'evictable' | 'in-use' | 'pinned';
 	readonly key: MirrorPackageKey;

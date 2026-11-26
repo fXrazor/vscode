@@ -18,7 +18,6 @@ import {
 	window,
 	type QuickPickItem
 } from 'vscode';
-import { parseOfflineMirrorReadiness } from '../canvas/serviceAdapters';
 import {
 	buildCleanupQuickPickRows,
 	formatMirrorBytes,
@@ -29,6 +28,7 @@ import {
 	parseMirrorImportResult,
 	parseMirrorIntegrityReport,
 	parseMirrorInventory,
+	parseMirrorReadiness,
 	parseQuotaMiBToBytes,
 	sameMirrorPackageKey,
 	type MirrorCleanupPlan,
@@ -700,11 +700,20 @@ export async function runOfflineProviderMirrorManager(host: OfflineMirrorHost): 
 			host.showServiceError(res.error);
 			return 'back';
 		}
-		const readiness = parseOfflineMirrorReadiness(res.value);
-		if (!readiness) {
-			void window.showErrorMessage(l10n.t('The CloudForge service returned an invalid offline readiness report.'));
+		const parsedReadiness = parseMirrorReadiness(res.value, captured, ['windows_amd64', 'linux_amd64']);
+		if (!parsedReadiness.ok) {
+			void window.showErrorMessage(parsedReadiness.reason);
 			return 'back';
 		}
+		const readiness = parsedReadiness.value;
+		const local = await host.callService<unknown>('checkOfflineMirrorReadiness', {
+			workspaceId: captured.workspaceId,
+			architectureId: captured.architectureId,
+			expectedSourceRevision: captured.sourceRevision,
+			platforms: ['windows_amd64'],
+		});
+		const localReadiness = local.ok ? parseMirrorReadiness(local.value, captured, ['windows_amd64']) : undefined;
+		const localReady = localReadiness?.ok && localReadiness.value.engine === readiness.engine ? localReadiness.value.isReady : undefined;
 		if (!isMirrorScopeCurrent(captured, host.getScope())) {
 			void window.showWarningMessage(l10n.t('The active architecture or source changed while checking readiness.'));
 			return 'back';
@@ -713,16 +722,22 @@ export async function runOfflineProviderMirrorManager(host: OfflineMirrorHost): 
 		const items: (ActionPickItem<{ readonly action: 'import' | 'init' | 'info'; readonly key?: MirrorPackageKey }> | QuickPickItem)[] = [];
 		items.push({
 			label: readiness.isReady
-				? `$(pass) ${l10n.t('Ready for offline init ({0} lockfile · {1})', readiness.lockState, readiness.engine)}`
-				: `$(warning) ${l10n.t('Not ready ({0} lockfile · {1} missing · {2} corrupted)', readiness.lockState, readiness.missing.length, readiness.corrupted.length)}`,
+				? `$(pass) ${l10n.t('Windows + Linux packages ready ({0} lockfile · {1})', readiness.lockState, readiness.engine)}`
+				: `$(warning) ${l10n.t('Windows + Linux packages not ready ({0} lockfile · {1} missing · {2} corrupted)', readiness.lockState, readiness.missing.length, readiness.corrupted.length)}`,
 			description: l10n.t('Architecture: {0}', captured.architectureName),
 			detail: l10n.t('Source revision {0} · Local Windows init requires windows_amd64 packages', readiness.sourceRevision.slice(0, 12)),
 			value: { action: 'info' },
 		});
-		if (readiness.isReady) {
+		items.push({
+			label: localReady === undefined ? `$(question) ${l10n.t('Local Windows readiness unavailable')}`
+				: localReady ? `$(pass) ${l10n.t('Local Windows packages ready')}` : `$(warning) ${l10n.t('Local Windows packages not ready')}`,
+			detail: l10n.t('Local initialization checks windows_amd64 only; Linux packages are checked separately above.'),
+			value: { action: 'info' },
+		});
+		if (localReady) {
 			items.push({
 				label: `$(plug) ${l10n.t('Initialize Architecture Offline…')}`,
-				description: l10n.t('Runs read-only lockfile offline init in writable architecture'),
+				description: l10n.t('Windows packages ready · Review initialization for a writable architecture'),
 				value: { action: 'init' },
 			});
 		}

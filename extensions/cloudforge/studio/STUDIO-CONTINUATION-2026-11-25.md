@@ -1,5 +1,9 @@
 # Studio continuation checkpoint — 25 November 2026
 
+## Populated mirror continuation — 26 November 2026
+
+The next phase found and repaired Windows long-path mirror publication in separate Rust commit **`fb68db9fd4fb4fa07c32a81fade842343f24728a`** and separated local Windows readiness from default Windows+Linux readiness in the native manager. Codex owns integration across the two isolated worktrees. [Detailed proof and continuation](research/populated-mirror-verification.md): 10 real-archive service checks, 12 recorded installed-manager assertions, 49 Rust unit/5 mirror integration/109 extension tests. Native review/cancel and pinned cleanup are proved; a newly packaged service's native first import/final removal/extraction remain. No Studio renderer, assets or Technical Graph files changed. Preserve the earlier graph backlog below and resume its installed variable/code/schema/provider work after the controlled desktop/service integration proof.
+
 ## Installed provider continuation — 26 November 2026
 
 Dale resumed development after the merged `930b9d7af51` checkpoint. Codex's isolated `codex/provider-installed-verification` adds a repeatable installed-host runner: **13/13 passed** with the real packaged Rust service and development extension, covering locked VMSS source/nested values, semantic Undo, exact guarded save/refresh and native empty-mirror/integrity/zero-quota/readiness flows. See [exact artifacts, reproduction and limits](research/installed-provider-verification.md). Other worktrees and production UI/Rust/installer files were not edited. Next: populated mirror import/removal/protection and installed variable/additional-Terraform journeys, then AWS/Google and live schema-import states. Preserve every Technical Graph backlog item below; this phase does not claim those remaining workflows complete.

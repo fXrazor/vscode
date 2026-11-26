@@ -14,8 +14,33 @@ import {
 	parseMirrorImportResult,
 	parseMirrorIntegrityReport,
 	parseMirrorInventory,
+	parseMirrorReadiness,
 	parseQuotaMiBToBytes
 } from '../src/providerMirror/model.ts';
+
+test('readiness distinguishes Windows init from dual-platform availability and validates exact scope', () => {
+	const scope = { workspaceId: 'workspace', architectureId: 'architecture', architectureName: 'Fixture', sourceRevision: 'a'.repeat(64) };
+	const windows = { address: 'registry.terraform.io/hashicorp/azurerm', version: '5.14.0', platform: 'windows_amd64' };
+	const linux = { ...windows, platform: 'linux_amd64' };
+	const report = { ...scope, engine: 'terraform', engineInferred: true, lockState: 'valid', isReady: false, ready: [windows], missing: [linux], corrupted: [] };
+	const both = parseMirrorReadiness(report, scope, ['windows_amd64', 'linux_amd64']);
+	assert.ok(both.ok);
+	assert.equal(both.value.isReady, false);
+	const local = parseMirrorReadiness({ ...report, isReady: true, missing: [] }, scope, ['windows_amd64']);
+	assert.ok(local.ok);
+	assert.equal(local.value.isReady, true, 'missing Linux archive must not block Windows-only init');
+	for (const change of [
+		{ workspaceId: 'other' }, { architectureId: 'other' }, { sourceRevision: 'b'.repeat(64) },
+		{ ready: [{}] }, { ready: [windows, windows] }, { missing: [windows] },
+		{ isReady: true }, { lockState: 'absent', isReady: true }, { corrupted: [{ key: linux }] },
+		{ ready: Array.from({ length: 513 }, () => windows) },
+	]) {
+		assert.equal(parseMirrorReadiness({ ...report, ...change }, scope, ['windows_amd64', 'linux_amd64']).ok, false, JSON.stringify(change));
+	}
+	assert.equal(parseMirrorReadiness(report, scope, ['windows_amd64']).ok, false, 'unexpected platform cannot authorize local init');
+	assert.equal(parseMirrorReadiness({ ...report, lockState: 'invalid', isReady: true, missing: [] }, scope, ['windows_amd64']).ok, false);
+	assert.ok(parseMirrorReadiness({ ...report, lockState: 'absent', isReady: true, ready: [], missing: [] }, scope, ['windows_amd64']).ok, 'valid service no-dependency readiness remains explicit');
+});
 
 const SHA_A = 'a'.repeat(64);
 const SHA_B = 'b'.repeat(64);
