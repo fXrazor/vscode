@@ -1,5 +1,7 @@
 # Installed provider workflow verification — 26 November 2026
 
+Closeout: Dale requested merge/update/close. The fix below was integrated with main `d2f5e7e06dd` as **`fa5a778e82de44e42eb9f3a0c87995883930be40`**, verified with **238 Studio tests**, TypeScript and preview build. The installed results below retain their original source/asset identities and were not rerun for the later canvas merge. The separate feature branches mentioned below remain preserved and unmerged by this closeout.
+
 ## Studio editor continuation after Claude's merged passes — 26 November 2026
 
 Dale asked to inspect Claude's current Studio and continue the handoff. Codex compared merged main **`df2168b72700c6ca0956e15888ee3789212a51c0`**, the pass 9/10 ledger and the resource/variable/list implementations. Claude's PR #6, mixed entries and object-variable paths are in the tested source, along with Antigravity's subsequent canvas/Technical Graph work. Older ledger entries describing those capabilities as pending are superseded by the reconciliation at the top of the canonical Studio continuation.

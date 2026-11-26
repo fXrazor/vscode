@@ -1,5 +1,9 @@
 # Studio continuation checkpoint — 25 November 2026
 
+## Merged closeout — 26 November 2026
+
+Dale authorized merging the Studio variable-usage fix and closing this worktree. Merge **`fa5a778e82de44e42eb9f3a0c87995883930be40`** combines `1a3a54740e6` with main `d2f5e7e06dd`, preserving later path tracing, smart spacing/style/duplication, Wrap/Fit Frame, sticky-note clustering and SVG export work. Fresh merged verification: **238/238 Studio tests**, TypeScript and preview build passed. The earlier **22/22 installed editor assertions** belong to their recorded pre-merge source and were not repeated during closeout. Resume from current remote main; older local/unmerged instructions below are superseded for this checkpoint. The native-import and guided-variable feature branches remain separate. Continue the outstanding provider/schema/native-archive proof listed below; do not recreate the implemented Studio features.
+
 ## Current reconciliation and installed editor continuation — 26 November 2026
 
 Codex inspected Claude's merged Studio sources and this ledger against **`origin/main df2168b72700c6ca0956e15888ee3789212a51c0`**. Continue from local **`codex/studio-handoff-verification`**, source checkpoint **`1a3a54740e68fdc5f1602deb52550e0d53d7ad88`**, in `C:/Users/dalep/.codex/worktrees/guided-variable-values/CloudForge-Code`. It starts directly from current main; the separate native-import and guided-variable checkpoints remain on their own branches. No main push/merge is implied.
