@@ -18,7 +18,7 @@ export interface GraphLayoutResult { positions: Record<string, Position>; sizes:
 
 /** Engineering reading order: scope, then the network a workload lands in, the controls on it, the workload, its data and telemetry. */
 export const layerOrder: InfrastructureLayer[] = ['scope', 'network', 'security', 'identity', 'compute', 'application', 'data', 'monitoring', 'unknown'];
-export const graphMetrics = { width: 248, header: 60, row: 26, footer: 10, compactHeight: 60, gapX: 44, gapY: 30, bandGap: 34, bandHeader: 22, gutter: 130, perLine: 7, columnGap: 72, columnHeader: 40, rowLimit: 5 };
+export const graphMetrics = { width: 248, header: 80, row: 26, footer: 10, compactHeight: 80, gapX: 48, gapY: 32, bandGap: 36, bandHeader: 28, gutter: 130, perLine: 7, columnGap: 72, columnHeader: 40, rowLimit: 5 };
 
 export function visiblePortCount(node: GraphNode, expanded: boolean): { shown: number; hidden: number } {
 	const total = node.ports.length; if (expanded || total <= graphMetrics.rowLimit) { return { shown: total, hidden: 0 }; }

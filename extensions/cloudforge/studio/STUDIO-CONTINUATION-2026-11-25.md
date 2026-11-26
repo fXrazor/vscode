@@ -39,6 +39,8 @@ Branch `claude/project-thread-2irlth` in fXrazor/vscode, based on main `5b66f85c
 6. **Service-edge field provenance.** `source-graph` edges still lack field paths. Consume `readResourceValues` expressions to promote them to field-level evidence (Phase 1 remainder). Add plan/state overlays only from `enginePlanReport` (Phase 5).
 7. High-degree aggregation (“+12 attachments” edge bundles to one peer group), keyboard row inspection and graph-only multi-select are not built.
 
+**Spacing pass (Dale's annotation, same day):** the toolbar is now a single non-wrapping row ("Membership" is a toggle button; field captions hide below 1180 px). Card layout heights now match the measured DOM (80 px header, +26 px per row, +10 px footer). Before this, a 15 px underestimate let cards in adjacent lines crowd each other. Card, chip and lane-label padding are larger. Same-band links between non-adjacent cards route underneath the line instead of across neighbouring cards. Edge labels appear only for a clicked edge (trace rows already name the field). Fit padding is 84/40 px. If card markup changes, re-measure with Detail set to Detailed and update `graphMetrics`.
+
 **Binding rules (unchanged):** graph drag, layout, pins, expansion and selection never write Resource.positions, parentId, visualParentId, container sizes, Terraform, Modified state or Undo. Configuration edits from the graph go only through `graphEditAllowed`.
 
 ### Main integration and portable agent handoff — 25 November 2026

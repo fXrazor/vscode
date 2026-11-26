@@ -103,7 +103,7 @@ function GraphRoute(props: EdgeProps<GraphFlowEdge>) {
 	return <>
 		<BaseEdge id={id} path={path} markerEnd={markerEnd} className={'tg-edge tg-cat-' + category + ' tg-edge-' + state} interactionWidth={14} />
 		{data?.animate && state !== 'dim' && <circle r={3.2} className={'tg-pulse tg-cat-' + category}><animateMotion dur="2.4s" repeatCount="indefinite" path={path} /></circle>}
-		{(state === 'selected' || state === 'trace') && data?.label && <EdgeLabelRenderer>
+		{state === 'selected' && data?.label && <EdgeLabelRenderer>
 			<div className={'tg-edge-label tg-cat-' + category} style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}>{data.label}</div>
 		</EdgeLabelRenderer>}
 	</>;
@@ -111,7 +111,7 @@ function GraphRoute(props: EdgeProps<GraphFlowEdge>) {
 
 const nodeTypes = { card: GraphCard, lane: LaneBand };
 const edgeTypes = { graph: GraphRoute };
-const fitPadding = { top: '76px', right: '32px', bottom: '96px', left: '32px' } as const;
+const fitPadding = { top: '84px', right: '40px', bottom: '84px', left: '40px' } as const;
 
 export interface TechnicalGraphProps {
 	architecture: Architecture;
@@ -186,6 +186,9 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme
 			const row = visiblePort(edge);
 			if (t.y >= s.y + sh - 4) { return ['out', row]; }
 			if (t.y + th <= s.y + 4) { return ['out-top', row === 'in' ? 'in-bottom' : row]; }
+			// Same band: neighbours link side to side; distant cards link underneath so lines never cross cards.
+			const adjacent = Math.abs(t.x - s.x) <= layout.sizes[edge.source].width + 80;
+			if (!adjacent) { return ['out', 'in-bottom']; }
 			return t.x >= s.x ? ['out-right', row === 'in' ? 'in-left' : row] : ['out-left', 'in-right'];
 		};
 		// The ownership tree shows parent links; evidence lines appear only for the selected trace or relationship.
@@ -195,7 +198,6 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme
 			const state: EdgeData['state'] = edge.id === selectedEdgeId ? 'selected' : !trace ? 'normal' : trace.edges.has(edge.id) ? 'trace' : 'dim';
 			return { id: edge.id, type: 'graph', source: edge.source, target: edge.target, sourceHandle, targetHandle, selectable: true, deletable: false, focusable: true,
 				ariaLabel: categoryNames[edge.category] + ' from ' + (snapshot.nodes.find(node => node.id === edge.source)?.label ?? edge.source) + ' to ' + (snapshot.nodes.find(node => node.id === edge.target)?.label ?? edge.target),
-				zIndex: state === 'trace' || state === 'selected' ? 2 : 0,
 				markerEnd: { type: 'arrowclosed' as never, width: 14, height: 14, color: 'var(--tg-edge-' + edge.category + ')' },
 				data: { edge, route: presentation.route, state, animate: !reducedMotion && (state === 'trace' || state === 'selected'), label: categoryNames[edge.category] + ' · ' + [...new Set(edge.evidence.map(item => item.field))].join(', ') } };
 		});
@@ -258,7 +260,7 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme
 				<option value="curved">Curved</option><option value="orthogonal">Orthogonal</option><option value="straight">Straight</option></select></label>
 			<label>Detail<select aria-label="Card detail" value={presentation.density} onChange={event => onPresentation({ type: 'set', patch: { density: event.target.value as GraphPresentation['density'] } })}>
 				<option value="auto">Auto</option><option value="detailed">Detailed</option><option value="compact">Compact</option></select></label>
-			<label className="tg-check"><input type="checkbox" checked={presentation.showMembership} onChange={event => onPresentation({ type: 'set', patch: { showMembership: event.target.checked } })} />Group membership lines</label>
+			<button className="tg-text-button" aria-pressed={presentation.showMembership} title="Show resource group membership as lines (otherwise shown on each card)" onClick={() => onPresentation({ type: 'set', patch: { showMembership: !presentation.showMembership } })}>Membership</button>
 			{pinCount > 0 && <button className="tg-text-button" onClick={() => onPresentation({ type: 'clearPins' })} title="Return pinned cards to the automatic layout (graph only)"><RotateCcw size={13} />Reset {pinCount} pin{pinCount === 1 ? '' : 's'}</button>}
 		</div>
 		<div className="tg-legend" aria-label="Relationship legend">
