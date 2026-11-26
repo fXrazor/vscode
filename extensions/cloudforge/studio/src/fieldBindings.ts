@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 import type { Architecture, Resource, ResourceBlock } from './model.ts';
+import { isExpr, type Value } from './cloudlab-core/model.ts';
 import { isObjectValue, isSensitiveProperty, variableValueAt, type VariableDefinition } from './variables.ts';
 import { getDef, type AttrDef } from './cloudlab-core/catalog/index.ts';
 import { resourceDefinition } from './fixture.ts';
@@ -238,4 +239,61 @@ export function variablePreview(variable: VariableDefinition, sensitiveField = f
 	if (sensitiveField || variable.sensitive) { return 'Sensitive value'; }
 	const value = path?.length ? variableValueAt(variable, path) : variable.value !== undefined ? variable.value : variable.defaultValue;
 	return value === undefined ? 'Required input · value not set' : typeof value === 'string' ? value || 'Empty string' : JSON.stringify(value);
+}
+
+/**
+ * Parses an HCL list containing expressions (e.g. `[azurerm_network_interface.nic.id, var.extra, "manual"]`)
+ * into a validated mixed `ResourceRefBinding` (`refs` + ordered `items`). Returns `undefined` for plain
+ * literal lists or any element that cannot round-trip losslessly (such as function calls, non-string
+ * literals, unknown targets, duplicate refs, or reference cycles), leaving complex HCL in `terraformExtras`.
+ */
+export function parseMixedListHclValue(
+	value: Value,
+	architecture: Architecture,
+	resource: Resource,
+	definition?: AttrDef,
+	variables?: readonly VariableDefinition[]
+): ResourceRefBinding | undefined {
+	if (definition?.type !== 'list' || !Array.isArray(value) || value.length === 0 || !value.some(isExpr)) {
+		return undefined;
+	}
+	const elementType: AttrDef['type'] = (definition.literalShape?.kind === 'list' || definition.literalShape?.kind === 'set')
+		&& definition.literalShape.element?.kind === 'number' ? 'number' : 'string';
+	const availableVars = variables ?? architecture.variables ?? [];
+	const eligibleRefs = eligibleReferenceTargets(architecture, resource, definition);
+	const items: ListEntry[] = [];
+	const refs: ResourceRefEntry[] = [];
+
+	for (const element of value) {
+		if (typeof element === 'string') {
+			items.push({ kind: 'value', value: element });
+			continue;
+		}
+		if (!isExpr(element)) {
+			return undefined;
+		}
+		const expr = element.$expr.trim();
+		const varMatch = /^var\.([A-Za-z_][A-Za-z0-9_-]*)((?:\.[A-Za-z_][A-Za-z0-9_-]*)*)$/.exec(expr);
+		if (varMatch) {
+			const variable = availableVars.find(item => item.name === varMatch[1]);
+			const path = varMatch[2] ? varMatch[2].slice(1).split('.') : [];
+			if (!variable || !acceptsVariable(variable, { type: elementType }, path.length ? path : undefined)) {
+				return undefined;
+			}
+			items.push({ kind: 'variable', variableId: variable.id, ...(path.length ? { path } : {}) });
+			continue;
+		}
+		const candidate = eligibleRefs.find(item => item.expression === expr);
+		if (candidate) {
+			items.push({ kind: 'ref', resourceId: candidate.resource.id, attribute: candidate.attribute });
+			refs.push({ resourceId: candidate.resource.id, attribute: candidate.attribute });
+			continue;
+		}
+		return undefined;
+	}
+
+	if (refs.length > 0 && !acceptsResourceRefs(architecture, resource, refs, definition)) {
+		return undefined;
+	}
+	return { refs, items };
 }

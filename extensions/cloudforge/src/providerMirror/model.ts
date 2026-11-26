@@ -218,6 +218,28 @@ export function sameMirrorPackageKey(a: MirrorPackageKey, b: MirrorPackageKey): 
 }
 
 /**
+ * Resolves a preselected `windows_amd64` package for direct schema extraction from Package Details,
+ * rejecting non-Windows targets or missing keys cleanly instead of silently picking another package.
+ */
+export function resolveMirrorExtractTarget(
+	packages: readonly MirrorPackageSummary[],
+	preselected?: MirrorPackageKey
+): ParseResult<MirrorPackageSummary | undefined> {
+	const windowsPackages = packages.filter(pkg => pkg.key.platform === 'windows_amd64');
+	if (!preselected) {
+		return { ok: true, value: undefined };
+	}
+	if (preselected.platform !== 'windows_amd64') {
+		return { ok: false, reason: `Local schema extraction requires windows_amd64 (${preselected.platform} cannot run locally on Windows).` };
+	}
+	const exact = windowsPackages.find(pkg => sameMirrorPackageKey(pkg.key, preselected));
+	if (!exact) {
+		return { ok: false, reason: `${formatMirrorPackageKey(preselected)} is no longer present in the local offline provider mirror.` };
+	}
+	return { ok: true, value: exact };
+}
+
+/**
  * Formats a byte size into a human-readable unit paired with exact bytes for truthful review copy.
  */
 export function formatMirrorBytes(bytes: number): string {

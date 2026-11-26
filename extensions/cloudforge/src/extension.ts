@@ -73,7 +73,6 @@ import {
 	parseSaveAllPreview,
 	parseEngineValidateReport,
 	parseExportAuditReport,
-	parseMirrorPackages,
 	parseModuleInspection,
 	parseOfflineMirrorReadiness,
 	parseSchemaDiffReport,
@@ -92,7 +91,14 @@ import {
 	runVerifiedMirrorIntegrityCheck,
 	type OfflineMirrorHost
 } from './providerMirror/manager';
-import { formatMirrorBytes, formatMirrorPackageKey, parseMirrorInventory } from './providerMirror/model';
+import {
+	formatMirrorBytes,
+	formatMirrorPackageKey,
+	parseMirrorInventory,
+	parseMirrorPackageKeyStrict,
+	resolveMirrorExtractTarget,
+	type MirrorPackageKey
+} from './providerMirror/model';
 import { buildProvidersModel, isProviderAddress, LOCAL_PLATFORM, parseProviderVersions, shortProviderName, type ProvidersModel } from './providers/model';
 import { ProvidersViewProvider, registryPageUrl, type ProvidersNode } from './providers/providersView';
 
@@ -2293,7 +2299,7 @@ export function activate(context: ExtensionContext): void {
 		commands.registerCommand('cloudforge.providers.refresh', () => { providersView.refreshVersions(); return providersView.refresh(); }),
 		commands.registerCommand('cloudforge.providers.extractSchema', async (node?: ProvidersNode) => {
 			const target = node?.type === 'project' || node?.type === 'version' ? node.row : undefined;
-			await commands.executeCommand('cloudforge.extractMirrorSchema', target?.address && target.version ? { address: target.address, version: target.version } : undefined);
+			await commands.executeCommand('cloudforge.extractMirrorSchema', target?.address && target.version ? { address: target.address, version: target.version, platform: LOCAL_PLATFORM } : undefined);
 		}),
 		commands.registerCommand('cloudforge.providers.download', async (node?: ProvidersNode) => {
 			// Where the click came from decides what is already known: address, and maybe an exact version.
@@ -2380,47 +2386,62 @@ export function activate(context: ExtensionContext): void {
 			void providersView.refresh();
 		}),
 	);
-	context.subscriptions.push(commands.registerCommand('cloudforge.extractMirrorSchema', async (preset?: { readonly address?: unknown; readonly version?: unknown }) => {
+	context.subscriptions.push(commands.registerCommand('cloudforge.extractMirrorSchema', async (rawKey?: unknown) => {
+		const preselectedKey: MirrorPackageKey | undefined = rawKey === undefined ? undefined : parseMirrorPackageKeyStrict(rawKey);
+		if (rawKey !== undefined && !preselectedKey) {
+			void window.showErrorMessage(l10n.t('The selected provider package identity is invalid.'));
+			return;
+		}
 		const listed = await callService<unknown>('listMirrorPackages', {});
 		if (!listed.ok) {
 			showServiceError(listed.error);
 			return;
 		}
-		const allWinPackages = parseMirrorPackages(listed.value).filter(pkg => pkg.key.platform === 'windows_amd64');
-		const presetMatch = typeof preset?.address === 'string' && typeof preset.version === 'string'
-			? allWinPackages.filter(pkg => pkg.key.address.toLowerCase() === (preset.address as string).toLowerCase() && pkg.key.version === preset.version)
-			: [];
-		const winPackages = presetMatch.length ? presetMatch : allWinPackages;
-		if (winPackages.length === 0) {
-			void window.showInformationMessage(
-				l10n.t('No verified windows_amd64 provider packages were found in the local CloudForge mirror.')
-			);
+		const inventory = parseMirrorInventory(listed.value);
+		if (!inventory.ok) {
+			void window.showErrorMessage(inventory.reason);
 			return;
 		}
-		const picked = winPackages.length === 1 && presetMatch.length ? { pkg: winPackages[0] } : await window.showQuickPick(
-			winPackages.map(pkg => ({
-				label: `${pkg.key.address} ${pkg.key.version}`,
-				description: pkg.publisher ? `${pkg.publisher} · ${pkg.sha256.slice(0, 8)}` : pkg.sha256.slice(0, 8),
-				detail: l10n.t('windows_amd64 · {0} bytes · recorded {1}', pkg.sizeBytes, pkg.recordedAt),
-				pkg,
-			})),
-			{
-				title: l10n.t('Extract Provider Schema from Local Offline Mirror'),
-				placeHolder: l10n.t('Select a verified mirrored provider package to extract into the catalogue'),
-			}
-		);
-		if (!picked) {
+		const resolved = resolveMirrorExtractTarget(inventory.value.packages, preselectedKey);
+		if (!resolved.ok) {
+			void window.showWarningMessage(resolved.reason);
 			return;
+		}
+		let targetPkg = resolved.value;
+		if (!targetPkg) {
+			const winPackages = inventory.value.packages.filter(pkg => pkg.key.platform === 'windows_amd64');
+			if (winPackages.length === 0) {
+				void window.showInformationMessage(
+					l10n.t('No verified windows_amd64 provider packages were found in the local CloudForge mirror.')
+				);
+				return;
+			}
+			const picked = await window.showQuickPick(
+				winPackages.map(pkg => ({
+					label: `${pkg.key.address} ${pkg.key.version}`,
+					description: pkg.publisher ? `${pkg.publisher} · ${pkg.sha256.slice(0, 8)}` : pkg.sha256.slice(0, 8),
+					detail: l10n.t('windows_amd64 · {0} · recorded {1}', formatMirrorBytes(pkg.sizeBytes), pkg.recordedAt),
+					pkg,
+				})),
+				{
+					title: l10n.t('Extract Provider Schema from Local Offline Mirror'),
+					placeHolder: l10n.t('Select a verified mirrored provider package to extract into the catalogue'),
+				}
+			);
+			if (!picked) {
+				return;
+			}
+			targetPkg = picked.pkg;
 		}
 		const extracted = await window.withProgress(
 			{
 				location: ProgressLocation.Notification,
-				title: l10n.t('Extracting {0} {1} schema offline from local mirror…', picked.pkg.key.address, picked.pkg.key.version),
+				title: l10n.t('Extracting {0} {1} schema offline from local mirror…', targetPkg.key.address, targetPkg.key.version),
 				cancellable: false,
 			},
 			() => callService<unknown>('extractProviderSchemaFromMirror', {
-				address: picked.pkg.key.address,
-				version: picked.pkg.key.version,
+				address: targetPkg.key.address,
+				version: targetPkg.key.version,
 			})
 		);
 		if (!extracted.ok) {
@@ -2435,7 +2456,7 @@ export function activate(context: ExtensionContext): void {
 		}
 		void providersView.refresh();
 		void window.showInformationMessage(
-			l10n.t('Extracted {0} {1} into the CloudForge provider catalogue from the local offline mirror.', picked.pkg.key.address, picked.pkg.key.version)
+			l10n.t('Extracted {0} {1} into the CloudForge provider catalogue from the local offline mirror.', targetPkg.key.address, targetPkg.key.version)
 		);
 	}));
 	context.subscriptions.push(commands.registerCommand('cloudforge.importMirrorPackage', async (preset?: { readonly address?: unknown; readonly version?: unknown; readonly platform?: unknown }) => {
@@ -2551,7 +2572,7 @@ export function activate(context: ExtensionContext): void {
 				canvas.updateIfOpen(toCanvasSnapshot(currentGraph, currentArchitectureName));
 			}
 		},
-		runExtractSchema: async (key) => {
+		runExtractSchema: async key => {
 			await commands.executeCommand('cloudforge.extractMirrorSchema', key);
 		},
 		runInitOffline: async () => {

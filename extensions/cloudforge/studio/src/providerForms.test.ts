@@ -8,7 +8,8 @@ import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { ensureTypes, getDef, setCatalogReader, type AttrDef } from './cloudlab-core/catalog/index.ts';
 import { additionalBlocks, editableFields, fieldIssue, type BlockDefinition } from './formDefinition.ts';
-import { fieldDefinition } from './fieldBindings.ts';
+import { bindingKey, fieldDefinition } from './fieldBindings.ts';
+import { sampleArchitecture } from './fixture.ts';
 import { formCoverageGaps, liveSchemaAttributes, liveSchemaBlocks, type HostFormSchema } from './liveSchema.ts';
 import { createHistory, historyReducer, type Resource } from './model.ts';
 import { projectGraphSnapshotToArchitecture } from './serviceAdapter.ts';
@@ -245,4 +246,82 @@ test('source values hydrate known blocks and expressions after metadata loads wi
 	history = historyReducer(history, { type: 'rebase', architecture: nextBase, base: hydrated });
 	assert.equal(history.present.resources[0].settings.sku, 'Standard_D8_v5');
 	assert.match(terraformCode(history.present, resource.id), /instances\s*=\s*3/);
+});
+
+test('mixed list HCL typed in code editor or hydrated from source files parses into editable mixed entries and falls back safely on complex expressions', () => {
+	const base = sampleArchitecture();
+	const architecture = {
+		...base,
+		variables: [
+			{ id: 'v-extra', name: 'extra_nic_id', type: 'string' as const, description: '', sensitive: false },
+			{ id: 'v-net', name: 'net', type: 'object' as const, description: '', sensitive: false, defaultValue: { fallback_nic: '/subscriptions/x/nic-obj' } },
+		],
+	};
+	const vm = architecture.resources.find(item => item.id === 'vm')!;
+	const nic = architecture.resources.find(item => item.id === 'nic')!;
+	const nicExpr = 'azurerm_network_interface.' + (nic.terraformName ?? nic.name.replace(/[^A-Za-z0-9_-]/g, '_')) + '.id';
+	const key = bindingKey({ kind: 'setting', name: 'network_interface_ids' });
+
+	// 1. Code editor apply parses mixed [ref, var, var.obj.leaf, "literal"] directly into resourceRefs without opaque terraformExtras
+	const before = terraformCode(architecture, vm.id);
+	const edited = before.replace(
+		/network_interface_ids\s*=\s*\[[^\]]*\]/,
+		`network_interface_ids = [${nicExpr}, var.extra_nic_id, var.net.fallback_nic, "/subscriptions/x/manual"]`
+	);
+	const [applied] = applyTerraformDraft(architecture, edited, vm.id, { allowAdditional: true });
+	assert.equal(hasTerraformExtras(applied.terraformExtras), false, 'representable mixed list stays out of opaque terraformExtras');
+	assert.deepEqual(applied.resourceRefs?.[key], {
+		refs: [{ resourceId: nic.id, attribute: 'id' }],
+		items: [
+			{ kind: 'ref', resourceId: nic.id, attribute: 'id' },
+			{ kind: 'variable', variableId: 'v-extra' },
+			{ kind: 'variable', variableId: 'v-net', path: ['fallback_nic'] },
+			{ kind: 'value', value: '/subscriptions/x/manual' },
+		],
+	});
+
+	// 2. Complex function expressions stay safely preserved in terraformExtras (no silent data loss)
+	const complex = before.replace(
+		/network_interface_ids\s*=\s*\[[^\]]*\]/,
+		`network_interface_ids = [coalesce(${nicExpr}, var.extra_nic_id)]`
+	);
+	const [preserved] = applyTerraformDraft(architecture, complex, vm.id, { allowAdditional: true });
+	assert.equal(hasTerraformExtras(preserved.terraformExtras), true);
+	assert.equal(preserved.resourceRefs?.[key], undefined);
+
+	// 3. File hydration (readResourceValues) hydrates mixed lists cleanly and idempotently
+	const vmAddr = 'azurerm_linux_virtual_machine.' + (vm.terraformName ?? vm.name.replace(/[^A-Za-z0-9_-]/g, '_'));
+	const graph = {
+		workspaceId: 'ws',
+		architectureId: 'arch',
+		architectureName: architecture.name,
+		sourceRevision: 'c'.repeat(64),
+		status: 'complete' as const,
+		edges: [],
+		diagnostics: [],
+		nodes: [
+			{ id: vm.id, kind: 'resource' as const, resourceType: 'azurerm_linux_virtual_machine', name: vmAddr.split('.')[1], label: vm.name, hasSource: true },
+			{ id: nic.id, kind: 'resource' as const, resourceType: 'azurerm_network_interface', name: nicExpr.split('.')[1], label: nic.name, hasSource: true },
+		],
+	};
+	const file: FileResourceValues = {
+		address: vmAddr,
+		file: 'main.tf',
+		attributes: {
+			network_interface_ids: { kind: 'expression', text: `[${nicExpr}, var.extra_nic_id, "/subscriptions/x/from-file"]` },
+		},
+		blocks: [],
+	};
+	const hydrated = hydrateResourceValues(architecture, graph, [file]);
+	const hydratedVm = hydrated.resources.find(item => item.id === vm.id)!;
+	assert.equal(hasTerraformExtras(hydratedVm.terraformExtras), false);
+	assert.deepEqual(hydratedVm.resourceRefs?.[key], {
+		refs: [{ resourceId: nic.id, attribute: 'id' }],
+		items: [
+			{ kind: 'ref', resourceId: nic.id, attribute: 'id' },
+			{ kind: 'variable', variableId: 'v-extra' },
+			{ kind: 'value', value: '/subscriptions/x/from-file' },
+		],
+	});
+	assert.equal(hydrateResourceValues(hydrated, graph, [file]), hydrated, 'mixed list hydration is idempotent');
 });

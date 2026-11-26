@@ -6,9 +6,9 @@ import { getDef, type AttrDef } from './cloudlab-core/catalog/index.ts';
 import { key, parseHcl, quote, type HclBlock } from './cloudlab-core/hcl.ts';
 import { isExpr, isRef, type Value } from './cloudlab-core/model.ts';
 import { resourceDefinition } from './fixture.ts';
-import { bindingKey, fieldPath, type FieldTarget } from './fieldBindings.ts';
+import { bindingKey, fieldPath, parseMixedListHclValue, type FieldTarget } from './fieldBindings.ts';
 import { liveSchemaDefinitionTree, type HostFormSchema } from './liveSchema.ts';
-import type { Resource, ResourceBlock } from './model.ts';
+import type { Architecture, Resource, ResourceBlock } from './model.ts';
 import { isSensitiveProperty } from './variables.ts';
 import { literalIssue } from '../../src/canvas/literalSchema.ts';
 
@@ -114,7 +114,7 @@ export function additionalTerraformItems(resource: Resource): { path: string; qu
 }
 
 /** New literal fields/blocks go into forms; only expressions/unknown schema structure stay sparse. */
-export function resourceFromTerraform(resource: Resource, block: HclBlock, baseline: HclBlock, schema?: HostFormSchema): Resource {
+export function resourceFromTerraform(resource: Resource, block: HclBlock, baseline: HclBlock, schema?: HostFormSchema, architecture?: Architecture): Resource {
 	const attributes = schema ? liveSchemaDefinitionTree(schema, getDef(block.labels[0])?.attributes) : getDef(block.labels[0])?.attributes ?? [];
 	const next: Resource = { ...resource, settings: { ...resource.settings }, blocks: [], fieldBindings: { ...resource.fieldBindings }, resourceRefs: { ...resource.resourceRefs } };
 	const before = baseline;
@@ -133,7 +133,16 @@ export function resourceFromTerraform(resource: Resource, block: HclBlock, basel
 			if (containsExpression(value) && JSON.stringify(value) === JSON.stringify(old?.attrs[name]) && !extraFieldValue(resource, target)) { continue; }
 			delete next.fieldBindings![binding]; delete next.resourceRefs![binding];
 			if (!definition && !['count', 'for_each', 'depends_on'].includes(name)) { throw new Error('The schema does not describe ' + fullPath + '. Import the matching provider schema before applying it.'); }
-			if (containsExpression(value)) { extras.attrs[name] = value; continue; }
+			if (containsExpression(value)) {
+				const mixed = architecture ? parseMixedListHclValue(value, architecture, resource, definition) : undefined;
+				if (mixed) {
+					next.resourceRefs![binding] = mixed;
+					values[originalKey ?? name] = (blockId ? previous.find(item => item.id === blockId)?.values[name] : resource.settings[originalKey ?? name]) ?? '';
+					continue;
+				}
+				extras.attrs[name] = value;
+				continue;
+			}
 			if (!definition) { throw new Error('This meta-argument needs its typed form definition before applying a literal value.'); }
 			if (isSensitiveProperty(name, definition.sensitive) && typeof value === 'string' && value !== '') { throw new Error('Use a sensitive variable for ' + fullPath + '; literal secrets are not applied from this editor.'); }
 			const valid = definition.type === 'json' ? true : definition.type === 'string' ? typeof value === 'string' : definition.type === 'number' ? typeof value === 'number' && Number.isFinite(value) : definition.type === 'bool' ? typeof value === 'boolean' : definition.type === 'list' ? Array.isArray(value) : definition.type === 'map' ? value !== null && typeof value === 'object' && !Array.isArray(value) : false;
