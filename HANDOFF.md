@@ -1,5 +1,20 @@
 # CloudForge Code OSS handoff
 
+## Studio Technical Graph Rebuild — Phase 4 Topology Patterns & Phase 5 WhyPanel Evidence — 26 November 2026
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review` (integrated atop `origin/main` `c39a66477bc` including Claude's PR #3 dedicated `TechnicalGraph.tsx`), owner Antigravity.
+- **Scope (conflict-free with Codex's active `codex/provider-editor-coverage` worktree — zero edits to `App.tsx`, `protocol.ts`, `liveSchema.ts`, `resourceValues.ts`, `CodePanel.tsx`, `ResourceFields.tsx`, `SchemaField.tsx`, `assets/*`, Rust, or installer scripts):**
+  - Added [technicalGraphPatterns.ts](extensions/cloudforge/studio/src/technicalGraphPatterns.ts) + [technicalGraphPatterns.test.ts](extensions/cloudforge/studio/src/technicalGraphPatterns.test.ts): evidence-backed Phase 4 topology pattern detection (**Azure Hub-Spoke**, **AWS VPC Network**, **AWS Organizations Landing Zone**, **Managed Kubernetes AKS/EKS/GKE**, **GCP Regional vs Global HTTP LB Chains**) with positive & negative fixtures, honest multi-region/mixed-provider/module/Kubernetes-adapter boundary summaries (`summarizeGraphBoundaries`), and Phase 5 deterministic troubleshooting findings & bounded shortest-path provenance (`snapshotTroubleshootingFindings`, `shortestSnapshotPath`).
+  - Integrated `patterns` and `boundaries` additively into [technicalGraph.ts](extensions/cloudforge/studio/src/technicalGraph.ts), and rendered detected topology patterns, clickable direct `Uses`/`Used by`/cycle peer links, deterministic evidence checks, and boundary chips cleanly inside `WhyPanel` in [TechnicalGraph.tsx](extensions/cloudforge/studio/src/TechnicalGraph.tsx) + [technical-graph.css](extensions/cloudforge/studio/src/technical-graph.css).
+  - Updated `extensions/cloudforge/studio/package.json` `"test"` and [STUDIO-CONTINUATION-2026-11-25.md](extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md).
+- **Fresh verification (26 November 2026):**
+  - Studio `check` (`tsc --noEmit`): **PASS**
+  - Studio `test`: **198/198 PASS** (0 skipped; +4 Phase 4/5 suites atop Claude's merged 194/194)
+  - Studio `build` + `node extensions/cloudforge/esbuild.webview.mts`: **PASS**
+  - `node build/oxlint.ts` + `node --experimental-strip-types build/hygiene.ts` on all pure TS/CSS/JSON targets: **PASS** (0 warnings/errors)
+  - Extension Node tests (`CLOUDFORGE_REPO=Z:/CloudForge`): **97/97 PASS** (0 skipped)
+- **Next action:** once Codex's `codex/provider-editor-coverage` lands on `main`, wire `readResourceValues` field-level provenance into `technicalGraph.ts` (promoting `source-graph` edges via `App.tsx`) and run Phase 6 Windows Edge + installed Code OSS save/refresh/Undo proof.
+
 ## Technical Graph UI passes 2–7 (Claude) — merged to main 26 November 2026 — read first
 
 Branch `claude/project-thread-2irlth` merged to `main`. The Configuration view is now a dedicated `TechnicalGraph` with Layers, Scopes, Tree (horizontal tidy tree with folds), Bundled (radial edge bundling) and Network (force graph, icons, size by connections, Spread dial, cluster hulls, Barnes–Hut above 400 nodes) layouts; lenses incl. Exposure; plan/order/impact overlays; ghost inputs; SVG/PNG export; presentation persisted in `viewState.graph` (never `nodePositions`). Cards are editable (rename, form) but never movable. Studio 194/194 tests, technical-view verify 60/60. Detail and the next steps (wire Antigravity's Phase 1–2 contract/workflow/routing modules into the UI and drop the duplicates) are in `extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md`, "Technical Graph pass 7". Run `build/oxlint.ts`, `build/hygiene.ts` and the extension Node tests on Windows before the next installer build; they could not run in the cloud container.

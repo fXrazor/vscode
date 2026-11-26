@@ -2,6 +2,31 @@
 
 ## Current handoff — read first
 
+### Technical Graph Rebuild — Phase 4 Provider Topology Patterns & Phase 5 WhyPanel Evidence Integration (26 November 2026)
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review` (fast-forwarded to `origin/main` `c39a66477bc` including Claude's PR #3 dedicated `TechnicalGraph.tsx` before adding Phase 4–5), integration owner Antigravity. Resolve the commit with `git log -1 -- extensions/cloudforge/studio/src/technicalGraphPatterns.ts`.
+- **Conflict-free scope (zero edits to `App.tsx`, `protocol.ts`, `liveSchema.ts`, `resourceValues.ts`, `CodePanel.tsx`, `ResourceFields.tsx`, `SchemaField.tsx`, `assets/*`, or any file in Codex's active `codex/provider-editor-coverage` worktree):**
+  - Added `extensions/cloudforge/studio/src/technicalGraphPatterns.ts` + `technicalGraphPatterns.test.ts` (4 comprehensive positive + negative test suites).
+  - Wired `patterns` and `boundaries` into `TechnicalGraphSnapshot` in `extensions/cloudforge/studio/src/technicalGraph.ts` (strictly additive; also fixed `id in wave` -> `Object.hasOwn(wave, id)` for root oxlint cleanliness).
+  - Wired Phase 4 topology pattern cards, clickable direct `Uses` / `Used by` peer links, clickable cycle member links, Phase 5 deterministic evidence checks, and honest mixed-provider/multi-region/Kubernetes-adapter boundary badges into `WhyPanel` in `extensions/cloudforge/studio/src/TechnicalGraph.tsx` + matching light/dark styles in `extensions/cloudforge/studio/src/technical-graph.css`.
+  - Registered `src/technicalGraphPatterns.test.ts` in `extensions/cloudforge/studio/package.json` `"test"` and updated this handoff + root `HANDOFF.md`.
+- **What Phase 4 & Phase 5 integration delivers:**
+  - **Evidence-backed topology patterns (`detectTechnicalGraphPatterns`):**
+    1. **Azure Hub-Spoke** (`azure-hub-spoke`, backed by verified `azurerm_virtual_network_peering` local + remote references).
+    2. **AWS VPC Network** (`aws-vpc-network`, `aws_vpc` + evidenced `aws_subnet` + linked `aws_internet_gateway` / `aws_nat_gateway` / `aws_route_table`).
+    3. **AWS Organizations Landing Zone** (`aws-landing-zone`, requires `aws_organizations_organization` + `aws_organizations_account` + linked governance resources — VPCs named `"landing-zone"` never match).
+    4. **Managed Kubernetes (AKS / EKS / GKE)** (`managed-kubernetes`, requires evidenced network/node-group/identity/monitoring links; explicitly states that in-cluster Pods/Services/NetworkPolicies require an explicit Kubernetes adapter).
+    5. **GCP Regional vs Global HTTP LB Chains** (`gcp-load-balancer-chain`, strictly separates regional vs global forwarding-rule → proxy → url-map → backend-service hops; cross-scope links never match).
+  - **Honest architectural boundaries (`summarizeGraphBoundaries`):** reports `providers` / `mixedProviders`, `knownRegions` / `multiRegion` (ignoring `'Unknown'` regions so missing regions never fake multi-region), `moduleCallIds`, and `kubernetesAdapterStatus: 'none' | 'manifest-adapter-required'`.
+  - **Deterministic snapshot troubleshooting & shortest path (`snapshotTroubleshootingFindings`, `shortestSnapshotPath`):** surfaces ordering cycles, missing documented structural parents/attachments, and Kubernetes manifest adapter notices directly over `TechnicalGraphSnapshot`, plus bounded BFS shortest path with per-hop field provenance.
+- **Fresh verification (26 November 2026):**
+  - `corepack pnpm --dir extensions/cloudforge/studio run check` (`tsc --noEmit`): **PASS**
+  - `corepack pnpm --dir extensions/cloudforge/studio run test`: **198/198 PASS** (0 skipped; +4 Phase 4/5 positive+negative suites atop merged 194/194)
+  - `corepack pnpm --dir extensions/cloudforge/studio run build` & `node extensions/cloudforge/esbuild.webview.mts`: **PASS**
+  - `node build/oxlint.ts` & `node --experimental-strip-types build/hygiene.ts` on `technicalGraphPatterns.ts`, `technicalGraphPatterns.test.ts`, `technicalGraph.ts`, `technical-graph.css`, `package.json`: **PASS** (0 warnings/errors)
+  - Extension Node tests (`CLOUDFORGE_REPO=Z:/CloudForge`): **97/97 PASS** (0 skipped)
+- **Exact next action:** once Codex's `codex/provider-editor-coverage` worktree merges to `main`, finish remaining Phase 5/6 items: promote `source-graph` edges in `technicalGraph.ts` with `readResourceValues` field expressions (via `App.tsx` once Codex lands), deduplicate the Phase 1–2 standalone workflow helpers against `technicalGraph.ts`, and run the Windows Edge `technical-view-verify.mjs` + installed Code OSS Phase 6 save/refresh/Undo proof.
+
 ### Technical Graph Rebuild — Phase 2 background workflow, tracing & routing engine (26 November 2026)
 
 - **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review` (pushed to `origin/main` atop Phase 1 `e5fc572a702`), integration owner Antigravity. Resolve the commit with `git log -1 -- extensions/cloudforge/studio/src/technicalGraphWorkflows.ts`.

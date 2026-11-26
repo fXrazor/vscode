@@ -1,3 +1,8 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
 /* Technical Graph: calm engineering graph. Category colour is restrained; detail on demand. */
 .studio {
 	--tg-edge-ownership: #8a91a6;
@@ -153,7 +158,14 @@
 .tg-why-actions button:hover, .tg-why-actions button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
 .tg-why-issues { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 5px; }
 .tg-why-issues li { display: flex; gap: 6px; align-items: flex-start; line-height: 1.4; }
-.tg-issue-error svg { color: var(--danger); flex: none; margin-top: 2px; } .tg-issue-warning svg { color: var(--warning); flex: none; margin-top: 2px; }
+.tg-issue-error svg { color: var(--danger); flex: none; margin-top: 2px; } .tg-issue-warning svg { color: var(--warning); flex: none; margin-top: 2px; } .tg-issue-info svg { color: var(--accent); flex: none; margin-top: 2px; }
+.tg-why-peers { color: var(--muted); font-size: 11px; }
+.tg-why-patterns { display: grid; gap: 6px; margin: 8px 0 4px; }
+.tg-why-pattern { padding: 7px 9px; border-radius: 8px; border: 1px solid var(--border); background: color-mix(in srgb, var(--accent) 5%, var(--input)); }
+.tg-why-pattern-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 3px; }
+.tg-why-pattern p { margin: 2px 0; line-height: 1.4; }
+.tg-why-pattern-peers { display: flex; flex-wrap: wrap; gap: 2px 6px; }
+.tg-why-boundaries { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0 4px; }
 .tg-banner-info { color: var(--text); background: color-mix(in srgb, var(--accent) 8%, var(--surface)); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
 .tg-banner + .tg-banner { top: 96px; }
 
