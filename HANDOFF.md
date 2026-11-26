@@ -4,6 +4,16 @@
 
 Source **`c7d595cd7c771d418a07d9199e71fbd45e4c02e4`**, branch `codex/provider-import-navigation`, worktree `C:/Users/dalep/.codex/worktrees/guided-variable-values/CloudForge-Code`, base merged main `e58ba69c4dd`. Completes the existing manager's guided import with standard Back buttons, retained unaccepted edits, restored platform selection, explicit 5/5 review and clean cancellation. All **130/130 extension tests**, TypeScript, bundle build and strict targeted lint passed; **13/13 installed Workbench navigation checks** passed using the isolated development extension. No Studio source, Providers view, extension wiring, broker or Rust edits. Prior guided-variable checkpoint is preserved on its own branch. [Exact ownership, provenance, screenshots, reproduction, limits and next action](docs/cloudforge/provider-import-navigation.md). Local and unmerged; actual archive selection/import was not executed. Integrate only when requested, then coordinate reuse in the separate direct Providers import command.
 
+## Miro-style Alt+Drag clone & compact 1024px selection toolbar fix — 26 November 2026
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `e58ba69c4dd`, owner Antigravity. Zero overlap with unmerged Claude branches (`2dm0k0`, `ksv8z9`) or Rust.
+- **Scope:**
+  - Extended `duplicate` in [canvasOperations.ts](extensions/cloudforge/studio/src/canvasOperations.ts) and `remapEndpoint()` in [connectionEndpoints.ts](extensions/cloudforge/studio/src/connectionEndpoints.ts) with independent `(offset, offsetY)` deltas so cloned elements, loose endpoints, and bent waypoints land at the exact drag drop point.
+  - Added **Alt+Drag clone** in [DesignCanvas.tsx](extensions/cloudforge/studio/src/DesignCanvas.tsx): holding `Alt` while dragging any unlocked element or multi-selection clones it cleanly at the drop location while keeping originals untouched in place, generating unique Terraform identifiers and recording 1 atomic Undo/Redo step.
+  - Fixed a `1024×768` floating selection-toolbar overlap regression in [styles.css](extensions/cloudforge/studio/src/styles.css) by tightening `.selection-anchor .selection-controls` button/caption padding so the toolbar stays compact without obscuring nearby elements.
+  - Added unit coverage in [model.test.ts](extensions/cloudforge/studio/src/model.test.ts).
+- **Fresh verification (26 November 2026):** Studio `tsc --noEmit` **PASS**, **232/232** Studio unit tests PASS (0 skipped), Studio `build` + `esbuild.webview.mts` **PASS**, `oxlint` & `hygiene` **PASS**, and real Windows Edge (`--channel=msedge`): `whiteboard-controls-verify.mjs` **20/20 PASS** + `Alt+Drag` clone & 1-step Undo **PASS** (0 browser errors).
+
 ## Draggable connector bend waypoints & packaged CloudForge upgrade (`48d529c9557`) — 26 November 2026
 
 - **Packaged & installed Windows upgrade (`48d529c9557`):**

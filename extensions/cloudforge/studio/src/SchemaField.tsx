@@ -33,10 +33,12 @@ export function SchemaField({ name, value, definition, onChange, onUnset, variab
 	onUnset?: () => void; list?: FieldList;
 }) {
 	const id = useId(); const reference = inheritance?.reference;
-	const mixed = list?.binding?.items?.length ? list.binding.items : undefined;
-	const refBinding = !mixed && resourceReference?.binding?.refs.length ? resourceReference.binding : undefined;
 	const shape = definition?.literalShape;
 	const scalarList = !!list && definition?.type === 'list' && (!shape || (shape.kind === 'list' || shape.kind === 'set') && (shape.element?.kind === 'string' || shape.element?.kind === 'number'));
+	// A list field that already holds references (several NICs on a VM) opens in the entry editor too, so values and variables can join them.
+	const listRefs = scalarList && !list?.binding?.items?.length && list?.binding?.refs.length ? list.binding.refs.map(entry => ({ kind: 'ref' as const, resourceId: entry.resourceId, attribute: entry.attribute })) : undefined;
+	const mixed = list?.binding?.items?.length ? list.binding.items : listRefs;
+	const refBinding = !mixed && resourceReference?.binding?.refs.length ? resourceReference.binding : undefined;
 	const literalEntries = (() => { if (!scalarList) { return undefined; } if (!value.trim()) { return []; } try { const parsed = JSON.parse(value); return Array.isArray(parsed) && parsed.every(item => typeof item === 'string' || typeof item === 'number') ? parsed.map(item => ({ kind: 'value' as const, value: String(item) })) : undefined; } catch { return undefined; } })();
 	const entries = mixed ?? literalEntries;
 	const canReference = !!resourceReference && !!definition?.refTypes?.length && !isSensitiveProperty(name, definition.sensitive);

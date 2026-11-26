@@ -778,3 +778,31 @@ test('list fields mix typed values, variables and resource references entry by e
 	history = historyReducer(history, { type: 'undo' });
 	assert.equal(history.present.resources.find(resource => resource.id === 'vm')!.resourceRefs?.[bindingKey(target)]?.items?.length, 3);
 });
+
+test('duplicate supports independent X/Y drag deltas (Alt+Drag clone) across items, resources, waypoints, and 1-step Undo', () => {
+	const note: BoardItem = { id: 'n1', kind: 'note', text: 'Original', width: 160, height: 100, positions: { visual: { x: 100, y: 200 }, technical: { x: 100, y: 200 } }, members: [] };
+	const arch: Architecture = {
+		name: 'AltDrag',
+		resources: [],
+		items: [note],
+		connections: [{ id: 'c1', source: elementEndpoint('n1'), target: { kind: 'point', position: { x: 350, y: 250 } }, waypoint: { x: 240, y: 180 } }],
+	};
+	const fragment = selectionFragment(arch, ['n1'], ['c1']);
+	let history = historyReducer(createHistory(arch), {
+		type: 'canvas',
+		command: { kind: 'duplicate', fragment, idMap: { n1: 'n2', c1: 'c2' }, offset: 180, offsetY: -60 },
+	});
+	assert.equal(history.past.length, 1);
+	assert.equal(history.present.items.length, 2);
+	assert.deepEqual(history.present.items.find(i => i.id === 'n1')?.positions.visual, { x: 100, y: 200 }, 'original stays untouched');
+	assert.deepEqual(history.present.items.find(i => i.id === 'n2')?.positions.visual, { x: 280, y: 140 }, 'clone lands at exact (dx, dy)');
+	const clonedLink = history.present.connections.find(c => c.id === 'c2')!;
+	assert.deepEqual(clonedLink.target, { kind: 'point', position: { x: 530, y: 190 } });
+	assert.deepEqual(clonedLink.waypoint, { x: 420, y: 120 });
+	// Invalid NaN offsetY consumes zero history
+	assert.equal(historyReducer(history, { type: 'canvas', command: { kind: 'duplicate', fragment, idMap: { n1: 'n3', c1: 'c3' }, offset: 10, offsetY: Number.NaN } }), history);
+	// 1-step Undo removes clone cleanly
+	history = historyReducer(history, { type: 'undo' });
+	assert.equal(history.present.items.length, 1);
+	assert.equal(history.present.connections.length, 1);
+});
