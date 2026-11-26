@@ -2,7 +2,7 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-import { ArrowDownToLine, ArrowUpToLine, BoxSelect, BringToFront, ChevronRight, ClipboardPaste, Copy, CopyPlus, Focus, Group, Layers, LayoutGrid, Lock, LockKeyhole, LockOpen, Paintbrush, SendToBack, Sparkles, Trash2, Ungroup, X, type LucideIcon } from 'lucide-react';
+import { ArrowDownToLine, ArrowUpToLine, BoxSelect, BringToFront, ChevronRight, ClipboardPaste, Copy, CopyPlus, Focus, Frame, Group, Layers, LayoutGrid, Lock, LockKeyhole, LockOpen, Maximize2, Paintbrush, SendToBack, Sparkles, Trash2, Ungroup, X, type LucideIcon } from 'lucide-react';
 import * as ContextMenu from '@radix-ui/react-context-menu';
 import { Fragment, type Dispatch, type ReactNode } from 'react';
 import type { Action, Architecture } from './model.ts';
@@ -16,7 +16,7 @@ import { isResourceContainer } from './resourceHierarchy.ts';
 import type { DesignMode } from './model.ts';
 import { selectionUnits } from './selectionGeometry.ts';
 
-export type SelectionAction = 'copy' | 'paste' | 'duplicate' | 'copyStyle' | 'pasteStyle' | 'selectSimilar' | 'delete' | 'lock' | 'unlock' | 'group' | 'ungroup' | 'front' | 'forward' | 'backward' | 'back' | 'fit' | 'edit' | 'selectAll' | 'clear' | `align-${string}` | `size-${string}`;
+export type SelectionAction = 'copy' | 'paste' | 'duplicate' | 'copyStyle' | 'pasteStyle' | 'selectSimilar' | 'frameSelection' | 'fitFrame' | 'delete' | 'lock' | 'unlock' | 'group' | 'ungroup' | 'front' | 'forward' | 'backward' | 'back' | 'fit' | 'edit' | 'selectAll' | 'clear' | `align-${string}` | `size-${string}`;
 type MenuSection = 'edit' | 'clipboard' | 'structure' | 'arrange' | 'view' | 'danger';
 export type SelectionMenuAction = { id: SelectionAction; label: string; enabled: boolean; shortcut?: string; section: MenuSection; icon: LucideIcon };
 export function selectionActions(architecture: Architecture, ids: string[], hasClipboard: boolean, hasStyleClipboard = false): SelectionMenuAction[] {
@@ -24,6 +24,8 @@ export function selectionActions(architecture: Architecture, ids: string[], hasC
 	const drawings = architecture.items.filter(item => ids.includes(item.id));
 	const editableDrawings = drawings.some(item => !item.canvasLocked);
 	const grouped = architecture.groups?.some(group => group.members.some(id => ids.includes(id)));
+	const canWrapFrame = selected.some(item => !item.canvasLocked && !architecture.items.some(frame => frame.id === item.id && frame.kind === 'frame'));
+	const singleFrame = selected.length === 1 && architecture.items.some(item => item.id === ids[0] && item.kind === 'frame' && !item.canvasLocked);
 	const canLayer = selected.some(item => !item.canvasLocked && !architecture.items.some(frame => frame.id === item.id && frame.kind === 'frame') && !architecture.resources.some(resource=>resource.id===item.id&&isResourceContainer(resource)));
 	const locked = selected.some(item => item.canvasLocked);
 	const units = selectionUnits(architecture, ids).length;
@@ -36,6 +38,8 @@ export function selectionActions(architecture: Architecture, ids: string[], hasC
 		{ id: 'pasteStyle', label: 'Paste style', enabled: hasStyleClipboard && editableDrawings, shortcut: 'Ctrl+Alt+V', section: 'clipboard', icon: Paintbrush },
 		{ id: 'group', label: 'Group', enabled: selected.length > 1 && selected.every(item => !item.canvasLocked), shortcut: 'Ctrl+G', section: 'structure', icon: Group },
 		{ id: 'ungroup', label: 'Ungroup', enabled: !!grouped && editable, shortcut: 'Ctrl+Shift+G', section: 'structure', icon: Ungroup },
+		{ id: 'frameSelection', label: 'Wrap in frame', enabled: canWrapFrame, shortcut: 'Ctrl+Alt+F', section: 'structure', icon: Frame },
+		...(singleFrame ? [{ id: 'fitFrame' as const, label: 'Fit frame to contents', enabled: true, section: 'structure' as const, icon: Maximize2 }] : []),
 		{ id: locked ? 'unlock' : 'lock', label: locked ? 'Unlock' : 'Lock', enabled: !!selected.length, shortcut: 'Ctrl+L', section: 'structure', icon: locked ? LockOpen : Lock },
 		{ id: 'align-tidy', label: 'Tidy up spacing', enabled: units > 1 && editable, section: 'arrange', icon: LayoutGrid },
 		{ id: 'front', label: 'Bring to front', enabled: canLayer, section: 'arrange', icon: BringToFront }, { id: 'forward', label: 'Bring forward', enabled: canLayer, section: 'arrange', icon: ArrowUpToLine },

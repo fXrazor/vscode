@@ -1,5 +1,11 @@
 # Studio continuation checkpoint — 25 November 2026
 
+## Miro Wrap in Frame, Fit Frame, Sticky-Note Tab Clustering, Frame Toolbar Fix & Bundled SVG Export — 26 November 2026
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `4ad76453b2b`, owner Antigravity.
+- **Scope:** added `frameSelection` (`Ctrl+Alt+F` / **Wrap in frame**) and `fitFrame` (**Fit frame to contents**) commands (`src/canvasOperations.ts`, `src/SelectionControls.tsx`, `src/DesignCanvas.tsx`), fixed React Flow `<NodeToolbar>` z-index on selected frames (`src/SelectionAnchor.tsx`), added Miro `Tab`/`Shift+Tab` rapid sticky-note spawning (`src/DesignCanvas.tsx`), and added `bundledGraphSvg()` (`src/technicalGraphExport.ts`, `src/TechnicalGraph.tsx`) so all five Technical Graph layouts export their true view with colour-preserving Scope Spotlight. Covered in `src/model.test.ts` and `src/technicalGraph.test.ts`.
+- **Fresh checks:** Studio `tsc --noEmit` **PASS**, **237/237** Studio tests (0 skipped), Studio `build` + `esbuild.webview.mts` **PASS**, `oxlint` & `hygiene` **PASS**, real Windows Edge live check of `Tab`/`Shift+Tab`, `Wrap in frame`, `Fit frame to contents`, 1-step Undo, and Bundled Spotlight SVG export **PASS** (0 browser errors).
+
 ## Miro smart spacing handles, Tidy Up, Copy/Paste Style, Smart Duplicate, Select Similar & Network View SVG Export — 26 November 2026
 
 - **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `0973f8940d3`, owner Antigravity.

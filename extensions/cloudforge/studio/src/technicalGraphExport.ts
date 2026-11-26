@@ -9,6 +9,7 @@
  */
 import { layerLabels, type GraphEdge, type GraphInput, type GraphNode, type NodeOverlay, type TechnicalGraphSnapshot } from './technicalGraph.ts';
 import { inputSize, type GraphLane, type GraphLayoutResult } from './technicalGraphLayout.ts';
+import { bundleLayout } from './technicalGraphBundle.ts';
 import { forceSettings, hullPath, type ForceNode, type NetworkOptions } from './technicalGraphForce.ts';
 import type { Position } from './model.ts';
 
@@ -178,6 +179,57 @@ export function networkGraphSvg({ snapshot, simNodes, edges, membership, network
 
 	const legend = usedCategories.map((category, index) => `<g transform="translate(${minX + 20 + index * 120} ${minY + 48})"><line x1="0" y1="-4" x2="22" y2="-4" stroke="${edgeColours[category]?.[theme] ?? colours.muted}" stroke-width="2"/><text x="28" y="0" font-size="11" fill="${colours.muted}">${escape(category)}</text></g>`).join('');
 	return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="${minX} ${minY} ${width} ${height}" font-family="Segoe UI, Mona Sans, sans-serif"><defs>${markers}</defs><rect x="${minX}" y="${minY}" width="${width}" height="${height}" fill="${colours.canvas}"/><text x="${minX + 20}" y="${minY + 26}" font-size="15" font-weight="700" fill="${colours.text}">${escape(title)}</text>${legend}${hulls}${membershipMarkup}${edgeMarkup}${nodeMarkup}</svg>`;
+}
+
+export interface BundledGraphSvgInput {
+	snapshot: TechnicalGraphSnapshot;
+	edges: readonly GraphEdge[];
+	visible?: ReadonlySet<string>;
+	theme: 'light' | 'dark';
+	title: string;
+	spotlight?: ReadonlySet<string>;
+}
+
+/** Portable SVG of the radial Bundled relationship view, with colour-preserving Scope Spotlight dimming. */
+export function bundledGraphSvg({ snapshot, edges, visible, theme, title, spotlight }: BundledGraphSvgInput): string {
+	const colours = palette[theme];
+	const bundle = bundleLayout(snapshot, edges, { visible });
+	if (!bundle.leaves.length) { return `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="120"><text x="20" y="60">${escape(title)}: nothing to show</text></svg>`; }
+	const margin = 195;
+	const half = bundle.radius + margin;
+	const minX = -half;
+	const minY = -half - 44;
+	const width = Math.ceil(half * 2);
+	const height = Math.ceil(half * 2 + 44);
+	const arc = (start: number, end: number, r: number) => {
+		const a = start - 0.02; const b = end + 0.02;
+		const [x0, y0] = [Math.cos(a - Math.PI / 2) * r, Math.sin(a - Math.PI / 2) * r];
+		const [x1, y1] = [Math.cos(b - Math.PI / 2) * r, Math.sin(b - Math.PI / 2) * r];
+		return `M ${x0.toFixed(1)} ${y0.toFixed(1)} A ${r} ${r} 0 ${b - a > Math.PI ? 1 : 0} 1 ${x1.toFixed(1)} ${y1.toFixed(1)}`;
+	};
+	const usedCategories = [...new Set(bundle.paths.map(path => path.category))];
+	const groupsMarkup = bundle.groups.map(group => {
+		const stripe = layerColours[group.layer] ?? colours.muted;
+		const mid = (group.start + group.end) / 2;
+		const angle = mid - Math.PI / 2;
+		const lx = Math.cos(angle) * (bundle.radius + 168);
+		const ly = Math.sin(angle) * (bundle.radius + 168);
+		return `<g><path d="${arc(group.start, group.end, bundle.radius + 150)}" fill="none" stroke="${stripe}" stroke-width="6" stroke-linecap="round" opacity="0.55"/><text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="middle" dominant-baseline="central" font-size="11.5" font-weight="700" letter-spacing=".06em" fill="${colours.muted}">${escape(group.label.toUpperCase())}</text></g>`;
+	}).join('');
+	const pathsMarkup = bundle.paths.map(path => {
+		const colour = edgeColours[path.category]?.[theme] ?? colours.muted;
+		const outside = spotlight && !(spotlight.has(path.source) && spotlight.has(path.target)) ? ' opacity="0.08"' : ' opacity="0.52"';
+		return `<path d="${path.d}" fill="none" stroke="${colour}" stroke-width="1.4"${outside}/>`;
+	}).join('');
+	const leavesMarkup = bundle.leaves.map(leaf => {
+		const degrees = (leaf.angle * 180 / Math.PI - 90).toFixed(2);
+		const flip = leaf.angle > Math.PI;
+		const stripe = layerColours[leaf.layer] ?? colours.muted;
+		const outside = spotlight && !spotlight.has(leaf.id) ? ' opacity="0.22"' : '';
+		return `<g data-id="${escape(leaf.id)}" transform="rotate(${degrees}) translate(${bundle.radius + 8},0)${flip ? ' rotate(180)' : ''}"${outside}><circle cx="${flip ? 4 : -4}" r="3.5" fill="${stripe}"/><text x="${flip ? -6 : 6}" dy="0.32em" text-anchor="${flip ? 'end' : 'start'}" font-size="12.5" fill="${colours.text}">${escape(truncate(leaf.label, 26))}</text></g>`;
+	}).join('');
+	const legend = usedCategories.map((category, index) => `<g transform="translate(${minX + 20 + index * 120} ${minY + 48})"><line x1="0" y1="-4" x2="22" y2="-4" stroke="${edgeColours[category]?.[theme] ?? colours.muted}" stroke-width="2"/><text x="28" y="0" font-size="11" fill="${colours.muted}">${escape(category)}</text></g>`).join('');
+	return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="${minX} ${minY} ${width} ${height}" font-family="Segoe UI, Mona Sans, sans-serif"><rect x="${minX}" y="${minY}" width="${width}" height="${height}" fill="${colours.canvas}"/><text x="${minX + 20}" y="${minY + 26}" font-size="15" font-weight="700" fill="${colours.text}">${escape(title)}</text>${legend}${groupsMarkup}${pathsMarkup}${leavesMarkup}</svg>`;
 }
 
 /** Fetch each visible card icon once and inline it as a data URL. */

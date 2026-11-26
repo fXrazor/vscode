@@ -24,7 +24,7 @@ import { applyWaves, graphLenses, graphOverlays, layerLabels, lensEdges, matches
 import { inputSize, layoutTechnicalGraph, placeInputs, treeConnector, treeLinkPath, treeParents, visiblePortCount, type GraphLane } from './technicalGraphLayout.ts';
 import { graphEditAllowed, type GraphPresentation, type GraphPresentationAction, type RouteStyle } from './graphPresentation.ts';
 import { relationshipNames } from './infrastructureRelationships.ts';
-import { graphIcons, networkGraphSvg, technicalGraphSvg } from './technicalGraphExport.ts';
+import { bundledGraphSvg, graphIcons, networkGraphSvg, technicalGraphSvg } from './technicalGraphExport.ts';
 import { bundleLayout } from './technicalGraphBundle.ts';
 import { createForceSimulation, forceSettings, hullPath, nodeRadii, orientForce, settleForce, tickForce, type ForceNode, type ForceSimulation, type NetworkOptions } from './technicalGraphForce.ts';
 import { shortestSnapshotPath, snapshotTroubleshootingFindings } from './technicalGraphPatterns.ts';
@@ -397,6 +397,11 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, fileV
 			if (presentation.layout === 'force' && forceNodesRef.current.length > 0) {
 				const visibleNodes = snapshot.nodes.filter(node => !focusSet || focusSet.has(node.id));
 				const svg = networkGraphSvg({ snapshot, simNodes: forceNodesRef.current, edges: visibleEdges, membership: membershipEdges, network: presentation.network, theme, title: architecture.name + ' · Network graph · ' + lensName, overlays, icons: await graphIcons(visibleNodes), spotlight });
+				onExportImage(svg, format);
+				return;
+			}
+			if (presentation.layout === 'bundled') {
+				const svg = bundledGraphSvg({ snapshot, edges: visibleEdges, visible: focusSet, theme, title: architecture.name + ' · Bundled graph · ' + lensName, spotlight });
 				onExportImage(svg, format);
 				return;
 			}

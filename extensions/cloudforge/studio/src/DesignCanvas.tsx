@@ -284,6 +284,14 @@ export const DesignCanvas = memo(function DesignCanvas({
 		else if (action === 'lock' || action === 'unlock') { dispatch({ type: 'canvas', command: { kind: 'lock', ids, locked: action === 'lock' } }); }
 		else if (action === 'group') { dispatch({ type: 'canvas', command: { kind: 'group', ids, id: crypto.randomUUID() } }); }
 		else if (action === 'ungroup') { dispatch({ type: 'canvas', command: { kind: 'ungroup', ids } }); }
+		else if (action === 'frameSelection') {
+			const frameId = crypto.randomUUID();
+			dispatch({ type: 'canvas', command: { kind: 'frameSelection', ids, id: frameId, mode, sizes: nodeSizes() } });
+			onSelectionChange([frameId]);
+		}
+		else if (action === 'fitFrame') {
+			if (ids.length === 1) { dispatch({ type: 'canvas', command: { kind: 'fitFrame', id: ids[0], mode, sizes: nodeSizes() } }); }
+		}
 		else if (action === 'front' || action === 'forward' || action === 'backward' || action === 'back') { dispatch({ type: 'canvas', command: { kind: 'arrange', ids, direction: action } }); }
 		else if (action === 'fit') { if (selectedConnectionId) { fitConnectionsAndNodes(selectedConnectionId); } else if (ids.length) { void flow?.fitView({ nodes: ids.map(id => ({ id })), padding: 0.25, maxZoom: 2 }); } }
 		else if (action === 'edit') {
@@ -390,7 +398,19 @@ export const DesignCanvas = memo(function DesignCanvas({
 		if (mod) {
 			if (key === 'a') { action = 'selectAll'; } else if (key === 'c') { action = event.altKey ? 'copyStyle' : 'copy'; } else if (key === 'v') { action = event.altKey ? 'pasteStyle' : 'paste'; }
 			else if (key === 'd') { action = 'duplicate'; } else if (key === 'g') { action = event.shiftKey ? 'ungroup' : 'group'; }
+			else if (key === 'f' && event.altKey) { action = 'frameSelection'; }
 			else if (key === 'l') { action = canvasElements(architecture).some(item => selectedIds.includes(item.id) && item.canvasLocked) ? 'unlock' : 'lock'; }
+		} else if (key === 'tab' && mode === 'visual' && selectedIds.length === 1) {
+			const note = architecture.items.find(item => item.id === selectedIds[0] && item.kind === 'note' && !item.canvasLocked);
+			if (note) {
+				// Miro rapid sticky-note cluster authoring: Tab adds a matching note to the right, Shift+Tab below.
+				event.preventDefault(); event.stopPropagation();
+				const nextId = crypto.randomUUID();
+				const pos = event.shiftKey ? { x: note.positions[mode].x, y: note.positions[mode].y + note.height + 24 } : { x: note.positions[mode].x + note.width + 24, y: note.positions[mode].y };
+				dispatch({ type: 'addItem', item: { ...note, id: nextId, text: '', positions: { visual: pos, technical: pos }, members: [], canvasLocked: false } });
+				onSelectionChange([nextId]);
+				return;
+			}
 		} else if (key === 'delete' || key === 'backspace') { action = 'delete'; }
 		else if (key === 'enter') { action = 'edit'; } else if (key === 'f') { action = 'fit'; }
 		else if (key === 'escape') { action = 'clear'; }
@@ -533,7 +553,7 @@ export const DesignCanvas = memo(function DesignCanvas({
 				<label><input type="checkbox" checked={allDependencies} onChange={event=>setAllDependencies(event.target.checked)}/>All inherited dependencies</label>
 				<label><input type="checkbox" checked={showLabels} onChange={event => setShowLabels(event.target.checked)} />Show automatic and dependency labels</label>
 				<button aria-pressed={minimap} onClick={() => setMinimap(value => !value)}>Minimap</button>
-				<details className="canvas-shortcuts"><summary>Keyboard shortcuts</summary><p>Ctrl / Cmd + click: extend selection<br/>Shift + drag: select an area; Alt + drag: clone<br/>Ctrl / Cmd + D: duplicate (repeats last move)<br/>Ctrl / Cmd + Alt + C / V: copy / paste style<br/>Arrows: move 1 px; Shift + arrows: 10 px<br/>Enter: edit; Escape: clear selection<br/>V: select; H: pan; P: pen; T: text; N: note<br/>[ and ]: rotate drawings 15° (Shift: 1°)<br/>F: focus selection; Space + drag: pan<br/>Alt + F10: move to the selection toolbar; Escape: back to the canvas<br/>Copy, duplicate, group and layer actions are in the selection menu.</p></details>
+				<details className="canvas-shortcuts"><summary>Keyboard shortcuts</summary><p>Ctrl / Cmd + click: extend selection<br/>Shift + drag: select an area; Alt + drag: clone<br/>Ctrl / Cmd + D: duplicate (repeats last move)<br/>Ctrl / Cmd + Alt + C / V: copy / paste style<br/>Ctrl / Cmd + Alt + F: wrap selection in frame<br/>Tab / Shift + Tab on sticky note: spawn adjacent note<br/>Arrows: move 1 px; Shift + arrows: 10 px<br/>Enter: edit; Escape: clear selection<br/>V: select; H: pan; P: pen; T: text; N: note<br/>[ and ]: rotate drawings 15° (Shift: 1°)<br/>F: focus selection; Space + drag: pan<br/>Alt + F10: move to the selection toolbar; Escape: back to the canvas<br/>Copy, duplicate, group and layer actions are in the selection menu.</p></details>
 			</div></details>
 			{dropFeedback&&<div className={'container-drop-status '+(dropFeedback.ok?'valid':'invalid')} role="status">{dropFeedback.reason}</div>}
 			<div className="canvas-navigation" role="group" aria-label="Zoom and navigation">

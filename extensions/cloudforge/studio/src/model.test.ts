@@ -857,3 +857,32 @@ test('Miro tidy-up, interactive uniform spacing, and horizontal/vertical flip ar
 	assert.equal(flippedV.g1.y, tidiedGridArch.items.find(i => i.id === 'g3')!.positions.visual.y);
 	assert.equal(flippedV.g3.y, tidiedGridArch.items.find(i => i.id === 'g1')!.positions.visual.y);
 });
+
+test('Miro Wrap in Frame and Fit Frame to Contents create/resize frames atomically with 1-step Undo', () => {
+	const mkNote = (id: string, x: number, y: number): BoardItem => ({
+		id, kind: 'note', text: id, width: 140, height: 90, positions: { visual: { x, y }, technical: { x, y } }, members: [],
+	});
+	const base: Architecture = { name: 'FrameWrap', resources: [], items: [mkNote('a', 100, 120), mkNote('b', 320, 200)], connections: [] };
+	let history = historyReducer(createHistory(base), {
+		type: 'canvas',
+		command: { kind: 'frameSelection', ids: ['a', 'b'], id: 'f1', mode: 'visual' },
+	});
+	assert.equal(history.past.length, 1);
+	const frame = history.present.items.find(item => item.id === 'f1')!;
+	assert.equal(frame.kind, 'frame');
+	assert.deepEqual(frame.members.sort(), ['a', 'b']);
+	assert.deepEqual(frame.positions.visual, { x: 64, y: 80 });
+	assert.equal(frame.width, 432);
+	assert.equal(frame.height, 246);
+
+	// Move a member outward and call fitFrame -> frame expands tightly in 1 atomic Undo step
+	history = historyReducer(history, { type: 'canvas', command: { kind: 'move', mode: 'visual', positions: { b: { x: 500, y: 200 } } } });
+	history = historyReducer(history, { type: 'canvas', command: { kind: 'fitFrame', id: 'f1', mode: 'visual' } });
+	const fitted = history.present.items.find(item => item.id === 'f1')!;
+	assert.equal(fitted.width, 612);
+	// Calling fitFrame again when already fitted consumes zero history
+	assert.equal(historyReducer(history, { type: 'canvas', command: { kind: 'fitFrame', id: 'f1', mode: 'visual' } }), history);
+	// Undo reverts fitFrame cleanly
+	history = historyReducer(history, { type: 'undo' });
+	assert.equal(history.present.items.find(item => item.id === 'f1')!.width, 432);
+});

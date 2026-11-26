@@ -1,5 +1,20 @@
 # CloudForge Code OSS handoff
 
+## Miro Wrap in Frame, Fit Frame to Contents, Sticky-Note Tab Clustering, Frame Toolbar Z-Index Fix & Bundled View SVG Export — 26 November 2026
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `4ad76453b2b`, owner Antigravity. Zero overlap with unmerged Claude branches (`2dm0k0`, `ksv8z9`) or Rust.
+- **Scope:**
+  - **Miro Wrap in Frame & Fit Frame to Contents** ([canvasOperations.ts](extensions/cloudforge/studio/src/canvasOperations.ts), [SelectionControls.tsx](extensions/cloudforge/studio/src/SelectionControls.tsx), [DesignCanvas.tsx](extensions/cloudforge/studio/src/DesignCanvas.tsx)):
+    - Added `frameSelection` (`Ctrl+Alt+F` / **Wrap in frame**) wrapping any selected unlocked elements in a padded frame behind them with `members` bound in **1 atomic Undo/Redo step**.
+    - Added `fitFrame` (**Fit frame to contents** on selected unlocked frames) tightening a frame around its members (or visually enclosed elements if empty) in **1 atomic Undo/Redo step** (0 history steps if already fitted).
+    - Fixed a React Flow `<NodeToolbar>` z-index bug in [SelectionAnchor.tsx](extensions/cloudforge/studio/src/SelectionAnchor.tsx) (`style={{ zIndex: 30 }}`) where selecting a frame (`zIndex = -100`) pushed its floating toolbar behind `.react-flow__pane` so buttons could not be clicked.
+  - **Miro Rapid Sticky-Note Cluster Authoring (`Tab` / `Shift+Tab`)** ([DesignCanvas.tsx](extensions/cloudforge/studio/src/DesignCanvas.tsx)):
+    - Pressing `Tab` on a selected sticky note spawns a matching sticky note `+24px` to the right; `Shift+Tab` spawns one `+24px` below (**1 atomic Undo step**).
+  - **Bundled View Portable SVG/PNG Export** ([technicalGraphExport.ts](extensions/cloudforge/studio/src/technicalGraphExport.ts), [TechnicalGraph.tsx](extensions/cloudforge/studio/src/TechnicalGraph.tsx)):
+    - Added `bundledGraphSvg()` so **Save image → SVG / PNG** in **Bundled** view exports the actual radial hierarchical edge-bundling diagram with colour-preserving Scope Spotlight dimming (`opacity="0.22"` on outside leaves, `opacity="0.08"` on outside curves; zero grayscale). All five Technical Graph layouts now export their true view.
+  - **Tests:** added unit coverage in [model.test.ts](extensions/cloudforge/studio/src/model.test.ts) and [technicalGraph.test.ts](extensions/cloudforge/studio/src/technicalGraph.test.ts).
+- **Fresh verification (26 November 2026):** Studio `tsc --noEmit` **PASS**, **237/237** Studio unit tests PASS (0 skipped), Studio `build` + `esbuild.webview.mts` **PASS**, `oxlint` & `hygiene` **PASS** (0 errors/warnings), and real Windows Edge (`--channel=msedge`): live `Tab` / `Shift+Tab` sticky-note clustering, `Select similar` → `Ctrl+Alt+F` Wrap in frame, clicking `More` on the selected frame (`Fit frame to contents` visible, proving toolbar z-index fix), 1-step Undo, and Bundled View Spotlight SVG export (`18.2 KB`) **PASS** (0 browser errors).
+
 ## Miro smart spacing handles, Tidy Up, Copy/Paste Style, Smart Duplicate, Select Similar & Network View SVG Export — 26 November 2026
 
 - **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `0973f8940d3`, owner Antigravity. Zero overlap with unmerged Claude branches (`2dm0k0`, `ksv8z9`) or Rust.

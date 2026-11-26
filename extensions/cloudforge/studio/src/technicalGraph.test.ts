@@ -12,7 +12,7 @@ import { applyWaves, extractSourceEdgeEvidence, graphOverlays, lensEdges, matche
 import { inputSize, layerOrder, layoutTechnicalGraph, placeInputs, treeLinkPath } from './technicalGraphLayout.ts';
 import { defaultGraphPresentation, graphEditAllowed, graphPresentationReducer, parseGraphPresentation, serialiseGraphPresentation } from './graphPresentation.ts';
 import { buildHostViewState } from './serviceAdapter.ts';
-import { networkGraphSvg, technicalGraphSvg } from './technicalGraphExport.ts';
+import { bundledGraphSvg, networkGraphSvg, technicalGraphSvg } from './technicalGraphExport.ts';
 import { basisPath, bundleLayout, straighten } from './technicalGraphBundle.ts';
 import { createForceSimulation, forceSettings, hullPath, nodeRadii, parseNetworkOptions, settleForce } from './technicalGraphForce.ts';
 
@@ -487,4 +487,19 @@ test('networkGraphSvg exports live force-directed nodes, gradual sizing, sleek r
 	assert.match(svg, /<g data-id="vnet-hub" data-r="[0-9.]+" transform="translate\([^)]+\)" opacity="0\.22">/, 'outside network node softens to 0.22');
 	assert.ok(svg.includes('RG-PLATFORM'), 'exports scope cluster hulls with real scope labels');
 	assert.ok(svg.includes('stroke-width="2.6"') || svg.includes('stroke-width="1.6"'), 'preserves bounded sleek ring strokes');
+});
+
+test('bundledGraphSvg exports radial hierarchical edge-bundling layout with colour-preserving spotlight', () => {
+	const architecture = hubSpokeArchitecture();
+	const before = JSON.stringify(architecture);
+	const snapshot = projectTechnicalGraph(architecture);
+	const edges = lensEdges(snapshot, 'all', false);
+	const spotlight = new Set(snapshot.nodes.filter(node => node.id === 'rg-app' || node.scopePath.includes('rg-app')).map(node => node.id));
+
+	const svg = bundledGraphSvg({ snapshot, edges, theme: 'light', title: 'Bundled check', spotlight });
+	assert.equal(JSON.stringify(architecture), before, 'bundled SVG export never mutates architecture');
+	assert.ok(!svg.includes('grayscale'), 'bundled spotlight export stays colour-preserving');
+	assert.match(svg, /<g data-id="aks" transform="rotate\([^)]+\) translate\([^)]+\)[^"]*">/, 'spotlighted leaf stays full opacity');
+	assert.match(svg, /<g data-id="vnet-hub" transform="rotate\([^)]+\) translate\([^)]+\)[^"]*" opacity="0\.22">/, 'outside leaf softens to 0.22');
+	assert.ok(svg.includes('opacity="0.08"'), 'outside bundled curves soften to 0.08');
 });
