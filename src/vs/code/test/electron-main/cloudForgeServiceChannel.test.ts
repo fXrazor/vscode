@@ -821,4 +821,26 @@ suite('CloudForgeServiceChannel', () => {
 		}
 		await broker.stop();
 	});
+
+	test('validates exportPortableBundle (with native folder picker) and runEngineFmt parameters', async () => {
+		const rev = 'e'.repeat(64);
+		assert.deepStrictEqual(validateCloudForgeServiceParams('runEngineFmt', { workspaceId, architectureId: `${workspaceId}-architecture-1`, mode: 'check', engine: 'openTofu' }), { workspaceId, architectureId: `${workspaceId}-architecture-1`, mode: 'check', engine: 'openTofu' });
+		assert.strictEqual(validateCloudForgeServiceParams('runEngineFmt', { workspaceId, architectureId: `${workspaceId}-architecture-1`, mode: 'apply' }), undefined);
+		assert.deepStrictEqual(validateCloudForgeServiceParams('runEngineFmt', { workspaceId, architectureId: `${workspaceId}-architecture-1`, expectedSourceRevision: rev, mode: 'apply' }), { workspaceId, architectureId: `${workspaceId}-architecture-1`, expectedSourceRevision: rev, mode: 'apply' });
+
+		assert.deepStrictEqual(validateCloudForgeServiceParams('exportPortableBundle', { workspaceId, architectureId: `${workspaceId}-architecture-1`, bundleName: 'contoso-export', platforms: ['windows_amd64', 'linux_amd64'] }), { workspaceId, architectureId: `${workspaceId}-architecture-1`, bundleName: 'contoso-export', platforms: ['windows_amd64', 'linux_amd64'] });
+		assert.strictEqual(validateCloudForgeServiceParams('exportPortableBundle', { workspaceId, architectureId: `${workspaceId}-architecture-1`, bundleName: 'contoso-export', destinationPath: 'C:\\Windows' }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('exportPortableBundle', { workspaceId, architectureId: `${workspaceId}-architecture-1`, bundleName: '../escape' }), undefined);
+
+		const local = createBroker([contosoWindow], {
+			picked: ['D:\\Exports'],
+			reply: () => ({ bundleName: 'contoso-export', verificationStatus: 'verified', bundleSha256: rev })
+		});
+		const exported = await local.call(1, 'exportPortableBundle', { workspaceId, architectureId: `${workspaceId}-architecture-1`, bundleName: 'contoso-export' });
+		assert.strictEqual(exported.ok, true);
+		assert.deepStrictEqual(local.callsByWindow(), {
+			1: [{ method: 'exportPortableBundle', params: { workspaceId, architectureId: `${workspaceId}-architecture-1`, bundleName: 'contoso-export', destinationPath: 'D:\\Exports' } }]
+		});
+		await local.broker.stop();
+	});
 });

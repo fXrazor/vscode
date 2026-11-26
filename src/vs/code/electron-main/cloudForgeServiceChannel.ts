@@ -41,8 +41,8 @@ const cloudForgeMethods: ReadonlySet<string> = new Set<CloudForgeServiceMethod>(
 	'previewFocusedSaveBatch', 'applyFocusedSaveBatch',
 	'inspectDependencies', 'readResourceValues', 'listCloudRegions', 'readModule',
 	'summarizeState', 'listCloudConnections', 'setCloudConnection', 'storeCloudKey', 'removeCloudConnection', 'checkCloudSignIn',
-	'diffCatalogueSnapshots', 'auditExportReadiness',
-	'detectEngines', 'runEngineValidate', 'runEnginePlan',
+	'diffCatalogueSnapshots', 'auditExportReadiness', 'exportPortableBundle',
+	'detectEngines', 'runEngineValidate', 'runEnginePlan', 'runEngineFmt',
 	'listMirrorPackages', 'checkOfflineMirrorReadiness', 'runEngineInitOffline', 'extractProviderSchemaFromMirror',
 	'importMirrorPackage', 'evictMirrorPackage', 'verifyMirrorIntegrity', 'planMirrorCleanup',
 	'selectTerraformSkills', 'listBuiltinSkills', 'getTopologyBlueprint',
@@ -743,6 +743,63 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 				...(value.engine === undefined ? {} : { engine: value.engine })
 			};
 		}
+		case 'runEngineFmt': {
+			if (!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'expectedSourceRevision', 'engine', 'mode']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId)) {
+				return undefined;
+			}
+			if (value.expectedSourceRevision !== undefined && (typeof value.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(value.expectedSourceRevision))) {
+				return undefined;
+			}
+			if (value.engine !== undefined && value.engine !== 'openTofu' && value.engine !== 'terraform') {
+				return undefined;
+			}
+			if (value.mode !== undefined && value.mode !== 'check' && value.mode !== 'apply') {
+				return undefined;
+			}
+			if (value.mode === 'apply' && value.expectedSourceRevision === undefined) {
+				return undefined;
+			}
+			return {
+				workspaceId: value.workspaceId,
+				architectureId: value.architectureId,
+				...(value.expectedSourceRevision === undefined ? {} : { expectedSourceRevision: value.expectedSourceRevision }),
+				...(value.engine === undefined ? {} : { engine: value.engine }),
+				...(value.mode === undefined ? {} : { mode: value.mode })
+			};
+		}
+		case 'exportPortableBundle': {
+			// `destinationPath` is strictly broker-owned (supplied via Electron-main native folder picker).
+			if (!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'expectedSourceRevision', 'bundleName', 'engine', 'platforms']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId) || !isPathComponent(value.bundleName) || value.bundleName.startsWith('.')) {
+				return undefined;
+			}
+			if (value.expectedSourceRevision !== undefined && (typeof value.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(value.expectedSourceRevision))) {
+				return undefined;
+			}
+			if (value.engine !== undefined && value.engine !== 'openTofu' && value.engine !== 'terraform') {
+				return undefined;
+			}
+			let platforms: string[] | undefined;
+			if (value.platforms !== undefined) {
+				if (!Array.isArray(value.platforms) || value.platforms.length === 0 || value.platforms.length > 8) {
+					return undefined;
+				}
+				platforms = [];
+				for (const item of value.platforms) {
+					if (typeof item !== 'string' || !/^[a-z0-9]{1,32}_[a-z0-9]{1,32}$/.test(item)) {
+						return undefined;
+					}
+					platforms.push(item);
+				}
+			}
+			return {
+				workspaceId: value.workspaceId,
+				architectureId: value.architectureId,
+				bundleName: value.bundleName,
+				...(value.expectedSourceRevision === undefined ? {} : { expectedSourceRevision: value.expectedSourceRevision }),
+				...(value.engine === undefined ? {} : { engine: value.engine }),
+				...(platforms === undefined ? {} : { platforms })
+			};
+		}
 		case 'checkOfflineMirrorReadiness': {
 			if (!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'expectedSourceRevision', 'engine', 'platforms']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId)) {
 				return undefined;
@@ -1174,6 +1231,8 @@ export interface ICloudForgeRequestContext {
 	pickSchemaFile?(): Promise<string | undefined>;
 	/** Opens a native provider `.zip` archive picker owned by the calling window. `undefined` when cancelled. */
 	pickMirrorArchive?(): Promise<string | undefined>;
+	/** Opens a native export destination folder picker owned by the calling window. `undefined` when cancelled. */
+	pickExportDestination?(): Promise<string | undefined>;
 }
 
 export type CloudForgeResolvedRequest =
@@ -1237,6 +1296,16 @@ export async function resolveCloudForgeRequest(method: CloudForgeServiceMethod, 
 				return { kind: 'failure', code: 'SCOPE_DENIED' };
 			}
 			return { kind: 'call', params: { ...params, archivePath } };
+		}
+		case 'exportPortableBundle': {
+			const destinationPath = await context.pickExportDestination?.();
+			if (destinationPath === undefined) {
+				return { kind: 'failure', code: 'CANCELLED' };
+			}
+			if (!isLocalPath(destinationPath)) {
+				return { kind: 'failure', code: 'SCOPE_DENIED' };
+			}
+			return { kind: 'call', params: { ...params, destinationPath } };
 		}
 		default:
 			return { kind: 'call', params };
@@ -1337,7 +1406,8 @@ export class CloudForgeServiceBroker implements IServerChannel<string> {
 				resolveScope: () => resolveCloudForgeWindowScope(window.openedWorkspace, configPath => this.workspacesManagementMainService.resolveLocalWorkspace(configPath)),
 				pickParentFolder: () => this.pickParentFolder(window.win ?? undefined),
 				pickSchemaFile: () => this.pickSchemaFile(window.win ?? undefined),
-				pickMirrorArchive: () => this.pickMirrorArchive(window.win ?? undefined)
+				pickMirrorArchive: () => this.pickMirrorArchive(window.win ?? undefined),
+				pickExportDestination: () => this.pickExportDestination(window.win ?? undefined)
 			});
 			if (request.kind === 'failure') {
 				return safeFailure(new CloudForgeServiceError(request.code)) as T;
@@ -1413,6 +1483,18 @@ export class CloudForgeServiceBroker implements IServerChannel<string> {
 			buttonLabel: localize('cloudForge.importMirrorArchive', "Import Archive"),
 			properties: ['openFile'],
 			filters: [{ name: localize('cloudForge.providerZipFilter', "Provider Archive (.zip)"), extensions: ['zip'] }]
+		}, window);
+		if (result.canceled || result.filePaths.length !== 1) {
+			return undefined;
+		}
+		return result.filePaths[0];
+	}
+
+	private async pickExportDestination(window: electron.BrowserWindow | undefined): Promise<string | undefined> {
+		const result = await this.dialogMainService.showOpenDialog({
+			title: localize('cloudForge.pickExportDestination', "Choose Where to Save the Portable Terraform Bundle"),
+			buttonLabel: localize('cloudForge.exportHere', "Export Bundle Here"),
+			properties: ['openDirectory', 'createDirectory']
 		}, window);
 		if (result.canceled || result.filePaths.length !== 1) {
 			return undefined;
