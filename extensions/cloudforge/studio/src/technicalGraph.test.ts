@@ -7,8 +7,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { hubSpokeArchitecture } from './graphFixtures.ts';
 import { sampleArchitecture } from './fixture.ts';
-import { createHistory, historyReducer, type Action } from './model.ts';
-import { applyWaves, graphOverlays, lensEdges, matchesQuery, neighbourhood, orderingCycles, portId, projectTechnicalGraph, traceNode } from './technicalGraph.ts';
+import { createHistory, historyReducer, type Action, type Architecture } from './model.ts';
+import { applyWaves, extractSourceEdgeEvidence, graphOverlays, lensEdges, matchesQuery, neighbourhood, orderingCycles, portId, projectTechnicalGraph, traceNode } from './technicalGraph.ts';
 import { inputSize, layerOrder, layoutTechnicalGraph, placeInputs, treeLinkPath } from './technicalGraphLayout.ts';
 import { defaultGraphPresentation, graphEditAllowed, graphPresentationReducer, parseGraphPresentation, serialiseGraphPresentation } from './graphPresentation.ts';
 import { buildHostViewState } from './serviceAdapter.ts';
@@ -165,7 +165,7 @@ test('graph presentation persists under its own key and never as design position
 	let state = graphPresentationReducer(defaultGraphPresentation, { type: 'set', patch: { lens: 'runtime', layout: 'tree', spacing: 150, height: 200, focus: { id: 'aks', depth: 2 } } });
 	state = graphPresentationReducer(state, { type: 'pin', id: 'aks', position: { x: 9999.4, y: -40.6 } });
 	const stored = serialiseGraphPresentation(state);
-	assert.equal('focus' in stored, false); assert.deepEqual(stored.pins, { aks: { x: 9999, y: -41 } });
+	assert.equal(Object.hasOwn(stored, 'focus'), false); assert.deepEqual(stored.pins, { aks: { x: 9999, y: -41 } });
 	const view = buildHostViewState({ architecture, mode: 'technical', theme: 'light', selectedId: '', focusedWorkspaceOpen: false, inspectorOpen: false, libraryOpen: false, graph: stored });
 	const aks = architecture.resources.find(resource => resource.id === 'aks')!;
 	assert.deepEqual(view.nodePositions.visual?.aks, { x: Math.round(aks.positions.visual.x), y: Math.round(aks.positions.visual.y) });
@@ -282,7 +282,7 @@ test('tidy tree centres parents on their children and folds collapsed branches',
 	const subnets = ['snet-aks', 'snet-app'].filter(id => snapshot.nodes.find(node => node.id === id)!.scopePath.includes('vnet-aks'));
 	assert.ok(subnets.length >= 1 && Math.abs(centre('vnet-aks') - (Math.min(...subnets.map(centre)) + Math.max(...subnets.map(centre))) / 2) < 40);
 	const folded = layoutTechnicalGraph(snapshot, { layout: 'tree', expanded: new Set(), compact: false, pins: {}, edges: snapshot.edges, collapsed: new Set(['rg-app']) });
-	assert.ok(folded.positions['rg-app'] && !folded.positions['vnet-aks'] && !folded.positions['aks']);
+	assert.ok(folded.positions['rg-app'] && !folded.positions['vnet-aks'] && !folded.positions.aks);
 	assert.ok(folded.positions['vnet-hub']);
 	// rg-platform's many leaf children wrap into a block of columns no taller than six cards.
 	const block = tree.treeBlocks?.['rg-app'] ?? [];
@@ -365,4 +365,53 @@ test('multi-cloud estate: every top-level scope gets its own cluster, kept apart
 	for (const [i, a] of discs.entries()) { for (const b of discs.slice(i + 1)) { assert.ok(Math.hypot(a.x - b.x, a.y - b.y) >= a.r + b.r, 'scope clusters overlap'); } }
 	const scopes = layoutTechnicalGraph(snapshot, { layout: 'scopes', expanded: new Set(), compact: false, pins: {}, edges });
 	const prod = scopes.columns.find(column => column.id === 'column:rg-prod')!; assert.ok(new Set((prod.members ?? []).map(id => scopes.positions[id].x)).size >= 4, 'a large resource group wraps into a block, not a thin column');
+});
+
+test('service-graph edges gain exact field provenance and card ports from readResourceValues without false prefix matches or mutations', () => {
+	const architecture: Architecture = {
+		name: 'Service Provenance',
+		resources: [
+			{ id: 'snet-app', kind: 'subnet' as const, provider: 'azure' as const, name: 'app', terraformName: 'app', region: 'uksouth', settings: {}, blocks: [], positions: { visual: { x: 0, y: 0 }, technical: { x: 0, y: 0 } } },
+			{ id: 'snet-app-two', kind: 'subnet' as const, provider: 'azure' as const, name: 'app_two', terraformName: 'app_two', region: 'uksouth', settings: {}, blocks: [], positions: { visual: { x: 0, y: 80 }, technical: { x: 0, y: 80 } } },
+			{ id: 'nic', kind: 'generic' as const, provider: 'azure' as const, name: 'web_nic', terraformName: 'web_nic', region: 'uksouth', catalogue: { type: 'azurerm_network_interface', label: 'Network Interface', service: 'Network', category: 'Networking', icon: '', fields: [] }, settings: {}, blocks: [], positions: { visual: { x: 200, y: 0 }, technical: { x: 200, y: 0 } } },
+			{ id: 'mod-net', kind: 'module' as const, provider: 'azure' as const, name: 'network', region: 'uksouth', settings: { Source: './modules/net' }, blocks: [], positions: { visual: { x: 400, y: 0 }, technical: { x: 400, y: 0 } } },
+		],
+		items: [],
+		connections: [
+			{ id: 'snet-app->nic', source: { kind: 'element' as const, elementId: 'snet-app' }, target: { kind: 'element' as const, elementId: 'nic' }, label: 'reference', origin: { kind: 'service' as const, edgeKind: 'reference' } },
+			{ id: 'snet-app-two->nic', source: { kind: 'element' as const, elementId: 'snet-app-two' }, target: { kind: 'element' as const, elementId: 'nic' }, label: 'reference', origin: { kind: 'service' as const, edgeKind: 'reference' } },
+		],
+	};
+	const before = JSON.stringify(architecture);
+	const fileValues = [
+		{
+			address: 'azurerm_network_interface.web_nic',
+			file: 'network.tf',
+			attributes: {},
+			blocks: [
+				{ name: 'ip_configuration', attributes: { subnet_id: { kind: 'expression' as const, text: 'azurerm_subnet.app.id' } }, blocks: [] },
+			],
+		},
+	];
+	// Prefix boundary guard: azurerm_subnet.app must NOT match azurerm_subnet.app_two
+	assert.deepEqual(extractSourceEdgeEvidence(fileValues[0], 'azurerm_subnet.app'), [{ field: 'ip_configuration.subnet_id', expression: 'azurerm_subnet.app.id' }]);
+	assert.deepEqual(extractSourceEdgeEvidence(fileValues[0], 'azurerm_subnet.app_two'), []);
+
+	const withoutValues = projectTechnicalGraph(architecture);
+	const withValues = projectTechnicalGraph(architecture, fileValues);
+	assert.equal(JSON.stringify(architecture), before, 'architecture stays untouched');
+	assert.notEqual(withValues.revision, withoutValues.revision, 'enriched provenance updates snapshot revision');
+
+	const enrichedEdge = withValues.edges.find(edge => edge.source === 'snet-app' && edge.target === 'nic')!;
+	assert.equal(enrichedEdge.confidence, 'source-graph');
+	assert.equal(enrichedEdge.evidence[0].field, 'ip_configuration.subnet_id');
+	assert.equal(enrichedEdge.evidence[0].expression, 'azurerm_subnet.app.id');
+	const nicNode = withValues.nodes.find(node => node.id === 'nic')!;
+	assert.ok(nicNode.ports.some(port => port.field === 'ip_configuration.subnet_id' && port.peer === 'snet-app'), 'card port shows real source field');
+
+	const untouchedEdge = withValues.edges.find(edge => edge.source === 'snet-app-two' && edge.target === 'nic')!;
+	assert.equal(untouchedEdge.evidence[0].expression, undefined, 'unreferenced peer stays generic');
+
+	const modNode = withValues.nodes.find(node => node.id === 'mod-net')!;
+	assert.deepEqual(modNode.module, { source: './modules/net' }, 'reads capitalised module Source setting');
 });

@@ -165,6 +165,11 @@
 .tg-why-pattern-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 3px; }
 .tg-why-pattern p { margin: 2px 0; line-height: 1.4; }
 .tg-why-pattern-peers { display: flex; flex-wrap: wrap; gap: 2px 6px; }
+.tg-why-module { display: grid; gap: 6px; margin: 8px 0 4px; padding: 8px 9px; border-radius: 8px; border: 1px solid var(--border); background: color-mix(in srgb, var(--accent) 4%, var(--input)); font-size: 11.5px; }
+.tg-why-module-crumb { margin: 0; font-size: 11px; color: var(--muted); }
+.tg-why-module-list { display: grid; gap: 2px; }
+.tg-why-module-list ul { margin: 2px 0 0; padding-left: 16px; display: grid; gap: 2px; }
+.tg-why-module-list li { line-height: 1.35; }
 .tg-why-boundaries { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0 4px; }
 .tg-banner-info { color: var(--text); background: color-mix(in srgb, var(--accent) 8%, var(--surface)); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
 .tg-banner + .tg-banner { top: 96px; }

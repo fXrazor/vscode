@@ -1,5 +1,13 @@
 # Studio continuation checkpoint — 25 November 2026
 
+## Technical Graph service-edge provenance & module drill-down — 26 November 2026
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `a10ed3fb214`, owner Antigravity.
+- **Scope:**
+  - **Service-edge field provenance (`src/technicalGraph.ts`, `src/App.tsx`, `src/TechnicalGraph.tsx`, `src/technicalGraph.test.ts`):** added `extractSourceEdgeEvidence()` (identifier-bounded regex over `FileResourceValues` attributes & nested/repeated blocks) and passed `sourceValues` from `App.tsx` into `projectTechnicalGraph(architecture, fileValues)` so `source-graph` edges surface real Terraform field paths and expressions on card ports and `WhyPanel` without mutating `architecture`. Also fixed module card source reading for capitalised `Source`.
+  - **Module drill-down (`src/TechnicalGraph.tsx`, `src/App.tsx`, `src/technical-graph.css`):** added read-only `Module drill-down` in `WhyPanel` backed by existing Stage 7 `requestModule` / `moduleInspection` messages, showing internal resource/link counts and addresses, declared inputs/outputs, and clickable nested child module paths with breadcrumbs (zero Undo steps).
+- **Fresh checks:** Studio `tsc --noEmit` **PASS**, **219/219** Studio tests (0 skipped), Studio `build` + `esbuild.webview.mts` **PASS**, `oxlint` & `hygiene` **PASS**, and real Windows Edge: `technical-view-verify.mjs` **64/64 PASS**, `hosted-refresh-verify.mjs` **20/20 PASS**, hosted provenance + nested `requestModule` drill-down **PASS** (0 browser errors, 0 Undo steps).
+
 ## Post-PR #4 follow-up: colour-preserving Scope Spotlight, mixed-list HCL hydration & mirror prefill — 26 November 2026
 
 - **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `532f839a3de`, owner Antigravity.
@@ -145,7 +153,7 @@ Same branch. When the extension creates an architecture from a `.cloudforge.zip`
 
 ### Portable project bundle (.cloudforge.zip) — Claude, 26 November 2026
 
-Branch `claude/project-thread-8qd376` (from main `10cf5df6`), not merged. Dale asked for Export to produce the whole project as a portable zip, like Brainboard. **Export › Project bundle (.zip)** and **Export › Import project bundle…** are in the topbar Export menu and the compact menu.
+Branch `claude/project-thread-8qd376` (from main `10cf5df6`), merged to main via fXrazor/vscode#5. Dale asked for Export to produce the whole project as a portable zip, like Brainboard. **Export › Project bundle (.zip)** and **Export › Import project bundle…** are in the topbar Export menu and the compact menu.
 
 - Bundle layout: `cloudforge-project.json` (manifest: format `cloudforge.project-bundle` v1, source revision, counts, SHA-256 per file), `architecture.json` (the full canvas model: resources, both view positions, drawings/ink, connectors, groups, layer order, variables), `terraform/` (the runnable folder the canvas projects to via the cloudlab generator, with Studio-declared variables folded into `variables.tf` and their non-sensitive values into `terraform.tfvars`), `diagram/architecture.svg`, `README.md`.
 - Sensitive settings and sensitive variable values are never exported (`exportableArchitecture`). Terraform is the canvas projection, not a copy of on-disk source: comments and HCL the canvas doesn't model are not carried. Copying raw workspace `.tf` would need a Rust read API (follow-up).
