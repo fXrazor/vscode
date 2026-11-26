@@ -2,6 +2,7 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
+import { normaliseInkStyle } from './ink.ts';
 import { endpointElementId, remapEndpoint } from './connectionEndpoints.ts';
 import { VariablePanel } from './VariablePanel.tsx';
 import { exportableArchitecture } from './variables.ts';
@@ -57,6 +58,7 @@ export function Studio() {
 	const [history, dispatch] = useReducer(historyReducer, undefined, () => createHistory(previewSample()));
 	// Graph presentation (lens, layout, pins, expansion) is never part of architecture history.
 	const [graphPresentation, presentGraph] = useReducer(graphPresentationReducer, defaultGraphPresentation);
+	const [ink, setInk] = useState(() => normaliseInkStyle({}));
 	const graphEdit = useCallback((action: Action) => { if (graphEditAllowed(action)) { dispatch(action); } }, []);
 	const [mode, setMode] = useState<DesignMode>('visual');
 	const modeRef = useRef(mode); modeRef.current = mode;
@@ -789,7 +791,7 @@ export function Studio() {
 							plan={enginePlanReport ? { sourceRevision: enginePlanReport.sourceRevision, stale: enginePlanReport.sourceRevision !== hostSnapshot?.sourceRevision || (hostBaseline ? history.present !== hostBaseline : false), changes: enginePlanReport.resourceChanges } : undefined} /> :
 						<DesignCanvas architecture={architecture} mode={mode} theme={theme} onThemeChange={setTheme} selectedId={selectedId} selectedIds={selectedIds} onSelectionChange={setSelectedIds} dispatch={dispatch}
 							onSelect={id => { setSelectedId(id); if (id && inspectorCategory === 'resources' && !architecture.resources.some(resource => resource.id === id)) { setDetailTab('form'); } }} onOpen={openResource} onOpenDetails={openDetails} onInit={setFlow} viewports={viewport}
-							onOpenShapes={openShapes} onAddItem={addItem} onAddResource={addResource}
+							onOpenShapes={openShapes} ink={ink} onInkChange={setInk} onAddItem={addItem} onAddResource={addResource}
        onAddCatalogue={(type, provider, position, parentId) => {
         void loadCatalogue(provider).then(snapshot => { const entry = snapshot.entries.find(entry => entry.type === type); if (entry) { addCatalogueResource(entry,provider,position,parentId); } }).catch(() => setMessage('Unable to load the provider catalogue.'));
        }} />}
