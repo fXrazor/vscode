@@ -85,7 +85,7 @@ export function ConnectionOverlays({ architecture, mode, selectedId, showLabels,
 	};
 
 	const source = selected && anchor(selected, 'source', false); const target = selected && anchor(selected, 'target', false);
-	const toolWidth = Math.min(540, Math.max(200, area.width - 80));
+	const toolWidth = Math.min(900, Math.max(200, area.width - 80));
 	const centreX = source && target ? (source.x + target.x) / 2 * zoom + viewport.x : 80;
 	const upper = source && target ? Math.min(source.y, target.y) * zoom + viewport.y - area.toolHeight - 18 : 12;
 	const lower = source && target ? Math.max(source.y, target.y) * zoom + viewport.y + 18 : 12;
@@ -128,9 +128,9 @@ export function ConnectionOverlays({ architecture, mode, selectedId, showLabels,
 		{preview && selected && <span className="connection-drop-feedback" role="status" style={{ transform: `translate(${anchor(selected, preview.side)?.x ?? 0}px,${anchor(selected, preview.side)?.y ?? 0}px) scale(${1 / zoom})` }} data-valid={preview.valid}>{preview.label}</span>}
 		{selected && source && target && <div ref={toolbar} className="selection-anchor connection-overlay-tools" style={{ transform: `translate(${world.x}px,${world.y}px) scale(${1 / zoom})`, width: toolWidth, '--selection-max-width': toolWidth + 'px' } as React.CSSProperties}>
 			<ConnectionTools connection={selected} dispatch={dispatch} onClose={onClose}>
-				{!selected.id.includes('->') && <details className="connection-endpoint-fields"><summary>Endpoints</summary><div>
+				{!selected.id.includes('->') && <div className="endpoint-field-list">
 					{(['source', 'target'] as const).map(side => <EndpointField key={side} architecture={architecture} connection={selected} side={side} point={side === 'source' ? source : target} onChange={endpoint => update(side, endpoint)}/>)}
-				</div></details>}
+				</div>}
 			</ConnectionTools>
 		</div>}
 	</ViewportPortal>;

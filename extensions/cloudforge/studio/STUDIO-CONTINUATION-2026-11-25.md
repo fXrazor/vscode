@@ -129,6 +129,8 @@ Branch `claude/project-thread-2irlth` (unmerged; Antigravity owns merging). Base
 
 - Connection labels someone typed now stay visible after deselecting (`labelIsAuthored`); only automatic service edge-kind labels and dependency labels follow the View toggle, renamed "Show automatic and dependency labels". A selected connection shows a soft halo instead of swapping its dash, so style edits show live.
 - "Configure in Terraform" buttons (Additional configuration and Terraform-configured fields) use the `.code-action` style with a code icon. A browser audit over the three samples found no other unstyled inspector buttons.
+- One Miro-style edit bar (`ConnectionTools.tsx` `.line-bar`, `LineStyleControls`): line type icons, colour swatch menu (9 presets + custom), style, weight, start/end arrow toggles, inline label with an Aa formatting menu, reverse, an ⋯ Endpoints menu, delete and close in one row. Dependency lines use the same bar (name, style controls, Apply to all, Reset, Open, Close). The element selection bar uses the same shape. Every option and accessible name from before is kept.
+- Resource library: 8px gap between the Cloud provider picker, search and catalogue line.
 - List, map and object fields (`LiteralFields.tsx`, `editor-refinement.css`): icon remove beside each entry, a dashed Add entry row, a quiet Unset link and a ghost Edit JSON toggle. Accessible names are unchanged ("Remove entry 1", "Add entry to …", "Unset …"). Test: open a subnet's Address prefix or any list/map field.
 
 Test checklist:

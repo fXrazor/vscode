@@ -159,7 +159,8 @@
 .studio .lab-tabs [data-state=active] { color:var(--text); background:var(--panel-2); box-shadow:inset 0 -2px var(--accent); }
 .studio .lab-tabs .lib-count { padding-right:0; font-size:10.5px; }
 .spacer { flex:1; }.faint { color:var(--faint); }
-.studio .cat-head { padding:10px; flex-shrink:0; }
+.studio .cat-head { display:grid; gap:8px; padding:12px 10px 10px; flex-shrink:0; }
+.studio .cat-head .lib-docs { margin-top:-2px; padding-left:2px; }
 .studio .lib-provider select { min-height:30px; padding:4px 9px; }
 .studio .lib-version { align-items:center; justify-content:center; display:flex; padding:0 8px; border:1px solid var(--border-strong); border-radius:6px; width:95px; font:11px Consolas,monospace; }
 .studio .lab-search { position:relative; display:flex; align-items:center; }
