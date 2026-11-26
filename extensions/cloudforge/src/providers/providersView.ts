@@ -169,7 +169,7 @@ export class ProvidersViewProvider implements TreeDataProvider<ProvidersNode> {
 				const row = element.row;
 				const item = new TreeItem(row.display, TreeItemCollapsibleState.None);
 				item.id = 'project:' + (row.address ?? row.display);
-				item.description = (row.version ? row.version + ' · ' : '') + projectStatusLabel(row);
+				item.description = (row.version ? row.version + ' · ' : row.constraint ? row.constraint + ' · ' : '') + projectStatusLabel(row);
 				item.iconPath = projectIcon(row);
 				const next = projectNextAction(row);
 				item.contextValue = 'providerProject' + (next ? '.' + next : '') + (row.address ? '.registry' : '');
@@ -273,7 +273,9 @@ function projectTooltip(row: ProjectProviderRow): MarkdownString {
 			lines.push('', l10n.t('Download this version to get its schema and to run init and plan offline.'));
 			break;
 		case 'unlocked':
-			lines.push('', l10n.t('No .terraform.lock.hcl entry. Run init once to lock a version, or set an exact version in required_providers.'));
+			lines.push('', row.constraint
+				? l10n.t('No .terraform.lock.hcl entry yet. Get Ready downloads the newest version that fits {0} and creates the lock file offline.', row.constraint)
+				: l10n.t('No .terraform.lock.hcl entry and no version constraint. Get Ready downloads the latest version and creates the lock file offline.'));
 			break;
 		case 'conflict':
 			lines.push('', l10n.t('The lock file and the version constraints disagree. Review the provider dependency report.'));

@@ -99,7 +99,7 @@ import {
 	resolveMirrorExtractTarget,
 	type MirrorPackageKey
 } from './providerMirror/model';
-import { buildProvidersModel, isProviderAddress, LOCAL_PLATFORM, parseProviderVersions, shortProviderName, type ProvidersModel } from './providers/model';
+import { buildProvidersModel, isProviderAddress, LOCAL_PLATFORM, newestMatchingVersion, parseProviderVersions, shortProviderName, type ProvidersModel } from './providers/model';
 import { ProvidersViewProvider, registryPageUrl, type ProvidersNode } from './providers/providersView';
 
 interface WorkspaceArchitecture {
@@ -892,13 +892,15 @@ export function activate(context: ExtensionContext): void {
 		workspaceId: string,
 		architectureId: string,
 		sourceRevision: string,
-		engine?: 'openTofu' | 'terraform'
+		engine?: 'openTofu' | 'terraform',
+		createLockFile?: boolean
 	) {
 		const result = await callService<unknown>('runEngineInitOffline', {
 			workspaceId,
 			architectureId,
 			expectedSourceRevision: sourceRevision,
 			...(engine ? { engine } : {}),
+			...(createLockFile ? { createLockFile: true } : {}),
 		});
 		if (!result.ok) {
 			const message = result.error.code === 'STALE_SOURCE'
@@ -2207,7 +2209,7 @@ export function activate(context: ExtensionContext): void {
 	const providerErrorMessage = (code: string) => code === 'WORKSPACE_UNAVAILABLE'
 		? l10n.t('No usable OpenTofu or Terraform CLI was found on this PC.')
 		: code === 'INVALID_STATE' ? l10n.t('That provider package is in use; try again shortly.') : errorMessage(code);
-	async function downloadProviderVersions(items: readonly { readonly address: string; readonly version: string }[], platforms: readonly string[]): Promise<void> {
+	async function downloadProviderVersions(items: readonly { readonly address: string; readonly version: string }[], platforms: readonly string[], options: { readonly quiet?: boolean } = {}): Promise<readonly string[]> {
 		const failed: string[] = [];
 		await window.withProgress({ location: ProgressLocation.Notification, title: l10n.t('Downloading providers'), cancellable: false }, async progress => {
 			for (const [index, item] of items.entries()) {
@@ -2234,6 +2236,9 @@ export function activate(context: ExtensionContext): void {
 			canvas.updateIfOpen(toCanvasSnapshot(graph, currentArchitectureName));
 		}
 		await providersView.refresh();
+		if (options.quiet) {
+			return failed;
+		}
 		if (failed.length) {
 			void window.showWarningMessage(l10n.t('Some providers could not be prepared: {0}', failed.join('; ')));
 		} else {
@@ -2241,13 +2246,147 @@ export function activate(context: ExtensionContext): void {
 				? l10n.t('{0} {1} is downloaded and its schema is ready.', shortProviderName(items[0].address), items[0].version)
 				: l10n.t('{0} providers are downloaded and their schemas are ready.', items.length));
 		}
+		return failed;
+	}
+
+	/**
+	 * Get Ready: one step from "Terraform on disk" to "schemas in Studio, init and plan done".
+	 * Downloads locked-but-missing versions, picks the newest version that fits the constraint for
+	 * providers with no lock entry (older projects), extracts schemas, runs offline init (creating
+	 * the lock file only when there is none), then a credential-free plan. Every download and write
+	 * goes through the Rust service; this function only orchestrates.
+	 */
+	async function getArchitectureReady(): Promise<void> {
+		const graph = provider.getGraph();
+		if (!graph) {
+			void window.showInformationMessage(l10n.t('Open an architecture first, then run Get Ready.'));
+			return;
+		}
+		await window.withProgress({ location: ProgressLocation.Window, title: l10n.t('Checking providers…') }, () => providersView.refresh());
+		const model = providersView.current;
+		if (!model?.hasArchitecture) {
+			void window.showWarningMessage(l10n.t('The provider report for this architecture could not be read.'));
+			return;
+		}
+		const showProviders = l10n.t('Show Providers');
+		const reveal = (choice: string | undefined) => { if (choice === showProviders) { void commands.executeCommand('cloudforge.providers.focus'); } };
+		const conflicts = model.project.filter(row => row.status === 'conflict');
+		if (conflicts.length) {
+			void window.showWarningMessage(
+				l10n.t('Fix the version conflict for {0} first: the lock file and required_providers disagree.', conflicts.map(row => row.display).join(', ')),
+				showProviders
+			).then(reveal);
+			return;
+		}
+		const installedFor = (address: string) => (model.installed.find(row => row.address === address)?.versions ?? []).filter(row => row.platforms.includes(LOCAL_PLATFORM));
+		const downloads: { address: string; version: string }[] = [];
+		const extracts: { address: string; version: string }[] = [];
+		const steps: string[] = [];
+		const problems: string[] = [];
+		for (const row of model.project) {
+			if (!row.address) {
+				problems.push(l10n.t('{0} has no registry address', row.display));
+				continue;
+			}
+			if (row.status === 'notDownloaded' && row.version) {
+				downloads.push({ address: row.address, version: row.version });
+				steps.push(l10n.t('Download {0} {1}', row.display, row.version));
+			} else if (row.status === 'schemaNotExtracted' && row.version) {
+				extracts.push({ address: row.address, version: row.version });
+				steps.push(l10n.t('Extract the {0} {1} schema', row.display, row.version));
+			} else if (row.status === 'unlocked') {
+				const listed = await providersView.versionsFor(row.address);
+				const local = installedFor(row.address).map(entry => entry.version);
+				const picked = newestMatchingVersion(listed?.versions ?? [], row.constraint) ?? newestMatchingVersion(local, row.constraint);
+				if (!picked) {
+					problems.push(listed ? l10n.t('no {0} release fits {1}', row.display, row.constraint ?? '') : l10n.t('{0} versions could not be loaded (offline?)', row.display));
+					continue;
+				}
+				const have = installedFor(row.address).find(entry => entry.version === picked);
+				if (!have) {
+					downloads.push({ address: row.address, version: picked });
+					steps.push(row.constraint ? l10n.t('Download {0} {1}, the newest that fits {2}', row.display, picked, row.constraint) : l10n.t('Download {0} {1}, the latest', row.display, picked));
+				} else if (!have.hasSchema) {
+					extracts.push({ address: row.address, version: picked });
+					steps.push(l10n.t('Extract the {0} {1} schema', row.display, picked));
+				}
+			}
+		}
+		if (problems.length) {
+			void window.showWarningMessage(l10n.t('Get Ready stopped: {0}.', problems.join('; ')), showProviders).then(reveal);
+			return;
+		}
+		const creatingLock = model.lockState === 'absent' && model.project.length > 0;
+		steps.push(creatingLock ? l10n.t('Initialize offline and create .terraform.lock.hcl') : l10n.t('Initialize offline from the local provider mirror'));
+		steps.push(l10n.t('Run a credential-free plan'));
+		const go = l10n.t('Get Ready');
+		const noPlan = l10n.t('Without Plan');
+		const choice = await window.showInformationMessage(
+			l10n.t('Get {0} ready?', currentArchitectureName),
+			{ modal: true, detail: steps.map((step, index) => `${index + 1}. ${step}`).join('\n') },
+			go, noPlan
+		);
+		if (choice !== go && choice !== noPlan) {
+			return;
+		}
+		if (downloads.length) {
+			const failed = await downloadProviderVersions(downloads, [LOCAL_PLATFORM], { quiet: true });
+			if (failed.length) {
+				void window.showWarningMessage(l10n.t('Get Ready stopped: {0}', failed.join('; ')), showProviders).then(reveal);
+				return;
+			}
+		}
+		for (const item of extracts) {
+			const extracted = await window.withProgress(
+				{ location: ProgressLocation.Notification, title: l10n.t('Extracting the {0} {1} schema…', shortProviderName(item.address), item.version) },
+				() => callService<unknown>('extractProviderSchemaFromMirror', { address: item.address, version: item.version })
+			);
+			if (!extracted.ok) {
+				void window.showWarningMessage(l10n.t('Get Ready stopped: the {0} schema could not be extracted ({1}).', shortProviderName(item.address), providerErrorMessage(extracted.error.code)), showProviders).then(reveal);
+				return;
+			}
+		}
+		if (extracts.length) {
+			cachedCatalogueSnapshots = undefined;
+			cachedLiveSchemas.clear();
+		}
+		const current = provider.getGraph();
+		if (!current || current.architectureId !== graph.architectureId) {
+			return;
+		}
+		const init = await window.withProgress(
+			{ location: ProgressLocation.Notification, title: l10n.t('CloudForge: Initializing {0} offline…', currentArchitectureName) },
+			() => runArchitectureEngineInitOffline(current.workspaceId, current.architectureId, current.sourceRevision, undefined, creatingLock)
+		);
+		if (!init.ok) {
+			void window.showWarningMessage(init.message, showProviders).then(reveal);
+			return;
+		}
+		if (init.report.status !== 'initialized') {
+			const engineLabel = init.report.engine === 'openTofu' ? 'OpenTofu' : 'Terraform';
+			void window.showWarningMessage(l10n.t('{0} offline init failed (exit {1}): {2}', engineLabel, init.report.exitCode, init.report.summary), showProviders).then(reveal);
+			return;
+		}
+		// A new lock file changes the source revision, so reload before planning.
+		const refreshed = await showGraph(provider, treeView, current.workspaceId, current.architectureId) ?? current;
+		updateStatusBar(refreshed);
+		syncProblems(refreshed);
+		canvas.updateIfOpen(toCanvasSnapshot(refreshed, currentArchitectureName));
+		void providersView.refresh();
+		if (choice === noPlan) {
+			void window.showInformationMessage(init.report.lockFileCreated
+				? l10n.t('{0} is ready: schemas are in Studio, the lock file was created and offline init succeeded.', currentArchitectureName)
+				: l10n.t('{0} is ready: schemas are in Studio and offline init succeeded.', currentArchitectureName));
+			return;
+		}
+		await runAndPresentLocalPlan(refreshed);
 	}
 
 	const providerPromptsShown = new Set<string>();
 	/** Auto-detect: once per architecture revision, offer to fetch locked providers that are missing. */
 	function offerMissingProviders(model: ProvidersModel | undefined): void {
 		const graph = provider.getGraph();
-		const missing = model?.project.filter(row => row.status === 'notDownloaded' && row.address && row.version) ?? [];
+		const missing = model?.project.filter(row => row.address && (row.status === 'notDownloaded' && row.version || row.status === 'unlocked')) ?? [];
 		if (!graph || !missing.length) {
 			return;
 		}
@@ -2256,15 +2395,17 @@ export function activate(context: ExtensionContext): void {
 			return;
 		}
 		providerPromptsShown.add(promptKey);
-		const names = missing.slice(0, 3).map(row => `${row.display} ${row.version}`).join(', ') + (missing.length > 3 ? l10n.t(' and {0} more', missing.length - 3) : '');
-		const download = l10n.t('Download');
+		const names = missing.slice(0, 3).map(row => row.version ? `${row.display} ${row.version}` : row.constraint ? `${row.display} ${row.constraint}` : row.display).join(', ') + (missing.length > 3 ? l10n.t(' and {0} more', missing.length - 3) : '');
+		const ready = l10n.t('Get Ready');
 		const show = l10n.t('Show Providers');
 		void window.showInformationMessage(
-			l10n.t('This architecture uses {0}. Download them so Studio shows the matching fields and init and plan can run offline?', names),
-			download, show, l10n.t('Not Now')
+			missing.some(row => row.status === 'unlocked')
+				? l10n.t('This architecture uses {0} and has no lock file yet. Get Ready downloads matching versions, creates the lock file offline and runs a plan.', names)
+				: l10n.t('This architecture uses {0}. Get Ready downloads them so Studio shows the matching fields, then runs init and plan offline.', names),
+			ready, show, l10n.t('Not Now')
 		).then(choice => {
-			if (choice === download) {
-				void downloadProviderVersions(missing.map(row => ({ address: row.address!, version: row.version! })), [LOCAL_PLATFORM]);
+			if (choice === ready) {
+				void getArchitectureReady();
 			} else if (choice === show) {
 				void commands.executeCommand('cloudforge.providers.focus');
 			}
@@ -2381,6 +2522,7 @@ export function activate(context: ExtensionContext): void {
 		}),
 		commands.registerCommand('cloudforge.providers.verify', () => commands.executeCommand('cloudforge.verifyMirrorIntegrity')),
 		commands.registerCommand('cloudforge.providers.initOffline', () => commands.executeCommand('cloudforge.initArchitectureOffline')),
+		commands.registerCommand('cloudforge.getReady', () => getArchitectureReady()),
 		commands.registerCommand('cloudforge.providers.importSchemaFile', async () => {
 			await commands.executeCommand('cloudforge.importProviderSchema');
 			void providersView.refresh();

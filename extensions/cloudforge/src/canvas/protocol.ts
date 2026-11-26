@@ -193,6 +193,8 @@ export interface CanvasProviderDependency {
 	readonly lockedVersion?: string;
 	readonly conflictCount: number;
 	readonly requirementCount: number;
+	/** Every condition from every requirement, such as `~> 5.14, < 5.40`. */
+	readonly constraint?: string;
 }
 
 export interface CanvasDependencyReport {
@@ -390,6 +392,8 @@ export interface CanvasEngineInitOfflineReport {
 	readonly exitCode: number;
 	readonly durationMs: number;
 	readonly summary: string;
+	/** True when init wrote a new `.terraform.lock.hcl` for an architecture that had none. */
+	readonly lockFileCreated?: boolean;
 }
 
 export interface CanvasViewport {

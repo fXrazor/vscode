@@ -1184,6 +1184,7 @@ export function parseDependencyReport(value: unknown): CanvasDependencyReport | 
 			...(lockedVersion ? { lockedVersion } : {}),
 			conflictCount,
 			requirementCount,
+			...(isNonEmptyString(item.combined, 512) ? { constraint: item.combined } : {}),
 		});
 	}
 	const unusedLockEntries = Array.isArray(value.unusedLockEntries)
@@ -1910,5 +1911,6 @@ export function parseEngineInitOfflineReport(value: unknown): CanvasEngineInitOf
 		exitCode: value.exitCode,
 		durationMs: value.durationMs,
 		summary: value.summary,
+		...(value.lockFileCreated === true ? { lockFileCreated: true } : {}),
 	};
 }

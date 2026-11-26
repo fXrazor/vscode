@@ -727,7 +727,7 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 		case 'runEngineValidate':
 		case 'runEnginePlan':
 		case 'runEngineInitOffline': {
-			if (!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'expectedSourceRevision', 'engine']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId)) {
+			if (!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'expectedSourceRevision', 'engine', 'createLockFile']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId)) {
 				return undefined;
 			}
 			if (value.expectedSourceRevision !== undefined && (typeof value.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(value.expectedSourceRevision))) {
@@ -736,11 +736,15 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 			if (value.engine !== undefined && value.engine !== 'openTofu' && value.engine !== 'terraform') {
 				return undefined;
 			}
+			if (value.createLockFile !== undefined && typeof value.createLockFile !== 'boolean') {
+				return undefined;
+			}
 			return {
 				workspaceId: value.workspaceId,
 				architectureId: value.architectureId,
 				...(value.expectedSourceRevision === undefined ? {} : { expectedSourceRevision: value.expectedSourceRevision }),
-				...(value.engine === undefined ? {} : { engine: value.engine })
+				...(value.engine === undefined ? {} : { engine: value.engine }),
+				...(value.createLockFile === true ? { createLockFile: true } : {})
 			};
 		}
 		case 'checkOfflineMirrorReadiness': {

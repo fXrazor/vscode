@@ -627,6 +627,20 @@ suite('CloudForgeServiceChannel', () => {
 			architectureId: 'workspace-1-architecture-1',
 			cliConfigPath: 'C:\\evil.tofurc'
 		}), undefined);
+		assert.deepStrictEqual(validateCloudForgeServiceParams('runEngineInitOffline', {
+			workspaceId: 'workspace-1',
+			architectureId: 'workspace-1-architecture-1',
+			createLockFile: true
+		}), {
+			workspaceId: 'workspace-1',
+			architectureId: 'workspace-1-architecture-1',
+			createLockFile: true
+		});
+		assert.strictEqual(validateCloudForgeServiceParams('runEngineInitOffline', {
+			workspaceId: 'workspace-1',
+			architectureId: 'workspace-1-architecture-1',
+			createLockFile: 'yes'
+		}), undefined);
 
 		assert.deepStrictEqual(validateCloudForgeServiceParams('extractProviderSchemaFromMirror', {
 			address: 'registry.terraform.io/hashicorp/azurerm',

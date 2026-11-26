@@ -783,12 +783,15 @@ export class ProjectController implements Disposable {
 			...(bundle.skippedFiles.length ? [l10n.t('Not copied: {0}.', bundle.skippedFiles.slice(0, 6).join(', ') + (bundle.skippedFiles.length > 6 ? '…' : ''))] : []),
 			...bundle.warnings,
 		];
+		const ready = l10n.t('Get Ready');
 		const providers = l10n.t('Check Providers');
 		void window.showInformationMessage(
-			l10n.t('Added {0} from the bundle.', rawName.trim()) + (notes.length ? ' ' + notes.join(' ') : ''),
-			providers
+			l10n.t('Added {0} from the bundle.', rawName.trim()) + (notes.length ? ' ' + notes.join(' ') : '') + ' ' + l10n.t('Get Ready downloads its providers, then runs init and plan offline.'),
+			ready, providers
 		).then(choice => {
-			if (choice === providers) {
+			if (choice === ready) {
+				void commands.executeCommand('cloudforge.getReady');
+			} else if (choice === providers) {
 				void commands.executeCommand('cloudforge.providers.focus');
 			}
 		});

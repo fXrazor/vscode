@@ -33,6 +33,8 @@ export interface ProjectProviderRow {
 	/** Newest extracted schema for this provider when it differs from the locked version. */
 	readonly otherSchemaVersion?: string;
 	readonly platforms: readonly string[];
+	/** The combined version constraint from `required_providers`, when one is written. */
+	readonly constraint?: string;
 }
 
 export interface InstalledVersionRow {
@@ -90,6 +92,61 @@ export function compareVersionsDesc(a: string, b: string): number {
 
 const key = (address: string, version: string) => address.toLowerCase() + '@' + version;
 
+/**
+ * Whether `version` meets a Terraform version constraint such as `~> 5.14, != 5.20.0`. Mirrors the
+ * Rust `Constraint::matches`: a prerelease only matches an exact `=` pin. Unparseable input is false.
+ */
+export function versionMatchesConstraint(version: string, constraint: string): boolean {
+	const parse = (text: string) => {
+		const match = /^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(text.trim());
+		return match ? { nums: [Number(match[1]), Number(match[2] ?? 0), Number(match[3] ?? 0)] as const, pre: match[4], components: [match[1], match[2], match[3]].filter(part => part !== undefined).length } : undefined;
+	};
+	const target = parse(version);
+	if (!target || target.components !== 3) {
+		return false;
+	}
+	const compare = (a: string, b: string) => -compareVersionsDesc(a, b);
+	const conditions = constraint.split(',').map(part => part.trim());
+	if (!conditions.length || conditions.some(part => !part)) {
+		return false;
+	}
+	let pinned = false;
+	for (const condition of conditions) {
+		const operator = ['~>', '>=', '<=', '!=', '>', '<', '='].find(symbol => condition.startsWith(symbol)) ?? '=';
+		const rest = condition.startsWith(operator) ? condition.slice(operator.length) : condition;
+		const bound = parse(rest);
+		if (!bound) {
+			return false;
+		}
+		const boundText = bound.nums.join('.') + (bound.pre ? '-' + bound.pre : '');
+		if (target.pre) {
+			if (operator === '=' && compare(version, boundText) === 0) { pinned = true; continue; }
+			if (operator === '!=' && compare(version, boundText) !== 0) { continue; }
+			return false;
+		}
+		const order = compare(version, boundText);
+		const ok = operator === '=' ? order === 0
+			: operator === '!=' ? order !== 0
+				: operator === '>' ? order > 0
+					: operator === '>=' ? order >= 0
+						: operator === '<' ? order < 0
+							: operator === '<=' ? order <= 0
+								: order >= 0 && compare(version, bound.components >= 3 ? `${bound.nums[0]}.${bound.nums[1] + 1}.0` : `${bound.nums[0] + 1}.0.0`) < 0;
+		if (!ok) {
+			return false;
+		}
+	}
+	return target.pre ? pinned : true;
+}
+
+/** The newest release in `versions` that meets `constraint`; with no constraint, the newest release. */
+export function newestMatchingVersion(versions: readonly string[], constraint: string | undefined): string | undefined {
+	const releases = [...versions].sort(compareVersionsDesc);
+	return constraint
+		? releases.find(version => versionMatchesConstraint(version, constraint))
+		: releases.find(version => !version.includes('-'));
+}
+
 export function buildProvidersModel(input: {
 	readonly report?: CanvasDependencyReport;
 	readonly packages: readonly MirrorPackageSummary[];
@@ -131,6 +188,7 @@ export function buildProvidersModel(input: {
 			status,
 			...(otherSchemaVersion ? { otherSchemaVersion } : {}),
 			platforms: packages.map(pkg => pkg.key.platform).sort(),
+			...(provider.constraint ? { constraint: provider.constraint } : {}),
 		};
 	}).sort((a, b) => a.display.localeCompare(b.display));
 
