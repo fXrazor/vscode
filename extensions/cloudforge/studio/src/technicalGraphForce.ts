@@ -18,6 +18,10 @@ export interface ForceSimulation { nodes: ForceNode[]; links: ForceLink[]; alpha
 export interface NetworkOptions {
 	/** How much bigger the most-connected node is than a leaf, in percent (0 = all equal). */
 	sizeBy: number;
+	/** Which lines make a node bigger: every line, lines from resources that use it, or lines to what it uses. */
+	sizeCount: 'all' | 'dependents' | 'dependencies';
+	/** Overall spread of the graph, percent (the toolbar dial). Scales link length, repulsion and cluster reach. */
+	spread: number;
 	/** Link length, percent of the default. */
 	linkLength: number;
 	/** Repulsion between nodes, percent of the default. */
@@ -27,30 +31,40 @@ export interface NetworkOptions {
 	labels: 'all' | 'auto' | 'none';
 	links: 'straight' | 'curved';
 }
-export const defaultNetworkOptions: NetworkOptions = { sizeBy: 60, linkLength: 100, spacing: 100, clusters: 'scope', labels: 'auto', links: 'curved' };
+export const defaultNetworkOptions: NetworkOptions = { sizeBy: 150, sizeCount: 'all', spread: 150, linkLength: 100, spacing: 100, clusters: 'scope', labels: 'auto', links: 'curved' };
 
-const networkChoices = { clusters: ['scope', 'layer', 'none'], labels: ['auto', 'all', 'none'], links: ['curved', 'straight'] } as const;
+const networkChoices = { sizeCount: ['all', 'dependents', 'dependencies'], clusters: ['scope', 'layer', 'none'], labels: ['auto', 'all', 'none'], links: ['curved', 'straight'] } as const;
 /** Reads stored Network options, clamping numbers and dropping unknown values. */
 export function parseNetworkOptions(value: unknown): NetworkOptions | undefined {
 	if (!value || typeof value !== 'object') { return undefined; }
 	const raw = value as Record<string, unknown>;
 	const num = (v: unknown, min: number, max: number, fallback: number) => typeof v === 'number' && Number.isFinite(v) ? Math.max(min, Math.min(max, Math.round(v))) : fallback;
 	const pick = <K extends keyof typeof networkChoices>(key: K): NetworkOptions[K] => (networkChoices[key] as readonly string[]).includes(raw[key] as string) ? raw[key] as NetworkOptions[K] : defaultNetworkOptions[key];
-	return { sizeBy: num(raw.sizeBy, 0, 300, defaultNetworkOptions.sizeBy), linkLength: num(raw.linkLength, 40, 300, 100), spacing: num(raw.spacing, 40, 300, 100), clusters: pick('clusters'), labels: pick('labels'), links: pick('links') };
+	return { sizeBy: num(raw.sizeBy, 0, 300, defaultNetworkOptions.sizeBy), sizeCount: pick('sizeCount'), spread: num(raw.spread, 50, 400, defaultNetworkOptions.spread), linkLength: num(raw.linkLength, 40, 300, 100), spacing: num(raw.spacing, 40, 300, 100), clusters: pick('clusters'), labels: pick('labels'), links: pick('links') };
 }
 
-interface ForceOptions { linkDistance: number; charge: number; clusterPull: number; layerPull: number }
+interface ForceOptions { linkDistance: number; charge: number; clusterPull: number; layerPull: number; spread: number }
 export const forceSettings = { radius: 22, linkDistance: 110, charge: -460, labelPad: 20, velocityDecay: 0.4, alphaMin: 0.001, alphaDecay: 1 - Math.pow(0.001, 1 / 300), layerPull: 0.035, clusterPull: 0.06 };
 
 /**
- * Node radius from configured connections (in + out, membership excluded). Area-like growth:
- * sqrt of degree relative to the busiest node, so a hub stands out without dwarfing everything.
+ * Node radius from the lines drawn to it. 'all' counts every line, including resource-group
+ * membership, so a resource group holding twenty resources is the biggest node. 'dependents'
+ * counts resources that reference this one (edge source = the referenced resource), 'dependencies'
+ * the resources it references. Logarithmic growth relative to the busiest node keeps mid-sized
+ * hubs visibly bigger than leaves even beside a large resource group; the busiest node is exactly sizeBy % bigger than a node with no lines.
  */
-export function nodeRadii(nodes: readonly Pick<GraphNode, 'id'>[], edges: readonly Pick<GraphEdge, 'source' | 'target' | 'membership'>[], sizeBy: number): Record<string, number> {
+export function nodeRadii(nodes: readonly Pick<GraphNode, 'id'>[], edges: readonly Pick<GraphEdge, 'source' | 'target' | 'membership'>[], sizeBy: number, count: NetworkOptions['sizeCount'] = 'all'): Record<string, number> {
 	const degree = new Map(nodes.map(node => [node.id, 0]));
-	for (const edge of edges) { if (edge.membership) { continue; } for (const id of [edge.source, edge.target]) { if (degree.has(id)) { degree.set(id, degree.get(id)! + 1); } } }
+	const bump = (id: string) => { if (degree.has(id)) { degree.set(id, degree.get(id)! + 1); } };
+	const seen = new Set<string>();
+	for (const edge of edges) {
+		if (edge.source === edge.target) { continue; }
+		const key = edge.source + '\u0000' + edge.target; if (seen.has(key)) { continue; } seen.add(key);
+		if (count !== 'dependencies') { bump(edge.source); }
+		if (count !== 'dependents') { bump(edge.target); }
+	}
 	const max = Math.max(1, ...degree.values()); const growth = Math.max(0, Math.min(300, sizeBy)) / 100;
-	return Object.fromEntries([...degree].map(([id, d]) => [id, Math.round(forceSettings.radius * (1 + growth * Math.sqrt(d / max)) * 10) / 10]));
+	return Object.fromEntries([...degree].map(([id, d]) => [id, Math.round(forceSettings.radius * (1 + growth * Math.log1p(d) / Math.log1p(max)) * 10) / 10]));
 }
 
 /** Deterministic phyllotaxis start, like d3-force, so the same project always settles the same way. */
@@ -62,8 +76,9 @@ export function createForceSimulation(nodes: readonly Pick<GraphNode, 'id' | 'la
 	const simNodes = order.map((node, i) => { const r = 10 * Math.sqrt(0.5 + i); const a = i * Math.PI * (3 - Math.sqrt(5)); return { id: node.id, layer: node.layer, group: groupOf(node), r: options.radii?.[node.id] ?? forceSettings.radius, x: r * Math.cos(a), y: r * Math.sin(a), vx: 0, vy: 0 }; });
 	const seen = new Set<string>();
 	const links = edges.filter(edge => ids.has(edge.source) && ids.has(edge.target) && edge.source !== edge.target).filter(edge => { const key = [edge.source, edge.target].sort().join('\u0000'); if (seen.has(key)) { return false; } seen.add(key); return true; }).map(edge => ({ source: edge.source, target: edge.target }));
-	return { nodes: simNodes, links, alpha: 1, alphaTarget: 0, options: { linkDistance: forceSettings.linkDistance * clampPercent(network.linkLength) / 100, charge: forceSettings.charge * clampPercent(network.spacing) / 100, clusterPull: network.clusters === 'none' ? 0 : forceSettings.clusterPull, layerPull: network.clusters === 'layer' ? forceSettings.layerPull * 2.4 : forceSettings.layerPull } };
+	return { nodes: simNodes, links, alpha: 1, alphaTarget: 0, options: { spread: spreadOf(network), linkDistance: forceSettings.linkDistance * clampPercent(network.linkLength) / 100 * spreadOf(network), charge: forceSettings.charge * clampPercent(network.spacing) / 100 * spreadOf(network) ** 2, clusterPull: network.clusters === 'none' ? 0 : forceSettings.clusterPull, layerPull: network.clusters === 'layer' ? forceSettings.layerPull * 2.4 : forceSettings.layerPull } };
 }
+const spreadOf = (network: NetworkOptions) => Math.max(50, Math.min(400, Number.isFinite(network.spread) ? network.spread : 150)) / 100;
 const clampPercent = (value: number) => Math.max(40, Math.min(300, Number.isFinite(value) ? value : 100));
 
 /** One simulation step. Returns false once cooled. */
@@ -81,14 +96,14 @@ export function tickForce(sim: ForceSimulation): boolean {
 		t.vx -= dx * bias; t.vy -= dy * bias; s.vx += dx * (1 - bias); s.vy += dy * (1 - bias);
 	}
 	// Many-body repulsion (exact; Barnes–Hut is unnecessary at graph-view sizes), scaled by size, and collision with label room.
-	const n = sim.nodes.length; const maxDistance2 = 900 * 900;
+	const n = sim.nodes.length; const maxDistance2 = (900 * options.spread) ** 2;
 	for (let i = 0; i < n; i++) {
 		const a = sim.nodes[i];
 		for (let j = i + 1; j < n; j++) {
 			const b = sim.nodes[j]; let dx = b.x - a.x; let dy = b.y - a.y; let d2 = dx * dx + dy * dy;
 			if (d2 === 0) { dx = (j - i) * 1e-3; dy = 1e-3; d2 = dx * dx + dy * dy; }
 			if (d2 < maxDistance2) { const apart = options.clusterPull && a.group && b.group && a.group !== b.group ? 1.8 : 1; const w = options.charge * apart * Math.sqrt(a.r * b.r) / forceSettings.radius * alpha / Math.max(d2, 100); a.vx += dx * w; a.vy += dy * w; b.vx -= dx * w; b.vy -= dy * w; }
-			const min = a.r + b.r + forceSettings.labelPad; if (d2 < min * min) { const d = Math.sqrt(d2); const push = (min - d) / d * 0.5; a.vx -= dx * push; a.vy -= dy * push; b.vx += dx * push; b.vy += dy * push; }
+			const min = a.r + b.r + forceSettings.labelPad * options.spread; if (d2 < min * min) { const d = Math.sqrt(d2); const push = (min - d) / d * 0.5; a.vx -= dx * push; a.vy -= dy * push; b.vx += dx * push; b.vy += dy * push; }
 		}
 	}
 	// Cluster pull: each node drifts toward its group's centroid (a soft forceX/forceY per group).
@@ -101,7 +116,7 @@ export function tickForce(sim: ForceSimulation): boolean {
 	if (options.layerPull) {
 		const pull = options.layerPull;
 		for (const node of sim.nodes) {
-			const angle = (layerOrder.indexOf(node.layer) / layerOrder.length) * Math.PI * 2 - Math.PI / 2; const reach = options.layerPull > forceSettings.layerPull ? 340 : 220;
+			const angle = (layerOrder.indexOf(node.layer) / layerOrder.length) * Math.PI * 2 - Math.PI / 2; const reach = (options.layerPull > forceSettings.layerPull ? 340 : 220) * options.spread;
 			node.vx += (Math.cos(angle) * reach - node.x) * pull * alpha; node.vy += (Math.sin(angle) * reach - node.y) * pull * alpha;
 		}
 	}

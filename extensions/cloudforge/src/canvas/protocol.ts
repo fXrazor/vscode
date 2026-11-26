@@ -473,6 +473,8 @@ export interface CanvasGraphViewState {
 
 export interface CanvasNetworkOptions {
 	readonly sizeBy: number;
+	readonly sizeCount: string;
+	readonly spread: number;
 	readonly linkLength: number;
 	readonly spacing: number;
 	readonly clusters: string;
@@ -480,14 +482,14 @@ export interface CanvasNetworkOptions {
 	readonly links: string;
 }
 
-const networkEnums = { clusters: ['scope', 'layer', 'none'], labels: ['auto', 'all', 'none'], links: ['curved', 'straight'] } as const;
+const networkEnums = { sizeCount: ['all', 'dependents', 'dependencies'], clusters: ['scope', 'layer', 'none'], labels: ['auto', 'all', 'none'], links: ['curved', 'straight'] } as const;
 function sanitizeNetworkOptions(value: unknown): CanvasNetworkOptions | undefined {
 	if (!isRecord(value)) {
 		return undefined;
 	}
 	const num = (raw: unknown, min: number, max: number, fallback: number) => typeof raw === 'number' && Number.isFinite(raw) ? Math.min(max, Math.max(min, Math.round(raw))) : fallback;
 	const pick = (key: keyof typeof networkEnums): string => { const raw = value[key]; const allowed: readonly string[] = networkEnums[key]; return typeof raw === 'string' && allowed.includes(raw) ? raw : allowed[0]; };
-	return { sizeBy: num(value.sizeBy, 0, 300, 60), linkLength: num(value.linkLength, 40, 300, 100), spacing: num(value.spacing, 40, 300, 100), clusters: pick('clusters'), labels: pick('labels'), links: pick('links') };
+	return { sizeBy: num(value.sizeBy, 0, 300, 150), sizeCount: pick('sizeCount'), spread: num(value.spread, 50, 400, 150), linkLength: num(value.linkLength, 40, 300, 100), spacing: num(value.spacing, 40, 300, 100), clusters: pick('clusters'), labels: pick('labels'), links: pick('links') };
 }
 
 const graphEnums = {

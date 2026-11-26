@@ -303,10 +303,15 @@ test('network view settles deterministically with no overlapping icons and short
 
 test('network nodes grow with their connections, by a percentage, and keep clear of each other', () => {
 	const snapshot = projectTechnicalGraph(hubSpokeArchitecture()); const edges = lensEdges(snapshot, 'all', true);
-	const degree = (id: string) => edges.filter(edge => !edge.membership && (edge.source === id || edge.target === id)).length;
+	const degree = (id: string) => edges.filter(edge => edge.source === id || edge.target === id).length;
 	const busiest = [...snapshot.nodes].sort((a, b) => degree(b.id) - degree(a.id))[0];
 	const radii = nodeRadii(snapshot.nodes, edges, 100);
 	assert.equal(radii[busiest.id], forceSettings.radius * 2, 'the busiest node is 100% bigger');
+	// The resource group with the most members is the biggest: lines into it count, never shrink it.
+	assert.equal(snapshot.nodes.find(node => node.id === busiest.id)?.label, 'rg-platform');
+	const dependents = nodeRadii(snapshot.nodes, edges.filter(edge => !edge.membership), 100, 'dependents');
+	const vnet = snapshot.nodes.find(node => node.label === 'vnet-hub')!; const peering = snapshot.nodes.find(node => node.label === 'hub-to-aks')!;
+	assert.ok(dependents[vnet.id] > dependents[peering.id], 'a VNet that peerings reference outgrows the peering');
 	const leaf = snapshot.nodes.find(node => degree(node.id) === 0);
 	if (leaf) { assert.equal(radii[leaf.id], forceSettings.radius); }
 	for (const node of snapshot.nodes) { assert.ok(radii[node.id] <= radii[busiest.id]); assert.ok(radii[node.id] >= forceSettings.radius); }
@@ -316,10 +321,12 @@ test('network nodes grow with their connections, by a percentage, and keep clear
 	// Longer links spread the graph out; options never touch the architecture.
 	const spread = (link: number) => { const s = settleForce(createForceSimulation(snapshot.nodes, edges, { network: { linkLength: link } })); const at = new Map(s.nodes.map(node => [node.id, node])); return s.links.reduce((sum, l) => sum + Math.hypot(at.get(l.source)!.x - at.get(l.target)!.x, at.get(l.source)!.y - at.get(l.target)!.y), 0) / s.links.length; };
 	assert.ok(spread(200) > spread(60));
+	const wide = (value: number) => { const s = settleForce(createForceSimulation(snapshot.nodes, edges, { network: { spread: value } })); const xs = s.nodes.map(node => node.x); const ys = s.nodes.map(node => node.y); return (Math.max(...xs) - Math.min(...xs)) * (Math.max(...ys) - Math.min(...ys)); };
+	assert.ok(wide(300) > wide(150) * 1.8 && wide(150) > wide(60) * 1.8, 'the spread dial spreads the whole graph');
 });
 
 test('network options persist sanitised, and cluster hulls enclose their members', () => {
-	assert.deepEqual(parseNetworkOptions({ sizeBy: 999, linkLength: 5, spacing: 'x', clusters: 'bogus', labels: 'all', links: 'straight' }), { sizeBy: 300, linkLength: 40, spacing: 100, clusters: 'scope', labels: 'all', links: 'straight' });
+	assert.deepEqual(parseNetworkOptions({ sizeBy: 999, linkLength: 5, spacing: 'x', clusters: 'bogus', labels: 'all', links: 'straight' }), { sizeBy: 300, sizeCount: 'all', spread: 150, linkLength: 40, spacing: 100, clusters: 'scope', labels: 'all', links: 'straight' });
 	assert.equal(parseNetworkOptions(null), undefined);
 	const state = graphPresentationReducer(defaultGraphPresentation, { type: 'set', patch: { layout: 'force', network: { ...defaultGraphPresentation.network, sizeBy: 150, clusters: 'layer' } } });
 	const restored = parseGraphPresentation(JSON.parse(JSON.stringify(serialiseGraphPresentation(state))));

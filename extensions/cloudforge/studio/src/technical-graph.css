@@ -303,3 +303,9 @@
 .tg-force-size-key { display: inline-flex; align-items: center; gap: 4px; }
 .tg-force-size-key i { display: inline-block; border-radius: 50%; border: 1.5px solid var(--muted); width: 7px; height: 7px; }
 .tg-force-size-key i + i { width: 12px; height: 12px; margin-right: 3px; }
+.tg-spread { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+.tg-spread input[type="range"] { width: 110px; accent-color: var(--accent); }
+.tg-spread output { min-width: 3.2em; font-variant-numeric: tabular-nums; color: var(--muted); font-size: 11.5px; }
+.tg-spread input[type="range"] { height: 16px; margin: 0 2px; }
+@media (max-width: 1360px) { .tg-spread input[type="range"] { width: 76px; } }
+@media (max-width: 1180px) { .tg-spread input[type="range"] { width: 60px; } .tg-spread output { display: none; } }

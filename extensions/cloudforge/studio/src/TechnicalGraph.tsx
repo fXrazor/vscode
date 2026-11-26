@@ -395,6 +395,7 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme
 			<div className="tg-segment tg-layouts" role="radiogroup" aria-label="Graph layout">
 				{graphLayouts.map(item => <button key={item.id} role="radio" aria-checked={presentation.layout === item.id} aria-label={item.label} title={item.label + ' · ' + item.hint} onClick={() => onPresentation({ type: 'set', patch: { layout: item.id } })}><item.icon size={15} strokeWidth={1.8} /><span>{item.short}</span></button>)}
 			</div>
+			{presentation.layout === 'force' && <SpreadDial value={presentation.network.spread} onChange={spread => onPresentation({ type: 'set', patch: { network: { ...presentation.network, spread } } })} />}
 			<label>Overlay<select aria-label="Card overlay" value={presentation.overlay} onChange={event => onPresentation({ type: 'set', patch: { overlay: event.target.value as GraphPresentation['overlay'] } })}>
 				<option value="none">No overlay</option><option value="plan">Plan actions{plan ? '' : ' (no plan)'}</option><option value="order">Apply order</option><option value="impact">Dependents</option></select></label>
 			<details className="tg-view-menu"><summary className="tg-text-button" aria-label="View options"><SlidersHorizontal size={13} />View</summary>
@@ -558,9 +559,14 @@ function ForceGraph({ snapshot, edges, membership, visible, selectedId, query, o
 		const box = { x: Math.min(...xs) - pad, y: Math.min(...ys) - pad, w: Math.max(...xs) - Math.min(...xs) + pad * 2, h: Math.max(...ys) - Math.min(...ys) + pad * 2 + 70 };
 		const element = host.current; const aspect = element?.clientWidth ? element.clientWidth / Math.max(1, element.clientHeight) : 1.6;
 		if (box.w / box.h < aspect) { const w = box.h * aspect; box.x -= (w - box.w) / 2; box.w = w; } else { const h = box.w / aspect; box.y -= (h - box.h) / 2; box.h = h; }
+		// Never zoom out past a readable size: a widely spread graph stays spread on screen and pans instead.
+		const width = element?.clientWidth || 1200; const minScale = 0.62;
+		if (width / box.w < minScale) { const w = width / minScale; const h = w / aspect; box.x += (box.w - w) / 2; box.y += (box.h - h) / 2; box.w = w; box.h = h; }
 		setView(box);
 	}, []);
-	const radii = useMemo(() => nodeRadii(nodes, [...edges, ...membership], network.sizeBy), [nodes, edges, membership, network.sizeBy]);
+	// Size counts every relationship, including group membership, whether or not membership lines are drawn.
+	const sizing = useMemo(() => lensEdges(snapshot, 'all', true), [snapshot]);
+	const radii = useMemo(() => nodeRadii(nodes, [...edges, ...membership, ...sizing.filter(edge => edge.membership)], network.sizeBy, network.sizeCount), [nodes, edges, membership, sizing, network.sizeBy, network.sizeCount]);
 	useEffect(() => {
 		const previous = new Map((sim.current?.nodes ?? []).map(node => [node.id, node]));
 		const next = createForceSimulation(nodes, [...edges, ...membership], { radii, network });
@@ -662,7 +668,9 @@ const percentOptions = (values: readonly number[]) => values.map(value => <optio
 function NetworkControls({ value, onChange }: { value: NetworkOptions; onChange: (patch: Partial<NetworkOptions>) => void }) {
 	return <div className="tg-network-options" role="group" aria-label="Network options">
 		<label title="How much bigger the most-connected resource is than one with no links">Size by connections<select aria-label="Size by connections" value={value.sizeBy} onChange={event => onChange({ sizeBy: Number(event.target.value) })}>
-			<option value={0}>Off (all equal)</option>{percentOptions([30, 60, 100, 150, 200])}</select></label>
+			<option value={0}>Off (all equal)</option>{percentOptions([50, 100, 150, 200, 300])}</select></label>
+		<label title="Which lines make a resource bigger">Count<select aria-label="Size counts" value={value.sizeCount} onChange={event => onChange({ sizeCount: event.target.value as NetworkOptions['sizeCount'] })}>
+			<option value="all">All connections</option><option value="dependents">Used by others</option><option value="dependencies">Uses others</option></select></label>
 		<label>Link length<select aria-label="Link length" value={value.linkLength} onChange={event => onChange({ linkLength: Number(event.target.value) })}>{percentOptions([60, 80, 100, 130, 170, 220])}</select></label>
 		<label title="Repulsion between resources">Spacing<select aria-label="Network spacing" value={value.spacing} onChange={event => onChange({ spacing: Number(event.target.value) })}>{percentOptions([60, 80, 100, 130, 170, 220])}</select></label>
 		<label title="Pull resources together and draw a soft outline around each group">Clusters<select aria-label="Clusters" value={value.clusters} onChange={event => onChange({ clusters: event.target.value as NetworkOptions['clusters'] })}>
@@ -672,4 +680,14 @@ function NetworkControls({ value, onChange }: { value: NetworkOptions; onChange:
 		<label>Links<select aria-label="Link shape" value={value.links} onChange={event => onChange({ links: event.target.value as NetworkOptions['links'] })}>
 			<option value="curved">Curved</option><option value="straight">Straight</option></select></label>
 	</div>;
+}
+
+/** Toolbar dial for the Network spread. Drags preview locally and commit on release, so one drag is one relayout. */
+function SpreadDial({ value, onChange }: { value: number; onChange: (value: number) => void }) {
+	const [draft, setDraft] = useState(value);
+	useEffect(() => setDraft(value), [value]);
+	const commit = () => { if (draft !== value) { onChange(draft); } };
+	return <label className="tg-spread" title={'Spread: ' + draft + '% · spread the network out or pull it together'}>Spread
+		<input type="range" aria-label="Network spread" min={50} max={400} step={10} value={draft} onChange={event => setDraft(Number(event.target.value))} onPointerUp={commit} onKeyUp={commit} onBlur={commit} />
+		<output>{draft}%</output></label>;
 }

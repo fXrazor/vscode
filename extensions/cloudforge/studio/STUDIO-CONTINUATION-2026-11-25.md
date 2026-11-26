@@ -8,6 +8,12 @@ Worktree: `C:/Users/dalep/.codex/worktrees/infrastructure-studio/CloudForge-Code
 
 Dale approved continuing the proposed point-endpoint pass in this chat. No further approval is needed for that plan. Work remains within Studio and handoff documentation; one architecture and one semantic undo history, independent theme/viewport/tool preferences, drawings excluded from Terraform and Rust-owned guarded I/O remain binding.
 
+### Technical Graph pass 6: Network spread dial and sizing fix (Claude), 26 November 2026
+
+- Dale: bigger nodes must be the ones with more connections to them. Sizing now counts every line, including resource-group membership (always, even when membership lines are hidden), so rg-platform (21 members) is the biggest node. Growth is logarithmic relative to the busiest node; default Size by connections is 150 %. View → Network options → Count picks All connections / Used by others (edge source = referenced resource) / Uses others.
+- Spread dial on the toolbar (Network layout only), 50–400 %, default 150 %. It scales link length, repulsion² , collision room and cluster reach; it commits on release, so a drag is one relayout. Fit never zooms out past 0.62 px per unit, so a wide spread stays spread on screen and pans.
+- Persisted as `viewState.graph.network.spread` / `sizeCount`, sanitised on the host. Tests 180/180, verify 60/60.
+
 ### Technical Graph pass 5: Network design and options (Claude), 26 November 2026
 
 - Network nodes are sized by configured connections (in + out, membership excluded): radius = 22 × (1 + sizeBy% × √(degree / max degree)). "Size by connections" goes Off, 30–200 %; default 60 %.

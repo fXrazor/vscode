@@ -73,6 +73,10 @@ try {
 			await view('Size by connections', '200');
 			{ const radii = (await page.locator('.tg-force-node').evaluateAll(nodes => nodes.map(node => Number(node.getAttribute('data-r'))))); assert.ok(Math.max(...radii) >= Math.min(...radii) * 1.5, 'hub is much bigger'); }
 			assert.ok(await page.locator('.tg-force-hull').count() > 0);
+			{ const span = async () => page.locator('.tg-force-node').evaluateAll(nodes => { const at = nodes.map(node => node.getAttribute('transform').match(/-?[\d.]+/g).map(Number)); const xs = at.map(p => p[0]); const ys = at.map(p => p[1]); return (Math.max(...xs) - Math.min(...xs)) + (Math.max(...ys) - Math.min(...ys)); });
+				const before = await span(); const dial = page.getByLabel('Network spread', { exact: true }); await dial.fill('300'); await dial.blur(); await page.waitForTimeout(600);
+				assert.ok(await span() > before * 1.4, 'spread dial spreads the graph'); await dial.fill('150'); await dial.blur(); await page.waitForTimeout(400); }
+			assert.deepEqual(await exported(), original); pass('the spread dial spreads the network without project changes');
 			await view('Clusters', 'layer'); await view('Link shape', 'straight'); await view('Labels', 'all');
 			assert.equal(await page.locator('.tg-force-label').count(), original.resources.length);
 			assert.deepEqual(await exported(), original); pass('network options size nodes by connections, cluster and relabel without project changes');
