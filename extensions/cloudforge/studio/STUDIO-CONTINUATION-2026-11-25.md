@@ -8,6 +8,16 @@ Worktree: `C:/Users/dalep/.codex/worktrees/infrastructure-studio/CloudForge-Code
 
 Dale approved continuing the proposed point-endpoint pass in this chat. No further approval is needed for that plan. Work remains within Studio and handoff documentation; one architecture and one semantic undo history, independent theme/viewport/tool preferences, drawings excluded from Terraform and Rust-owned guarded I/O remain binding.
 
+### Technical Graph pass 3: design refinement (Claude), 26 November 2026
+
+Dale asked where the tree view was (it was hidden in View) and asked for further design refinement. Changes in `TechnicalGraph.tsx`, `technicalGraphLayout.ts` and `technical-graph.css`:
+- **Layout switcher on the toolbar.** Layers / Scopes / Tree / Bundled are now radios with an icon and a short label (`graphLayouts`). Labels hide below 1360 px. Find collapses to an icon below 1280 px. The Layout select was removed from View.
+- **Ownership-tree connectors** (`treeConnector`, `elbowPath`): rounded orthogonal elbows with a bus below the parent, drops into first-row children and a comb spine in the column gap into the left side of wrapped leaf rows. A test asserts that no connector passes through a card.
+- **`LaneRuler`.** A child of React Flow that uses `useViewport` and renders lane labels in screen space as tabs on the lane border: 11 px with a layer dot and member count, sticky below the toolbar. The in-canvas layer and input labels are hidden.
+- **Cards.** Issue counts moved to the right of the chip row (top-right on compact cards, hidden on hover so the actions show), so the name and type get full width. Rows show the leaf attribute (`vnet_subnet_id`) with the full path in the tooltip. Arrows into rows are 11 px. Compact ghost inputs use 17 px text.
+
+Checks: 176/176 Studio tests pass; technical graph 44/44 and whiteboard 20/20 in Chromium. Cost-category chips were deliberately not added: most registry `costCategory` values are just the layer name, so they would repeat the lane. Add them once the registry has real cost classes.
+
 ### Technical Graph pass 2 (Claude), 26 November 2026: read this first
 
 Same branch, `claude/project-thread-2irlth` in fXrazor/vscode, pushed through `3fb1fe86` (not merged to main). There are still no new dependencies and no Rust changes. One small additive protocol change: optional `viewState.graph`. Dale said "continue with the rest until all completed", so pass 1's next actions 1–4 and engineer needs (a), (b), (c), (e), (g) and (h) are now built:
