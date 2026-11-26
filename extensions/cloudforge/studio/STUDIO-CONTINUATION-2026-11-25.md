@@ -116,6 +116,24 @@ Worktree: `C:/Users/dalep/.codex/worktrees/infrastructure-studio/CloudForge-Code
 
 Dale approved continuing the proposed point-endpoint pass in this chat. No further approval is needed for that plan. Work remains within Studio and handoff documentation; one architecture and one semantic undo history, independent theme/viewport/tool preferences, drawings excluded from Terraform and Rust-owned guarded I/O remain binding.
 
+### Technical Graph pass 8: scope spotlight, multi-cloud estate, browser test view (Claude), 26 November 2026
+
+- Branch `claude/project-thread-2irlth` (after PR #3 merged). Not merged to main yet; open a PR from this branch when Dale approves.
+- **Scope spotlight:** a floating "Spotlight scope" picker (top right of the graph) and clickable Network hull labels. The chosen top-level scope (resource group, VPC, VNet, GCP project/folder, AWS account/OU, management group, Kubernetes namespace) and everything whose scopePath includes it stays lit; the rest is greyed (`.is-outside`). Works in Layers, Scopes, Tree, Bundled and Network. Transient: not serialised, cleared by restore. Never writes positions or Terraform.
+- **Grouping and separation:** `separateGroups` in the force engine pushes each scope's cluster disc apart with a gap of 70·spread, so different resource groups / VPCs / projects never overlap; hull labels scale with zoom. Scopes layout packs large scopes into square blocks (`perLineOf` in `technicalGraphLayout.ts`) instead of thin tall columns.
+- **Multi-cloud estate sample** (`src/estateFixture.ts`, 126 resources): Azure hub plus prod/stage/dev resource groups with spokes, NSGs, VMs and AKS; AWS transit gateway, two VPCs, EKS and RDS; two GCP projects with networks, subnetworks, NAT, GKE and Cloud SQL. Open with `?sample=estate` or `#estate`.
+- **Icons:** `src/coreIcons.ts` gives AWS and GCP core types (VPC, subnet, IGW, NAT, TGW, EKS, RDS, network, subnetwork, GKE, SQL …) their real catalog icons where the catalogue had the Azure resource-group placeholder.
+- **Browser test view:** `node build.ts && node scripts/build-test-view.mjs <out>` builds a self-contained copy (icons packed in one JSON, AWS forms split in four, `scripts/test-view.html` as the page with a sample switcher). Published privately for Dale as a claude.ai page where comments act as annotations: https://claude.ai/artifact/SZKUsLiQ7LqF3yGsmapCpN
+- Checks: Studio `check` pass, `test` 211/211, `technical-view-verify` 64/64 (adds estate scopes no-overlap, spotlight in Scopes and Network, hull non-overlap). Not run here: oxlint, hygiene, extension tests, host tsc, Windows Edge suites.
+- **Test checklist (Dale):**
+  1. Open the test view, pick "Multi-cloud estate", then Configuration → Technical Graph. Every resource has a real icon (no Azure RG icon on AWS/GCP items).
+  2. Scopes layout: each resource group / VPC / project is a separate, roughly square block; none overlap.
+  3. Spotlight scope → rg-prod: rg-prod and its members stay coloured, everything else greys out; X ("Show every scope") restores.
+  4. Network layout: clusters for each scope are visibly apart; drag the spread dial to 300 % and back, clusters stay separate. Click a hull label to spotlight it.
+  5. Selecting a greyed resource still opens its card; nothing becomes Modified and Undo is empty after spotlight, layout and drag.
+  6. Leave a comment on the test view page; it should reach the next Claude session.
+- **Next:** wire Antigravity's contract/workflow modules (see pass 7), spotlight by second-level scope (subnets inside a VNet), and a "collapse other scopes" option for very large estates.
+
 ### Technical Graph pass 7: large graphs, final checks and merge (Claude), 26 November 2026
 
 - Network solver: exact repulsion up to 400 nodes (`forceSettings.exactLimit`), Barnes–Hut (theta 0.9, mass √r) plus a uniform collision grid above it; per-simulation degree/index cache. Bench: 1,000 nodes settle in ~0.4 s, 2,000 in ~1 s; Bundled layout is under 40 ms at 2,000 nodes.

@@ -887,6 +887,6 @@ export function Studio() {
 
 /** Preview-only sample selection; the hosted webview always receives the project from the extension. */
 function previewSample() {
-	try { const sample = new URLSearchParams(location.search).get('sample'); if (sample === 'hub-spoke') { return hubSpokeArchitecture(); } if (sample === 'estate') { return estateArchitecture(); } } catch { /* Non-browser test environments use the default sample. */ }
+	try { const sample = new URLSearchParams(location.search).get('sample') ?? (location.hash.match(/^#(hub-spoke|estate)$/)?.[1] ?? null); if (sample === 'hub-spoke') { return hubSpokeArchitecture(); } if (sample === 'estate') { return estateArchitecture(); } } catch { /* Non-browser test environments use the default sample. */ }
 	return sampleArchitecture();
 }

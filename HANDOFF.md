@@ -1,5 +1,9 @@
 # CloudForge Code OSS handoff
 
+## Technical Graph pass 8 (Claude) — 26 November 2026
+
+Branch `claude/project-thread-2irlth`, unmerged: scope spotlight, multi-cloud estate sample (126 resources), separated scope clusters, AWS/GCP core icons and a browser test view (`extensions/cloudforge/studio/scripts/build-test-view.mjs`). Details, checks and a test checklist are under "Technical Graph pass 8" in the [Studio continuation](extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md).
+
 ## Merged main checkpoint: Provider schemas (4,271) + Technical Graph Phases 1-5 — 26 November 2026
 
 Completed Codex's requested merge of `codex/provider-editor-coverage` (`9cbd4e5902a`, signed executable AzureRM 5.14.0 / AWS 6.73.0 / Google 8.10.0 schemas, lock-aware selection, recursive nested literal editor, source hydration) into `origin/main` atop `04f0c8354af` (Claude PR #3 dedicated `TechnicalGraph.tsx` + Antigravity Phases 1-5), then fast-forwarded `codex/provider-editor-coverage` so Codex's worktree resumes clean with zero conflicts. Fresh merged verification: Studio `tsc --noEmit` **PASS**, **210/210** Studio Node tests (0 skipped), Studio `build` + `esbuild.webview.mts` **PASS**, extension `tsc --noEmit` **PASS**, **103/103** extension Node tests (0 skipped). Both handoff histories below are preserved in full.
