@@ -68,6 +68,7 @@
 	"command.copyMcpConfig": "Copy Scoped MCP Config (Codex / Claude Code)…",
 	"command.revokeMcpGrants": "Revoke Active MCP Grant…",
 	"command.addResourceNote": "Add / Edit Resource Learning Note…",
+	"command.exportStudyGuide": "Export Architecture Study Guide (Markdown)",
 	"chat.description": "Build multi-cloud topologies, browse baked-in CloudForge skills, and review architecture proposals.",
 	"chat.command.topology": "List or scaffold a customized multi-cloud starter blueprint as a reviewable proposal.",
 	"chat.command.skills": "Inspect baked-in CloudForge diagram, topology, workflow, and Terraform skills.",

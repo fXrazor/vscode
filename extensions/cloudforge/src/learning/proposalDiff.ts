@@ -20,13 +20,13 @@ import {
 import type { ProposalDraft } from './model';
 
 export const CLOUDFORGE_PROPOSAL_SCHEME = 'cloudforge-proposal';
+const MAX_CACHED_DIFFS = 32;
 
 function isSafeTfFileName(name: string): boolean {
 	return name.length > 3
 		&& name.length <= 128
 		&& !name.startsWith('.')
-		&& !name.includes('/')
-		&& !name.includes('\\')
+		&& !/[<>:"/\\|?*[\]{}\u0000-\u001f\u007f]/.test(name)
 		&& !name.includes('..')
 		&& name.toLowerCase().endsWith('.tf');
 }
@@ -60,7 +60,15 @@ export class ProposalDiffProvider implements TextDocumentContentProvider, Dispos
 		const safeProposalId = encodeURIComponent(proposal.proposalId);
 		const safeFileName = encodeURIComponent(file.fileName);
 		const proposedUri = Uri.parse(`${CLOUDFORGE_PROPOSAL_SCHEME}:/${safeProposalId}/${safeFileName}?side=proposed`);
-		this.documents.set(proposedUri.toString(), file.contents);
+		const key = proposedUri.toString();
+		this.documents.delete(key);
+		if (this.documents.size >= MAX_CACHED_DIFFS) {
+			const oldest = this.documents.keys().next().value;
+			if (oldest !== undefined) {
+				this.documents.delete(oldest);
+			}
+		}
+		this.documents.set(key, file.contents);
 		this.changeEmitter.fire(proposedUri);
 
 		const existingUri = await this.findExistingFileUri(file.fileName);

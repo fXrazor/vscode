@@ -26,13 +26,16 @@ import {
 import {
 	extractTerraformReferenceAtPosition,
 	findTerraformBlockAtLine,
-	parseTerraformDocumentBlocks
+	parseTerraformDocumentBlocks,
+	type TerraformBlockMatch
 } from '../editor/terraformLanguage';
 import {
 	formatLearningNoteHoverMarkdown,
 	type LearningRecord,
 	type LearningRequirement
 } from './model';
+
+const MAX_PARSE_CACHE = 16;
 
 const TERRAFORM_NOTE_SELECTOR: DocumentSelector = [
 	{ language: 'terraform' },
@@ -75,6 +78,24 @@ export function detectCursorResourceAddress(): string | undefined {
 export function registerLearningEditorProviders(host: EditorNotesHost): Disposable {
 	const lensEmitter = new EventEmitter<void>();
 	const recordListener = host.onDidChangeRecord(() => lensEmitter.fire());
+	const parseCache = new Map<string, { readonly version: number; readonly blocks: readonly TerraformBlockMatch[] }>();
+
+	function getDocumentBlocks(document: TextDocument): readonly TerraformBlockMatch[] {
+		const key = document.uri.toString();
+		const hit = parseCache.get(key);
+		if (hit && hit.version === document.version) {
+			return hit.blocks;
+		}
+		const blocks = parseTerraformDocumentBlocks(document.getText());
+		if (parseCache.size >= MAX_PARSE_CACHE) {
+			const oldest = parseCache.keys().next().value;
+			if (oldest !== undefined) {
+				parseCache.delete(oldest);
+			}
+		}
+		parseCache.set(key, { version: document.version, blocks });
+		return blocks;
+	}
 
 	const codeLensDisposable = languages.registerCodeLensProvider(TERRAFORM_NOTE_SELECTOR, {
 		onDidChangeCodeLenses: lensEmitter.event,
@@ -93,7 +114,7 @@ export function registerLearningEditorProviders(host: EditorNotesHost): Disposab
 				return [];
 			}
 
-			const blocks = parseTerraformDocumentBlocks(document.getText());
+			const blocks = getDocumentBlocks(document);
 			const lenses: CodeLens[] = [];
 			for (const block of blocks) {
 				if (block.kind !== 'resource' && block.kind !== 'data' && block.kind !== 'module') {
@@ -147,7 +168,7 @@ export function registerLearningEditorProviders(host: EditorNotesHost): Disposab
 				: undefined;
 
 			if (!targetAddress || (!record.notes[targetAddress] && requirementsForAddress(record, targetAddress).length === 0)) {
-				const blocks = parseTerraformDocumentBlocks(document.getText());
+				const blocks = getDocumentBlocks(document);
 				const block = findTerraformBlockAtLine(blocks, position.line);
 				if (block && block.startLine === position.line && (block.kind === 'resource' || block.kind === 'data' || block.kind === 'module')) {
 					targetAddress = block.address;
@@ -181,6 +202,7 @@ export function registerLearningEditorProviders(host: EditorNotesHost): Disposab
 
 	return {
 		dispose(): void {
+			parseCache.clear();
 			recordListener.dispose();
 			lensEmitter.dispose();
 			codeLensDisposable.dispose();

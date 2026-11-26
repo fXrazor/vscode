@@ -173,6 +173,7 @@ export type LearningStudioMessage =
 	| { readonly type: 'saveTask'; readonly title: string; readonly mode: LearningMode; readonly objective: string; readonly newRequirement?: string }
 	| { readonly type: 'toggleRequirement'; readonly requirementId: string }
 	| { readonly type: 'saveNote'; readonly address: string; readonly why?: string; readonly userNote?: string; readonly docLabel?: string; readonly docUrl?: string }
+	| { readonly type: 'exportStudyGuide' }
 	| { readonly type: 'copyMcpConfig'; readonly client: 'codex' | 'claude-code' }
 	| { readonly type: 'revokeGrant'; readonly grantIdPreview: string }
 	| { readonly type: 'refresh' };
@@ -700,10 +701,37 @@ export function parseLearningStudioMessage(raw: unknown): LearningStudioMessage 
 			const grantIdPreview = str(raw.grantIdPreview, 128);
 			return grantIdPreview ? { type: 'revokeGrant', grantIdPreview } : undefined;
 		}
+		case 'exportStudyGuide':
+			return { type: 'exportStudyGuide' };
 		case 'refresh':
 			return { type: 'refresh' };
 		default:
 			return undefined;
+	}
+}
+
+const ALLOWED_DOC_HOSTS: ReadonlySet<string> = new Set([
+	'registry.terraform.io',
+	'learn.microsoft.com',
+	'docs.aws.amazon.com',
+	'cloud.google.com',
+	'developer.hashicorp.com',
+	'opentofu.org'
+]);
+
+function escapeMarkdownText(value: string): string {
+	return value.replace(/[\\`*_{}[\]()#+\-.!|<>]/g, ch => `\\${ch}`);
+}
+
+export function isAllowlistedDocUrl(raw: string): boolean {
+	if (!raw.startsWith('https://') || raw.length > 512 || /[\s()<>]/.test(raw)) {
+		return false;
+	}
+	try {
+		const parsed = new URL(raw);
+		return parsed.protocol === 'https:' && parsed.username === '' && parsed.password === '' && parsed.port === '' && ALLOWED_DOC_HOSTS.has(parsed.hostname.toLowerCase());
+	} catch {
+		return false;
 	}
 }
 
@@ -715,26 +743,136 @@ export function formatLearningNoteHoverMarkdown(
 	if (!note && linkedRequirements.length === 0) {
 		return undefined;
 	}
-	const lines: string[] = [`$(note) **CloudForge Learning Note** — \`${address}\``];
+	const lines: string[] = [`$(note) **CloudForge Learning Note** — \`${address.replace(/`/g, '')}\``];
 	if (note?.why) {
-		lines.push(`\n**Why:** ${note.why}`);
+		lines.push(`\n**Why:** ${escapeMarkdownText(note.why)}`);
 	}
 	if (note?.userNote) {
-		lines.push(`\n**Note:** ${note.userNote}`);
+		lines.push(`\n**Note:** ${escapeMarkdownText(note.userNote)}`);
 	}
 	if (linkedRequirements.length > 0) {
 		lines.push('\n**Lab requirements:**');
 		for (const req of linkedRequirements) {
 			const mark = req.status === 'addressed' ? '✓' : '○';
-			lines.push(`- ${mark} ${req.text}`);
+			lines.push(`- ${mark} ${escapeMarkdownText(req.text)}`);
 		}
 	}
-	const safeDocs = (note?.docs ?? []).filter(doc => doc.url.startsWith('https://'));
+	const safeDocs = (note?.docs ?? []).filter(doc => isAllowlistedDocUrl(doc.url));
 	if (safeDocs.length > 0) {
-		lines.push('\n**Docs:** ' + safeDocs.map(doc => `[${doc.label}](${doc.url})`).join(' · '));
+		lines.push('\n**Docs:** ' + safeDocs.map(doc => `[${escapeMarkdownText(doc.label)}](${doc.url})`).join(' · '));
 	}
 	const editArgs = encodeURIComponent(JSON.stringify([address]));
 	lines.push(`\n[Edit note](command:cloudforge.addResourceNote?${editArgs}) · [Open Learning Studio](command:cloudforge.openLearningStudio?%5B%22task%22%5D)`);
+	return lines.join('\n');
+}
+
+export interface StudyGuideGraphNode {
+	readonly kind: string;
+	readonly resourceType: string | null;
+	readonly name: string;
+	readonly label: string;
+}
+
+export interface StudyGuideInput {
+	readonly architectureName: string;
+	readonly sourceRevision: string;
+	readonly nodes: readonly StudyGuideGraphNode[];
+	readonly edgeCount: number;
+	readonly record?: LearningRecord;
+	readonly skills: readonly PinnedSkill[];
+}
+
+export function buildArchitectureStudyGuideMarkdown(input: StudyGuideInput): string {
+	const lines: string[] = [
+		`# ${input.architectureName} — Architecture Study Guide`,
+		'',
+		`- **Source revision:** \`${input.sourceRevision.slice(0, 12)}\``,
+		`- **Topology:** ${input.nodes.length} node(s), ${input.edgeCount} dependency edge(s)`,
+		''
+	];
+
+	const task = input.record?.task;
+	if (task) {
+		const done = task.requirements.filter(r => r.status === 'addressed').length;
+		lines.push(`## Learning Task: ${task.title}`);
+		lines.push('');
+		lines.push(`- **Guidance mode:** \`${task.mode}\``);
+		if (task.objective) {
+			lines.push(`- **Objective:** ${task.objective}`);
+		}
+		if (task.assumptions.length > 0) {
+			lines.push(`- **Assumptions:** ${task.assumptions.join('; ')}`);
+		}
+		lines.push('');
+		if (task.requirements.length > 0) {
+			lines.push(`### Requirements Checklist (${done}/${task.requirements.length} addressed)`);
+			lines.push('');
+			for (const req of task.requirements) {
+				const box = req.status === 'addressed' ? '[x]' : '[ ]';
+				const linked = req.linkedAddresses.length > 0 ? ` — ${req.linkedAddresses.map(a => `\`${a}\``).join(', ')}` : '';
+				lines.push(`- ${box} ${req.text}${linked}`);
+			}
+			lines.push('');
+		}
+	}
+
+	const notesEntries = Object.entries(input.record?.notes ?? {});
+	if (notesEntries.length > 0) {
+		lines.push(`## Resource Design Rationale (${notesEntries.length})`);
+		lines.push('');
+		for (const [address, note] of notesEntries) {
+			lines.push(`### \`${address}\``);
+			if (note.why) {
+				lines.push(`- **Why:** ${note.why}`);
+			}
+			if (note.userNote) {
+				lines.push(`- **Study note:** ${note.userNote}`);
+			}
+			const safeDocs = note.docs.filter(d => isAllowlistedDocUrl(d.url));
+			if (safeDocs.length > 0) {
+				lines.push(`- **Official docs:** ${safeDocs.map(d => `[${d.label}](${d.url})`).join(' · ')}`);
+			}
+			lines.push('');
+		}
+	}
+
+	if (input.nodes.length > 0) {
+		lines.push(`## Architecture Components (${input.nodes.length})`);
+		lines.push('');
+		lines.push('| Kind | Type | Label |');
+		lines.push('| --- | --- | --- |');
+		for (const node of input.nodes.slice(0, 100)) {
+			lines.push(`| ${node.kind} | \`${node.resourceType ?? '-'}\` | ${node.label} |`);
+		}
+		lines.push('');
+	}
+
+	const proposals = input.record?.proposals ?? [];
+	if (proposals.length > 0) {
+		lines.push(`## Proposal Journal (${proposals.length})`);
+		lines.push('');
+		for (const p of proposals) {
+			lines.push(`- **${p.title}** (\`${p.status}\`, origin \`${p.origin}\`) — ${p.files.map(f => `\`${f.fileName}\``).join(', ')}`);
+		}
+		lines.push('');
+	}
+
+	const linkedSkillIds = new Set(task?.skillIds ?? []);
+	const relevantSkills = linkedSkillIds.size > 0
+		? input.skills.filter(s => linkedSkillIds.has(s.id))
+		: input.skills.slice(0, 4);
+	if (relevantSkills.length > 0) {
+		lines.push('## Referenced CloudForge Skills');
+		lines.push('');
+		for (const skill of relevantSkills) {
+			lines.push(`- **\`${skill.id}\`** (${categoryLabel(skill.category)}) — ${skill.purpose}`);
+		}
+		lines.push('');
+	}
+
+	lines.push('---');
+	lines.push('_Generated locally by CloudForge (zero secret values or local OS paths included)._');
+	lines.push('');
 	return lines.join('\n');
 }
 
@@ -824,7 +962,10 @@ export function buildLearningStudioHtml(state: LearningStudioViewState, nonce: s
 						<label>Guidance mode<select name="mode">${modeOpt('hint', 'Hint only')}${modeOpt('guided', 'Guided checklist')}${modeOpt('workedExample', 'Worked example')}</select></label>
 						<label class="full">Objective<textarea name="objective" rows="2" maxlength="4000" placeholder="What should this architecture achieve?">${escapeHtml(task?.objective ?? '')}</textarea></label>
 						<label class="full">Add requirement (optional)<input name="newRequirement" type="text" maxlength="512" placeholder="e.g. Provision disjoint hub and spoke VNets with NSGs"></label>
-						<div class="row-actions full"><button type="submit" class="primary-btn">Save learning task</button></div>
+						<div class="row-actions full">
+							<button type="submit" class="primary-btn">Save learning task</button>
+							<button type="button" class="ghost-btn" data-action="exportStudyGuide">Export study guide (Markdown)</button>
+						</div>
 					</form>
 					${checklistHtml}
 				</section>
@@ -1247,6 +1388,8 @@ export function buildLearningStudioHtml(state: LearningStudioViewState, nonce: s
 			vscode.postMessage({ type: 'copyMcpConfig', client: target.getAttribute('data-client') });
 		} else if (action === 'revokeGrant') {
 			vscode.postMessage({ type: 'revokeGrant', grantIdPreview: target.getAttribute('data-id') });
+		} else if (action === 'exportStudyGuide') {
+			vscode.postMessage({ type: 'exportStudyGuide' });
 		} else if (action === 'refresh') {
 			vscode.postMessage({ type: 'refresh' });
 		}

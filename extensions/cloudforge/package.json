@@ -377,6 +377,12 @@
 				"title": "%command.addResourceNote%",
 				"category": "%displayName%",
 				"icon": "$(note)"
+			},
+			{
+				"command": "cloudforge.exportStudyGuide",
+				"title": "%command.exportStudyGuide%",
+				"category": "%displayName%",
+				"icon": "$(markdown)"
 			}
 		],
 		"mcpServerDefinitionProviders": [
@@ -685,6 +691,11 @@
 					"command": "cloudforge.copyMcpConfig",
 					"when": "view == cloudforge.learn",
 					"group": "navigation@2"
+				},
+				{
+					"command": "cloudforge.exportStudyGuide",
+					"when": "view == cloudforge.learn",
+					"group": "navigation@3"
 				},
 				{
 					"command": "cloudforge.refreshLearning",

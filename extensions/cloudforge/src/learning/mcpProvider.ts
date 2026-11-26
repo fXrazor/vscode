@@ -87,7 +87,8 @@ export class CloudForgeMcpProvider implements McpServerDefinitionProvider<McpStd
 		if (!scope || token.isCancellationRequested) {
 			return undefined;
 		}
-		if (this.activeAutoGrant && this.activeAutoGrant.architectureId !== scope.architectureId) {
+		// Always revoke any previous auto-issued grant before issuing a fresh one so reconnects never leak grants.
+		if (this.activeAutoGrant) {
 			await this.revokeActiveAutoGrant();
 		}
 		const issued = await this.host.callService<unknown>('issueMcpGrant', {
@@ -96,11 +97,17 @@ export class CloudForgeMcpProvider implements McpServerDefinitionProvider<McpStd
 			clientLabel: 'vscode-agent',
 			ttlMinutes: 120
 		});
-		if (!issued.ok || token.isCancellationRequested) {
+		if (!issued.ok) {
 			return undefined;
 		}
 		const grant = parseIssuedMcpGrant(issued.value);
 		if (!grant) {
+			return undefined;
+		}
+		const currentScope = this.host.getActiveScope();
+		if (token.isCancellationRequested || !currentScope || currentScope.workspaceId !== scope.workspaceId || currentScope.architectureId !== scope.architectureId) {
+			// Scope changed or request cancelled while issuing — immediately revoke the orphaned grant.
+			void this.host.callService('revokeMcpGrant', { grantId: grant.grantId }).catch(() => undefined);
 			return undefined;
 		}
 		this.activeAutoGrant = { grantId: grant.grantId, architectureId: scope.architectureId };

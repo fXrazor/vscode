@@ -6,9 +6,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+	buildArchitectureStudyGuideMarkdown,
 	buildExternalMcpConfigSnippet,
 	buildLearningStudioHtml,
 	formatLearningNoteHoverMarkdown,
+	isAllowlistedDocUrl,
 	parseChatTopologyArgs,
 	parseIssuedMcpGrant,
 	parseLearningRecord,
@@ -306,10 +308,89 @@ test('validates diffProposalFile messages and formats in-editor learning note ho
 		[{ id: 'req-1', text: 'Provision hub VNet', status: 'addressed', linkedAddresses: ['azurerm_virtual_network.hub'] }]
 	);
 	assert.ok(hoverMd);
-	assert.ok(hoverMd.includes('Central transit hub for peered spokes.'));
+	assert.ok(hoverMd.includes('Central transit hub for peered spokes'));
 	assert.ok(hoverMd.includes('✓ Provision hub VNet'));
 	assert.ok(hoverMd.includes('[Azure VNet Docs](https://learn.microsoft.com/en-us/azure/virtual-network/)'));
 	assert.ok(!hoverMd.includes('insecure.example.com'));
 	assert.ok(hoverMd.includes('command:cloudforge.addResourceNote'));
 	assert.equal(formatLearningNoteHoverMarkdown('azurerm_subnet.app', undefined, []), undefined);
+
+	// Audit regression: prevents command-link injection inside trusted hover Markdown and non-allowlisted https hosts.
+	const injected = formatLearningNoteHoverMarkdown(
+		'azurerm_virtual_network.hub',
+		{
+			why: '[evil](command:cloudforge.addResourceNote)',
+			docs: [{ label: 'Untrusted', url: 'https://evil.example.com/phish' }]
+		},
+		[]
+	);
+	assert.ok(injected);
+	assert.ok(!injected.includes('[evil](command:'));
+	assert.ok(!injected.includes('evil.example.com'));
+	assert.equal(isAllowlistedDocUrl('https://learn.microsoft.com/azure'), true);
+	assert.equal(isAllowlistedDocUrl('https://evil.example.com/azure'), false);
+	assert.equal(isAllowlistedDocUrl('https://learn.microsoft.com/a)b'), false);
+});
+
+test('exports portable Architecture Study Guide Markdown with task, notes, topology, and proposals', () => {
+	const md = buildArchitectureStudyGuideMarkdown({
+		architectureName: 'Azure Hub Lab',
+		sourceRevision: 'e'.repeat(64),
+		nodes: [{ kind: 'resource', resourceType: 'azurerm_virtual_network', name: 'azurerm_virtual_network.hub', label: 'hub' }],
+		edgeCount: 2,
+		record: {
+			workspaceId: 'ws-1',
+			architectureId: 'ws-1-arch-1',
+			sourceRevision: 'e'.repeat(64),
+			task: {
+				title: 'Hub-and-Spoke Lab',
+				mode: 'guided',
+				objective: 'Build segmented Azure VNets.',
+				requirements: [{ id: 'req-1', text: 'Create hub VNet', status: 'addressed', linkedAddresses: ['azurerm_virtual_network.hub'] }],
+				assumptions: ['Offline learning only'],
+				skillIds: ['cloudforge-diagram-authoring']
+			},
+			notes: {
+				'azurerm_virtual_network.hub': {
+					why: 'Central ingress/egress VNet.',
+					docs: [
+						{ label: 'Azure VNet Docs', url: 'https://learn.microsoft.com/en-us/azure/virtual-network/' },
+						{ label: 'Untrusted', url: 'https://untrusted.example.com/' }
+					]
+				}
+			},
+			proposals: [{
+				proposalId: 'prop-1',
+				origin: 'mcp:vscode-agent',
+				title: 'Add hub subnet',
+				summary: 'Adds shared subnet.',
+				baseSourceRevision: 'e'.repeat(64),
+				skillIds: [],
+				requirementIds: [],
+				files: [{ fileName: 'network.tf', contents: '' }],
+				findings: [],
+				status: 'accepted',
+				createdAt: '2026-11-26T19:00:00Z'
+			}],
+			availableSkills: []
+		},
+		skills: [{
+			id: 'cloudforge-diagram-authoring',
+			category: 'cloudforge-diagram',
+			repository: 'cloudforge/built-in',
+			commit: '0afc60b',
+			license: 'MIT',
+			purpose: 'Clean diagrams.',
+			guidance: [],
+			dataOnly: true
+		}]
+	});
+	assert.ok(md.includes('# Azure Hub Lab — Architecture Study Guide'));
+	assert.ok(md.includes('- [x] Create hub VNet — `azurerm_virtual_network.hub`'));
+	assert.ok(md.includes('Central ingress/egress VNet.'));
+	assert.ok(md.includes('[Azure VNet Docs](https://learn.microsoft.com/en-us/azure/virtual-network/)'));
+	assert.ok(!md.includes('untrusted.example.com'));
+	assert.ok(md.includes('**Add hub subnet** (`accepted`, origin `mcp:vscode-agent`)'));
+	assert.ok(md.includes('`cloudforge-diagram-authoring`'));
+	assert.deepEqual(parseLearningStudioMessage({ type: 'exportStudyGuide' }), { type: 'exportStudyGuide' });
 });

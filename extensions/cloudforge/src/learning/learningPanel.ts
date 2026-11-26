@@ -17,6 +17,7 @@ import {
 	TreeItemCollapsibleState,
 	ViewColumn,
 	window,
+	workspace,
 	type Disposable,
 	type Event,
 	type ExtensionContext,
@@ -28,6 +29,7 @@ import { registerCloudForgeChatParticipant } from './chatParticipant';
 import { detectCursorResourceAddress, registerLearningEditorProviders } from './editorNotes';
 import { ProposalDiffProvider } from './proposalDiff';
 import {
+	buildArchitectureStudyGuideMarkdown,
 	buildExternalMcpConfigSnippet,
 	buildLearningStudioHtml,
 	categoryLabel,
@@ -45,6 +47,7 @@ import {
 	type PinnedSkill,
 	type ProposalDraft,
 	type SkillCategory,
+	type StudyGuideGraphNode,
 	type TopologyBlueprintSummary
 } from './model';
 
@@ -54,6 +57,8 @@ export interface LearningGraph {
 	readonly workspaceId: string;
 	readonly architectureId: string;
 	readonly sourceRevision: string;
+	readonly nodes?: readonly StudyGuideGraphNode[];
+	readonly edges?: readonly unknown[];
 }
 
 export interface LearningHost {
@@ -677,6 +682,25 @@ export function activateLearning(context: ExtensionContext, host: LearningHost):
 		renderPanel();
 	}
 
+	async function exportStudyGuide(): Promise<void> {
+		const graph = host.getGraph();
+		if (!graph) {
+			void window.showInformationMessage(l10n.t('Open a CloudForge architecture before exporting a study guide.'));
+			return;
+		}
+		await store.refresh();
+		const markdown = buildArchitectureStudyGuideMarkdown({
+			architectureName: host.architectureName() ?? 'Architecture',
+			sourceRevision: graph.sourceRevision,
+			nodes: graph.nodes ?? [],
+			edgeCount: graph.edges?.length ?? 0,
+			record: store.record,
+			skills: store.skills
+		});
+		const doc = await workspace.openTextDocument({ language: 'markdown', content: markdown });
+		await window.showTextDocument(doc, { preview: false, viewColumn: ViewColumn.Beside });
+	}
+
 	function openLearningStudio(tab?: LearningStudioTab, category?: SkillCategory | 'all'): void {
 		if (tab) {
 			activeTab = tab;
@@ -742,6 +766,9 @@ export function activateLearning(context: ExtensionContext, host: LearningHost):
 				case 'revokeGrant':
 					void revokeGrantByPreview(msg.grantIdPreview);
 					break;
+				case 'exportStudyGuide':
+					void exportStudyGuide();
+					break;
 				case 'refresh':
 					statusMessage = undefined;
 					void store.refresh().then(() => renderPanel());
@@ -774,6 +801,9 @@ export function activateLearning(context: ExtensionContext, host: LearningHost):
 		store.onDidChange(() => renderPanel()),
 		commands.registerCommand('cloudforge.openLearningStudio', (tab?: LearningStudioTab, category?: SkillCategory | 'all') => {
 			openLearningStudio(tab, category);
+		}),
+		commands.registerCommand('cloudforge.exportStudyGuide', async () => {
+			await exportStudyGuide();
 		}),
 		commands.registerCommand('cloudforge.addResourceNote', async (explicitAddress?: string) => {
 			const graph = host.getGraph();
