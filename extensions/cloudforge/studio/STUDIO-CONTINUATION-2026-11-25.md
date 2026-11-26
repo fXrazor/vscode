@@ -153,7 +153,7 @@ Same branch. When the extension creates an architecture from a `.cloudforge.zip`
 
 ### Portable project bundle (.cloudforge.zip) — Claude, 26 November 2026
 
-Branch `claude/project-thread-8qd376` (from main `10cf5df6`), not merged. Dale asked for Export to produce the whole project as a portable zip, like Brainboard. **Export › Project bundle (.zip)** and **Export › Import project bundle…** are in the topbar Export menu and the compact menu.
+Branch `claude/project-thread-8qd376` (from main `10cf5df6`), merged to main via fXrazor/vscode#5. Dale asked for Export to produce the whole project as a portable zip, like Brainboard. **Export › Project bundle (.zip)** and **Export › Import project bundle…** are in the topbar Export menu and the compact menu.
 
 - Bundle layout: `cloudforge-project.json` (manifest: format `cloudforge.project-bundle` v1, source revision, counts, SHA-256 per file), `architecture.json` (the full canvas model: resources, both view positions, drawings/ink, connectors, groups, layer order, variables), `terraform/` (the runnable folder the canvas projects to via the cloudlab generator, with Studio-declared variables folded into `variables.tf` and their non-sensitive values into `terraform.tfvars`), `diagram/architecture.svg`, `README.md`.
 - Sensitive settings and sensitive variable values are never exported (`exportableArchitecture`). Terraform is the canvas projection, not a copy of on-disk source: comments and HCL the canvas doesn't model are not carried. Copying raw workspace `.tf` would need a Rust read API (follow-up).
