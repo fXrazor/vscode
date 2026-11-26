@@ -237,6 +237,8 @@ export interface NodeOverlay {
 	readonly warnings: number;
 	readonly messages: readonly { severity: 'error' | 'warning'; message: string }[];
 	readonly plan?: { readonly action: PlanAction; readonly instances: number; readonly changed: readonly string[]; readonly sensitive: boolean };
+	/** Planned replace/destroy resources this one configurably depends on (directly or transitively). */
+	readonly affectedBy?: readonly string[];
 }
 type PlanChangeInput = { address: string; mode?: string; actionKind: PlanAction; changedAttributePaths: readonly string[]; hasSensitiveAttributes: boolean };
 const actionRank: Record<PlanAction, number> = { delete: 5, replace: 4, create: 3, update: 2, read: 1, noOp: 0 };
@@ -248,7 +250,7 @@ const actionRank: Record<PlanAction, number> = { delete: 5, replace: 4, create: 
  */
 export function graphOverlays(snapshot: TechnicalGraphSnapshot, diagnostics: readonly { resourceId: string; severity: 'error' | 'warning'; message: string }[], plan?: readonly PlanChangeInput[]): { byNode: Record<string, NodeOverlay>; unmatchedPlan: number } {
 	const byAddress = new Map(snapshot.nodes.map(node => [node.address, node.id]));
-	const byNode: Record<string, { errors: number; warnings: number; messages: { severity: 'error' | 'warning'; message: string }[]; plan?: { action: PlanAction; instances: number; changed: string[]; sensitive: boolean } }> = {};
+	const byNode: Record<string, { errors: number; warnings: number; messages: { severity: 'error' | 'warning'; message: string }[]; plan?: { action: PlanAction; instances: number; changed: string[]; sensitive: boolean }; affectedBy?: string[] }> = {};
 	const entry = (id: string) => byNode[id] ??= { errors: 0, warnings: 0, messages: [] };
 	for (const item of diagnostics) { if (!byAddress.size || !snapshot.nodes.some(node => node.id === item.resourceId)) { continue; } const target = entry(item.resourceId); target[item.severity === 'error' ? 'errors' : 'warnings']++; target.messages.push({ severity: item.severity, message: item.message }); }
 	let unmatchedPlan = 0;
@@ -260,6 +262,16 @@ export function graphOverlays(snapshot: TechnicalGraphSnapshot, diagnostics: rea
 		const target = entry(id); const current = target.plan;
 		target.plan = !current ? { action: change.actionKind, instances: 1, changed: [...change.changedAttributePaths], sensitive: change.hasSensitiveAttributes }
 			: { action: actionRank[change.actionKind] > actionRank[current.action] ? change.actionKind : current.action, instances: current.instances + 1, changed: [...new Set([...current.changed, ...change.changedAttributePaths])], sensitive: current.sensitive || change.hasSensitiveAttributes };
+	}
+	// Configured consumers of a planned replace/destroy may be recreated, lose a reference or fail.
+	const ordering = snapshot.edges.filter(edge => edge.ordering && !edge.membership);
+	for (const [id, overlay] of Object.entries(byNode)) {
+		if (overlay.plan?.action !== 'replace' && overlay.plan?.action !== 'delete') { continue; }
+		for (const downstream of traceNode(ordering, id).downstream) {
+			const target = entry(downstream);
+			if (target.plan?.action === 'replace' || target.plan?.action === 'delete') { continue; }
+			(target.affectedBy ??= []).push(id);
+		}
 	}
 	return { byNode, unmatchedPlan };
 }

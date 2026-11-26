@@ -141,6 +141,10 @@
 .tg-overlay-badge { position: absolute; top: -9px; right: 10px; font-size: 10.5px; font-weight: 650; line-height: 17px; padding: 0 7px; border-radius: 9px; border: 1px solid currentColor; background: var(--surface); white-space: nowrap; }
 .tg-tone-create { color: #2f8a4e; } .tg-tone-update { color: #a86c0e; } .tg-tone-replace { color: #c0532b; } .tg-tone-delete { color: var(--danger); }
 .tg-tone-read, .tg-tone-order { color: var(--accent); } .tg-tone-muted, .tg-tone-noOp { color: var(--muted); border-style: dashed; }
+.tg-tone-affected { color: #b4541a; border-style: dashed; background: color-mix(in srgb, #c0532b 8%, var(--surface)); }
+.theme-dark .tg-tone-affected { color: #f3a07e; }
+.tg-link { border: 0; background: none; padding: 0 4px 0 0; color: var(--accent); cursor: pointer; font: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.tg-muted { color: var(--muted); }
 .theme-dark .tg-tone-create { color: #84d29f; } .theme-dark .tg-tone-update { color: #eac173; } .theme-dark .tg-tone-replace { color: #f3a07e; }
 .tg-why-actions { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 4px; }
 .tg-why-actions button { display: inline-flex; align-items: center; gap: 5px; height: 26px; min-height: 0; padding: 0 9px; font-size: 11.5px; border-radius: 6px; border: 1px solid var(--border); background: var(--input); color: var(--text); cursor: pointer; }

@@ -171,3 +171,15 @@ test('graph presentation persists under its own key and never as design position
 	assert.equal(restored.lens, 'runtime'); assert.equal(restored.layout, 'tree'); assert.equal(restored.spacing, 150); assert.equal(restored.focus, undefined);
 	assert.deepEqual(parseGraphPresentation({ lens: 'bogus', spacing: 10, pins: { a: { x: 'no' } } }), { pins: {} });
 });
+
+test('planned replace or destroy marks configured dependents as affected', () => {
+	const snapshot = projectTechnicalGraph(hubSpokeArchitecture());
+	const node = snapshot.nodes.find(item => item.id === 'snet-aks')!;
+	const dependents = traceNode(snapshot.edges.filter(edge => edge.ordering && !edge.membership), 'snet-aks').downstream;
+	const { byNode } = graphOverlays(snapshot, [], [{ address: node.address, actionKind: 'replace', changedAttributePaths: ['name'], hasSensitiveAttributes: false }]);
+	assert.equal(byNode['snet-aks'].affectedBy, undefined);
+	for (const id of dependents) { assert.deepEqual(byNode[id].affectedBy, ['snet-aks']); }
+	const upstream = traceNode(snapshot.edges.filter(edge => edge.ordering && !edge.membership), 'snet-aks').upstream;
+	for (const id of upstream) { assert.equal(byNode[id]?.affectedBy, undefined); }
+	assert.equal(dependents.size, 3); assert.ok(upstream.size > 0);
+});

@@ -167,14 +167,16 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme
 		if (presentation.overlay === 'plan') {
 			const change = overlays.byNode[node.id]?.plan;
 			if (!plan) { return undefined; }
-			if (!change) { return { kind: 'plan', text: 'no change', tone: 'muted', title: 'Not in the latest plan, or no changes planned' }; }
+			const affected = overlays.byNode[node.id]?.affectedBy;
+			const affectedTitle = affected?.length ? ' · depends on planned replace/destroy of ' + affected.map(id => snapshot.nodes.find(item => item.id === id)?.label ?? id).slice(0, 4).join(', ') : '';
+			if (!change || change.action === 'noOp') { return affected?.length ? { kind: 'plan', text: '⚠ affected', tone: 'affected', title: 'No planned change of its own' + affectedTitle + '. Check that its references survive.' } : { kind: 'plan', text: 'no change', tone: 'muted', title: 'Not in the latest plan, or no changes planned' }; }
 			const symbol: Record<PlanAction, string> = { create: '+ create', update: '~ update', replace: '± replace', delete: '− destroy', read: '↻ read', noOp: 'no change' };
-			return { kind: 'plan', text: symbol[change.action] + (change.instances > 1 ? ' ×' + change.instances : ''), tone: change.action, title: (change.changed.length ? 'Changed: ' + change.changed.slice(0, 8).join(', ') : 'Planned action') + (change.sensitive ? ' · includes sensitive values' : '') + (plan.stale ? ' · plan is older than this draft' : '') };
+			return { kind: 'plan', text: symbol[change.action] + (change.instances > 1 ? ' ×' + change.instances : ''), tone: change.action, title: (change.changed.length ? 'Changed: ' + change.changed.slice(0, 8).join(', ') : 'Planned action') + (change.sensitive ? ' · includes sensitive values' : '') + affectedTitle + (plan.stale ? ' · plan is older than this draft' : '') };
 		}
 		if (presentation.overlay === 'order') { const wave = waves[node.id]; return wave === undefined ? { kind: 'order', text: 'cycle', tone: 'delete', title: 'In a reference cycle; Terraform cannot order it' } : { kind: 'order', text: 'wave ' + (wave + 1), tone: 'order', title: 'Longest prerequisite chain before this resource. Resources in the same wave can be created in parallel; destroy runs in reverse.' }; }
 		if (presentation.overlay === 'impact') { const count = impact[node.id] ?? 0; return { kind: 'impact', text: count ? 'used by ' + count : 'leaf', tone: count >= 8 ? 'replace' : count >= 3 ? 'update' : 'muted', title: 'Configured resources downstream of this one. Not an outage or replacement prediction.' }; }
 		return undefined;
-	}, [presentation.overlay, overlays, plan, waves, impact]);
+	}, [presentation.overlay, overlays, plan, waves, impact, snapshot.nodes]);
 	const selectedNode = snapshot.nodes.find(node => node.id === selectedId);
 	const trace = useMemo(() => selectedNode ? traceNode(visibleEdges, selectedNode.id) : undefined, [visibleEdges, selectedNode]);
 	const selectedEdge = snapshot.edges.find(edge => edge.id === selectedEdgeId);
@@ -361,6 +363,7 @@ function WhyPanel({ snapshot, edge, node, trace, overlay, wave, focused, onFocus
 			<dt>Used by</dt><dd>{trace?.downstream.size ?? 0} configured dependent{trace?.downstream.size === 1 ? '' : 's'}</dd>
 			<dt>Apply wave</dt><dd>{wave === undefined ? 'cycle — cannot be ordered' : wave + 1}</dd>
 			<dt>Shared category</dt><dd>{node.blastRadiusCategory}</dd>
+			{!!overlay?.affectedBy?.length && <><dt>Affected by</dt><dd>{overlay.affectedBy.map(id => <button key={id} className="tg-link" onClick={() => onSelect(id)}>{snapshot.nodes.find(item => item.id === id)?.label ?? id}</button>)} <span className="tg-muted">(planned replace or destroy upstream)</span></dd></>}
 			{overlay?.plan && <><dt>Planned</dt><dd>{overlay.plan.action}{overlay.plan.instances > 1 ? ' ×' + overlay.plan.instances : ''}{overlay.plan.changed.length ? ' · ' + overlay.plan.changed.slice(0, 6).join(', ') : ''}{overlay.plan.sensitive ? ' · sensitive values' : ''}</dd></>}
 			{node.sourceFile && <><dt>Source</dt><dd>{node.sourceFile}{node.sourceLine ? ':' + node.sourceLine : ''}</dd></>}
 		</dl>
