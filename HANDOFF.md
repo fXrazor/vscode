@@ -68,6 +68,8 @@ Eighteenth slice: **saves recover from a reconnect**. Dale hit "Imported reposit
 
 Nineteenth slice: **import as a copy or a link** (Dale chose "offer both, copy by default"; Rust `importRepository` `mode`/`includeTfvars`). `importFolder` in `project/controller.ts` asks **Copy into project** (default) or **Link in place**; copy offers every root (linked ones too) and, when the inspection found `.tfvars`, asks whether to copy them (default no). After a copy, `parseImportCopies`/`describeImportCopies` (`project/model.ts`) say how many files came across, that state stayed behind, and warn about module sources outside the copy. Linked architectures are now saved like local ones: the save recovery treats both the same, and the save notice says the change is in the linked repository and should be committed. The broker allows `mode` (`copy`/`link`) and `includeTfvars` (copy only). Not done: the Studio save dialog doesn't show the repository path yet (Studio, coordinate with Codex), and there's no per-link read-only switch yet.
 
+Merged `main` (Codex's Studio design push, 5b66f85c) and JSON Crack (PR #2, 16962455) into the branch on 2026-11-26 for the next installer: conflicts in Studio `catalogue.ts` (kept provider version on entries and recorded icons) and `serviceAdapter.ts` (kept `iconOverride` and `visualParentId`; `visualParentId` is now remapped with the other ids). Studio tsc + 163/163 + build, extension tsc + 105/105.
+
 Manual and Windows test list for all slices: [extensions/cloudforge/TEST-CHECKLIST-ksv8z9.md](extensions/cloudforge/TEST-CHECKLIST-ksv8z9.md).
 
 ## Studio continuation — read first — 25 November 2026
