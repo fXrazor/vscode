@@ -132,6 +132,10 @@ html, body, #root { margin: 0; padding: 0; width: 100%; height: 100%; overflow: 
 .terraform-configured { display: grid; gap: 8px; padding: 12px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 4px; font-size: 12px; }
 .terraform-configured code { overflow-wrap: anywhere; white-space: pre-wrap; font-family: var(--font-code); }
 .terraform-configured button, .additional-config-item button { justify-self: start; }
+/* "Configure in Terraform": a code action, outlined in the accent so it reads as the way into the code editor. */
+.code-action { display: inline-flex; align-items: center; gap: 6px; justify-self: start; min-height: 30px; padding: 0 12px; border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border)); border-radius: 7px; background: color-mix(in srgb, var(--accent) 6%, var(--panel-solid)); color: var(--accent); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+.code-action:hover { background: color-mix(in srgb, var(--accent) 13%, var(--panel-solid)); border-color: var(--accent); }
+.code-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .additional-config-item { display: grid; gap: 8px; padding: 12px 0; border-bottom: 1px solid var(--border); }
 .provider-example pre, .terraform-review pre { padding: 12px; overflow: auto; max-height: 280px; font-family: var(--font-code); font-size: 11px; line-height: 1.6; background: var(--panel-2); }
 .terraform-review { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 20px; display: grid; gap: 12px; align-content: start; }

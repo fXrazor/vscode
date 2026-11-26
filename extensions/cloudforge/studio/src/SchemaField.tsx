@@ -2,7 +2,7 @@ import { useId } from 'react';
 import { LiteralFields } from './LiteralFields.tsx';
 import type { AttrDef } from './cloudlab-core/catalog/index.ts';
 import { fieldIssue } from './formDefinition.ts';
-import { CircleHelp, CornerDownRight, Link2, TriangleAlert, Variable, X } from 'lucide-react';
+import { CircleHelp, CornerDownRight, Link2, TriangleAlert, Variable, X, Code2 } from 'lucide-react';
 import type { FieldImpact } from './fieldImpact.ts';
 import { resourceRefBindingIssue, variableBindingIssue, variablePreview, type ResourceRefBinding, type ResourceRefCandidate, type ResourceRefEntry, type VariableBinding } from './fieldBindings.ts';
 import { isSensitiveProperty, type VariableDefinition } from './variables.ts';
@@ -56,7 +56,7 @@ export function SchemaField({ name, value, definition, onChange, onUnset, variab
 				<VariablePicker onManageVariables={onManageVariables} sensitiveField={isSensitiveProperty(name,definition?.sensitive)} name={name} variables={variables} selectedId={binding?.variableId} selectedPath={binding?.path} definition={definition} onSelect={onBind}/>
 			</div>:<span className="schema-field-type">{definition?.type??'value'}</span>}
 		</div>
-		{terraform ? <div className="terraform-configured" id={id} role="group" aria-labelledby={id+'-label'}><strong>Configured in Terraform</strong><code>{terraform.expression}</code>{terraform.onConfigure && <button type="button" onClick={terraform.onConfigure}>Configure in Terraform</button>}</div> : reference ? <div className="inherited-field" id={id} role="group" aria-labelledby={id+'-label'}>
+		{terraform ? <div className="terraform-configured" id={id} role="group" aria-labelledby={id+'-label'}><strong>Configured in Terraform</strong><code>{terraform.expression}</code>{terraform.onConfigure && <button type="button" className="code-action" onClick={terraform.onConfigure}><Code2 size={14} aria-hidden="true"/>Configure in Terraform</button>}</div> : reference ? <div className="inherited-field" id={id} role="group" aria-labelledby={id+'-label'}>
 			<span className="inheritance-label"><CornerDownRight size={13}/>Inherited from container</span>
 			<button className="inheritance-source" onClick={()=>inheritance?.onReveal?.(reference.source.id)} title={reference.expression}><img src={'./assets/'+resourceDefinition(reference.source).icon} alt=""/><strong>{reference.source.label||reference.source.name}</strong><span>{reference.attribute}</span></button>
 			<code>{reference.expression}</code><button className="inheritance-override" onClick={fixed}>Use own value</button>

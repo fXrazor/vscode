@@ -128,6 +128,7 @@ Branch `claude/project-thread-2irlth` (unmerged; Antigravity owns merging). Base
 - Checks: `npm run check`, 214/214 tests (new dependency style test), loose-connectors-verify 16/16, whiteboard-controls-verify 20/20.
 
 - Connection labels someone typed now stay visible after deselecting (`labelIsAuthored`); only automatic service edge-kind labels and dependency labels follow the View toggle, renamed "Show automatic and dependency labels". A selected connection shows a soft halo instead of swapping its dash, so style edits show live.
+- "Configure in Terraform" buttons (Additional configuration and Terraform-configured fields) use the `.code-action` style with a code icon. A browser audit over the three samples found no other unstyled inspector buttons.
 - List, map and object fields (`LiteralFields.tsx`, `editor-refinement.css`): icon remove beside each entry, a dashed Add entry row, a quiet Unset link and a ghost Edit JSON toggle. Accessible names are unchanged ("Remove entry 1", "Add entry to …", "Unset …"). Test: open a subnet's Address prefix or any list/map field.
 
 Test checklist:
