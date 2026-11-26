@@ -171,6 +171,18 @@
 .tg-why-module-list { display: grid; gap: 2px; }
 .tg-why-module-list ul { margin: 2px 0 0; padding-left: 16px; display: grid; gap: 2px; }
 .tg-why-module-list li { line-height: 1.35; }
+.tg-why-pathfind { margin: 8px 0 4px; border: 1px solid var(--border); border-radius: 8px; background: color-mix(in srgb, var(--accent) 4%, var(--input)); }
+.tg-why-pathfind > summary { cursor: pointer; padding: 6px 9px; font-size: 11.5px; font-weight: 600; color: var(--text); user-select: none; }
+.tg-why-pathfind[open] > summary { border-bottom: 1px solid var(--border); color: var(--accent); }
+.tg-why-pathfind-body { display: grid; gap: 6px; padding: 7px 9px; font-size: 11.5px; }
+.tg-why-pathfind-body > p { margin: 0; line-height: 1.35; }
+.tg-why-pathfind-pick { display: flex; align-items: center; gap: 4px; }
+.tg-why-pathfind-pick select { flex: 1; min-width: 0; height: 26px; min-height: 0; padding: 0 6px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 11.5px; }
+.tg-why-pathfind-hops { margin: 0; padding-left: 16px; display: grid; gap: 6px; }
+.tg-why-pathfind-hops li { line-height: 1.35; }
+.tg-why-pathfind-step { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.tg-why-pathfind-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin-top: 2px; font-size: 10.5px; }
+.tg-why-pathfind-meta .tg-why-expr { width: 100%; color: var(--muted); word-break: break-all; }
 .tg-why-boundaries { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0 4px; }
 .tg-banner-info { color: var(--text); background: color-mix(in srgb, var(--accent) 8%, var(--surface)); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
 .tg-banner + .tg-banner { top: 96px; }

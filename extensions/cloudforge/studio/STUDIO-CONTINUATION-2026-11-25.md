@@ -12,6 +12,24 @@ Codex inspected Claude's merged Studio sources and this ledger against **`origin
 
 **Next:** review/integrate the local checkpoint when requested; then finish live schema import/render and AWS/Google installed journeys, provider validation of recorded examples/additional configuration, and the remaining native archive/service proof. This pass does not prove arbitrary HCL hydration, provider semantic validation, deployment behavior or a new installer. Preserve the master Technical Graph contract and historical ledgers below.
 
+## Miro Wrap in Frame, Fit Frame, Sticky-Note Tab Clustering, Frame Toolbar Fix & Bundled SVG Export — 26 November 2026
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `4ad76453b2b`, owner Antigravity.
+- **Scope:** added `frameSelection` (`Ctrl+Alt+F` / **Wrap in frame**) and `fitFrame` (**Fit frame to contents**) commands (`src/canvasOperations.ts`, `src/SelectionControls.tsx`, `src/DesignCanvas.tsx`), fixed React Flow `<NodeToolbar>` z-index on selected frames (`src/SelectionAnchor.tsx`), added Miro `Tab`/`Shift+Tab` rapid sticky-note spawning (`src/DesignCanvas.tsx`), and added `bundledGraphSvg()` (`src/technicalGraphExport.ts`, `src/TechnicalGraph.tsx`) so all five Technical Graph layouts export their true view with colour-preserving Scope Spotlight. Covered in `src/model.test.ts` and `src/technicalGraph.test.ts`.
+- **Fresh checks:** Studio `tsc --noEmit` **PASS**, **237/237** Studio tests (0 skipped), Studio `build` + `esbuild.webview.mts` **PASS**, `oxlint` & `hygiene` **PASS**, real Windows Edge live check of `Tab`/`Shift+Tab`, `Wrap in frame`, `Fit frame to contents`, 1-step Undo, and Bundled Spotlight SVG export **PASS** (0 browser errors).
+
+## Miro smart spacing handles, Tidy Up, Copy/Paste Style, Smart Duplicate, Select Similar & Network View SVG Export — 26 November 2026
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `0973f8940d3`, owner Antigravity.
+- **Scope:** added Miro **Tidy up** (auto row/column/2D-grid), **Flip H/V**, and interactive pink **gap spacing drag handles** (`src/selectionGeometry.ts`, `src/SelectionResizeHandle.tsx`, `src/styles.css`); wired **Copy/Paste Style (`Ctrl+Alt+C`/`V`)**, **Smart Duplicate step-and-repeat (`Ctrl+D`)**, **Select similar**, and an `autoFit` `rAF` zoom-hijack fix (`src/DesignCanvas.tsx`, `src/SelectionControls.tsx`); added live **Network View SVG/PNG export** (`networkGraphSvg` in `src/technicalGraphExport.ts`, wired into `src/TechnicalGraph.tsx`) with gradual sizing, sleek rings, cluster hulls, and colour-preserving Scope Spotlight. Covered in `src/model.test.ts` and `src/technicalGraph.test.ts`.
+- **Fresh checks:** Studio `tsc --noEmit` **PASS**, **235/235** Studio tests (0 skipped), Studio `build` + `esbuild.webview.mts` **PASS**, `oxlint` & `hygiene` **PASS**, Windows Edge `whiteboard-controls-verify.mjs` **20/20 PASS** + live Miro spacing/tidy-up/copy-style/smart-duplicate/select-similar & Network View Spotlight SVG export **PASS** (0 browser errors).
+
+## Technical Graph `WhyPanel` shortest dependency path tracer & spotlight-aware SVG/PNG export — 26 November 2026
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `df2168b7270`, owner Antigravity.
+- **Scope:** surfaced `shortestSnapshotPath()` inside `WhyPanel` via a collapsed `<details className="tg-why-pathfind">` (`src/TechnicalGraph.tsx`, `src/technical-graph.css`) with bidirectional shortest-path tracing, hop-by-hop clickable links + Terraform field provenance, and live path highlighting across React Flow, Network (`ForceGraph`), and Bundled views (view-local state, zero Undo steps); added colour-preserving Scope Spotlight dimming (`opacity="0.22"` / `opacity="0.12"`, zero grayscale) to `technicalGraphSvg()` (`src/technicalGraphExport.ts`, `src/TechnicalGraph.tsx`) plus unit test in `src/technicalGraph.test.ts`.
+- **Fresh checks:** Studio `tsc --noEmit` **PASS**, **233/233** Studio tests (0 skipped), Studio `build` + `esbuild.webview.mts` **PASS**, `oxlint` & `hygiene` **PASS**, Windows Edge `technical-view-verify.mjs` **64/64 PASS** + live `WhyPanel` path-tracer & spotlight SVG export check **PASS** (0 browser errors, 0 Undo steps).
+
 ## Alt+Drag direct clone & 1024px floating selection toolbar fix — 26 November 2026
 
 - **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `e58ba69c4dd`, owner Antigravity.

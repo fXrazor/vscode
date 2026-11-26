@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 import type { Architecture, BoardItem, DesignMode, Position, ResourceBlock } from './model.ts';
 import { bindingKey, bindingTarget } from './fieldBindings.ts';
-import { fitResourceContainers, isResourceContainer, visualAncestors, visualDescendants, containedDescendants } from './resourceHierarchy.ts';
+import { fitResourceContainers, isResourceContainer, resourceDimensions, visualAncestors, visualDescendants, containedDescendants } from './resourceHierarchy.ts';
 import { iconSizeLimits, resourceIconSize } from './resourceGeometry.ts';
 import { connectionElementIds, endpointElementId, pointEndpoint, remapEndpoint } from './connectionEndpoints.ts';
 import { connectionAnchor } from './designConnections.ts';
@@ -24,7 +24,11 @@ export type CanvasCommand =
 	/** Multi-object resize in one undo step, keeping the chosen corner fixed (top-left by default). */
 	| { kind: 'resize'; ids: string[]; mode: DesignMode; scale?: number; match?: 'width' | 'height' | 'size'; anchor?: ResizeAnchor }
 	/** Rotate drawings about their centres: `angle` sets an absolute angle, `by` turns each one. Resources stay upright. */
-	| { kind: 'rotate'; ids: string[]; angle?: number; by?: number };
+	| { kind: 'rotate'; ids: string[]; angle?: number; by?: number }
+	/** Miro-style wrap selection in a new frame sized to fit its members (1 atomic undo step). */
+	| { kind: 'frameSelection'; ids: string[]; id: string; mode: DesignMode; sizes?: Record<string, { width: number; height: number }>; label?: string }
+	/** Resize an existing frame tightly around its members (or visually enclosed elements if empty). */
+	| { kind: 'fitFrame'; id: string; mode: DesignMode; sizes?: Record<string, { width: number; height: number }> };
 
 /** Degrees in [0, 360), rounded to 0.1°; 0 is stored as undefined so unrotated drawings stay unchanged. */
 export function normaliseRotation(degrees: number): number | undefined {
@@ -84,7 +88,7 @@ export function selectionFragment(architecture: Architecture, ids: string[], con
 
 export function applyCanvasCommand(architecture: Architecture, command: CanvasCommand): Architecture {
 	const elements = canvasElements(architecture); const byId = new Map(elements.map(element => [element.id, element]));
-	const expanded = 'ids' in command ? expandGroups(architecture, command.ids) : [];
+	const expanded = Object.hasOwn(command, 'ids') ? expandGroups(architecture, (command as { ids: string[] }).ids) : [];
 	const editable = new Set(expanded.filter(id => !byId.get(id)?.canvasLocked));
 	switch (command.kind) {
 		case 'move': {
@@ -237,6 +241,69 @@ export function applyCanvasCommand(architecture: Architecture, command: CanvasCo
 			});
 			if ((!source.length && !connections.length) || new Set(connections.map(link => link.id)).size !== connections.length || connections.some(link => architecture.connections.some(existing => existing.id === link.id))) { return architecture; }
 			return { ...architecture, resources: [...architecture.resources, ...resources], items: [...architecture.items, ...items], groups: [...(architecture.groups ?? []), ...groups], connections: [...architecture.connections, ...connections], layerOrder: [...sceneOrder(architecture), ...sceneOrder(fragment).map(id => idMap[id])] };
+		}
+		case 'frameSelection': {
+			if (!command.id || byId.has(command.id)) { return architecture; }
+			const members = [...editable].filter(id => !architecture.items.some(item => item.id === id && item.kind === 'frame'));
+			if (!members.length) { return architecture; }
+			const boxOf = (id: string) => {
+				const element = byId.get(id)!;
+				const pos = element.positions[command.mode];
+				if (command.sizes?.[id]) { return { x: pos.x, y: pos.y, width: command.sizes[id].width, height: command.sizes[id].height }; }
+				if (Object.hasOwn(element, 'width')) { const item = element as BoardItem; return { x: pos.x, y: pos.y, width: item.width, height: item.height }; }
+				const resource = architecture.resources.find(item => item.id === id)!;
+				if (isResourceContainer(resource)) { const dim = resourceDimensions(architecture, resource, command.mode); return { x: pos.x, y: pos.y, width: dim.width, height: dim.height }; }
+				const side = command.mode === 'visual' ? resourceIconSize(resource) : 220;
+				return { x: pos.x, y: pos.y, width: side, height: command.mode === 'visual' ? side : 120 };
+			};
+			const boxes = members.map(boxOf);
+			const minX = Math.min(...boxes.map(box => box.x)); const minY = Math.min(...boxes.map(box => box.y));
+			const maxX = Math.max(...boxes.map(box => box.x + box.width)); const maxY = Math.max(...boxes.map(box => box.y + box.height));
+			const pos = { x: Math.round(minX - 36), y: Math.round(minY - 40) };
+			const width = Math.max(240, Math.round(maxX - minX + 72));
+			const height = Math.max(160, Math.round(maxY - minY + 76));
+			const frameIndex = architecture.items.filter(item => item.kind === 'frame').length + 1;
+			const frame: BoardItem = { id: command.id, kind: 'frame', text: command.label?.trim() || 'Frame ' + frameIndex, width, height, positions: { visual: pos, technical: pos }, members };
+			const memberSet = new Set(members);
+			const items = [...architecture.items.map(item => item.kind === 'frame' ? { ...item, members: item.members.filter(id => !memberSet.has(id)) } : item), frame];
+			return { ...architecture, items, layerOrder: [command.id, ...sceneOrder(architecture)] };
+		}
+		case 'fitFrame': {
+			const frame = architecture.items.find(item => item.id === command.id && item.kind === 'frame');
+			if (!frame || frame.canvasLocked) { return architecture; }
+			const boxOf = (id: string) => {
+				const element = byId.get(id)!;
+				const pos = element.positions[command.mode];
+				if (command.sizes?.[id]) { return { x: pos.x, y: pos.y, width: command.sizes[id].width, height: command.sizes[id].height }; }
+				if (Object.hasOwn(element, 'width')) { const item = element as BoardItem; return { x: pos.x, y: pos.y, width: item.width, height: item.height }; }
+				const resource = architecture.resources.find(item => item.id === id)!;
+				if (isResourceContainer(resource)) { const dim = resourceDimensions(architecture, resource, command.mode); return { x: pos.x, y: pos.y, width: dim.width, height: dim.height }; }
+				const side = command.mode === 'visual' ? resourceIconSize(resource) : 220;
+				return { x: pos.x, y: pos.y, width: side, height: command.mode === 'visual' ? side : 120 };
+			};
+			let members = frame.members.filter(id => byId.has(id) && id !== frame.id);
+			if (!members.length) {
+				const fp = frame.positions[command.mode];
+				members = elements.filter(element => {
+					if (element.id === frame.id || element.canvasLocked) { return false; }
+					if (architecture.items.some(item => item.id === element.id && item.kind === 'frame')) { return false; }
+					const box = boxOf(element.id);
+					const cx = box.x + box.width / 2; const cy = box.y + box.height / 2;
+					return cx >= fp.x && cx <= fp.x + frame.width && cy >= fp.y && cy <= fp.y + frame.height;
+				}).map(element => element.id);
+			}
+			if (!members.length) { return architecture; }
+			const boxes = members.map(boxOf);
+			const minX = Math.min(...boxes.map(box => box.x)); const minY = Math.min(...boxes.map(box => box.y));
+			const maxX = Math.max(...boxes.map(box => box.x + box.width)); const maxY = Math.max(...boxes.map(box => box.y + box.height));
+			const pos = { x: Math.round(minX - 36), y: Math.round(minY - 40) };
+			const width = Math.max(200, Math.round(maxX - minX + 72));
+			const height = Math.max(140, Math.round(maxY - minY + 76));
+			const unchanged = frame.positions[command.mode].x === pos.x && frame.positions[command.mode].y === pos.y && frame.width === width && frame.height === height && frame.members.length === members.length && frame.members.every((id, index) => id === members[index]);
+			if (unchanged) { return architecture; }
+			const memberSet = new Set(members);
+			const items = architecture.items.map(item => item.id === frame.id ? { ...item, width, height, positions: { visual: pos, technical: pos }, members } : item.kind === 'frame' ? { ...item, members: item.members.filter(id => !memberSet.has(id)) } : item);
+			return { ...architecture, items };
 		}
 	}
 }

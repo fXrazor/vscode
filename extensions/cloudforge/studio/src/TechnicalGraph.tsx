@@ -24,11 +24,13 @@ import { applyWaves, graphLenses, graphOverlays, layerLabels, lensEdges, matches
 import { inputSize, layoutTechnicalGraph, placeInputs, treeConnector, treeLinkPath, treeParents, visiblePortCount, type GraphLane } from './technicalGraphLayout.ts';
 import { graphEditAllowed, type GraphPresentation, type GraphPresentationAction, type RouteStyle } from './graphPresentation.ts';
 import { relationshipNames } from './infrastructureRelationships.ts';
-import { graphIcons, technicalGraphSvg } from './technicalGraphExport.ts';
+import { bundledGraphSvg, graphIcons, networkGraphSvg, technicalGraphSvg } from './technicalGraphExport.ts';
 import { bundleLayout } from './technicalGraphBundle.ts';
 import { createForceSimulation, forceSettings, hullPath, nodeRadii, orientForce, settleForce, tickForce, type ForceNode, type ForceSimulation, type NetworkOptions } from './technicalGraphForce.ts';
-import { snapshotTroubleshootingFindings } from './technicalGraphPatterns.ts';
+import { shortestSnapshotPath, snapshotTroubleshootingFindings } from './technicalGraphPatterns.ts';
 import { resourceIntelligence } from './providerKnowledge.ts';
+
+type TracedDependencyPath = NonNullable<ReturnType<typeof shortestSnapshotPath>>;
 
 type CardData = { outside?: boolean; treeToggle?: { collapsed: boolean; count: number }; onToggleTree?: (id: string) => void; node: GraphNode; lens: GraphPresentation['lens']; /* state 'soft' = hover context */ overlay?: NodeOverlay; badge?: { kind: 'plan' | 'order' | 'impact'; text: string; tone: string; title: string }; match: boolean; compact: boolean; expanded: boolean; state: 'normal' | 'focus' | 'trace' | 'dim' | 'soft'; pinned: boolean; tracedPorts: ReadonlySet<string>; onRename: (id: string, label: string) => void; onEdit: (id: string) => void; onToggleRows: (id: string) => void; onUnpin: (id: string) => void };
 type LaneData = { lane: GraphLane };
@@ -253,12 +255,25 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, fileV
 	const trace = useMemo(() => selectedNode ? traceNode(visibleEdges, selectedNode.id) : undefined, [visibleEdges, selectedNode]);
 	const selectedEdge = snapshot.edges.find(edge => edge.id === selectedEdgeId);
 	useEffect(() => { if (selectedEdgeId && !selectedEdge) { setSelectedEdgeId(''); } }, [selectedEdgeId, selectedEdge]);
+	const [pathTargetId, setPathTargetId] = useState('');
+	useEffect(() => { setPathTargetId(''); }, [selectedId]);
+	useEffect(() => { if (pathTargetId && !snapshot.nodes.some(node => node.id === pathTargetId)) { setPathTargetId(''); } }, [pathTargetId, snapshot.nodes]);
+	const tracedPath = useMemo<({ direction: 'downstream' | 'upstream'; path: TracedDependencyPath }) | undefined>(() => {
+		if (!selectedNode || !pathTargetId || pathTargetId === selectedNode.id) { return undefined; }
+		const forward = shortestSnapshotPath(visibleEdges, selectedNode.id, pathTargetId) ?? shortestSnapshotPath(snapshot.edges, selectedNode.id, pathTargetId);
+		if (forward) { return { direction: 'downstream', path: forward }; }
+		const reverse = shortestSnapshotPath(visibleEdges, pathTargetId, selectedNode.id) ?? shortestSnapshotPath(snapshot.edges, pathTargetId, selectedNode.id);
+		if (reverse) { return { direction: 'upstream', path: reverse }; }
+		return undefined;
+	}, [selectedNode, pathTargetId, visibleEdges, snapshot.edges]);
+	const pathNodes = useMemo(() => tracedPath ? new Set(tracedPath.path.nodeIds) : undefined, [tracedPath]);
+	const pathEdges = useMemo(() => tracedPath ? new Set(tracedPath.path.hops.map(hop => hop.edgeId)) : undefined, [tracedPath]);
 
 	const rename = useCallback((id: string, label: string) => { dispatchGraphEdit(onEdit, { type: 'update', id, patch: { label } }); }, [onEdit]);
 	const toggleRows = useCallback((id: string) => onPresentation({ type: 'toggleExpanded', id }), [onPresentation]);
 	const unpin = useCallback((id: string) => onPresentation({ type: 'unpin', id }), [onPresentation]);
 
-	const tracedPorts = useMemo(() => new Set(visibleEdges.filter(edge => trace?.edges.has(edge.id)).map(edge => edge.targetPort)), [visibleEdges, trace]);
+	const tracedPorts = useMemo(() => new Set(visibleEdges.filter(edge => pathEdges ? pathEdges.has(edge.id) : trace?.edges.has(edge.id)).map(edge => edge.targetPort)), [visibleEdges, trace, pathEdges]);
 	const computedNodes = useMemo<GraphFlowNode[]>(() => {
 		const lanes: LaneNode[] = [...layout.columns, ...layout.lanes].map(lane => ({ id: lane.id, type: 'lane', position: { x: lane.x, y: lane.y }, data: { lane }, draggable: false, selectable: false, focusable: false, connectable: false, deletable: false, zIndex: -2 }));
 		const hoveredEdge = hoverEdge ? visibleEdges.find(edge => edge.id === hoverEdge) : undefined;
@@ -267,7 +282,9 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, fileV
 		const cards: CardNode[] = snapshot.nodes.filter(node => layout.positions[node.id]).map(node => {
 			const state: CardData['state'] = hoveredEdge ? (node.id === hoveredEdge.source || node.id === hoveredEdge.target ? 'trace' : 'soft')
 				: hoverNode && !selectedNode ? (node.id === hoverNode ? 'focus' : hoverPeers!.has(node.id) ? 'trace' : 'soft')
-				: !selectedNode ? 'normal' : node.id === selectedNode.id ? 'focus' : trace?.upstream.has(node.id) || trace?.downstream.has(node.id) ? 'trace' : 'dim';
+				: !selectedNode ? 'normal'
+				: pathNodes ? (node.id === selectedNode.id || node.id === pathTargetId ? 'focus' : pathNodes.has(node.id) ? 'trace' : 'dim')
+				: node.id === selectedNode.id ? 'focus' : trace?.upstream.has(node.id) || trace?.downstream.has(node.id) ? 'trace' : 'dim';
 			return { id: node.id, type: 'card', position: layout.positions[node.id], selected: node.id === selectedId, draggable: true, connectable: false, deletable: false,
 				ariaLabel: node.label + ', ' + node.typeLabel + ', ' + layerLabels[node.layer],
 				data: { treeToggle: presentation.layout === 'tree' && treeDescendants[node.id] ? { collapsed: collapsedSet.has(node.id), count: treeDescendants[node.id] } : undefined, onToggleTree: toggleTree, node, lens: presentation.lens, overlay: overlays.byNode[node.id], badge: badgeFor(node), outside: !!spotlight && !spotlight.has(node.id), match: (!query.trim() || matchesQuery(node, query)) && (presentation.lens !== 'security' || !!node.exposure || node.layer === 'security' || node.layer === 'identity' || visibleEdges.some(edge => edge.source === node.id || edge.target === node.id)), compact, expanded: expanded.has(node.id), state, pinned: !!presentation.pins[node.id], tracedPorts, onRename: rename, onEdit: onOpenDetails, onToggleRows: toggleRows, onUnpin: unpin } };
@@ -280,7 +297,7 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, fileV
 		});
 		const inputLanes: LaneNode[] = inputLayout.lane ? [{ id: inputLayout.lane.id, type: 'lane', position: { x: inputLayout.lane.x, y: inputLayout.lane.y }, data: { lane: inputLayout.lane }, draggable: false, selectable: false, focusable: false, connectable: false, deletable: false, zIndex: -2 }] : [];
 		return [...lanes, ...inputLanes, ...cards, ...ghosts];
-	}, [treeDescendants, collapsedSet, toggleTree, presentation.layout, presentation.lens, inputLayout, onSelect, layout, snapshot, selectedNode, selectedId, trace, compact, expanded, presentation.pins, tracedPorts, rename, onOpenDetails, toggleRows, unpin, overlays, badgeFor, query, hoverNode, hoverEdge, visibleEdges, spotlight]);
+	}, [treeDescendants, collapsedSet, toggleTree, presentation.layout, presentation.lens, inputLayout, onSelect, layout, snapshot, selectedNode, selectedId, trace, pathNodes, pathTargetId, compact, expanded, presentation.pins, tracedPorts, rename, onOpenDetails, toggleRows, unpin, overlays, badgeFor, query, hoverNode, hoverEdge, visibleEdges, spotlight]);
 	// Local copy only so React Flow can show a drag in progress. It is rebuilt from layout + pins.
 	const [nodes, setNodes] = useState<GraphFlowNode[]>(computedNodes);
 	// Keep React Flow's measurements when presentation changes (hover, selection, overlays), otherwise
@@ -313,18 +330,19 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, fileV
 		};
 		// The ownership tree shows parent links; evidence lines appear only for the selected trace or relationship.
 		const treeMode = presentation.layout === 'tree';
-		const graphEdges: GraphFlowEdge[] = visibleEdges.filter(edge => cardIds.has(edge.source) && cardIds.has(edge.target) && (!treeMode || trace?.edges.has(edge.id) || edge.id === selectedEdgeId)).map(edge => {
+		const graphEdges: GraphFlowEdge[] = visibleEdges.filter(edge => cardIds.has(edge.source) && cardIds.has(edge.target) && (!treeMode || trace?.edges.has(edge.id) || pathEdges?.has(edge.id) || edge.id === selectedEdgeId)).map(edge => {
 			const [sourceHandle, targetHandle] = handles(edge);
 			const hovered = edge.id === hoverEdge || (!!hoverNode && !selectedNode && (edge.source === hoverNode || edge.target === hoverNode));
 			const state: EdgeData['state'] = edge.id === selectedEdgeId || edge.id === hoverEdge ? 'selected'
 				: hoverEdge ? 'dim'
 				: hoverNode && !selectedNode ? (hovered ? 'trace' : 'dim')
+				: pathEdges ? (pathEdges.has(edge.id) ? 'trace' : 'dim')
 				: !trace ? 'normal' : trace.edges.has(edge.id) ? 'trace' : 'dim';
 			const sourceLabel = snapshot.nodes.find(node => node.id === edge.source)?.label ?? edge.source;
 			return { id: edge.id, type: 'graph', source: edge.source, target: edge.target, sourceHandle, targetHandle, selectable: true, deletable: false, focusable: true, className: spotlight && !(spotlight.has(edge.source) && spotlight.has(edge.target)) ? 'is-outside' : undefined,
 				ariaLabel: categoryNames[edge.category] + ' from ' + (snapshot.nodes.find(node => node.id === edge.source)?.label ?? edge.source) + ' to ' + (snapshot.nodes.find(node => node.id === edge.target)?.label ?? edge.target),
 				markerEnd: { type: 'arrowclosed' as never, width: targetHandle === 'in' || targetHandle.startsWith('in-') ? 16 : 11, height: targetHandle === 'in' || targetHandle.startsWith('in-') ? 16 : 11, color: 'var(--tg-edge-' + edge.category + ')' },
-				data: { edge, route: presentation.route, state, animate: !reducedMotion && !!trace && (state === 'trace' || edge.id === selectedEdgeId), label: sourceLabel + ' → ' + [...new Set(edge.evidence.map(item => item.field))].join(', ') + ' · ' + categoryNames[edge.category] } };
+				data: { edge, route: presentation.route, state, animate: !reducedMotion && (!!trace || !!pathEdges) && (state === 'trace' || edge.id === selectedEdgeId), label: sourceLabel + ' → ' + [...new Set(edge.evidence.map(item => item.field))].join(', ') + ' · ' + categoryNames[edge.category] } };
 		});
 		for (const input of snapshot.inputs) {
 			if (!inputLayout.positions[input.id]) { continue; }
@@ -345,7 +363,7 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, fileV
 			}
 		}
 		return graphEdges;
-	}, [inputLayout, visibleEdges, layout, snapshot, compact, expanded, selectedEdgeId, trace, presentation.route, presentation.layout, reducedMotion, selectedId, hoverNode, hoverEdge, selectedNode, spotlight]);
+	}, [inputLayout, visibleEdges, layout, snapshot, compact, expanded, selectedEdgeId, trace, pathEdges, presentation.route, presentation.layout, reducedMotion, selectedId, hoverNode, hoverEdge, selectedNode, spotlight]);
 
 	const bounds = useRef<HTMLDivElement>(null);
 	const lastFit = useRef('');
@@ -362,7 +380,7 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, fileV
 	function handleKeys(event: ReactKeyboardEvent) {
 		const target = event.target as HTMLElement;
 		if (target.matches('input, textarea, select')) { return; }
-		if (event.key === 'Escape') { onSelect(''); setSelectedEdgeId(''); }
+		if (event.key === 'Escape') { onSelect(''); setSelectedEdgeId(''); setPathTargetId(''); }
 		if (event.key === 'Enter' && selectedId && !target.closest('button')) { onOpenDetails(selectedId); }
 		if (event.key === 'F2' && selectedId) { (bounds.current?.querySelector(`[data-id="${CSS.escape(selectedId)}"] .tg-card-actions button[title="Rename"]`) as HTMLButtonElement | null)?.click(); }
 		// Graph keys never reach project shortcuts such as Delete, Ctrl+D or Ctrl+Z.
@@ -370,22 +388,34 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, fileV
 	}
 
 	const [exporting, setExporting] = useState(false);
+	const forceNodesRef = useRef<readonly ForceNode[]>([]);
 	const exportImage = useCallback(async (format: 'svg' | 'png') => {
 		if (!onExportImage) { return; }
 		setExporting(true);
 		try {
+			const lensName = graphLenses.find(item => item.id === presentation.lens)?.label ?? presentation.lens;
+			if (presentation.layout === 'force' && forceNodesRef.current.length > 0) {
+				const visibleNodes = snapshot.nodes.filter(node => !focusSet || focusSet.has(node.id));
+				const svg = networkGraphSvg({ snapshot, simNodes: forceNodesRef.current, edges: visibleEdges, membership: membershipEdges, network: presentation.network, theme, title: architecture.name + ' · Network graph · ' + lensName, overlays, icons: await graphIcons(visibleNodes), spotlight });
+				onExportImage(svg, format);
+				return;
+			}
+			if (presentation.layout === 'bundled') {
+				const svg = bundledGraphSvg({ snapshot, edges: visibleEdges, visible: focusSet, theme, title: architecture.name + ' · Bundled graph · ' + lensName, spotlight });
+				onExportImage(svg, format);
+				return;
+			}
 			const shown = snapshot.nodes.filter(node => layout.positions[node.id]);
 			const badges = Object.fromEntries(shown.flatMap(node => { const badge = badgeFor(node); return badge ? [[node.id, badge.text]] : []; }));
-			const lensName = graphLenses.find(item => item.id === presentation.lens)?.label ?? presentation.lens;
-			const svg = technicalGraphSvg({ snapshot, layout, edges: presentation.layout === 'tree' ? [] : visibleEdges, inputs: inputLayout, theme, title: architecture.name + ' · Technical graph · ' + lensName, badges, icons: await graphIcons(shown) });
+			const svg = technicalGraphSvg({ snapshot, layout, edges: presentation.layout === 'tree' ? [] : visibleEdges, inputs: inputLayout, theme, title: architecture.name + ' · Technical graph · ' + lensName, badges, icons: await graphIcons(shown), spotlight });
 			onExportImage(svg, format);
 		} finally { setExporting(false); }
-	}, [onExportImage, snapshot, layout, badgeFor, presentation.lens, presentation.layout, visibleEdges, inputLayout, theme, architecture.name]);
+	}, [onExportImage, snapshot, layout, badgeFor, presentation.lens, presentation.layout, presentation.network, visibleEdges, membershipEdges, overlays, focusSet, inputLayout, theme, architecture.name, spotlight]);
 	const pinCount = Object.keys(presentation.pins).length;
 	const categoriesShown = categoryOrder.filter(category => visibleEdges.some(edge => edge.category === category));
 	return <main ref={bounds} tabIndex={0} className={'canvas technical-graph theme-' + theme + (compact ? ' is-compact-view' : '')} data-read-only="true" data-graph="technical" aria-label="Technical graph" onKeyDownCapture={handleKeys}>
-		{presentation.layout === 'force' ? <ForceGraph spotlight={spotlight} onSpotlight={id => onPresentation({ type: 'set', patch: { spotlight: id || undefined } })} snapshot={snapshot} edges={visibleEdges} membership={membershipEdges} visible={focusSet} selectedId={selectedId} query={query} overlays={overlays} network={presentation.network} onSelect={id => { setSelectedEdgeId(''); onSelect(id); }} onOpenDetails={onOpenDetails} reducedMotion={reducedMotion} /> :
-		bundled ? <BundledGraph spotlight={spotlight} snapshot={snapshot} edges={visibleEdges} visible={focusSet} selectedId={selectedId} query={query} onSelect={id => { setSelectedEdgeId(''); onSelect(id); }} onOpenDetails={onOpenDetails} reducedMotion={reducedMotion} /> :
+		{presentation.layout === 'force' ? <ForceGraph spotlight={spotlight} onSpotlight={id => onPresentation({ type: 'set', patch: { spotlight: id || undefined } })} snapshot={snapshot} edges={visibleEdges} membership={membershipEdges} visible={focusSet} selectedId={selectedId} pathTargetId={pathTargetId} pathNodes={pathNodes} pathEdges={pathEdges} pathDirection={tracedPath?.direction} query={query} overlays={overlays} network={presentation.network} nodesRef={forceNodesRef} onSelect={id => { setSelectedEdgeId(''); onSelect(id); }} onOpenDetails={onOpenDetails} reducedMotion={reducedMotion} /> :
+		bundled ? <BundledGraph spotlight={spotlight} snapshot={snapshot} edges={visibleEdges} visible={focusSet} selectedId={selectedId} pathTargetId={pathTargetId} pathNodes={pathNodes} pathEdges={pathEdges} pathDirection={tracedPath?.direction} query={query} onSelect={id => { setSelectedEdgeId(''); onSelect(id); }} onOpenDetails={onOpenDetails} reducedMotion={reducedMotion} /> :
 		<ReactFlow<GraphFlowNode, GraphFlowEdge> nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes}
 			onInit={instance => { setFlow(instance); onInit?.(instance); setZoom(instance.getZoom()); }}
 			onNodesChange={onNodesChange}
@@ -453,13 +483,14 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, fileV
 			focused={!!selectedNode && presentation.focus?.id === selectedNode.id} onFocus={id => onPresentation({ type: 'set', patch: { focus: presentation.focus?.id === id ? undefined : { id, depth: 2 } } })}
 			onOpenSource={selectedNode && hasSource[selectedNode.id] ? onOpenSource : undefined}
 			moduleInspections={moduleInspections} onInspectModule={onInspectModule}
-			onEdit={onOpenDetails} onSelect={id => { setSelectedEdgeId(''); onSelect(id); }} onClose={() => { setSelectedEdgeId(''); onSelect(''); }} />}
+			pathTargetId={pathTargetId} onPathTarget={setPathTargetId} tracedPath={tracedPath}
+			onEdit={onOpenDetails} onSelect={id => { setSelectedEdgeId(''); onSelect(id); }} onClose={() => { setSelectedEdgeId(''); setPathTargetId(''); onSelect(''); }} />}
 		{presentation.overlay === 'plan' && <div className="tg-banner tg-banner-info" role="status">{!plan ? 'No plan yet. Run Plan from Issues to see create, update, replace and destroy actions.' : (plan.stale ? 'Plan is older than this draft; actions may have changed. ' : 'Latest plan. ') + (overlays.unmatchedPlan ? overlays.unmatchedPlan + ' planned change' + (overlays.unmatchedPlan === 1 ? '' : 's') + ' are in modules or resources not drawn here.' : '')}</div>}
 		{snapshot.cycles.length > 0 && <div className="tg-banner" role="status"><AlertTriangle size={14} />{snapshot.cycles.length} configured reference cycle{snapshot.cycles.length === 1 ? '' : 's'} — Terraform cannot order {snapshot.cycles.map(cycle => cycle.length).reduce((a, b) => a + b, 0)} resources.</div>}
 	</main>;
 });
 
-function WhyPanel({ snapshot, edge, node, trace, overlay, wave, focused, onFocus, onOpenSource, moduleInspections, onInspectModule, onEdit, onSelect, onClose }: { snapshot: TechnicalGraphSnapshot; edge?: GraphEdge; node?: GraphNode; trace?: ReturnType<typeof traceNode>; overlay?: NodeOverlay; wave?: number; focused: boolean; onFocus: (id: string) => void; onOpenSource?: (id: string) => void; moduleInspections?: Readonly<Record<string, GraphModuleInspectionEntry>>; onInspectModule?: (modulePath: readonly string[]) => void; onEdit: (id: string) => void; onSelect: (id: string) => void; onClose: () => void }) {
+function WhyPanel({ snapshot, edge, node, trace, overlay, wave, focused, onFocus, onOpenSource, moduleInspections, onInspectModule, pathTargetId, onPathTarget, tracedPath, onEdit, onSelect, onClose }: { snapshot: TechnicalGraphSnapshot; edge?: GraphEdge; node?: GraphNode; trace?: ReturnType<typeof traceNode>; overlay?: NodeOverlay; wave?: number; focused: boolean; onFocus: (id: string) => void; onOpenSource?: (id: string) => void; moduleInspections?: Readonly<Record<string, GraphModuleInspectionEntry>>; onInspectModule?: (modulePath: readonly string[]) => void; pathTargetId: string; onPathTarget: (id: string) => void; tracedPath?: { direction: 'downstream' | 'upstream'; path: TracedDependencyPath }; onEdit: (id: string) => void; onSelect: (id: string) => void; onClose: () => void }) {
 	const [modulePath, setModulePath] = useState<readonly string[]>(() => node?.module ? [node.name] : []);
 	useEffect(() => { setModulePath(node?.module ? [node.name] : []); }, [node?.id, node?.name, node?.module]);
 	const label = (id: string) => snapshot.nodes.find(item => item.id === id)?.label ?? id;
@@ -508,6 +539,36 @@ function WhyPanel({ snapshot, edge, node, trace, overlay, wave, focused, onFocus
 			<button onClick={() => onEdit(node.id)}><Pencil size={13} />Edit</button>
 			{onOpenSource && <button onClick={() => onOpenSource(node.id)}><FileCode2 size={13} />Source</button>}
 		</div>
+		{snapshot.nodes.length > 1 && <details className="tg-why-pathfind" key={node.id}>
+			<summary>Trace path to…{tracedPath ? ` (${tracedPath.path.length} hop${tracedPath.path.length === 1 ? '' : 's'})` : ''}</summary>
+			<div className="tg-why-pathfind-body">
+				<div className="tg-why-pathfind-pick">
+					<select aria-label="Trace dependency path to resource" value={pathTargetId} onChange={event => onPathTarget(event.target.value)}>
+						<option value="">Choose a resource…</option>
+						{snapshot.nodes.filter(item => item.id !== node.id).sort((a, b) => a.label.localeCompare(b.label)).map(item => <option key={item.id} value={item.id}>{item.label} · {item.typeLabel}</option>)}
+					</select>
+					{pathTargetId && <button type="button" className="tg-icon-button" aria-label="Clear traced path" title="Clear traced path" onClick={() => onPathTarget('')}><X size={12} /></button>}
+				</div>
+				{pathTargetId && !tracedPath && <p className="tg-muted">No directed dependency path between these resources.</p>}
+				{tracedPath && <>
+					<p className="tg-muted">{tracedPath.path.length} hop{tracedPath.path.length === 1 ? '' : 's'} · {tracedPath.direction === 'downstream' ? label(node.id) + ' → ' + label(pathTargetId) : label(pathTargetId) + ' → ' + label(node.id)}</p>
+					<ol className="tg-why-pathfind-hops" aria-label="Shortest dependency path">
+						{tracedPath.path.hops.map(hop => <li key={hop.edgeId}>
+							<div className="tg-why-pathfind-step">
+								<button type="button" className="tg-link" onClick={() => onSelect(hop.fromId)}>{label(hop.fromId)}</button>
+								<span>→</span>
+								<button type="button" className="tg-link" onClick={() => onSelect(hop.toId)}>{label(hop.toId)}</button>
+							</div>
+							<div className="tg-why-pathfind-meta">
+								<code>{hop.primaryField}</code>
+								<span className={'tg-why-kind tg-cat-' + hop.category}>{categoryNames[hop.category]}</span>
+								{hop.expression && <code className="tg-why-expr">{hop.expression}</code>}
+							</div>
+						</li>)}
+					</ol>
+				</>}
+			</div>
+		</details>}
 		{node.module && onInspectModule && <div className="tg-why-module" aria-label="Module inspection">
 			<div className="tg-why-pattern-head">
 				<strong>Module drill-down</strong>
@@ -578,12 +639,13 @@ function WhyPanel({ snapshot, edge, node, trace, overlay, wave, focused, onFocus
  * Radial hierarchical edge bundling view. Hover or select a resource: its prerequisites ("uses")
  * and configured dependents ("used by") light up in two colours; everything else fades.
  */
-function BundledGraph({ spotlight, snapshot, edges, visible, selectedId, query, onSelect, onOpenDetails, reducedMotion }: { spotlight?: ReadonlySet<string>; snapshot: TechnicalGraphSnapshot; edges: readonly GraphEdge[]; visible?: ReadonlySet<string>; selectedId: string; query: string; onSelect: (id: string) => void; onOpenDetails: (id: string) => void; reducedMotion: boolean }) {
+function BundledGraph({ spotlight, snapshot, edges, visible, selectedId, pathTargetId, pathNodes, pathEdges, pathDirection, query, onSelect, onOpenDetails, reducedMotion }: { spotlight?: ReadonlySet<string>; snapshot: TechnicalGraphSnapshot; edges: readonly GraphEdge[]; visible?: ReadonlySet<string>; selectedId: string; pathTargetId?: string; pathNodes?: ReadonlySet<string>; pathEdges?: ReadonlySet<string>; pathDirection?: 'downstream' | 'upstream'; query: string; onSelect: (id: string) => void; onOpenDetails: (id: string) => void; reducedMotion: boolean }) {
 	const bundle = useMemo(() => bundleLayout(snapshot, edges, { visible }), [snapshot, edges, visible]);
 	const [hover, setHover] = useState('');
 	const [view, setView] = useState({ scale: 1, x: 0, y: 0 });
 	const drag = useRef<{ x: number; y: number; vx: number; vy: number } | null>(null);
 	const focus = hover || selectedId;
+	const activePath = !hover && pathNodes && pathEdges ? { nodes: pathNodes, edges: pathEdges, flow: pathDirection === 'upstream' ? ' is-uses' : ' is-used-by' } : undefined;
 	const related = useMemo(() => new Set(bundle.paths.flatMap(path => path.source === focus ? [path.target] : path.target === focus ? [path.source] : [])), [bundle, focus]);
 	const margin = 190; const size = (bundle.radius + margin) * 2;
 	const arc = (start: number, end: number, r: number) => { const a = start - 0.02; const b = end + 0.02; const [x0, y0] = [Math.cos(a - Math.PI / 2) * r, Math.sin(a - Math.PI / 2) * r]; const [x1, y1] = [Math.cos(b - Math.PI / 2) * r, Math.sin(b - Math.PI / 2) * r]; return `M ${x0} ${y0} A ${r} ${r} 0 ${b - a > Math.PI ? 1 : 0} 1 ${x1} ${y1}`; };
@@ -600,13 +662,13 @@ function BundledGraph({ spotlight, snapshot, edges, visible, selectedId, query, 
 			</g>)}
 			<g className="tg-bundle-paths">
 				{bundle.paths.map(path => {
-					const state = !focus ? '' : path.target === focus ? ' is-uses' : path.source === focus ? ' is-used-by' : ' is-dim';
+					const state = activePath ? (activePath.edges.has(path.edgeId) ? activePath.flow : ' is-dim') : !focus ? '' : path.target === focus ? ' is-uses' : path.source === focus ? ' is-used-by' : ' is-dim';
 					return <path key={path.edgeId} d={path.d} className={'tg-bundle-path tg-cat-' + path.category + state + (reducedMotion ? '' : ' can-animate') + (spotlight && !(spotlight.has(path.source) && spotlight.has(path.target)) ? ' is-outside' : '')} />;
 				})}
 			</g>
 			{bundle.leaves.map(leaf => {
 				const degrees = leaf.angle * 180 / Math.PI - 90; const flip = leaf.angle > Math.PI;
-				const state = !focus ? '' : leaf.id === focus ? ' is-focus' : related.has(leaf.id) ? ' is-related' : ' is-dim';
+				const state = activePath ? (leaf.id === selectedId || leaf.id === pathTargetId ? ' is-focus' : activePath.nodes.has(leaf.id) ? ' is-related' : ' is-dim') : !focus ? '' : leaf.id === focus ? ' is-focus' : related.has(leaf.id) ? ' is-related' : ' is-dim';
 				const match = !query.trim() || leaf.label.toLowerCase().includes(query.trim().toLowerCase());
 				return <g key={leaf.id} className={'tg-bundle-leaf tg-layer-' + leaf.layer + state + (match ? '' : ' is-unmatched') + (spotlight && !spotlight.has(leaf.id) ? ' is-outside' : '') + (leaf.id === selectedId ? ' is-selected' : '')} transform={`rotate(${degrees}) translate(${bundle.radius + 8},0)${flip ? ' rotate(180)' : ''}`}
 					role="button" tabIndex={0} aria-label={leaf.label} onMouseEnter={() => setHover(leaf.id)} onMouseLeave={() => setHover('')}
@@ -644,7 +706,7 @@ function LaneRuler({ lanes }: { lanes: readonly GraphLane[] }) {
  * layer-coloured ring. Dragging moves a node only inside this view and reheats the simulation; it
  * never pins, moves or edits the project. Hover or select lights up uses and used-by.
  */
-function ForceGraph({ spotlight, onSpotlight, snapshot, edges, membership, visible, selectedId, query, overlays, network, onSelect, onOpenDetails, reducedMotion }: { spotlight?: ReadonlySet<string>; onSpotlight: (id: string) => void; snapshot: TechnicalGraphSnapshot; edges: readonly GraphEdge[]; membership: readonly GraphEdge[]; visible?: ReadonlySet<string>; selectedId: string; query: string; overlays: { byNode: Record<string, NodeOverlay> }; network: NetworkOptions; onSelect: (id: string) => void; onOpenDetails: (id: string) => void; reducedMotion: boolean }) {
+function ForceGraph({ spotlight, onSpotlight, snapshot, edges, membership, visible, selectedId, pathTargetId, pathNodes, pathEdges, pathDirection, query, overlays, network, nodesRef, onSelect, onOpenDetails, reducedMotion }: { spotlight?: ReadonlySet<string>; onSpotlight: (id: string) => void; snapshot: TechnicalGraphSnapshot; edges: readonly GraphEdge[]; membership: readonly GraphEdge[]; visible?: ReadonlySet<string>; selectedId: string; pathTargetId?: string; pathNodes?: ReadonlySet<string>; pathEdges?: ReadonlySet<string>; pathDirection?: 'downstream' | 'upstream'; query: string; overlays: { byNode: Record<string, NodeOverlay> }; network: NetworkOptions; nodesRef?: RefObject<readonly ForceNode[]>; onSelect: (id: string) => void; onOpenDetails: (id: string) => void; reducedMotion: boolean }) {
 	const nodes = useMemo(() => snapshot.nodes.filter(node => !visible || visible.has(node.id)), [snapshot.nodes, visible]);
 	const sim = useRef<ForceSimulation | null>(null);
 	const [, setFrame] = useState(0);
@@ -699,9 +761,11 @@ function ForceGraph({ spotlight, onSpotlight, snapshot, edges, membership, visib
 	const lastTap = useRef({ id: '', at: 0 });
 	const drag = useRef<{ id?: string; startX: number; startY: number; moved: boolean; view?: { x: number; y: number; w: number; h: number } } | null>(null);
 	const simNodes = sim.current?.nodes ?? [];
+	if (nodesRef) { nodesRef.current = simNodes; }
 	const byId = new Map(simNodes.map(node => [node.id, node]));
 	const info = new Map(nodes.map(node => [node.id, node]));
 	const focus = hover || selectedId;
+	const activePath = !hover && pathNodes && pathEdges ? { nodes: pathNodes, edges: pathEdges, flow: pathDirection === 'upstream' ? ' is-uses' : ' is-used-by' } : undefined;
 	const related = new Set(sim.current?.links.flatMap(link => link.source === focus ? [link.target] : link.target === focus ? [link.source] : []) ?? []);
 	const visibleEdges = edges.filter(edge => byId.has(edge.source) && byId.has(edge.target) && edge.source !== edge.target);
 	const categories = [...new Set(visibleEdges.map(edge => edge.category))];
@@ -710,7 +774,7 @@ function ForceGraph({ spotlight, onSpotlight, snapshot, edges, membership, visib
 	const base = forceSettings.radius;
 	const maxRadius = Math.max(base, ...simNodes.map(node => node.r));
 	const hubRadius = maxRadius > base * 1.15 ? Math.max(base * 1.32, base + (maxRadius - base) * 0.55) : Number.POSITIVE_INFINITY;
-	const showLabel = (id: string, r: number) => network.labels === 'all' || id === focus || related.has(id) || id === selectedId || (network.labels === 'auto' && (nodes.length <= 36 || (!!spotlight && spotlight.size <= 60 && spotlight.has(id)) || scale >= 0.9 || r >= hubRadius || (!!query.trim() && matchesQuery(info.get(id)!, query))));
+	const showLabel = (id: string, r: number) => network.labels === 'all' || id === focus || related.has(id) || id === selectedId || !!activePath?.nodes.has(id) || (network.labels === 'auto' && (nodes.length <= 36 || (!!spotlight && spotlight.size <= 60 && spotlight.has(id)) || scale >= 0.9 || r >= hubRadius || (!!query.trim() && matchesQuery(info.get(id)!, query))));
 	// Soft cluster hulls behind everything, labelled with the scope or layer they gather.
 	const hulls = network.clusters === 'none' ? [] : [...simNodes.reduce((groups, node) => { if (node.group) { groups.set(node.group, [...(groups.get(node.group) ?? []), node]); } return groups; }, new Map<string, ForceNode[]>())].filter(([, members]) => members.length > 1).map(([group, members]) => {
 		const label = network.clusters === 'layer' ? layerLabels[members[0].layer] : info.get(group)?.label ?? snapshot.nodes.find(node => node.id === group)?.label ?? group;
@@ -755,10 +819,10 @@ function ForceGraph({ spotlight, onSpotlight, snapshot, edges, membership, visib
 				? <text x={hull.x} y={hull.y} textAnchor="middle" style={hullFont} className="is-clickable" role="button" tabIndex={0} aria-label={(hull.lit ? 'Show every scope' : 'Spotlight ' + hull.label)} onPointerDown={event => event.stopPropagation()} onClick={() => onSpotlight(hull.lit ? '' : hull.group)} onKeyDown={event => { if (event.key === 'Enter') { onSpotlight(hull.lit ? '' : hull.group); } }}>{hull.label}</text>
 				: <text x={hull.x} y={hull.y} textAnchor="middle" style={hullFont}>{hull.label}</text>}</g>)}</g>
 			<g className="tg-force-links">
-				{membership.filter(edge => byId.has(edge.source) && byId.has(edge.target)).map(edge => { const a = byId.get(edge.source)!; const b = byId.get(edge.target)!; return <line key={edge.id} x1={a.x} y1={a.y} x2={b.x} y2={b.y} className={'tg-force-link is-membership' + (focus && edge.source !== focus && edge.target !== focus ? ' is-dim' : '')} />; })}
+				{membership.filter(edge => byId.has(edge.source) && byId.has(edge.target)).map(edge => { const a = byId.get(edge.source)!; const b = byId.get(edge.target)!; const state = activePath ? (activePath.edges.has(edge.id) ? activePath.flow + ' is-flow' : ' is-dim') : (focus && edge.source !== focus && edge.target !== focus ? ' is-dim' : ''); return <line key={edge.id} x1={a.x} y1={a.y} x2={b.x} y2={b.y} className={'tg-force-link is-membership' + state} />; })}
 				{visibleEdges.map(edge => {
 					const a = byId.get(edge.source)!; const b = byId.get(edge.target)!;
-					const state = !focus ? '' : edge.target === focus ? ' is-uses' : edge.source === focus ? ' is-used-by' : ' is-dim';
+					const state = activePath ? (activePath.edges.has(edge.id) ? activePath.flow : ' is-dim') : !focus ? '' : edge.target === focus ? ' is-uses' : edge.source === focus ? ' is-used-by' : ' is-dim';
 					return <path key={edge.id} d={linkPath(a, b, 5)} className={'tg-force-link tg-cat-' + edge.category + state + (state === ' is-uses' || state === ' is-used-by' ? ' is-flow' : '') + (spotlight && !(spotlight.has(edge.source) && spotlight.has(edge.target)) ? ' is-outside' : '')} markerEnd={'url(#tg-force-arrow-' + (state === ' is-uses' ? 'uses' : state === ' is-used-by' ? 'used-by' : edge.category) + ')'} />;
 				})}
 			</g>
@@ -769,7 +833,7 @@ function ForceGraph({ spotlight, onSpotlight, snapshot, edges, membership, visib
 				const discStroke = Math.round((1.6 + prominence * 1.0) * 10) / 10;
 				const labelSize = Math.round((10.5 + prominence * 4.5) * 10) / 10;
 				const overlay = overlays.byNode[node.id]; const issues = (overlay?.errors ?? 0) + (overlay?.warnings ?? 0);
-				const state = !focus ? '' : node.id === focus ? ' is-focus' : related.has(node.id) ? ' is-related' : ' is-dim';
+				const state = activePath ? (node.id === selectedId || node.id === pathTargetId ? ' is-focus' : activePath.nodes.has(node.id) ? ' is-related' : ' is-dim') : !focus ? '' : node.id === focus ? ' is-focus' : related.has(node.id) ? ' is-related' : ' is-dim';
 				const match = !query.trim() || matchesQuery(node, query);
 				return <g key={node.id} data-node={node.id} data-r={r} className={'tg-force-node tg-layer-' + node.layer + state + (match ? '' : ' is-unmatched') + (spotlight && !spotlight.has(node.id) ? ' is-outside' : '') + (node.id === selectedId ? ' is-selected' : '') + (r >= hubRadius ? ' is-hub' : '')} transform={`translate(${simNode.x} ${simNode.y})`}
 					role="button" tabIndex={0} aria-label={node.label + ', ' + node.typeLabel} onPointerEnter={() => setHover(node.id)} onPointerLeave={() => setHover('')} onKeyDown={event => { if (event.key === 'Enter') { onSelect(node.id); } }}>

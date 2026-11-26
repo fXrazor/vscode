@@ -9,8 +9,8 @@ import { DependencyTools, dependencyStyle } from './DependencyTools.tsx';
 import { ConnectionCreate } from './ConnectionCreate.tsx';
 import { canConnect, connectionAnchor } from './designConnections.ts';
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type RefObject, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { canvasElements, expandGroups, resizeSelectionBoxes, sceneOrder, selectionFragment } from './canvasOperations.ts';
-import { layoutSelection, type Alignment } from './selectionGeometry.ts';
+import { canvasElements, expandGroups, resizeSelectionBoxes, sceneOrder, selectionFragment, type TextAppearance } from './canvasOperations.ts';
+import { applyUniformSpacing, layoutSelection, type Alignment } from './selectionGeometry.ts';
 import { CanvasActionMenu, SelectionControls, resizable, type SelectionAction } from './SelectionControls.tsx';
 import { SelectionResizeHandle } from './SelectionResizeHandle.tsx';
 import { InkCapture } from './InkCapture.tsx';
@@ -106,6 +106,10 @@ export const DesignCanvas = memo(function DesignCanvas({
 	const [connectionSourceId, setConnectionSourceId] = useState('');
 	const clipboard = useRef<Architecture | null>(null);
 	const [hasClipboard, setHasClipboard] = useState(false);
+	const styleClipboard = useRef<Partial<TextAppearance> | null>(null);
+	const [hasStyleClipboard, setHasStyleClipboard] = useState(false);
+	/** Miro/Figma smart duplicate: tracks last clone+move delta so repeating Ctrl+D stamps evenly. */
+	const repeatStep = useRef<{ ids: string[]; dx: number; dy: number } | null>(null);
 	const [editRequest, setEditRequest] = useState({ id: '', token: 0 });
 	const selectedConnection = architecture.connections.find(connection => connection.id === selectedConnectionId);
 	const bounds = useRef<HTMLDivElement>(null);
@@ -124,7 +128,10 @@ export const DesignCanvas = memo(function DesignCanvas({
 		const observer = new ResizeObserver(() => {
 			if (autoFit.current.mode !== mode || performance.now() - autoFit.current.at > 2500) { return; }
 			cancelAnimationFrame(frame);
-			frame = requestAnimationFrame(() => { void flow.fitView({ padding: canvasFitPadding, maxZoom: 1 }).then(() => { viewports.current[mode] = flow.getViewport(); setZoom(flow.getZoom()); }); });
+			frame = requestAnimationFrame(() => {
+				if (autoFit.current.mode !== mode) { return; }
+				void flow.fitView({ padding: canvasFitPadding, maxZoom: 1 }).then(() => { viewports.current[mode] = flow.getViewport(); setZoom(flow.getZoom()); });
+			});
 		});
 		observer.observe(element);
 		return () => { cancelAnimationFrame(frame); observer.disconnect(); };
@@ -216,12 +223,16 @@ export const DesignCanvas = memo(function DesignCanvas({
 		if (!selectedIds.length && !selectedConnectionId) { return; }
 		clipboard.current = selectionFragment(architecture, selectedIds, selectedConnectionId ? [selectedConnectionId] : [], mode); setHasClipboard(true);
 	}
-	function insertCopy(fragment: Architecture) {
+	function insertCopy(fragment: Architecture, dx = 30, dy = 30, trackRepeat = false) {
 		const idMap = Object.fromEntries([...canvasElements(fragment), ...(fragment.groups ?? []), ...fragment.connections].map(item => [item.id, crypto.randomUUID()]));
-		dispatch({ type: 'canvas', command: { kind: 'duplicate', fragment, idMap, offset: 30 } });
-		onSelectionChange(canvasElements(fragment).map(item => idMap[item.id]));
+		dispatch({ type: 'canvas', command: { kind: 'duplicate', fragment, idMap, offset: dx, offsetY: dy } });
+		const newIds = canvasElements(fragment).map(item => idMap[item.id]);
+		onSelectionChange(newIds);
+		repeatStep.current = trackRepeat && newIds.length ? { ids: newIds, dx, dy } : null;
 		if (!canvasElements(fragment).length && fragment.connections.length === 1) { setSelectedConnectionId(idMap[fragment.connections[0].id]); }
 	}
+	function sameSelection(a: readonly string[], b: readonly string[]) { return a.length === b.length && a.every(id => b.includes(id)); }
+	function nodeSizes() { return Object.fromEntries((flow?.getNodes() ?? []).map(node => [node.id, { width: node.measured?.width ?? 112, height: node.measured?.height ?? 92 }])); }
 	function fitConnectionsAndNodes(connectionId?: string) {
 		if (!flow) { return; }
 		const links = architecture.connections.filter(link => connectionId ? link.id === connectionId : needsConnectionOverlay(link));
@@ -237,15 +248,50 @@ export const DesignCanvas = memo(function DesignCanvas({
 	}
 	function run(action: SelectionAction) {
 		const ids = expandGroups(architecture, selectedIds);
-		if (action === 'clear') { onSelectionChange([]); setSelectedConnectionId(''); setDependencyPick(undefined); setCreatingConnection(false); setAdditiveSelection(false); bounds.current?.focus(); }
-		else if (action === 'selectAll') { onSelectionChange(canvasElements(architecture).map(item => item.id)); }
+		if (action === 'clear') { repeatStep.current = null; onSelectionChange([]); setSelectedConnectionId(''); setDependencyPick(undefined); setCreatingConnection(false); setAdditiveSelection(false); bounds.current?.focus(); }
+		else if (action === 'selectAll') { repeatStep.current = null; onSelectionChange(canvasElements(architecture).map(item => item.id)); }
+		else if (action === 'selectSimilar') {
+			const boardKinds = new Set(architecture.items.filter(item => ids.includes(item.id)).map(item => item.kind));
+			const resourceKeys = new Set(architecture.resources.filter(item => ids.includes(item.id)).map(item => item.catalogue?.type ?? item.kind));
+			const matching = [
+				...architecture.items.filter(item => boardKinds.has(item.kind)).map(item => item.id),
+				...architecture.resources.filter(item => resourceKeys.has(item.catalogue?.type ?? item.kind)).map(item => item.id),
+			];
+			if (matching.length) { repeatStep.current = null; onSelectionChange(expandGroups(architecture, matching)); }
+		}
 		else if (action === 'copy') { copySelection(); }
 		else if (action === 'paste') { if (clipboard.current) { insertCopy(clipboard.current); } }
-		else if (action === 'duplicate') { if (ids.length || selectedConnectionId) { insertCopy(selectionFragment(architecture, ids, selectedConnectionId ? [selectedConnectionId] : [], mode)); } }
-		else if (action === 'delete') { dispatch({ type: 'canvas', command: { kind: 'delete', ids } }); }
+		else if (action === 'duplicate') {
+			if (ids.length || selectedConnectionId) {
+				const repeat = repeatStep.current && sameSelection(repeatStep.current.ids, ids) ? repeatStep.current : undefined;
+				insertCopy(selectionFragment(architecture, ids, selectedConnectionId ? [selectedConnectionId] : [], mode), repeat?.dx ?? 30, repeat?.dy ?? 30, true);
+			}
+		}
+		else if (action === 'copyStyle') {
+			if (ids.length !== 1) { return; }
+			const item = architecture.items.find(candidate => candidate.id === ids[0]);
+			if (!item) { return; }
+			const keys: (keyof TextAppearance)[] = ['fontSize', 'bold', 'italic', 'underline', 'textColor', 'fontFamily', 'textAlign', 'verticalAlign', 'fill', 'opacity', 'strokeColor', 'strokeWidth', 'strokeStyle'];
+			const patch: Partial<TextAppearance> = {};
+			for (const key of keys) { if (item[key] !== undefined) { (patch as Record<string, unknown>)[key] = item[key]; } }
+			styleClipboard.current = patch; setHasStyleClipboard(true);
+		}
+		else if (action === 'pasteStyle') {
+			if (!styleClipboard.current || !ids.length) { return; }
+			dispatch({ type: 'canvas', command: { kind: 'style', ids, patch: styleClipboard.current } });
+		}
+		else if (action === 'delete') { repeatStep.current = null; dispatch({ type: 'canvas', command: { kind: 'delete', ids } }); }
 		else if (action === 'lock' || action === 'unlock') { dispatch({ type: 'canvas', command: { kind: 'lock', ids, locked: action === 'lock' } }); }
 		else if (action === 'group') { dispatch({ type: 'canvas', command: { kind: 'group', ids, id: crypto.randomUUID() } }); }
 		else if (action === 'ungroup') { dispatch({ type: 'canvas', command: { kind: 'ungroup', ids } }); }
+		else if (action === 'frameSelection') {
+			const frameId = crypto.randomUUID();
+			dispatch({ type: 'canvas', command: { kind: 'frameSelection', ids, id: frameId, mode, sizes: nodeSizes() } });
+			onSelectionChange([frameId]);
+		}
+		else if (action === 'fitFrame') {
+			if (ids.length === 1) { dispatch({ type: 'canvas', command: { kind: 'fitFrame', id: ids[0], mode, sizes: nodeSizes() } }); }
+		}
 		else if (action === 'front' || action === 'forward' || action === 'backward' || action === 'back') { dispatch({ type: 'canvas', command: { kind: 'arrange', ids, direction: action } }); }
 		else if (action === 'fit') { if (selectedConnectionId) { fitConnectionsAndNodes(selectedConnectionId); } else if (ids.length) { void flow?.fitView({ nodes: ids.map(id => ({ id })), padding: 0.25, maxZoom: 2 }); } }
 		else if (action === 'edit') {
@@ -253,9 +299,7 @@ export const DesignCanvas = memo(function DesignCanvas({
 			if (architecture.resources.some(item => item.id === ids[0])) { onOpenDetails(ids[0]); }
 			else { setEditRequest(request => ({ id: ids[0], token: request.token + 1 })); }
 		} else if (action.startsWith('align-')) {
-			const sizes = Object.fromEntries((flow?.getNodes() ?? []).map(node => [node.id, { width: node.measured?.width ?? 112, height: node.measured?.height ?? 92 }]));
-			const current = new Map((flow?.getNodes() ?? nodes).map(node => [node.id, node]));
-			dispatch({ type: 'canvas', command: { kind: 'move', mode, positions: layoutSelection(architecture, ids, mode, action.slice(6) as Alignment, sizes, undefined) } });
+			dispatch({ type: 'canvas', command: { kind: 'move', mode, positions: layoutSelection(architecture, ids, mode, action.slice(6) as Alignment, nodeSizes(), undefined) } });
 		} else if (action.startsWith('size-')) {
 			const value = action.slice(5);
 			dispatch({ type: 'canvas', command: value === 'width' || value === 'height' || value === 'size' ? { kind: 'resize', ids, mode, match: value } : { kind: 'resize', ids, mode, scale: Number(value) } });
@@ -305,9 +349,19 @@ export const DesignCanvas = memo(function DesignCanvas({
 					const fragment = selectionFragment(architecture, moved.map(node => node.id), [], mode);
 					const idMap = Object.fromEntries([...canvasElements(fragment), ...(fragment.groups ?? []), ...fragment.connections].map(item => [item.id, crypto.randomUUID()]));
 					dispatch({ type: 'canvas', command: { kind: 'duplicate', fragment, idMap, offset: dx, offsetY: dy } });
-					onSelectionChange(canvasElements(fragment).map(item => idMap[item.id]));
+					const newIds = canvasElements(fragment).map(item => idMap[item.id]);
+					onSelectionChange(newIds);
+					repeatStep.current = { ids: newIds, dx, dy };
 				}
 				return;
+			}
+		}
+		if (repeatStep.current && moved.length > 0 && sameSelection(repeatStep.current.ids, moved.map(node => node.id))) {
+			const lead = moved[0];
+			const original = canvasElements(architecture).find(item => item.id === lead.id);
+			const nextPos = positions[lead.id];
+			if (original && nextPos) {
+				repeatStep.current = { ids: repeatStep.current.ids, dx: repeatStep.current.dx + Math.round((nextPos.x - original.positions[mode].x) * 10) / 10, dy: repeatStep.current.dy + Math.round((nextPos.y - original.positions[mode].y) * 10) / 10 };
 			}
 		}
 		const placement=moved.length===1&&event?placementAt(moved[0],event):undefined;
@@ -342,9 +396,21 @@ export const DesignCanvas = memo(function DesignCanvas({
 			return;
 		}
 		if (mod) {
-			if (key === 'a') { action = 'selectAll'; } else if (key === 'c') { action = 'copy'; } else if (key === 'v') { action = 'paste'; }
+			if (key === 'a') { action = 'selectAll'; } else if (key === 'c') { action = event.altKey ? 'copyStyle' : 'copy'; } else if (key === 'v') { action = event.altKey ? 'pasteStyle' : 'paste'; }
 			else if (key === 'd') { action = 'duplicate'; } else if (key === 'g') { action = event.shiftKey ? 'ungroup' : 'group'; }
+			else if (key === 'f' && event.altKey) { action = 'frameSelection'; }
 			else if (key === 'l') { action = canvasElements(architecture).some(item => selectedIds.includes(item.id) && item.canvasLocked) ? 'unlock' : 'lock'; }
+		} else if (key === 'tab' && mode === 'visual' && selectedIds.length === 1) {
+			const note = architecture.items.find(item => item.id === selectedIds[0] && item.kind === 'note' && !item.canvasLocked);
+			if (note) {
+				// Miro rapid sticky-note cluster authoring: Tab adds a matching note to the right, Shift+Tab below.
+				event.preventDefault(); event.stopPropagation();
+				const nextId = crypto.randomUUID();
+				const pos = event.shiftKey ? { x: note.positions[mode].x, y: note.positions[mode].y + note.height + 24 } : { x: note.positions[mode].x + note.width + 24, y: note.positions[mode].y };
+				dispatch({ type: 'addItem', item: { ...note, id: nextId, text: '', positions: { visual: pos, technical: pos }, members: [], canvasLocked: false } });
+				onSelectionChange([nextId]);
+				return;
+			}
 		} else if (key === 'delete' || key === 'backspace') { action = 'delete'; }
 		else if (key === 'enter') { action = 'edit'; } else if (key === 'f') { action = 'fit'; }
 		else if (key === 'escape') { action = 'clear'; }
@@ -352,6 +418,7 @@ export const DesignCanvas = memo(function DesignCanvas({
 			const step = event.shiftKey ? 10 : 1; const dx = key === 'arrowleft' ? -step : key === 'arrowright' ? step : 0; const dy = key === 'arrowup' ? -step : key === 'arrowdown' ? step : 0;
 			const ids = expandGroups(architecture, selectedIds);
 			const positions = Object.fromEntries(canvasElements(architecture).filter(item => ids.includes(item.id)).map(item => [item.id, { x: item.positions[mode].x + dx, y: item.positions[mode].y + dy }]));
+			if (repeatStep.current && sameSelection(repeatStep.current.ids, ids)) { repeatStep.current = { ids: repeatStep.current.ids, dx: repeatStep.current.dx + dx, dy: repeatStep.current.dy + dy }; }
 			event.preventDefault(); event.stopPropagation(); dispatch({ type: 'canvas', command: { kind: 'move', mode, positions } }); return;
 		} else if (key === 'v') { setHand(false); setPen(false); } else if (key === 'h') { setPen(false); setHand(true); } else if (key === 'p') { setHand(false); setPen(value => !value); }
 		else if ((event.key === '[' || event.key === ']') && selectedIds.length) {
@@ -364,7 +431,7 @@ export const DesignCanvas = memo(function DesignCanvas({
 	}
 
 	return (
-		<CanvasActionMenu architecture={architecture} ids={selectedIds} hasClipboard={hasClipboard} run={run} container={bounds.current} readOnly={false}>
+		<CanvasActionMenu architecture={architecture} ids={selectedIds} hasClipboard={hasClipboard} hasStyleClipboard={hasStyleClipboard} run={run} container={bounds.current} readOnly={false}>
 		<main ref={bounds} tabIndex={0} className="canvas" aria-label="Visual design canvas" onKeyDownCapture={handleKeys}
 			onContextMenuCapture={event => {
 				const node = (event.target as HTMLElement).closest<HTMLElement>('.react-flow__node');
@@ -408,7 +475,7 @@ export const DesignCanvas = memo(function DesignCanvas({
 				forceColorMode={theme}
 				zIndexMode="manual"
 				nodes={(nodes[0]?.data.mode===mode ? nodes : displayNodes).map(node=>({...node,className:dropFeedback?.target===node.id?'container-drop-'+(dropFeedback.ok?'valid':'invalid'):undefined}))} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange}
-				onInit={instance => { setFlow(instance); setZoom(instance.getZoom()); onInit(instance); if(!viewports.current[mode]){autoFit.current={mode,at:performance.now()};requestAnimationFrame(()=>{void instance.fitView({padding:canvasFitPadding,maxZoom:1}).then(()=>{viewports.current[mode]=instance.getViewport();setZoom(instance.getZoom());});});} }}
+				onInit={instance => { setFlow(instance); setZoom(instance.getZoom()); onInit(instance); if(!viewports.current[mode]){autoFit.current={mode,at:performance.now()};requestAnimationFrame(()=>{if(autoFit.current.mode!==mode){return;}void instance.fitView({padding:canvasFitPadding,maxZoom:1}).then(()=>{viewports.current[mode]=instance.getViewport();setZoom(instance.getZoom());});});} }}
 				onMoveStart={event => { if (event) { autoFit.current = { at: 0 }; } }}
 				onConnect={connection => {
 					// Default sides keep the compact form; any other side (top, bottom, a reversed side) is stored on the endpoint.
@@ -463,9 +530,9 @@ export const DesignCanvas = memo(function DesignCanvas({
 				<CanvasBackground grid={grid} />
 				<AlignmentGuides lines={guideLines}/>
 				{mode === 'visual' && flow && showConnections && <ConnectionOverlays architecture={architecture} mode={mode} selectedId={selectedConnectionId} showLabels={showLabels} canvas={bounds} flow={flow} dispatch={dispatch} onSelect={id => { setCreatingConnection(false); onSelectionChange([]); setSelectedConnectionId(id); }} onClose={() => { setSelectedConnectionId(''); bounds.current?.focus(); }}/>}
-				{mode === 'visual' && !hand && !pen && !creatingConnection && selectedIds.length > 1 && resizeBoxes.length > 0 && <SelectionResizeHandle boxes={resizeBoxes} onScale={(scale, anchor) => dispatch({ type: 'canvas', command: { kind: 'resize', ids: selectedIds, mode, scale, anchor } })}/>}
+				{mode === 'visual' && !hand && !pen && !creatingConnection && selectedIds.length > 1 && <SelectionResizeHandle architecture={architecture} ids={selectedIds} mode={mode} boxes={resizeBoxes} onScale={(scale, anchor) => dispatch({ type: 'canvas', command: { kind: 'resize', ids: selectedIds, mode, scale, anchor } })} onApplySpacing={(axis, gap) => dispatch({ type: 'canvas', command: { kind: 'move', mode, positions: applyUniformSpacing(architecture, selectedIds, mode, axis, gap, nodeSizes()) } })} onTidy={() => run('align-tidy')}/>}
 				{minimap && <MiniMap<CanvasNode> pannable zoomable nodeColor={node => node.type === 'board' && node.data.item.kind === 'frame' ? 'transparent' : '#8e79d9'} />}
-				{!creatingConnection && !selectedConnection && selectedIds.some(id=>canvasElements(architecture).some(item=>item.id===id)) && <SelectionAnchor ids={selectedIds.filter(id=>canvasElements(architecture).some(item=>item.id===id))} canvas={bounds}>{mode === 'visual' ? <SelectionControls architecture={architecture} ids={selectedIds} dispatch={dispatch} run={run} hasClipboard={hasClipboard} mode={mode} onInspect={onOpen} container={bounds.current}/> : <section className="selection-controls" aria-label="Graph inspection controls">{selectedIds.length === 1 && architecture.resources.some(resource => resource.id === selectedIds[0]) && <button onClick={() => onOpenDetails(selectedIds[0])}>Inspect resource</button>}<button onClick={() => run('fit')}>Focus selection</button><button onClick={() => run('clear')}>Clear selection</button></section>}</SelectionAnchor>}
+				{!creatingConnection && !selectedConnection && selectedIds.some(id=>canvasElements(architecture).some(item=>item.id===id)) && <SelectionAnchor ids={selectedIds.filter(id=>canvasElements(architecture).some(item=>item.id===id))} canvas={bounds}>{mode === 'visual' ? <SelectionControls architecture={architecture} ids={selectedIds} dispatch={dispatch} run={run} hasClipboard={hasClipboard} hasStyleClipboard={hasStyleClipboard} mode={mode} onInspect={onOpen} container={bounds.current}/> : <section className="selection-controls" aria-label="Graph inspection controls">{selectedIds.length === 1 && architecture.resources.some(resource => resource.id === selectedIds[0]) && <button onClick={() => onOpenDetails(selectedIds[0])}>Inspect resource</button>}<button onClick={() => run('fit')}>Focus selection</button><button onClick={() => run('clear')}>Clear selection</button></section>}</SelectionAnchor>}
 			</ReactFlow>
 			{selectedDependency && dependencyPick && mode === 'visual' && <DependencyTools architecture={architecture} dependency={selectedDependency} at={dependencyPick} dispatch={dispatch} onOpen={id => { setDependencyPick(undefined); onOpen(id); }} onClose={() => { setDependencyPick(undefined); bounds.current?.focus(); }}/>}
 			{connectorDrop && <ConnectorDropMenu at={connectorDrop} onClose={() => { setConnectorDrop(undefined); bounds.current?.focus(); }} onKeepLooseEnd={() => {
@@ -486,7 +553,7 @@ export const DesignCanvas = memo(function DesignCanvas({
 				<label><input type="checkbox" checked={allDependencies} onChange={event=>setAllDependencies(event.target.checked)}/>All inherited dependencies</label>
 				<label><input type="checkbox" checked={showLabels} onChange={event => setShowLabels(event.target.checked)} />Show automatic and dependency labels</label>
 				<button aria-pressed={minimap} onClick={() => setMinimap(value => !value)}>Minimap</button>
-				<details className="canvas-shortcuts"><summary>Keyboard shortcuts</summary><p>Ctrl / Cmd + click: extend selection<br/>Shift + drag: select an area<br/>Arrows: move 1 px; Shift + arrows: 10 px<br/>Enter: edit; Escape: clear selection<br/>V: select; H: pan; P: pen; T: text; N: note<br/>[ and ]: rotate drawings 15° (Shift: 1°)<br/>F: focus selection; Space + drag: pan<br/>Alt + F10: move to the selection toolbar; Escape: back to the canvas<br/>Copy, duplicate, group and layer actions are in the selection menu.</p></details>
+				<details className="canvas-shortcuts"><summary>Keyboard shortcuts</summary><p>Ctrl / Cmd + click: extend selection<br/>Shift + drag: select an area; Alt + drag: clone<br/>Ctrl / Cmd + D: duplicate (repeats last move)<br/>Ctrl / Cmd + Alt + C / V: copy / paste style<br/>Ctrl / Cmd + Alt + F: wrap selection in frame<br/>Tab / Shift + Tab on sticky note: spawn adjacent note<br/>Arrows: move 1 px; Shift + arrows: 10 px<br/>Enter: edit; Escape: clear selection<br/>V: select; H: pan; P: pen; T: text; N: note<br/>[ and ]: rotate drawings 15° (Shift: 1°)<br/>F: focus selection; Space + drag: pan<br/>Alt + F10: move to the selection toolbar; Escape: back to the canvas<br/>Copy, duplicate, group and layer actions are in the selection menu.</p></details>
 			</div></details>
 			{dropFeedback&&<div className={'container-drop-status '+(dropFeedback.ok?'valid':'invalid')} role="status">{dropFeedback.reason}</div>}
 			<div className="canvas-navigation" role="group" aria-label="Zoom and navigation">
