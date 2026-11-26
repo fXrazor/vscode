@@ -1,5 +1,11 @@
 # CloudForge Code OSS handoff
 
+## Installed provider workflow proof — 26 November 2026
+
+Dale explicitly resumed development after Antigravity's merge. Codex reused the isolated `C:/Users/dalep/.codex/worktrees/release-readiness/CloudForge-Code` worktree on `codex/provider-installed-verification`, from merged `930b9d7af51`. The new [installed verification runner and evidence](extensions/cloudforge/studio/research/installed-provider-verification.md) passed **13/13 real Workbench + packaged Rust checks**: locked VMSS source/nested forms, semantic Undo, no-write preview, guarded one-field save and refresh; native mirror empty inventory/integrity, zero quota, and missing-package readiness. Installed desktop `d8c253fd95b686bfd258b04429cdef70d2c59e4c` / service `f6ccff1af12a8c60911b8e9977f7127700d2df5c` protocol 1 were tested with this worktree's freshly bundled development extension/media. Packaged service SHA-256 matched its manifest. This is an installed **development-extension** integration proof, not a new product installer build.
+
+Only the runner and documentation change. Production UI, Technical Graph worktrees, Rust/protocol and installed files remain untouched. Terraform writes targeted the disposable fixture. Initial startup used the default shared app storage despite a separate profile; the final run also isolates `--shared-data-dir`, confirmed in its startup log. Populated mirror import/removal/protection, live snapshot import/render checks, installed variables/additional Terraform, AWS/Google samples and remaining opaque-source hydration are explicit next actions in the linked evidence. The earlier stop/merge-only instruction below is historical; the latest continuation request authorizes this phase. No new main merge/push is inferred.
+
 ## Offline Provider-Package Native Manager, Hosted Icon Bugfix & Windows Edge Verification — 26 November 2026
 
 - **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review` (pushed to `origin/main` atop `fc7a6e675aa`, zero edits to `TechnicalGraph.tsx` / `technicalGraphForce.ts` / `technical-graph.css` so Claude's auto-resuming `claude/project-thread-2irlth` thread has zero overlap), owner Antigravity.

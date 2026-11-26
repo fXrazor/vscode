@@ -1,5 +1,9 @@
 # Studio continuation checkpoint — 25 November 2026
 
+## Installed provider continuation — 26 November 2026
+
+Dale resumed development after the merged `930b9d7af51` checkpoint. Codex's isolated `codex/provider-installed-verification` adds a repeatable installed-host runner: **13/13 passed** with the real packaged Rust service and development extension, covering locked VMSS source/nested values, semantic Undo, exact guarded save/refresh and native empty-mirror/integrity/zero-quota/readiness flows. See [exact artifacts, reproduction and limits](research/installed-provider-verification.md). Other worktrees and production UI/Rust/installer files were not edited. Next: populated mirror import/removal/protection and installed variable/additional-Terraform journeys, then AWS/Google and live schema-import states. Preserve every Technical Graph backlog item below; this phase does not claim those remaining workflows complete.
+
 ## Provider forms merge handoff — 26 November 2026
 
 Dale requested merging the current provider-editor checkpoint and continuing the unfinished work later. That latest instruction authorizes this merge and supersedes the preceding local-only/no-main-merge notes for the provider branch. Integration owner: Codex. Owned implementation worktree: `C:/Users/dalep/.codex/worktrees/release-readiness/CloudForge-Code`, branch `codex/provider-editor-coverage`; previous checkpoint `d2e4732c658`. Merge current main's Technical Graph work without replacing it, preserve all other worktrees and retain every graph backlog entry below. Final commit: resolve with `git log -1 -- extensions/cloudforge/studio/research/provider-form-coverage.md`.
