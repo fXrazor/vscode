@@ -8,16 +8,14 @@
 // Pure: no React or DOM. Only plain literals are copied; expressions, references and redacted
 // secrets keep the canvas value, and the three-way save keeps the file's text for those.
 
-import { providerRegions } from './fixture.ts';
+import { providerRegions, resourceDefinition } from './fixture.ts';
 import type { Architecture, Resource, ResourceBlock } from './model.ts';
 import { projectTerraform } from './terraformProjection.ts';
 import type { HostGraphSnapshot } from './webviewBridge.ts';
-import { bindingKey, type FieldTarget } from './fieldBindings.ts';
+import { bindingKey, parseMixedListHclValue, type FieldTarget } from './fieldBindings.ts';
 import { getDef, type AttrDef } from './cloudlab-core/catalog/index.ts';
-import { resourceDefinition } from './fixture.ts';
 import { parseHcl } from './cloudlab-core/hcl.ts';
-import type { TerraformExtraBody } from './additionalTerraform.ts';
-import { hasTerraformExtras, pruneTerraformExtras } from './additionalTerraform.ts';
+import { hasTerraformExtras, pruneTerraformExtras, type TerraformExtraBody } from './additionalTerraform.ts';
 import { variableTypes, type VariableDefinition, type VariableValue } from './variables.ts';
 
 export type FileValue =
@@ -62,7 +60,7 @@ function parseAttributes(value: unknown): Record<string, FileValue> {
 		if (!isRecord(entry)) {
 			continue;
 		}
-		if (entry.kind === 'literal' && 'value' in entry) {
+		if (entry.kind === 'literal' && Object.hasOwn(entry, 'value')) {
 			out[name] = { kind: 'literal', value: entry.value };
 		} else if (entry.kind === 'expression' && typeof entry.text === 'string') {
 			out[name] = { kind: 'expression', text: entry.text };
@@ -355,7 +353,17 @@ export function hydrateResourceValues(architecture: Architecture, snapshot: Host
 							if (reference && variableIdByName.has(reference.name)) { clearBinding(); next.fieldBindings = { ...next.fieldBindings, [bindingKey(target)]: reference.path.length ? { variableId: variableIdByName.get(reference.name)!, path: reference.path } : { variableId: variableIdByName.get(reference.name)! } }; delete result.extras.attrs[definition.name]; continue; }
 							try {
 								const parsed = parseHcl('value = ' + field.text);
-								if (!parsed.blocks.length && Object.keys(parsed.attrs).length === 1 && Object.hasOwn(parsed.attrs, 'value')) { clearBinding(); result.extras.attrs[definition.name] = parsed.attrs.value; }
+								if (!parsed.blocks.length && Object.keys(parsed.attrs).length === 1 && Object.hasOwn(parsed.attrs, 'value')) {
+									const mixed = parseMixedListHclValue(parsed.attrs.value, architecture, resource, definition, variables);
+									clearBinding();
+									if (mixed) {
+										next.resourceRefs = { ...next.resourceRefs, [bindingKey(target)]: mixed };
+										delete result.extras.attrs[definition.name];
+										result.values[key] = (blockId ? previous.find(block => block.id === blockId)?.values[key] : next.settings[key]) ?? '';
+									} else {
+										result.extras.attrs[definition.name] = parsed.attrs.value;
+									}
+								}
 							} catch { /* Preserve the source file; do not claim an unparsed expression is configured in the model. */ }
 						} else if (field.kind === 'literal') {
 							clearBinding();

@@ -322,12 +322,12 @@
 @media (max-width: 1360px) { .tg-spread input[type="range"] { width: 76px; } }
 @media (max-width: 1180px) { .tg-spread input[type="range"] { width: 60px; } .tg-spread output { display: none; } }
 
-/* Scope spotlight: everything outside the chosen scope greys out in every layout. */
-.tg-card.is-outside { opacity: .22; filter: grayscale(1); }
+/* Scope spotlight: everything outside the chosen scope dims softly while keeping icon and ring colour. */
+.tg-card.is-outside { opacity: .22; }
 .react-flow__edge.is-outside { opacity: .12; }
-.tg-bundle-leaf.is-outside, .tg-force-node.is-outside { opacity: .16; filter: grayscale(1); }
-.tg-bundle-path.is-outside, .tg-force-link.is-outside { opacity: .05; }
-.tg-force-hull.is-outside { opacity: .25; filter: grayscale(1); }
+.tg-bundle-leaf.is-outside, .tg-force-node.is-outside { opacity: .22; }
+.tg-bundle-path.is-outside, .tg-force-link.is-outside { opacity: .08; }
+.tg-force-hull.is-outside { opacity: .3; }
 .tg-force-hull.is-lit path { stroke-width: 2; stroke-dasharray: none; fill: color-mix(in srgb, var(--accent) 7%, transparent); stroke: color-mix(in srgb, var(--accent) 55%, transparent); }
 .tg-force-hull text.is-clickable { cursor: pointer; pointer-events: auto; }
 .tg-force-hull text.is-clickable:hover { fill: var(--accent); text-decoration: underline; }

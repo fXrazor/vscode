@@ -1,5 +1,14 @@
 # Studio continuation checkpoint — 25 November 2026
 
+## Post-PR #4 follow-up: colour-preserving Scope Spotlight, mixed-list HCL hydration & mirror prefill — 26 November 2026
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `532f839a3de`, owner Antigravity.
+- **Scope:**
+  - **Scope Spotlight colour preservation:** removed `filter: grayscale(1)` from `.is-outside` rules in `src/technical-graph.css` so spotlighting a scope dims outside cards/nodes/hulls softly via opacity while preserving icon and ring colour (matching selected-resource highlighting); guarded with `getComputedStyle(el).filter === 'none'` in `scripts/technical-view-verify.mjs`.
+  - **Mixed-list HCL code-apply & file hydration:** added `parseMixedListHclValue` in `src/fieldBindings.ts` and wired it into `src/additionalTerraform.ts`, `src/terraformProjection.ts`, and `src/resourceValues.ts` so mixed lists (`[ref, var.name.leaf, "literal"]`) edited in the resource Terraform editor or loaded via `readResourceValues` hydrate into structured `resourceRefs[key] = { refs, items }` instead of opaque `terraformExtras`, while complex expressions (`coalesce(...)`, etc.) remain safely preserved in `terraformExtras`. Covered in `src/providerForms.test.ts`.
+  - **Extension Package-Details extraction prefill:** wired `resolveMirrorExtractTarget` (`../src/providerMirror/model.ts`, `../src/extension.ts`, `../test/providerMirror.test.ts`) so **Extract Provider Schema…** inside Package Details preselects the exact `windows_amd64` package without a second picker.
+- **Fresh checks:** Studio `tsc --noEmit` **PASS**, **218/218** Studio tests (0 skipped), Studio `build` + `esbuild.webview.mts` **PASS**, extension `tsc --noEmit` + `esbuild.mts` **PASS**, **110/110** extension tests (0 skipped), `oxlint` **0 errors/warnings**, and Windows Edge **100/100** (`technical-view-verify.mjs` **64/64**, `hosted-refresh-verify.mjs` **20/20**, `loose-connectors-verify.mjs` **16/16**, zero browser errors).
+
 ## Merged main continuation — 26 November 2026
 
 Dale authorized pushing and merging both checkpoints and completing this handoff. Desktop integration preserves main `4bb840d2718` plus `8b3d5dee698` / `cb1c18465b7`; resolve the final desktop merge with `git log -1 --grep="Merge provider mirror workflow fixes"`. Rust main and its retained feature branch are published at **`53539fd9d13ec5177b7a3f4ef0aa15fae0b10f32`**, including `fb68db9…` and the latest service hardening. Codex is the cross-repository integration owner. Fresh merged checks: **52 Rust unit + 5 mirror integration + 109 extension tests**, TypeScript/build/lint and **10 authentic-archive service checks**. Older local-only/merge-pending instructions below are historical and superseded for these checkpoints.

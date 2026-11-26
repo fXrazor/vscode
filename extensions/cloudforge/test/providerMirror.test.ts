@@ -15,7 +15,8 @@ import {
 	parseMirrorIntegrityReport,
 	parseMirrorInventory,
 	parseMirrorReadiness,
-	parseQuotaMiBToBytes
+	parseQuotaMiBToBytes,
+	resolveMirrorExtractTarget
 } from '../src/providerMirror/model.ts';
 
 test('readiness distinguishes Windows init from dual-platform availability and validates exact scope', () => {
@@ -218,4 +219,45 @@ test('parseMirrorImportResult, parseMirrorEvictionResult, formatMirrorBytes, and
 	assert.equal(isMirrorScopeCurrent(ctx1, ctx1), true);
 	assert.equal(isMirrorScopeCurrent(ctx1, ctx2), false);
 	assert.equal(isMirrorScopeCurrent(undefined, ctx1), false);
+});
+
+test('resolveMirrorExtractTarget preselects exact windows_amd64 package and rejects non-Windows or missing targets', () => {
+	const winAzure = {
+		key: { address: 'registry.terraform.io/hashicorp/azurerm', version: '5.14.0', platform: 'windows_amd64' },
+		sizeBytes: 1048576,
+		sha256: SHA_A,
+		recordedAt: '2026-11-26T00:00:00Z',
+	};
+	const linuxAzure = {
+		key: { address: 'registry.terraform.io/hashicorp/azurerm', version: '5.14.0', platform: 'linux_amd64' },
+		sizeBytes: 1048576,
+		sha256: SHA_B,
+		recordedAt: '2026-11-26T00:00:00Z',
+	};
+	const packages = [winAzure, linuxAzure];
+
+	const noSelection = resolveMirrorExtractTarget(packages);
+	assert.deepEqual(noSelection, { ok: true, value: undefined });
+
+	const exact = resolveMirrorExtractTarget(packages, winAzure.key);
+	assert.equal(exact.ok, true);
+	if (exact.ok) {
+		assert.deepEqual(exact.value, winAzure);
+	}
+
+	const linuxRejected = resolveMirrorExtractTarget(packages, linuxAzure.key);
+	assert.equal(linuxRejected.ok, false);
+	if (!linuxRejected.ok) {
+		assert.match(linuxRejected.reason, /windows_amd64/i);
+	}
+
+	const missing = resolveMirrorExtractTarget(packages, {
+		address: 'registry.terraform.io/hashicorp/aws',
+		version: '6.73.0',
+		platform: 'windows_amd64',
+	});
+	assert.equal(missing.ok, false);
+	if (!missing.ok) {
+		assert.match(missing.reason, /no longer present/i);
+	}
 });

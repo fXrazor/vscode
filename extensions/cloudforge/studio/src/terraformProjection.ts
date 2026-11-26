@@ -1,3 +1,8 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
 import { isSensitiveProperty } from './variables.ts';
 import type { Architecture, Resource, ResourceBlock } from './model.ts';
 import { resourceDefinition, providerRegions } from './fixture.ts';
@@ -157,7 +162,7 @@ export function applyTerraformDraft(architecture: Architecture, code: string, re
 		if (!block) { throw new Error('Resource type and Terraform identifier must stay unchanged in this editor.'); }
 		if (options?.allowAdditional && resourceId) {
 			const resource = architecture.resources.find(resource => resource.id === node.id)!;
-			const next = resourceFromTerraform(resource, block, parseHcl(before).blocks[0], options.schema);
+			const next = resourceFromTerraform(resource, block, parseHcl(before).blocks[0], options.schema, architecture);
 			const projected = parseHcl(terraformCode({ ...architecture, resources: architecture.resources.map(resource => resource.id === next.id ? next : resource) }, next.id)).blocks[0];
 			const normalize = (value: unknown): unknown => Array.isArray(value) ? value.map(normalize) : value !== null && typeof value === 'object' ? Object.fromEntries(Object.entries(value).sort(([left], [right]) => left.localeCompare(right)).map(([key, child]) => [key, normalize(child)])) : value;
 			const semanticBlock = (value: HclBlock): unknown => ({ type: value.type, labels: value.labels, attrs: normalize(value.attrs), blocks: [...value.blocks].sort((left, right) => left.type.localeCompare(right.type)).map(semanticBlock) });
