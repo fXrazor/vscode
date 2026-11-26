@@ -51,6 +51,118 @@
 					"type": "boolean",
 					"default": true,
 					"description": "%config.editor.codeLens%"
+				},
+				"cloudforge.ai.autoDiscoverLocal": {
+					"type": "boolean",
+					"default": true,
+					"description": "%config.ai.autoDiscoverLocal%"
+				},
+				"cloudforge.ai.providers": {
+					"type": "array",
+					"default": [],
+					"description": "%config.ai.providers%",
+					"items": {
+						"type": "object",
+						"required": [
+							"id",
+							"name",
+							"baseUrl"
+						],
+						"properties": {
+							"id": {
+								"type": "string",
+								"description": "Unique lowercase provider identifier (e.g. ollama, lmstudio, openai, vllm-local)."
+							},
+							"name": {
+								"type": "string",
+								"description": "Display name shown in CloudForge and VS Code model picker."
+							},
+							"baseUrl": {
+								"type": "string",
+								"description": "HTTPS endpoint URL or loopback http://127.0.0.1 / http://localhost URL for local models."
+							},
+							"apiFormat": {
+								"type": "string",
+								"enum": [
+									"openai",
+									"anthropic"
+								],
+								"default": "openai"
+							},
+							"authKind": {
+								"type": "string",
+								"enum": [
+									"none",
+									"apiKey",
+									"githubOAuth"
+								],
+								"default": "apiKey",
+								"description": "API keys are stored encrypted in OS SecretStorage — never put keys in settings.json."
+							},
+							"enabled": {
+								"type": "boolean",
+								"default": true
+							}
+						}
+					}
+				},
+				"cloudforge.ai.customModels": {
+					"type": "array",
+					"default": [],
+					"description": "%config.ai.customModels%",
+					"items": {
+						"type": "object",
+						"required": [
+							"id"
+						],
+						"properties": {
+							"id": {
+								"type": "string",
+								"description": "Model ID sent to the API (e.g. qwen2.5-coder:14b, llama-3.3-70b)."
+							},
+							"name": {
+								"type": "string",
+								"description": "Friendly display name shown in the Chat / Agent View model picker."
+							},
+							"providerId": {
+								"type": "string",
+								"default": "custom",
+								"description": "Matching provider ID (ollama, lmstudio, openai, anthropic, gemini, openrouter, or custom)."
+							},
+							"baseUrl": {
+								"type": "string",
+								"description": "Optional endpoint override (https:// or local loopback http://127.0.0.1 / localhost)."
+							},
+							"apiFormat": {
+								"type": "string",
+								"enum": [
+									"openai",
+									"anthropic"
+								],
+								"default": "openai"
+							},
+							"authKind": {
+								"type": "string",
+								"enum": [
+									"none",
+									"apiKey",
+									"githubOAuth"
+								]
+							},
+							"maxInputTokens": {
+								"type": "integer",
+								"default": 65536
+							},
+							"maxOutputTokens": {
+								"type": "integer",
+								"default": 8192
+							},
+							"toolCalling": {
+								"type": "boolean",
+								"default": true
+							}
+						}
+					}
 				}
 			}
 		},
@@ -383,6 +495,31 @@
 				"title": "%command.exportStudyGuide%",
 				"category": "%displayName%",
 				"icon": "$(markdown)"
+			},
+			{
+				"command": "cloudforge.configureAiProviders",
+				"title": "%command.configureAiProviders%",
+				"category": "%displayName%",
+				"icon": "$(sparkle)"
+			},
+			{
+				"command": "cloudforge.scanLocalModels",
+				"title": "%command.scanLocalModels%",
+				"category": "%displayName%",
+				"icon": "$(search)"
+			},
+			{
+				"command": "cloudforge.addCustomModel",
+				"title": "%command.addCustomModel%",
+				"category": "%displayName%",
+				"icon": "$(add)"
+			}
+		],
+		"languageModelChatProviders": [
+			{
+				"vendor": "cloudforge",
+				"displayName": "%lm.provider%",
+				"icon": "$(sparkle)"
 			}
 		],
 		"mcpServerDefinitionProviders": [

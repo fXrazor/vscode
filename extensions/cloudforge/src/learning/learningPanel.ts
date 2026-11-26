@@ -28,6 +28,8 @@ import { registerCloudForgeMcpProvider } from './mcpProvider';
 import { registerCloudForgeChatParticipant } from './chatParticipant';
 import { detectCursorResourceAddress, registerLearningEditorProviders } from './editorNotes';
 import { ProposalDiffProvider } from './proposalDiff';
+import { CloudForgeAiManager } from '../ai/providerRuntime';
+import type { AiProviderView } from '../ai/model';
 import {
 	buildArchitectureStudyGuideMarkdown,
 	buildExternalMcpConfigSnippet,
@@ -292,6 +294,13 @@ class CloudForgeLearnTreeProvider implements TreeDataProvider<LearnTreeNode>, Di
 				const rows: LearnTreeNode[] = [
 					{
 						kind: 'agentInfo',
+						label: l10n.t('AI Models & Simple Auth…'),
+						description: l10n.t('local Ollama/LM Studio, custom & cloud'),
+						command: 'cloudforge.openLearningStudio',
+						tab: 'models'
+					},
+					{
+						kind: 'agentInfo',
 						label: l10n.t('VS Code Agent View'),
 						description: this.vscodeAgentEnabled ? l10n.t('auto-discovered (cloudforge.mcp)') : l10n.t('unavailable'),
 						command: 'cloudforge.openLearningStudio',
@@ -348,6 +357,7 @@ export function activateLearning(context: ExtensionContext, host: LearningHost):
 	const treeProvider = new CloudForgeLearnTreeProvider(store, mcp.enabled);
 	const treeView = window.createTreeView('cloudforge.learn', { treeDataProvider: treeProvider });
 	const diffProvider = new ProposalDiffProvider();
+	const aiManager = new CloudForgeAiManager(context);
 	const editorNotesDisposable = registerLearningEditorProviders({
 		getRecord: () => store.record,
 		onDidChangeRecord: store.onDidChange
@@ -357,6 +367,12 @@ export function activateLearning(context: ExtensionContext, host: LearningHost):
 	let activeTab: LearningStudioTab = 'proposals';
 	let skillCategoryFilter: SkillCategory | 'all' = 'all';
 	let statusMessage: string | undefined;
+	let cachedAiProviders: readonly AiProviderView[] = [];
+
+	async function refreshAiViewsAndRender(): Promise<void> {
+		cachedAiProviders = await aiManager.getProviderViews();
+		renderPanel();
+	}
 
 	function renderPanel(): void {
 		if (!panel) {
@@ -375,6 +391,9 @@ export function activateLearning(context: ExtensionContext, host: LearningHost):
 			blueprints: store.blueprints,
 			grants: store.grants,
 			vscodeAgentEnabled: mcp.enabled,
+			aiProviders: cachedAiProviders,
+			customModels: aiManager.getCustomModels(),
+			lmProviderEnabled: aiManager.lmProviderEnabled,
 			statusMessage
 		}, nonce);
 	}
@@ -769,14 +788,72 @@ export function activateLearning(context: ExtensionContext, host: LearningHost):
 				case 'exportStudyGuide':
 					void exportStudyGuide();
 					break;
+				case 'connectAiProvider':
+					void aiManager.connectProvider(msg.providerId).then(result => {
+						if (result) {
+							statusMessage = result;
+						}
+						return refreshAiViewsAndRender();
+					});
+					break;
+				case 'disconnectAiProvider':
+					void aiManager.disconnectProvider(msg.providerId).then(result => {
+						statusMessage = result;
+						return refreshAiViewsAndRender();
+					});
+					break;
+				case 'scanLocalModels':
+					void aiManager.scanLocalRuntimes().then(counts => {
+						statusMessage = l10n.t('Scanned local runtimes: {0} Ollama model(s), {1} LM Studio model(s).', counts.ollama, counts.lmstudio);
+						return refreshAiViewsAndRender();
+					});
+					break;
+				case 'addCustomModel':
+					void (async () => {
+						let apiKey: string | undefined;
+						if (msg.authKind === 'apiKey') {
+							apiKey = await window.showInputBox({
+								title: l10n.t('API Key for {0}', msg.name),
+								prompt: l10n.t('Stored encrypted in OS SecretStorage (leave blank to reuse existing provider key)'),
+								password: true,
+								ignoreFocusOut: true
+							});
+							if (apiKey === undefined) {
+								return;
+							}
+						}
+						await aiManager.addCustomModel({
+							id: msg.id,
+							name: msg.name,
+							providerId: msg.providerId,
+							baseUrl: msg.baseUrl,
+							apiFormat: msg.apiFormat,
+							authKind: msg.authKind,
+							maxInputTokens: msg.maxInputTokens,
+							maxOutputTokens: 8192,
+							toolCalling: msg.toolCalling
+						}, apiKey);
+						statusMessage = l10n.t('Added model "{0}" ({1}) to VS Code Chat & Agent View.', msg.name, msg.baseUrl);
+						await refreshAiViewsAndRender();
+					})();
+					break;
+				case 'removeCustomModel':
+					void aiManager.removeCustomModel(msg.providerId, msg.modelId).then(() => {
+						statusMessage = l10n.t('Removed custom model "{0}".', msg.modelId);
+						return refreshAiViewsAndRender();
+					});
+					break;
+				case 'openAiSettings':
+					void commands.executeCommand('workbench.action.openSettings', 'cloudforge.ai');
+					break;
 				case 'refresh':
 					statusMessage = undefined;
-					void store.refresh().then(() => renderPanel());
+					void Promise.all([store.refresh(), refreshAiViewsAndRender()]);
 					break;
 			}
 		});
 		renderPanel();
-		void store.refresh().then(() => renderPanel());
+		void Promise.all([store.refresh(), refreshAiViewsAndRender()]);
 	}
 
 	const chatDisposable = registerCloudForgeChatParticipant({
@@ -792,6 +869,8 @@ export function activateLearning(context: ExtensionContext, host: LearningHost):
 		mcp.disposable,
 		chatDisposable,
 		diffProvider,
+		aiManager,
+		aiManager.onDidChangeState(() => { void refreshAiViewsAndRender(); }),
 		editorNotesDisposable,
 		treeProvider,
 		treeView,
@@ -801,6 +880,23 @@ export function activateLearning(context: ExtensionContext, host: LearningHost):
 		store.onDidChange(() => renderPanel()),
 		commands.registerCommand('cloudforge.openLearningStudio', (tab?: LearningStudioTab, category?: SkillCategory | 'all') => {
 			openLearningStudio(tab, category);
+		}),
+		commands.registerCommand('cloudforge.configureAiProviders', () => {
+			openLearningStudio('models');
+		}),
+		commands.registerCommand('cloudforge.scanLocalModels', async () => {
+			const counts = await aiManager.scanLocalRuntimes();
+			statusMessage = l10n.t('Scanned local runtimes: {0} Ollama model(s), {1} LM Studio model(s).', counts.ollama, counts.lmstudio);
+			await refreshAiViewsAndRender();
+			void window.showInformationMessage(statusMessage);
+		}),
+		commands.registerCommand('cloudforge.addCustomModel', async () => {
+			const msg = await aiManager.promptAddCustomModel();
+			if (msg) {
+				statusMessage = msg;
+				await refreshAiViewsAndRender();
+				void window.showInformationMessage(msg);
+			}
 		}),
 		commands.registerCommand('cloudforge.exportStudyGuide', async () => {
 			await exportStudyGuide();

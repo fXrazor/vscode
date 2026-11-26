@@ -394,3 +394,73 @@ test('exports portable Architecture Study Guide Markdown with task, notes, topol
 	assert.ok(md.includes('`cloudforge-diagram-authoring`'));
 	assert.deepEqual(parseLearningStudioMessage({ type: 'exportStudyGuide' }), { type: 'exportStudyGuide' });
 });
+
+test('validates AI Models & Auth studio messages and renders models tab', () => {
+	assert.deepEqual(parseLearningStudioMessage({ type: 'switchTab', tab: 'models' }), { type: 'switchTab', tab: 'models' });
+	assert.deepEqual(parseLearningStudioMessage({ type: 'connectAiProvider', providerId: 'github-models' }), { type: 'connectAiProvider', providerId: 'github-models' });
+	assert.deepEqual(parseLearningStudioMessage({ type: 'scanLocalModels' }), { type: 'scanLocalModels' });
+	assert.deepEqual(parseLearningStudioMessage({
+		type: 'addCustomModel',
+		id: 'qwen2.5-coder:14b',
+		name: 'Qwen Local',
+		baseUrl: 'http://127.0.0.1:11434/v1',
+		apiFormat: 'openai',
+		authKind: 'none',
+		maxInputTokens: '65536',
+		toolCalling: true
+	}), {
+		type: 'addCustomModel',
+		id: 'qwen2.5-coder:14b',
+		name: 'Qwen Local',
+		providerId: 'custom-qwen2-5-coder-14b',
+		baseUrl: 'http://127.0.0.1:11434/v1',
+		apiFormat: 'openai',
+		authKind: 'none',
+		maxInputTokens: 65536,
+		toolCalling: true
+	});
+	// Rejects plain HTTP remote URLs in custom model form.
+	assert.equal(parseLearningStudioMessage({
+		type: 'addCustomModel',
+		id: 'remote-bad',
+		baseUrl: 'http://api.example.com/v1',
+		apiFormat: 'openai',
+		authKind: 'apiKey'
+	}), undefined);
+
+	const html = buildLearningStudioHtml({
+		activeTab: 'models',
+		skillCategoryFilter: 'all',
+		skills: [],
+		blueprints: [],
+		grants: [],
+		vscodeAgentEnabled: true,
+		lmProviderEnabled: true,
+		aiProviders: [{
+			id: 'github-models',
+			name: 'GitHub Models',
+			kind: 'cloud',
+			baseUrl: 'https://models.inference.ai.azure.com',
+			apiFormat: 'openai',
+			authKind: 'githubOAuth',
+			enabled: true,
+			connected: false,
+			authDetail: 'Not signed in',
+			modelCount: 0,
+			description: 'One-click GitHub OAuth'
+		}],
+		customModels: [{
+			id: 'qwen2.5-coder:14b',
+			name: 'Qwen Local',
+			providerId: 'ollama',
+			baseUrl: 'http://127.0.0.1:11434/v1',
+			maxInputTokens: 65536,
+			maxOutputTokens: 8192,
+			toolCalling: true
+		}]
+	}, 'nonce-ai');
+	assert.ok(html.includes('Sign in with GitHub'));
+	assert.ok(html.includes('Scan Ollama &amp; LM Studio'));
+	assert.ok(html.includes('Qwen Local'));
+	assert.ok(html.includes('id="custom-model-form"'));
+});

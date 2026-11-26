@@ -7,6 +7,37 @@
 // Stage 12B (Learning Studio, Baked-in Skills, Topology Blueprints, Proposals, and Scoped MCP).
 // No `vscode` imports so every parser and renderer is unit tested directly.
 
+import type {
+	AiApiFormat,
+	AiAuthKind,
+	AiProviderView,
+	CustomModelEntry
+} from '../ai/model';
+
+const AI_LOOPBACK_HOSTS: ReadonlySet<string> = new Set(['127.0.0.1', 'localhost', '[::1]', '::1']);
+
+function validateStudioAiEndpointUrl(raw: string): string | undefined {
+	const trimmed = raw.trim();
+	if (trimmed.length === 0 || trimmed.length > 512 || /[\s\u0000-\u001f\u007f]/.test(trimmed)) {
+		return undefined;
+	}
+	try {
+		const parsed = new URL(trimmed);
+		if (parsed.username !== '' || parsed.password !== '') {
+			return undefined;
+		}
+		if (parsed.protocol === 'https:') {
+			return trimmed.replace(/\/+$/, '');
+		}
+		if (parsed.protocol === 'http:' && AI_LOOPBACK_HOSTS.has(parsed.hostname.toLowerCase())) {
+			return trimmed.replace(/\/+$/, '');
+		}
+		return undefined;
+	} catch {
+		return undefined;
+	}
+}
+
 export type SkillCategory = 'cloudforge-diagram' | 'cloudforge-topology' | 'cloudforge-workflow' | 'terraform';
 
 export interface PinnedSkill {
@@ -140,7 +171,7 @@ export interface IssuedMcpGrant extends McpGrantSummary {
 	readonly mcpCommand: string;
 }
 
-export type LearningStudioTab = 'task' | 'proposals' | 'skills' | 'blueprints' | 'agents';
+export type LearningStudioTab = 'task' | 'proposals' | 'skills' | 'blueprints' | 'models' | 'agents';
 
 export interface LearningStudioViewState {
 	readonly architectureName?: string;
@@ -153,6 +184,9 @@ export interface LearningStudioViewState {
 	readonly blueprints: readonly TopologyBlueprintSummary[];
 	readonly grants: readonly McpGrantSummary[];
 	readonly vscodeAgentEnabled: boolean;
+	readonly aiProviders?: readonly AiProviderView[];
+	readonly customModels?: readonly CustomModelEntry[];
+	readonly lmProviderEnabled?: boolean;
 	readonly statusMessage?: string;
 }
 
@@ -174,6 +208,12 @@ export type LearningStudioMessage =
 	| { readonly type: 'toggleRequirement'; readonly requirementId: string }
 	| { readonly type: 'saveNote'; readonly address: string; readonly why?: string; readonly userNote?: string; readonly docLabel?: string; readonly docUrl?: string }
 	| { readonly type: 'exportStudyGuide' }
+	| { readonly type: 'connectAiProvider'; readonly providerId: string }
+	| { readonly type: 'disconnectAiProvider'; readonly providerId: string }
+	| { readonly type: 'scanLocalModels' }
+	| { readonly type: 'addCustomModel'; readonly id: string; readonly name: string; readonly providerId: string; readonly baseUrl: string; readonly apiFormat: AiApiFormat; readonly authKind: AiAuthKind; readonly maxInputTokens: number; readonly toolCalling: boolean }
+	| { readonly type: 'removeCustomModel'; readonly providerId: string; readonly modelId: string }
+	| { readonly type: 'openAiSettings' }
 	| { readonly type: 'copyMcpConfig'; readonly client: 'codex' | 'claude-code' }
 	| { readonly type: 'revokeGrant'; readonly grantIdPreview: string }
 	| { readonly type: 'refresh' };
@@ -187,7 +227,7 @@ const SKILL_CATEGORIES: ReadonlySet<string> = new Set<SkillCategory>([
 
 const LEARNING_MODES: ReadonlySet<string> = new Set<LearningMode>(['hint', 'guided', 'workedExample']);
 const PROPOSAL_STATUSES: ReadonlySet<string> = new Set<ProposalStatus>(['pending', 'stale', 'accepted', 'rejected']);
-const STUDIO_TABS: ReadonlySet<string> = new Set<LearningStudioTab>(['task', 'proposals', 'skills', 'blueprints', 'agents']);
+const STUDIO_TABS: ReadonlySet<string> = new Set<LearningStudioTab>(['task', 'proposals', 'skills', 'blueprints', 'models', 'agents']);
 
 export function parseChatTopologyArgs(prompt: string): ChatTopologyArgs {
 	const tokens = prompt.trim().split(/\s+/).filter(Boolean);
@@ -703,6 +743,50 @@ export function parseLearningStudioMessage(raw: unknown): LearningStudioMessage 
 		}
 		case 'exportStudyGuide':
 			return { type: 'exportStudyGuide' };
+		case 'connectAiProvider':
+		case 'disconnectAiProvider': {
+			const providerId = str(raw.providerId, 64);
+			return providerId && /^[a-z0-9-]+$/.test(providerId) ? { type: raw.type, providerId } : undefined;
+		}
+		case 'scanLocalModels':
+			return { type: 'scanLocalModels' };
+		case 'openAiSettings':
+			return { type: 'openAiSettings' };
+		case 'addCustomModel': {
+			const id = str(typeof raw.id === 'string' ? raw.id.trim() : '', 128);
+			const name = str(typeof raw.name === 'string' ? raw.name.trim() : '', 100) ?? id;
+			const rawBaseUrl = typeof raw.baseUrl === 'string' ? raw.baseUrl.trim() : '';
+			const baseUrl = validateStudioAiEndpointUrl(rawBaseUrl);
+			const rawProv = typeof raw.providerId === 'string' ? raw.providerId.trim().toLowerCase() : '';
+			const providerId = rawProv && /^[a-z0-9][a-z0-9-]{0,47}$/.test(rawProv) ? rawProv : `custom-${(id ?? 'model').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 32)}`;
+			const apiFormat: AiApiFormat = raw.apiFormat === 'anthropic' ? 'anthropic' : 'openai';
+			const authKind: AiAuthKind = raw.authKind === 'none' || raw.authKind === 'githubOAuth' ? raw.authKind : 'apiKey';
+			const rawTokens = typeof raw.maxInputTokens === 'number'
+				? raw.maxInputTokens
+				: typeof raw.maxInputTokens === 'string' && /^\d+$/.test(raw.maxInputTokens.trim())
+					? Number(raw.maxInputTokens.trim())
+					: 65536;
+			const maxInputTokens = Number.isInteger(rawTokens) && rawTokens >= 1024 && rawTokens <= 2_000_000 ? rawTokens : 65536;
+			if (!id || !name || !baseUrl || !/^[A-Za-z0-9._:/@-]{1,128}$/.test(id)) {
+				return undefined;
+			}
+			return {
+				type: 'addCustomModel',
+				id,
+				name,
+				providerId,
+				baseUrl,
+				apiFormat,
+				authKind,
+				maxInputTokens,
+				toolCalling: raw.toolCalling !== false
+			};
+		}
+		case 'removeCustomModel': {
+			const providerId = str(raw.providerId, 64);
+			const modelId = str(raw.modelId, 128);
+			return providerId && modelId ? { type: 'removeCustomModel', providerId, modelId } : undefined;
+		}
 		case 'refresh':
 			return { type: 'refresh' };
 		default:
@@ -1080,6 +1164,82 @@ export function buildLearningStudioHtml(state: LearningStudioViewState, nonce: s
 				</div>
 			</article>`).join('');
 		bodyHtml = `${intro}${cards}`;
+	} else if (state.activeTab === 'models') {
+		const providers = state.aiProviders ?? [];
+		const customModels = state.customModels ?? [];
+		const localProviders = providers.filter(p => p.kind === 'local');
+		const cloudProviders = providers.filter(p => p.kind !== 'local');
+		const lmBadge = state.lmProviderEnabled
+			? '<span class="badge" style="--badge-color:#16A34A">VS Code Chat Ready</span>'
+			: '<span class="badge" style="--badge-color:#6B7280">Host LM Unavailable</span>';
+		const renderProviderRow = (p: AiProviderView): string => {
+			const primaryLabel = p.authKind === 'none'
+				? 'Scan local models'
+				: p.authKind === 'githubOAuth'
+					? (p.connected ? 'Reconnect GitHub' : 'Sign in with GitHub')
+					: (p.connected ? 'Update API key' : 'Connect');
+			const disconnectBtn = p.authKind === 'apiKey' && p.connected
+				? `<button type="button" class="ghost-btn" data-action="disconnectAiProvider" data-id="${escapeHtml(p.id)}">Disconnect</button>`
+				: '';
+			const statusColor = p.connected ? '#16A34A' : '#6B7280';
+			return `
+				<div class="provider-row">
+					<div>
+						<strong>${escapeHtml(p.name)}</strong> <span class="badge" style="--badge-color:${statusColor}">${p.connected ? 'Connected' : 'Not connected'}</span>
+						<div class="meta">${escapeHtml(p.authDetail)} · <code>${escapeHtml(p.baseUrl)}</code></div>
+					</div>
+					<div class="row-actions-inline">
+						<button type="button" class="primary-btn" data-action="connectAiProvider" data-id="${escapeHtml(p.id)}">${escapeHtml(primaryLabel)}</button>
+						${disconnectBtn}
+					</div>
+				</div>`;
+		};
+		const customListHtml = customModels.length === 0
+			? '<p class="muted">No custom models added yet. Add any local runtime (Ollama, LM Studio, vLLM, llama.cpp) or remote OpenAI/Anthropic-compatible model below.</p>'
+			: customModels.map(m => `
+				<div class="grant-row">
+					<div>
+						<strong>${escapeHtml(m.name)}</strong> (<code>${escapeHtml(m.id)}</code>)
+						<div class="meta">${escapeHtml(m.providerId)}${m.baseUrl ? ` · <code>${escapeHtml(m.baseUrl)}</code>` : ''} · ${m.maxInputTokens.toLocaleString()} ctx${m.toolCalling ? ' · tool calling' : ''}</div>
+					</div>
+					<button type="button" class="ghost-btn" data-action="removeCustomModel" data-provider="${escapeHtml(m.providerId)}" data-id="${escapeHtml(m.id)}">Remove</button>
+				</div>`).join('');
+		bodyHtml = `
+			<section class="entry">
+				<div class="entry-head">
+					<div>
+						<h3>Local &amp; Cloud AI Models</h3>
+						<div class="meta">Models configured here appear directly in VS Code's open-source Chat &amp; Agent View picker with CloudForge MCP tool calling. API keys are stored encrypted in OS SecretStorage — never in <code>settings.json</code>.</div>
+					</div>
+					${lmBadge}
+				</div>
+				<div class="row-actions">
+					<button type="button" class="primary-btn" data-action="scanLocalModels">Scan Ollama &amp; LM Studio</button>
+					<button type="button" class="ghost-btn" data-action="openAiSettings">Open AI Settings</button>
+				</div>
+			</section>
+			<section class="entry">
+				<h3>Local model runtimes (zero auth)</h3>
+				${localProviders.map(renderProviderRow).join('')}
+			</section>
+			<section class="entry">
+				<h3>Cloud providers (simple auth)</h3>
+				${cloudProviders.map(renderProviderRow).join('')}
+			</section>
+			<section class="entry">
+				<h3>Custom &amp; local models (${customModels.length})</h3>
+				${customListHtml}
+				<form id="custom-model-form" class="form-grid">
+					<label>Model ID<input name="id" type="text" maxlength="128" placeholder="e.g. qwen2.5-coder:14b or gpt-4.1" required></label>
+					<label>Display name<input name="name" type="text" maxlength="100" placeholder="e.g. Qwen 2.5 Coder 14B (Local)"></label>
+					<label class="full">Endpoint base URL (HTTPS or local loopback HTTP)<input name="baseUrl" type="url" maxlength="512" value="http://127.0.0.1:11434/v1" required></label>
+					<label>API format<select name="apiFormat"><option value="openai">OpenAI-compatible (/v1/chat/completions)</option><option value="anthropic">Anthropic Messages API (/v1/messages)</option></select></label>
+					<label>Authentication<select name="authKind"><option value="none">None (local loopback)</option><option value="apiKey">API key (prompt &amp; store encrypted)</option><option value="githubOAuth">GitHub OAuth session</option></select></label>
+					<label>Context window (tokens)<input name="maxInputTokens" type="number" min="1024" max="2000000" value="65536"></label>
+					<label class="checkbox-label"><input name="toolCalling" type="checkbox" checked> Enable MCP tool calling</label>
+					<div class="row-actions full"><button type="submit" class="primary-btn">Add custom / local model</button></div>
+				</form>
+			</section>`;
 	} else {
 		const agentStatus = state.vscodeAgentEnabled
 			? `<div class="entry"><div class="entry-head"><div><h3>VS Code Agent View (MCP auto-discovery)</h3><div class="meta">Provider ID: <code>cloudforge.mcp</code> · Self-updating docs via <code>cloudforge://docs/catalogue</code>, <code>/topologies</code>, <code>/skills</code></div></div><span class="badge" style="--badge-color:#16A34A">Registered</span></div><p class="prose">Open-source VS Code Agent View discovers CloudForge's scoped MCP server automatically whenever an architecture is active and mints a revocable grant only when an agent connects.</p></div>`
@@ -1326,9 +1486,13 @@ export function buildLearningStudioHtml(state: LearningStudioViewState, nonce: s
 	.check-btn { border: 0; background: transparent; color: var(--vscode-foreground); cursor: pointer; font-size: 14px; padding: 0 4px; }
 	.note-card { padding: 8px 0; border-top: 1px solid var(--vscode-panel-border, rgba(128,128,128,.15)); }
 	.note-card h4 { margin: 0 0 4px; font-size: 13px; }
+	.provider-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--vscode-panel-border, rgba(128,128,128,.15)); }
+	.row-actions-inline { display: flex; gap: 6px; flex-shrink: 0; }
+	.checkbox-label { flex-direction: row !important; align-items: center; gap: 8px !important; padding-top: 18px; }
 	@media (max-width: 640px) {
 		.shell { grid-template-columns: 1fr; }
 		.form-grid, .custom-bar { grid-template-columns: 1fr; }
+		.provider-row { flex-direction: column; align-items: flex-start; }
 		.rail { border-right: 0; border-bottom: 1px solid var(--vscode-panel-border, rgba(128,128,128,.22)); }
 	}
 </style>
@@ -1342,6 +1506,7 @@ export function buildLearningStudioHtml(state: LearningStudioViewState, nonce: s
 		${navItem('proposals', 'Proposals', pendingCount)}
 		${navItem('skills', 'Baked-in Skills', state.skills.length)}
 		${navItem('blueprints', 'Starter Blueprints', state.blueprints.length)}
+		${navItem('models', 'AI Models & Auth', (state.aiProviders ?? []).reduce((sum, p) => sum + p.modelCount, 0))}
 		${navItem('agents', 'AI Agents & MCP', state.grants.filter(g => g.active && !g.revoked).length)}
 		<div class="rail-footer">
 			<button type="button" class="ghost-btn" data-action="refresh">Refresh</button>
@@ -1390,6 +1555,14 @@ export function buildLearningStudioHtml(state: LearningStudioViewState, nonce: s
 			vscode.postMessage({ type: 'revokeGrant', grantIdPreview: target.getAttribute('data-id') });
 		} else if (action === 'exportStudyGuide') {
 			vscode.postMessage({ type: 'exportStudyGuide' });
+		} else if (action === 'connectAiProvider' || action === 'disconnectAiProvider') {
+			vscode.postMessage({ type: action, providerId: target.getAttribute('data-id') });
+		} else if (action === 'scanLocalModels') {
+			vscode.postMessage({ type: 'scanLocalModels' });
+		} else if (action === 'openAiSettings') {
+			vscode.postMessage({ type: 'openAiSettings' });
+		} else if (action === 'removeCustomModel') {
+			vscode.postMessage({ type: 'removeCustomModel', providerId: target.getAttribute('data-provider'), modelId: target.getAttribute('data-id') });
 		} else if (action === 'refresh') {
 			vscode.postMessage({ type: 'refresh' });
 		}
@@ -1417,6 +1590,17 @@ export function buildLearningStudioHtml(state: LearningStudioViewState, nonce: s
 				userNote: String(data.get('userNote') || ''),
 				docLabel: String(data.get('docLabel') || ''),
 				docUrl: String(data.get('docUrl') || '')
+			});
+		} else if (form.id === 'custom-model-form') {
+			vscode.postMessage({
+				type: 'addCustomModel',
+				id: String(data.get('id') || ''),
+				name: String(data.get('name') || ''),
+				baseUrl: String(data.get('baseUrl') || ''),
+				apiFormat: String(data.get('apiFormat') || 'openai'),
+				authKind: String(data.get('authKind') || 'none'),
+				maxInputTokens: String(data.get('maxInputTokens') || '65536'),
+				toolCalling: data.get('toolCalling') !== null
 			});
 		}
 	});
