@@ -36,7 +36,7 @@ import {
 import { BoardNode, ResourceNode, type CanvasNode } from './ResourceNode.tsx';
 import type { Action, Architecture, BoardItem, DesignMode, Provider, ResourceKind, Position } from './model.ts';
 import { resourceDefinition, resourceTypes, providerNames } from './fixture.ts';
-import { MousePointer2, SquareDashedMousePointer, Hand, Type, StickyNote, Shapes, Frame, Minus, Plus, Scan, Cable, PenLine } from 'lucide-react';
+import { MousePointer2, SquareDashedMousePointer, Hand, Type, StickyNote, Shapes, Frame, Minus, Plus, Scan, Cable, PenLine, ChevronLeft, ChevronRight, Lock } from 'lucide-react';
 
 const nodeTypes = { resource: ResourceNode, board: BoardNode };
 const edgeTypes = { design: DesignEdge };
@@ -138,6 +138,24 @@ export const DesignCanvas = memo(function DesignCanvas({
 	}, [flow, mode, viewports]);
 	useEffect(() => { if (selectedIds.length) { setSelectedConnectionId(''); } }, [selectedIds]);
 	const order = useMemo(() => sceneOrder(architecture), [architecture]);
+	const frames = useMemo(() => architecture.items.filter(item => item.kind === 'frame'), [architecture.items]);
+	const [activeFrameIndex, setActiveFrameIndex] = useState(0);
+	const jumpToFrame = useCallback((frame: BoardItem, index: number) => {
+		if (!flow) { return; }
+		autoFit.current = { at: 0 };
+		setActiveFrameIndex(index);
+		setSelectedConnectionId('');
+		onSelectionChange([frame.id]);
+		const pos = frame.positions[mode];
+		void flow.fitBounds({ x: pos.x, y: pos.y, width: Math.max(1, frame.width), height: Math.max(1, frame.height) }, { padding: 0.16, duration: 240 });
+	}, [flow, mode, onSelectionChange]);
+	const stepFrame = useCallback((delta: number) => {
+		if (!frames.length) { return; }
+		const currentIdx = frames.findIndex(item => selectedIds.includes(item.id));
+		const baseIdx = currentIdx >= 0 ? currentIdx : activeFrameIndex % frames.length;
+		const nextIdx = (baseIdx + delta + frames.length) % frames.length;
+		jumpToFrame(frames[nextIdx], nextIdx);
+	}, [frames, selectedIds, activeFrameIndex, jumpToFrame]);
 	const diagnostics = useMemo(() => architectureDiagnostics(architecture), [architecture]);
 	const dependencies = useMemo(() => inheritedDependencies(architecture), [architecture]);
 	const relationships = useMemo(() => infrastructureRelationships(architecture), [architecture]);
@@ -412,6 +430,9 @@ export const DesignCanvas = memo(function DesignCanvas({
 				return;
 			}
 		} else if (key === 'delete' || key === 'backspace') { action = 'delete'; }
+		else if ((key === 'pageup' || key === 'pagedown') && frames.length > 0) {
+			event.preventDefault(); event.stopPropagation(); stepFrame(key === 'pagedown' ? 1 : -1); return;
+		}
 		else if (key === 'enter') { action = 'edit'; } else if (key === 'f') { action = 'fit'; }
 		else if (key === 'escape') { action = 'clear'; }
 		else if (['arrowleft', 'arrowright', 'arrowup', 'arrowdown'].includes(key) && selectedIds.length) {
@@ -557,6 +578,28 @@ export const DesignCanvas = memo(function DesignCanvas({
 			</div></details>
 			{dropFeedback&&<div className={'container-drop-status '+(dropFeedback.ok?'valid':'invalid')} role="status">{dropFeedback.reason}</div>}
 			<div className="canvas-navigation" role="group" aria-label="Zoom and navigation">
+				{frames.length > 0 && <details className="canvas-frames-nav">
+					<summary aria-label={'Frames navigator (' + frames.length + ')'} title="Jump between frames (PageUp / PageDown)"><Frame size={14} aria-hidden="true" /><span>{frames.length}</span></summary>
+					<div className="canvas-frames-panel" role="region" aria-label="Frames list">
+						<header>
+							<strong>Frames ({frames.length})</strong>
+							<div className="canvas-frames-step">
+								<button type="button" aria-label="Previous frame" title="Previous frame (PageUp)" onClick={() => stepFrame(-1)}><ChevronLeft size={14} /></button>
+								<button type="button" aria-label="Next frame" title="Next frame (PageDown)" onClick={() => stepFrame(1)}><ChevronRight size={14} /></button>
+							</div>
+						</header>
+						<ul>
+							{frames.map((frame, index) => <li key={frame.id}>
+								<button type="button" aria-current={selectedIds.includes(frame.id) ? 'true' : undefined} onClick={() => jumpToFrame(frame, index)}>
+									<span className="canvas-frame-name">{frame.text.trim() || 'Frame ' + (index + 1)}</span>
+									<small>{frame.members.length > 0 ? frame.members.length + ' item' + (frame.members.length === 1 ? '' : 's') : 'frame'}</small>
+									{frame.canvasLocked && <Lock size={11} aria-label="Locked" />}
+								</button>
+							</li>)}
+						</ul>
+						{mode === 'visual' && <button type="button" className="canvas-frames-add" onClick={() => createItem('frame')}><Plus size={13} />New frame</button>}
+					</div>
+				</details>}
 				<button aria-label="Zoom out" title="Zoom out" onClick={() => { autoFit.current = { at: 0 }; void flow?.zoomOut(); }}><Minus /></button>
 				<select aria-label="Canvas zoom" value={zoom.toFixed(3)} onChange={event => { autoFit.current = { at: 0 }; void flow?.zoomTo(Number(event.target.value)); }}>
 					{!zoomPresets.some(value => value.toFixed(3) === zoom.toFixed(3)) && <option value={zoom.toFixed(3)}>{Math.round(zoom * 100)}%</option>}

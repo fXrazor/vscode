@@ -1066,3 +1066,21 @@ select, summary, label:has(> select), label:has(> input[type=checkbox]), label:h
 .selection-spacing-ghost { position: absolute; pointer-events: none; border-style: dashed; border-color: #e04f9a; background: color-mix(in srgb, #e04f9a 8%, transparent); border-radius: 6px; }
 .selection-tidy-button { position: absolute; pointer-events: auto; display: grid; place-items: center; padding: 0; min-height: 0; background: var(--panel-solid); color: var(--accent); border: 1.5px solid var(--accent); box-shadow: 0 2px 8px #00000024; cursor: pointer; }
 .selection-tidy-button:hover { background: var(--accent); color: #ffffff; }
+/* Miro-style quick-jump Frames navigator tucked inside the bottom-right zoom bar. */
+.canvas-frames-nav { position: relative; border-right: 1px solid var(--border); padding-right: 4px; margin-right: 2px; }
+.canvas-frames-nav > summary { list-style: none; display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 7px; border-radius: 6px; font-size: 11.5px; font-weight: 600; color: var(--text); cursor: pointer; user-select: none; }
+.canvas-frames-nav > summary::-webkit-details-marker { display: none; }
+.canvas-frames-nav > summary:hover, .canvas-frames-nav[open] > summary { background: var(--selection); color: var(--accent); }
+.canvas-frames-panel { position: absolute; right: 0; bottom: calc(100% + 10px); z-index: 25; width: 228px; max-height: 300px; display: flex; flex-direction: column; gap: 6px; padding: 8px; border-radius: 10px; background: var(--panel-solid); border: 1px solid var(--border); box-shadow: 0 12px 32px -10px #0004; font-size: 12px; color: var(--text); }
+.canvas-frames-panel > header { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 0 2px 4px; border-bottom: 1px solid var(--border); font-size: 11.5px; }
+.canvas-frames-step { display: inline-flex; gap: 2px; }
+.canvas-frames-step button { width: 24px; height: 24px; min-height: 0; padding: 0; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 5px; background: var(--input); color: var(--text); cursor: pointer; }
+.canvas-frames-step button:hover { border-color: var(--accent); color: var(--accent); }
+.canvas-frames-panel ul { list-style: none; margin: 0; padding: 0; overflow: auto; display: grid; gap: 2px; }
+.canvas-frames-panel li button { width: 100%; display: flex; align-items: center; gap: 6px; min-height: 30px; padding: 4px 7px; border: 0; border-radius: 6px; background: transparent; color: var(--text); text-align: left; font-size: 12px; cursor: pointer; }
+.canvas-frames-panel li button:hover { background: var(--hover); }
+.canvas-frames-panel li button[aria-current="true"] { background: var(--selection); color: var(--accent); font-weight: 600; }
+.canvas-frame-name { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.canvas-frames-panel li small { color: var(--muted); font-size: 10.5px; flex: none; }
+.canvas-frames-add { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 28px; padding: 4px 8px; border: 1px dashed var(--border); border-radius: 6px; background: transparent; color: var(--accent); font-size: 11.5px; font-weight: 600; cursor: pointer; }
+.canvas-frames-add:hover { background: var(--selection); border-color: var(--accent); }

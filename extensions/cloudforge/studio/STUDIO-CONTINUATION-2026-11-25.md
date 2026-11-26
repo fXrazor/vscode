@@ -1,5 +1,11 @@
 # Studio continuation checkpoint — 25 November 2026
 
+## Miro Quick-Jump Frames Navigator, One-Click Bend Reset & Technical Graph Keyboard Traversal / Cycle Jump — 26 November 2026
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `8f9deda8e4b`, owner Antigravity.
+- **Scope:** added contextual **Frames navigator** popover (`PageUp`/`PageDown`, `◀`/`▶`, smooth `fitBounds` jump, `+ New frame`, 0 Undo steps) in `src/DesignCanvas.tsx` + `src/styles.css`, contextual **Reset bend** icon in `src/ConnectionTools.tsx` when `waypoint` is set, and Technical Graph `Alt+ArrowLeft`/`Alt+ArrowRight` dependency traversal, `F` fit, and interactive **Inspect cycle** jump in `src/TechnicalGraph.tsx` (0 Undo steps).
+- **Fresh checks:** Studio `tsc --noEmit` **PASS**, **238/238** Studio tests (0 skipped), Studio `build` + `esbuild.webview.mts` **PASS**, real Windows Edge live check of Frames navigator, spacing handles/Tidy Up screenshot, and Technical Graph `Alt+←/→` traversal **PASS** (0 browser errors, 0 Undo steps).
+
 ## Merged closeout — 26 November 2026
 
 Dale authorized merging the Studio variable-usage fix and closing this worktree. Merge **`fa5a778e82de44e42eb9f3a0c87995883930be40`** combines `1a3a54740e6` with main `d2f5e7e06dd`, preserving later path tracing, smart spacing/style/duplication, Wrap/Fit Frame, sticky-note clustering and SVG export work. Fresh merged verification: **238/238 Studio tests**, TypeScript and preview build passed. The earlier **22/22 installed editor assertions** belong to their recorded pre-merge source and were not repeated during closeout. Resume from current remote main; older local/unmerged instructions below are superseded for this checkpoint. The native-import and guided-variable feature branches remain separate. Continue the outstanding provider/schema/native-archive proof listed below; do not recreate the implemented Studio features.

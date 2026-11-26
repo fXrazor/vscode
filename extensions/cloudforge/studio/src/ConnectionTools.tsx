@@ -1,5 +1,5 @@
 import type { Dispatch, ReactNode } from 'react';
-import { ArrowRightLeft, MoveLeft, MoveRight, MoreHorizontal, Trash2, Type, X } from 'lucide-react';
+import { ArrowRightLeft, MoveLeft, MoveRight, MoreHorizontal, RotateCcw, Trash2, Type, X } from 'lucide-react';
 import type { Action, DesignConnection } from './model.ts';
 
 /** Miro-style single edit bar for a line: type, colour, style, weight, arrows, label, then less common options behind menus. */
@@ -21,6 +21,7 @@ export function ConnectionTools({ connection, dispatch, onClose, children }: { c
 		</div></details>
 		<span className="line-bar-divider" aria-hidden="true"/>
 		{!service && <button type="button" className="line-bar-icon" aria-label="Reverse connection direction" data-tip="Reverse direction" onClick={() => dispatch({ type: 'reverseConnection', id: connection.id })}><ArrowRightLeft size={15}/></button>}
+		{connection.waypoint && <button type="button" className="line-bar-icon" aria-label="Reset connection bend" data-tip="Reset bend" onClick={() => update({ waypoint: undefined })}><RotateCcw size={15}/></button>}
 		{children && <details className="line-bar-menu connection-endpoint-fields"><summary aria-label="Endpoints" data-tip="Endpoints and ports"><MoreHorizontal size={16}/></summary><div className="line-bar-panel">{children}</div></details>}
 		{!service && <button type="button" className="line-bar-icon line-bar-danger" aria-label="Delete design connection" data-tip="Delete (Del)" onClick={() => { dispatch({ type: 'deleteConnection', id: connection.id }); onClose(); }}><Trash2 size={15}/></button>}
 		<button type="button" className="line-bar-icon" aria-label="Close connection tools" data-tip="Close (Esc)" onClick={onClose}><X size={15}/></button>

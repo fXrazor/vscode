@@ -377,12 +377,32 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, fileV
 		requestAnimationFrame(() => { if (saved) { void flow.setViewport(saved); } else { void flow.fitView({ padding: fitPadding, maxZoom: 1, duration: first ? 0 : 280 }); } });
 	}, [bundled, flow, presentation.layout, presentation.spacing, presentation.height, presentation.focus, snapshot.nodes, viewports]);
 
+	const [cycleCursor, setCycleCursor] = useState(0);
+	const cycleNodeIds = useMemo(() => [...new Set(snapshot.cycles.flat())], [snapshot.cycles]);
+	const jumpToGraphNode = useCallback((id: string) => {
+		setSelectedEdgeId('');
+		onSelect(id);
+		if (flow && layout.positions[id]) { void flow.fitView({ nodes: [{ id }], padding: 0.6, maxZoom: 1.1, duration: 240 }); }
+	}, [flow, layout.positions, onSelect]);
+
 	function handleKeys(event: ReactKeyboardEvent) {
 		const target = event.target as HTMLElement;
 		if (target.matches('input, textarea, select')) { return; }
 		if (event.key === 'Escape') { onSelect(''); setSelectedEdgeId(''); setPathTargetId(''); }
 		if (event.key === 'Enter' && selectedId && !target.closest('button')) { onOpenDetails(selectedId); }
 		if (event.key === 'F2' && selectedId) { (bounds.current?.querySelector(`[data-id="${CSS.escape(selectedId)}"] .tg-card-actions button[title="Rename"]`) as HTMLButtonElement | null)?.click(); }
+		if (event.key.toLowerCase() === 'f' && !event.ctrlKey && !event.metaKey && !event.altKey && flow) {
+			event.preventDefault();
+			if (selectedId && layout.positions[selectedId]) { void flow.fitView({ nodes: [{ id: selectedId }], padding: 0.45, maxZoom: 1.1, duration: 240 }); }
+			else { void flow.fitView({ padding: fitPadding, maxZoom: 1, duration: 240 }); }
+			return;
+		}
+		if (event.altKey && (event.key === 'ArrowLeft' || event.key === 'ArrowRight') && selectedNode) {
+			const neighbours = event.key === 'ArrowLeft'
+				? [...new Set(visibleEdges.filter(edge => edge.target === selectedNode.id).map(edge => edge.source))]
+				: [...new Set(visibleEdges.filter(edge => edge.source === selectedNode.id).map(edge => edge.target))];
+			if (neighbours.length > 0) { event.preventDefault(); event.stopPropagation(); jumpToGraphNode(neighbours[0]); return; }
+		}
 		// Graph keys never reach project shortcuts such as Delete, Ctrl+D or Ctrl+Z.
 		if (['Delete', 'Backspace'].includes(event.key) || (event.ctrlKey || event.metaKey) && ['z', 'y', 'd', 'v', 'x'].includes(event.key.toLowerCase())) { event.preventDefault(); event.stopPropagation(); }
 	}
@@ -486,7 +506,7 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, fileV
 			pathTargetId={pathTargetId} onPathTarget={setPathTargetId} tracedPath={tracedPath}
 			onEdit={onOpenDetails} onSelect={id => { setSelectedEdgeId(''); onSelect(id); }} onClose={() => { setSelectedEdgeId(''); setPathTargetId(''); onSelect(''); }} />}
 		{presentation.overlay === 'plan' && <div className="tg-banner tg-banner-info" role="status">{!plan ? 'No plan yet. Run Plan from Issues to see create, update, replace and destroy actions.' : (plan.stale ? 'Plan is older than this draft; actions may have changed. ' : 'Latest plan. ') + (overlays.unmatchedPlan ? overlays.unmatchedPlan + ' planned change' + (overlays.unmatchedPlan === 1 ? '' : 's') + ' are in modules or resources not drawn here.' : '')}</div>}
-		{snapshot.cycles.length > 0 && <div className="tg-banner" role="status"><AlertTriangle size={14} />{snapshot.cycles.length} configured reference cycle{snapshot.cycles.length === 1 ? '' : 's'} — Terraform cannot order {snapshot.cycles.map(cycle => cycle.length).reduce((a, b) => a + b, 0)} resources.</div>}
+		{snapshot.cycles.length > 0 && <div className="tg-banner" role="status"><AlertTriangle size={14} /><span>{snapshot.cycles.length} configured reference cycle{snapshot.cycles.length === 1 ? '' : 's'} — Terraform cannot order {cycleNodeIds.length} resources.</span>{cycleNodeIds.length > 0 && <button type="button" className="tg-link" onClick={() => { const id = cycleNodeIds[cycleCursor % cycleNodeIds.length]; setCycleCursor(value => value + 1); jumpToGraphNode(id); }}>Inspect cycle</button>}</div>}
 	</main>;
 });
 
