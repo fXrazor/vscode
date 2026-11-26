@@ -1,5 +1,23 @@
 # CloudForge Code OSS handoff
 
+## Offline Provider-Package Native Manager, Hosted Icon Bugfix & Windows Edge Verification — 26 November 2026
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review` (pushed to `origin/main` atop `fc7a6e675aa`, zero edits to `TechnicalGraph.tsx` / `technicalGraphForce.ts` / `technical-graph.css` so Claude's auto-resuming `claude/project-thread-2irlth` thread has zero overlap), owner Antigravity.
+- **Offline Provider-Package Management Native QuickPick Manager (from [offline-provider-management-spec.md](docs/cloudforge/offline-provider-management-spec.md)):**
+  - Added pure validated model & strict bounded response adapters in [providerMirror/model.ts](extensions/cloudforge/src/providerMirror/model.ts) + [providerMirror.test.ts](extensions/cloudforge/test/providerMirror.test.ts) (5 suites) and native Workbench QuickPick manager in [providerMirror/manager.ts](extensions/cloudforge/src/providerMirror/manager.ts), registered as **`CloudForge: Manage Offline Provider Packages…`** (`cloudforge.manageOfflineMirror`) in [extension.ts](extensions/cloudforge/src/extension.ts), [package.json](extensions/cloudforge/package.json), and [package.nls.json](extensions/cloudforge/package.nls.json).
+  - Fixed all 4 Stage 10B/10C truthful-state & eviction bugs across both the new hub and existing `evictMirrorPackage`, `verifyMirrorIntegrity`, and `planMirrorCleanup` commands:
+    1. Rejects missing/malformed/inconsistent integrity counters (`{}` never reports 0 intact packages) and opens searchable issue rows.
+    2. Never evicts on cleanup QuickPick row selection — enforces unified explicit modal `Remove Package` confirmation and validates `bytesReclaimed` without falling back to old inventory size.
+    3. Preserves and separates **Eligible for Review**, **In Use (Active Lease)** (`protectedActive`), and **Pinned by Active Architecture** (`pinnedRequiringReview`) rows, rejects unsafe/overflowing MiB quotas while accepting `0`, and explicitly reports *"Quota cannot be reached with the current protections"* with exact shortfall when over quota.
+    4. Distinguishes validated empty mirror vs invalid inventory and tracks session integrity staleness (`Not checked since change`) + scope/sourceRevision drift.
+- **Hosted Icon Double-Prefix Fix & Real Windows Edge Proof:**
+  - Running real Windows Edge browser verification caught a 404 on `assets/catalog-icons/catalog-icons/azure/azure-key-vaults.svg` in [serviceAdapter.ts](extensions/cloudforge/studio/src/serviceAdapter.ts) (`defaultIconFor()` prepended `catalog-icons/` a second time on already-prefixed signed-catalogue icon paths). Fixed in `serviceAdapter.ts`, added regression test in [serviceAdapter.test.ts](extensions/cloudforge/studio/src/serviceAdapter.test.ts), and added `<link rel="icon" href="data:,">` to [index.html](extensions/cloudforge/studio/index.html).
+- **Fresh verification (26 November 2026):**
+  - Studio `check` (`tsc --noEmit`): **PASS**; Studio `test`: **211/211 PASS** (0 skipped); Studio `build` + `esbuild.webview.mts`: **PASS**
+  - Extension `tsc --noEmit` + `esbuild.mts`: **PASS**; Extension Node tests (`CLOUDFORGE_REPO=Z:/CloudForge`): **108/108 PASS** (0 skipped)
+  - `build/hygiene.ts` + `build/oxlint.ts` on all touched files: **PASS** (0 errors/warnings)
+  - Real Windows Edge browser suites against merged `fc7a6e675aa` + icon fix: `technical-view-verify.mjs` **60/60 PASS** (zero browser errors), `hosted-refresh-verify.mjs` **20/20 PASS** (zero browser errors)
+
 ## Merged main checkpoint: Provider schemas (4,271) + Technical Graph Phases 1-5 — 26 November 2026
 
 Completed Codex's requested merge of `codex/provider-editor-coverage` (`9cbd4e5902a`, signed executable AzureRM 5.14.0 / AWS 6.73.0 / Google 8.10.0 schemas, lock-aware selection, recursive nested literal editor, source hydration) into `origin/main` atop `04f0c8354af` (Claude PR #3 dedicated `TechnicalGraph.tsx` + Antigravity Phases 1-5), then fast-forwarded `codex/provider-editor-coverage` so Codex's worktree resumes clean with zero conflicts. Fresh merged verification: Studio `tsc --noEmit` **PASS**, **210/210** Studio Node tests (0 skipped), Studio `build` + `esbuild.webview.mts` **PASS**, extension `tsc --noEmit` **PASS**, **103/103** extension Node tests (0 skipped). Both handoff histories below are preserved in full.

@@ -41,6 +41,7 @@
 	"config.projects.openInNewWindow": "Controls whether opening or creating a CloudForge project while another folder is open uses a new window, replaces the current window, or asks.",
 	"command.importProviderSchema": "Import Provider Schema Snapshot…",
 	"command.openProjectGallery": "Browse Project Architectures",
+	"command.manageOfflineMirror": "Manage Offline Provider Packages…",
 	"command.extractMirrorSchema": "Extract Provider Schema from Local Mirror…",
 	"command.importMirrorPackage": "Import Provider Archive (.zip) into Local Mirror…",
 	"command.evictMirrorPackage": "Remove Package from Local Provider Mirror…",

@@ -270,6 +270,12 @@
 				"icon": "$(cloud-upload)"
 			},
 			{
+				"command": "cloudforge.manageOfflineMirror",
+				"title": "%command.manageOfflineMirror%",
+				"category": "%displayName%",
+				"icon": "$(package)"
+			},
+			{
 				"command": "cloudforge.extractMirrorSchema",
 				"title": "%command.extractMirrorSchema%",
 				"category": "%displayName%",
