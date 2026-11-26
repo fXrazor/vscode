@@ -4,6 +4,12 @@
 
 Continue from `codex/guided-variable-values`, source **`28af238269e42fd9032f74b358ad931ec8677627`**, in `C:/Users/dalep/.codex/worktrees/guided-variable-values/CloudForge-Code`, based on merged main `e14d0b22b1a`. [Scope, design, checks and continuation](research/guided-variable-values.md). Non-sensitive list/map variable values now have entry fields and JSON within the existing configurator; Save/Undo, masked sensitive values and explicit null/empty/unset are preserved. **39/39 browser-preview checks**, **229/229 Studio tests**, TypeScript and preview build passed; screenshot evidence includes both themes and narrow layout. This does not replace Claude's Miro-style resource list/reference controls or any earlier provider/Technical Graph backlog. Next: review against refreshed main when integration is requested, then installed Workbench variable/save proof. This branch is local and unmerged; no installer or installed app was changed.
 
+## Network view gradual node sizing & sleek border polish — 26 November 2026
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `e14d0b22b1a`, owner Antigravity.
+- **Scope:** updated `nodeRadii()` in `src/technicalGraphForce.ts` to use `(d / max(maxDegree, 6))^1.35` (keeping 0/1-link leaves compact, avoiding small-graph inflation, and giving major hubs unmistakable visual hierarchy), added bounded proportional ring strokes (`1.6px`–`2.6px`), gradual label sizing (`10.5px`–`15px`), 3-dot legend key, and `WhyPanel` header wrapping in `src/TechnicalGraph.tsx` and `src/technical-graph.css`, plus unit tests in `src/technicalGraph.test.ts`.
+- **Fresh checks:** Studio `tsc --noEmit` **PASS**, **230/230** Studio tests (0 skipped), Studio `build` + `esbuild.webview.mts` **PASS**, `oxlint` & `hygiene` **PASS**, and Windows Edge `technical-view-verify.mjs` **64/64 PASS** (0 browser errors).
+
 ## Technical Graph service-edge provenance & module drill-down — 26 November 2026
 
 - **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `a10ed3fb214`, owner Antigravity.

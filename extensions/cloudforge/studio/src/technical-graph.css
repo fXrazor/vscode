@@ -124,7 +124,8 @@
 .tg-zoom span { min-width: 40px; text-align: center; font-variant-numeric: tabular-nums; }
 .tg-why { position: absolute; top: 62px; right: 14px; z-index: 6; width: min(320px, calc(100% - 28px)); max-height: calc(100% - 140px); overflow: auto; padding: 12px 14px; border-radius: 10px; background: var(--surface); border: 1px solid var(--border); box-shadow: 0 10px 30px -14px #0006; font-size: 12px; color: var(--text); }
 .tg-why header { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 8px; }
-.tg-why header strong { display: block; font-size: 13.5px; } .tg-why header code { font-size: 10.5px; color: var(--muted); word-break: break-all; }
+.tg-why header > div { min-width: 0; }
+.tg-why header strong { display: block; font-size: 13.5px; overflow-wrap: anywhere; } .tg-why header code { font-size: 10.5px; color: var(--muted); word-break: break-all; }
 .tg-why dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0 0 8px; } .tg-why dt { color: var(--muted); } .tg-why dd { margin: 0; }
 .tg-why-kind { font-weight: 650; color: var(--tg-cat); }
 .tg-why-path { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 0 0 6px; }
@@ -293,7 +294,7 @@
 .tg-force-node:hover .tg-force-halo, .tg-force-node.is-related .tg-force-halo { stroke: color-mix(in srgb, var(--tg-layer) 35%, transparent); }
 .tg-force-node.is-selected .tg-force-halo, .tg-force-node.is-focus .tg-force-halo { stroke: var(--accent); stroke-width: 3; }
 .tg-force-exposed { fill: none; stroke: var(--danger); stroke-width: 1.5; stroke-dasharray: 3 3; }
-.tg-force-label { font-size: 11.5px; font-weight: 600; fill: var(--text); paint-order: stroke; stroke: var(--canvas); stroke-width: 4px; stroke-linejoin: round; pointer-events: none; }
+.tg-force-label { font-size: 11px; font-weight: 550; fill: var(--text); paint-order: stroke; stroke: var(--canvas); stroke-width: 4px; stroke-linejoin: round; pointer-events: none; }
 .tg-force-node.is-dim { opacity: .22; }
 .tg-force-node.is-unmatched { opacity: .18; }
 .tg-force-issue circle { fill: var(--warning); stroke: var(--node); stroke-width: 2; }
@@ -311,15 +312,16 @@
 .tg-force-hull path { fill: color-mix(in srgb, var(--tg-layer, var(--tg-edge-ownership)) 7%, transparent); stroke: color-mix(in srgb, var(--tg-layer, var(--tg-edge-ownership)) 32%, transparent); stroke-width: 1.2; stroke-dasharray: 4 5; transition: opacity .15s; }
 .tg-force-hull text { font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; fill: color-mix(in srgb, var(--tg-layer, var(--muted)) 70%, var(--muted)); paint-order: stroke; stroke: var(--canvas); stroke-width: 4px; pointer-events: none; }
 .tg-force-hull.is-dim { opacity: .3; }
-.tg-force-node.is-hub .tg-force-disc { stroke-width: 3.2; filter: drop-shadow(0 4px 10px #1a1b2630); }
+.tg-force-node.is-hub .tg-force-disc { filter: drop-shadow(0 4px 10px #1a1b2630); }
 .tg-force-node.is-hub .tg-force-label { font-weight: 700; }
 .tg-force-link.is-flow { stroke-dasharray: 7 5; animation: tg-force-flow .9s linear infinite; }
 @keyframes tg-force-flow { to { stroke-dashoffset: -24; } }
 .tg-force.is-still .tg-force-link.is-flow { animation: none; }
 @media (prefers-reduced-motion: reduce) { .tg-force-link.is-flow { animation: none; } }
 .tg-force-size-key { display: inline-flex; align-items: center; gap: 4px; }
-.tg-force-size-key i { display: inline-block; border-radius: 50%; border: 1.5px solid var(--muted); width: 7px; height: 7px; }
-.tg-force-size-key i + i { width: 12px; height: 12px; margin-right: 3px; }
+.tg-force-size-key i { display: inline-block; border-radius: 50%; border: 1.5px solid var(--muted); width: 6px; height: 6px; }
+.tg-force-size-key i + i { width: 9px; height: 9px; }
+.tg-force-size-key i + i + i { width: 13px; height: 13px; margin-right: 3px; }
 .tg-spread { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
 .tg-spread input[type="range"] { width: 110px; accent-color: var(--accent); }
 .tg-spread output { min-width: 3.2em; font-variant-numeric: tabular-nums; color: var(--muted); font-size: 11.5px; }

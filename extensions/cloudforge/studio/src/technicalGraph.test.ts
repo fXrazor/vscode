@@ -415,3 +415,30 @@ test('service-graph edges gain exact field provenance and card ports from readRe
 	const modNode = withValues.nodes.find(node => node.id === 'mod-net')!;
 	assert.deepEqual(modNode.module, { source: './modules/net' }, 'reads capitalised module Source setting');
 });
+
+test('network node sizing grows gradually with degree so 1-link leaves stay compact beside real hubs', () => {
+	// Small 4-node graph: 0-link VM, two 1-link VNets, one 2-link RG (prevents tiny-graph inflation)
+	const small = nodeRadii(
+		[{ id: 'vm' }, { id: 'vnet1' }, { id: 'vnet2' }, { id: 'rg' }],
+		[{ source: 'rg', target: 'vnet1', membership: true }, { source: 'rg', target: 'vnet2', membership: true }],
+		150
+	);
+	assert.equal(small.vm, forceSettings.radius);
+	assert.ok(small.vnet1 > small.vm && small.vnet1 < forceSettings.radius * 1.2, '1-link leaf stays compact: ' + small.vnet1);
+	assert.ok(small.rg > small.vnet1 + 3 && small.rg < forceSettings.radius * 1.5, '2-link RG steps up gradually without ballooning: ' + small.rg);
+
+	// 8-node RG cluster: 0-link orphan, 1-link leaves, 2-link mid-tier, 3-link subnet, 7-link RG
+	const cluster = nodeRadii(
+		[{ id: 'rg' }, { id: 'snet' }, { id: 'vnet' }, { id: 'nic' }, { id: 'vm' }, { id: 'aks' }, { id: 'log' }, { id: 'orphan' }],
+		[
+			{ source: 'rg', target: 'snet', membership: true }, { source: 'rg', target: 'vnet', membership: true },
+			{ source: 'rg', target: 'nic', membership: true }, { source: 'rg', target: 'vm', membership: true },
+			{ source: 'rg', target: 'aks', membership: true }, { source: 'rg', target: 'log', membership: true },
+			{ source: 'vnet', target: 'snet', membership: false }, { source: 'snet', target: 'nic', membership: false },
+		],
+		150
+	);
+	assert.ok(cluster.orphan < cluster.aks && cluster.aks < cluster.vnet && cluster.vnet < cluster.snet && cluster.snet < cluster.rg, 'strict gradual progression');
+	assert.ok((cluster.aks - cluster.orphan) < (cluster.rg - cluster.snet) * 0.25, 'hub stands out dramatically over 1-link leaves');
+	assert.equal(cluster.rg, forceSettings.radius * 2.5, 'busiest hub reaches full configured growth once graph has real hubs');
+});
