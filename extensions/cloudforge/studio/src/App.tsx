@@ -29,7 +29,7 @@ import { ArrowLeft, Scan, PanelsTopLeft, PanelRightClose, Code2, ListTree, Boxes
 import { PaneResizeHandle } from './PaneResizeHandle.tsx';
 import { architectureDiagnostics, type Diagnostic } from './diagnostics.ts';
 import { IssuesPanel, focusResourceField } from './IssuesPanel.tsx';
-import { resourcePlacement } from './resourceHierarchy.ts';
+import { visualResourcePlacement } from './resourceHierarchy.ts';
 import { workflowTemplate } from './workflowTemplate.ts';
 import { createHostBridge, type HostCloudRegionsPayload, type HostDependencyReport, type HostDetectedEngine, type HostDraftSaveError, type HostDraftSavePreview, type HostEngineInitOfflineReport, type HostEnginePlanReport, type HostEngineValidateReport, type HostSaveAllPreview, type HostExportAuditReport, type HostGraphSnapshot, type HostModuleInspection, type HostNotice, type HostOfflineMirrorReadiness, type HostStartContext, type HostValidationRun } from './webviewBridge.ts';
 import type { LiveSchemaMap } from './liveSchema.ts';
@@ -54,6 +54,7 @@ export function Studio() {
 	const hostBridge = useMemo(() => createHostBridge(), []);
 	const [history, dispatch] = useReducer(historyReducer, undefined, () => createHistory(hostBridge.isHosted ? blankArchitecture() : sampleArchitecture()));
 	const [mode, setMode] = useState<DesignMode>('visual');
+	const modeRef = useRef(mode); modeRef.current = mode;
 	const [theme, setTheme] = useState<'light' | 'dark'>(() => detectInitialTheme(hostBridge.isHosted));
 	const [selectedIds, setSelectedIds] = useState<string[]>([]);
 	const selectedId = selectedIds.length === 1 ? selectedIds[0] : '';
@@ -651,6 +652,7 @@ export function Studio() {
 		function handleKey(event: KeyboardEvent) {
 			if (event.defaultPrevented) { return; }
 			const target = event.target;
+			if (target instanceof HTMLElement && target.closest('main.canvas[data-read-only="true"]')) { return; }
 			if (target instanceof HTMLElement && (target.matches('input, textarea, select') || target.isContentEditable)) { return; }
 			if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
 				event.preventDefault();
@@ -666,11 +668,12 @@ export function Studio() {
 		// The renderer records its viewport on move end. A departing renderer's instance
 		// may still be mounted here, so never copy it into the next renderer's slot.
 		setMode(next);
-		setMessage(next === 'visual' ? 'Visual Design · shared draft preserved' : 'Technical Design · shared draft preserved');
+		setMessage(next === 'visual' ? 'Architecture view · shared draft preserved' : 'Configuration view · shared draft preserved');
 	}
 
 	const resourceCount = architecture.resources.length;
 	const addResource = useCallback((kind: ResourceKind, provider: Provider, position?: Position, parentId?:string) => {
+		if (modeRef.current !== 'visual') { setMessage('Switch to Architecture to add resources.'); return; }
 		const id = crypto.randomUUID();
 		const definition = resourceDefinition({ kind, provider });
 		const placed = position ?? {
@@ -684,7 +687,7 @@ export function Studio() {
 			blocks: [],
 			positions: { visual: placed, technical: placed }
 		};
-		const placement=resourcePlacement(architecture,resource,parentId); if(!placement.ok){setMessage(placement.reason);return;} resource.parentId=placement.parentId;
+		const placement=visualResourcePlacement(architecture,resource,parentId); if(!placement.ok){setMessage(placement.reason);return;} resource.parentId=placement.parentId; if(parentId&&parentId!==placement.parentId){resource.visualParentId=parentId;}
 		dispatch({type:'add',resource});
 		setSelectedId(id);
 		setOverview(false); setInspectorOpen(true); setInspectorCategory('resources'); setDetailTab('form');
@@ -692,16 +695,18 @@ export function Studio() {
 	}, [resourceCount,architecture]);
 
  const addCatalogueResource = useCallback((entry: CatalogueEntry, provider: Provider, position?: Position, parentId?:string) => {
+  if (modeRef.current !== 'visual') { setMessage('Switch to Architecture to add resources.'); return; }
   const id = crypto.randomUUID();
   const bounds = document.querySelector('.canvas')?.getBoundingClientRect();
   const placed = position ?? (flow && bounds ? flow.screenToFlowPosition({ x: bounds.x+bounds.width/2, y:bounds.y+bounds.height/2 }) : { x:100,y:100 });
   const settings = Object.fromEntries(entry.fields.filter(field=>field.required && !['name','location','region'].includes(field.name)).map(field=>[field.name, field.default === undefined ? '' : String(field.default)]));
   const resource:Resource={ id, kind:'generic', catalogue:entry, provider, name:entry.type.replace(/^(azurerm|aws|google)_/,'')+'_'+id.slice(0,4), ...(hostSnapshot ? { sourceFile: defaultTargetTfFile(architecture, selectedId || undefined) } : {}), region:providerRegions[provider][0], settings, blocks:[], positions:{visual:placed,technical:placed} };
-  const placement=resourcePlacement(architecture,resource,parentId);if(!placement.ok){setMessage(placement.reason);return;}resource.parentId=placement.parentId;dispatch({type:'add',resource});
+  const placement=visualResourcePlacement(architecture,resource,parentId);if(!placement.ok){setMessage(placement.reason);return;}resource.parentId=placement.parentId;if(parentId&&parentId!==placement.parentId){resource.visualParentId=parentId;}dispatch({type:'add',resource});
   setSelectedId(id); setOverview(false); setInspectorOpen(true); setInspectorCategory('resources'); setDetailTab('form');
  },[flow,architecture]);
 
  function addTemplate(kind:'network'|'platform'|'workflow') {
+  if (modeRef.current !== 'visual') { setMessage('Switch to Architecture to add a template.'); return; }
   if(kind==='workflow'){
    const rect=document.querySelector('.canvas')?.getBoundingClientRect();
    const centre=flow&&rect?flow.screenToFlowPosition({x:rect.x+rect.width/2,y:rect.y+rect.height/2}):{x:200,y:200};
@@ -720,6 +725,7 @@ export function Studio() {
  }
 
 	const addItem = useCallback((kind: BoardItem['kind'], position: Position, caption?:string, shape?: ShapeId) => {
+		if (modeRef.current !== 'visual') { setMessage('Switch to Architecture to add a drawing.'); return; }
 		const id = crypto.randomUUID();
 		const text = { frame: 'New section', note: 'Add an architecture note', text: 'Architecture annotation', shape: 'Label', ink: '' }[kind];
 		dispatch({ type: 'addItem', item: {
@@ -780,7 +786,7 @@ export function Studio() {
 					onExportArtifact: exportHostArtifact,
 				} : undefined} />
 			<div className="studio-body">
-				<ResourceCatalogue architecture={architecture} onAdd={addResource} onAddCatalogue={addCatalogueResource} onTemplate={addTemplate} search={search} onSearch={setSearch} onImportModule={() => setModuleImportOpen(true)}
+				<ResourceCatalogue architecture={architecture} liveSchemas={liveSchemas} onAdd={addResource} onAddCatalogue={addCatalogueResource} onTemplate={addTemplate} search={search} onSearch={setSearch} onImportModule={() => setModuleImportOpen(true)}
 					shapesOpen={shapesOpen} onShapesOpen={openShapes} onShapesBack={() => setShapesOpen(false)}
 					tab={libraryTab} onTabChange={setLibraryTab}
      visible={libraryOpen} onClose={() => setLibraryOpen(false)}

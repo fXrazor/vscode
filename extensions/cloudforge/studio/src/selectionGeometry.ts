@@ -24,10 +24,10 @@ export function selectionUnits(architecture: Architecture, ids: string[]): strin
 	return units;
 }
 
-export function layoutSelection(architecture: Architecture, ids: string[], mode: DesignMode, alignment: Alignment, sizes: Record<string, ElementSize>): Record<string, Position> {
+export function layoutSelection(architecture: Architecture, ids: string[], mode: DesignMode, alignment: Alignment, sizes: Record<string, ElementSize>, displayedPositions: Record<string, Position> = {}): Record<string, Position> {
 	const byId = new Map(canvasElements(architecture).map(item => [item.id, item]));
 	const units = selectionUnits(architecture, ids).filter(unit => unit.every(id => !byId.get(id)?.canvasLocked)).map(members => {
-		const boxes = members.map(id => { const item = byId.get(id)!; const position = item.positions[mode]; const size = sizes[id] ?? ('width' in item ? { width: item.width, height: item.height } : { width: 112, height: 92 }); return { ...position, ...size }; });
+		const boxes = members.map(id => { const item = byId.get(id)!; const position = displayedPositions[id] ?? item.positions[mode]; const size = sizes[id] ?? ('width' in item ? { width: item.width, height: item.height } : { width: 112, height: 92 }); return { ...position, ...size }; });
 		const x = Math.min(...boxes.map(box => box.x)); const y = Math.min(...boxes.map(box => box.y));
 		return { members, x, y, width: Math.max(...boxes.map(box => box.x + box.width)) - x, height: Math.max(...boxes.map(box => box.y + box.height)) - y };
 	});

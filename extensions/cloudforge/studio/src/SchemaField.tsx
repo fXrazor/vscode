@@ -1,7 +1,8 @@
 import { useId } from 'react';
 import type { AttrDef } from './cloudlab-core/catalog/index.ts';
 import { fieldIssue } from './formDefinition.ts';
-import { CircleHelp, CornerDownRight, Link2, Variable, X } from 'lucide-react';
+import { CircleHelp, CornerDownRight, Link2, TriangleAlert, Variable, X } from 'lucide-react';
+import type { FieldImpact } from './fieldImpact.ts';
 import { resourceRefBindingIssue, variableBindingIssue, variablePreview, type ResourceRefBinding, type ResourceRefCandidate, type ResourceRefEntry, type VariableBinding } from './fieldBindings.ts';
 import { isSensitiveProperty, type VariableDefinition } from './variables.ts';
 import { VariablePicker } from './VariablePicker.tsx';
@@ -21,9 +22,9 @@ export type FieldResourceReference = {
 	onReveal?: (id: string) => void;
 };
 /** Literal, input, typed resource reference and inherited modes share the same field in both resource editors. */
-export function SchemaField({ name, value, definition, onChange, variables = [], binding, onBind, onManageVariables, inheritance, resourceReference, path }: {
+export function SchemaField({ name, value, definition, onChange, variables = [], binding, onBind, onManageVariables, inheritance, resourceReference, path, impact }: {
 	name:string; value:string; definition?:AttrDef; onChange:(value:string)=>void; variables?:VariableDefinition[]; binding?:VariableBinding;
-	onBind?:(variableId?:string)=>void; onManageVariables?:()=>void; inheritance?:FieldInheritance; resourceReference?:FieldResourceReference; path?:string;
+	onBind?:(variableId?:string)=>void; onManageVariables?:()=>void; inheritance?:FieldInheritance; resourceReference?:FieldResourceReference; path?:string; impact?:FieldImpact;
 }) {
 	const id = useId(); const reference = inheritance?.reference;
 	const refBinding = resourceReference?.binding?.refs.length ? resourceReference.binding : undefined;
@@ -70,5 +71,6 @@ export function SchemaField({ name, value, definition, onChange, variables = [],
 		: <input {...props} type={isSensitiveProperty(name,definition?.sensitive)?'password':'text'} inputMode={definition?.type==='number'?'decimal':undefined} placeholder={definition?.placeholder}/>}
 		{!reference&&inheritance?.available&&<button className="restore-inheritance" onClick={()=>inheritance.onInherit(true)}>Use inherited {inheritance.available.source.name}.{inheritance.available.attribute}</button>}
 		<div id={id+'-help'} className={issue?'schema-field-error':'field-help'}>{issue??definition?.description}</div>
+		{impact && <div className="field-impact" role="note"><TriangleAlert size={15}/><div><strong>{impact.kind === 'replacement' ? 'May replace an existing resource' : 'May stop the instance to update'}</strong><p>{impact.kind === 'replacement' ? 'Changing this argument can require a new resource. Review the plan for affected dependencies.' : 'Review allow_stopping_for_update and the instance status before changing this argument.'}</p>{impact.docsUrl ? <a href={impact.docsUrl} target="_blank" rel="noreferrer">{impact.source}</a> : <small>{impact.source}</small>}</div></div>}
 	</div>;
 }

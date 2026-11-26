@@ -27,9 +27,10 @@ export function loadCatalogue(provider: Provider): Promise<CatalogueSnapshot> {
  if (!snapshot) {
   snapshot = fetch('./assets/catalogue/' + provider + '.json').then(async response => {
    if (!response.ok) { throw new Error('The provider catalogue could not be loaded.'); }
-   const loaded = await response.json() as CatalogueSnapshot;
-   recordCatalogueIcons(loaded.entries ?? []);
-   return loaded;
+    const value = await response.json() as CatalogueSnapshot;
+    const loaded = { ...value, entries: value.entries.map(entry => ({ ...entry, providerVersion: value.version, providerSource: value.source })) };
+    recordCatalogueIcons(loaded.entries);
+    return loaded;
   }).catch(error => { snapshots.delete(provider); throw error; });
   snapshots.set(provider, snapshot);
  }

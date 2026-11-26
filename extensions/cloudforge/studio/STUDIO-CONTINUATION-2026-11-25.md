@@ -4,20 +4,206 @@
 
 Canonical Studio checkpoint: this file. Dale requested consolidation on 25 November 2026; the earlier Claude continuation and Codex whiteboard continuation are retained below as historical evidence. Use the current queue here instead of historical branch commands or pending-approval notes.
 
-Worktree: `C:/Users/dalep/.codex/worktrees/infrastructure-studio/CloudForge-Code`. Branch: `codex/studio-whiteboard-2`. Integration owner: Codex. Starting revision for this continuation: `5963df26af39f3f65365304025df8fa70773ff9d`. Fresh baseline: Studio check/build passed, **111/111** Node tests. The previous iteration also verified both Edge browser suites 20/20; those are inherited results until rerun for the new changes.
+Worktree: `C:/Users/dalep/.codex/worktrees/infrastructure-studio/CloudForge-Code`. Branch: `codex/studio-whiteboard-2`. Integration owner: Codex. Initial revision for this continuation: `5963df26af39f3f65365304025df8fa70773ff9d`. Historical starting baseline: Studio check/build passed, **111/111** Node tests and two Edge suites 20/20. Use the main integration verification below for the current merged result.
 
 Dale approved continuing the proposed point-endpoint pass in this chat. No further approval is needed for that plan. Work remains within Studio and handoff documentation; one architecture and one semantic undo history, independent theme/viewport/tool preferences, drawings excluded from Terraform and Rust-owned guarded I/O remain binding.
 
-### Current work queue
+### Main integration and portable agent handoff — 25 November 2026
+
+Dale explicitly instructed Codex to finish the handoff and push completed work to **main**. This authorizes the present main integration and supersedes the older no-main-push notes below; it does not authorize force-pushing, merging unrelated open PRs or changing the Rust repository. Integration work remains in the existing isolated worktree on `codex/studio-whiteboard-2`. The fetched main baseline was `e9a36e0e73fdf429a0ac1a0cc11474e32ac81e68` (35 commits ahead of the feature branch's base); the four feature commits through `64c01b2b4c3` are integrated with it. Resolve the final integration revision from the repository root with `git log -1 -- extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md` or the latest root HANDOFF entry. The remote main revision, rather than an old local worktree path, is the portable starting point.
+
+Repository: **https://github.com/fXrazor/vscode**. Canonical continuation: `extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md` (this file). Supporting research: `research/provider-intelligence.md` and `research/provider-source-manifest.json` under the Studio directory. They supplement this handoff; do not create a second continuation document. Prior backlog and source notes remain intact below.
+
+**What is included:** the earlier designer/endpoint work, variable picker/provider/icon/constraint follow-ups, independent visual versus provider containment, preliminary provider intelligence, and the technical-graph mutation safety correction. Graph gestures cannot write the design layout; explicit Parameters/Code project editing remains available. D3, the final TechnicalGraph renderer, tasteful curve/density/attachment-row design, graph-local pins, Miro copy handles and perimeter/bend controls remain planned, not implemented.
+
+**Main capabilities to reuse:** `resourceValues.ts` and App's `resourceValues` event hydrate source literals and `var.NAME` bindings with source-revision checks/rebase. Imported provider types/coverage are registered in `catalogue.ts`/`liveSchema.ts`; `resourceDraft.ts` supports schema draft checks. `sourceChanges`, focused and three-way saves, Save All, clickable/stale diagnostics, source navigation, project gallery/side panel, offline mirror and `HostEnginePlanReport`/`enginePlanReport` already exist. Do not build replacement service APIs from the earlier historical gap descriptions. The graph snapshot alone remains a summary; consume the separate existing value/schema/plan payloads. Complex resource expressions are not yet comprehensively converted into typed, provenance-backed graph relationships. Installed integration and graph-overlay completeness still need verification.
+
+Two merge conflicts were resolved: root HANDOFF preserves both the new graph handoff and main's Rust/desktop history; `ResourceCatalogue.tsx` keeps both provider identity/schema disclosure and main's imported-schema registration. Auto-merges retain source hydration, focused saves, diagnostics, rebase and plan support. No new dependency versions, Rust source, protocol authority or installer changes were introduced relative to main.
+
+#### Copy this prompt to a successor agent
+
+```text
+Continue CloudForge Infrastructure Studio from the latest origin/main in https://github.com/fXrazor/vscode. Use your own isolated worktree and a codex/ branch; preserve other agents' work. Read AGENTS.md, HANDOFF.md, and extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md before editing. That is the single canonical continuation; keep it updated.
+
+Start Phase 1 of the Technical Graph rebuild: audit the CURRENT source-value/schema/dependency/plan capabilities, then define and test an immutable graph projection contract with evidence/version/unknown-state metadata. Reuse resourceValues.ts, existing imported schema coverage, focused/three-way save and plan-report bridges. Do not invent new backend APIs or infer attachments from resource-type compatibility. Do not duplicate the architecture model.
+
+Critical invariant: graph layout, simulation ticks, node dragging/pins, expansion, routing, selection and filters must NEVER write Resource.positions, parentId, visualParentId, container sizes, Terraform, Modified state or project Undo. The previous shared-delta experiment was wrong and removed. Keep the current safety guard. Any future graph-local dragging belongs in separate presentation state; deliberate configuration edits use explicit project commands/editors.
+
+The current technical cards/packing are a guarded prototype, not the accepted final UI. Follow the master phases: provider evidence/graph contract -> engineer workflows and visual design -> D3/Canvas versus React Flow/compound-layout benchmark and dedicated TechnicalGraph -> provider patterns -> diagnostics/impact -> installed integration. Preserve the approved interest in tasteful curved paths, bounded attachment rows with distinct stable ports, zoom-dependent density, graph-local pins, and the separately queued Miro copy/perimeter/bend controls.
+
+Research is preliminary: 88 pinned documents, 87 documented profiles and 4,005 unreviewed records; AWS source applicability is unresolved and Kubernetes is manifest research, not a newly supported provider. Runtime connectivity/outages/prices/replacement effects require the appropriate evidence. Do not silently treat defaults or diagram positions as infrastructure facts.
+
+Finish one bounded phase with meaningful tests, record exact branch/revision/file ownership/checks/gaps/next action in the same handoff, and give the integration owner a reviewable commit. Do not push unrelated main/Claude/Rust branches or deploy cloud infrastructure. See the current integration verification entry for commands and known limits. Do not require the previous chat to understand the work.
+```
+
+#### Optional work ownership for separate successor agents
+
+| Workstream | Scoped ownership | Dependency / integration rule |
+| --- | --- | --- |
+| Provider evidence | `providerKnowledge.ts`, registry generation/source manifests and provider fixtures | Research actual selected versions; keep unknowns explicit. Coordinate registry contract changes with the graph-contract owner. |
+| Graph contract (next priority) | New readonly graph projection/types/tests plus narrow adapters | Reuse current service/value/plan payloads; establish no-mutation tests before changing the renderer. One integration owner reconciles shared model/adapter files. |
+| Visual/layout exploration | Separate graph prototype/spec/benchmarks and existing design tokens | Depends on the agreed graph DTO. Compare D3/Canvas and compound layout with identical fixtures; no canonical model setters in renderer callbacks. |
+| Designer handle follow-up | Drawing/endpoint geometry, copy gesture, exports and tests | Separate branch/worktree, preserving Graph View isolation. Coordinate changes to shared endpoint types before integration. |
+
+These are handoff scopes, not agents launched by this checkpoint. Each editing agent needs a separate worktree. Do not have parallel agents edit `model.ts`, `App.tsx`, `serviceAdapter.ts` or this handoff without an integration owner.
+
+#### Main integration verification and reproducible commands
+
+The merged source passed Studio TypeScript and production preview build, **160/160 Studio Node tests**, **96/96 extension Node tests** (including adjacent Rust fixture parsing, no skips), and the extension TypeScript check. The successful extension compiler invocation uses Studio's installed compiler and Node types; the root checkout has no directly executable `tsc`. No dependencies were installed or shared across worktrees.
+
+From the repository root (PowerShell, Node **24.22.1**, pnpm **12.16.0**):
+
+```powershell
+corepack pnpm --dir extensions/cloudforge/studio run check
+corepack pnpm --dir extensions/cloudforge/studio run test
+corepack pnpm --dir extensions/cloudforge/studio run build
+# Point this at the matching, separately owned Rust checkout for fixture tests.
+$env:CLOUDFORGE_REPO = 'Z:/CloudForge'
+$extensionTests = @(rg --files extensions/cloudforge/test -g '*.test.ts')
+node --test @extensionTests
+```
+
+From `extensions/cloudforge/studio`: `corepack pnpm exec tsc --noEmit -p ../tsconfig.json --typeRoots ./node_modules/@types`. Research capture verification: `node scripts/research-provider-intelligence.mjs --verify-local` — **88/88** document hashes matched. Pure tests read local fixtures; these commands do not deploy infrastructure or mutate the Rust checkout.
+
+Browser checks use the existing owned QA preview (`http://127.0.0.1:56797/` while running), an installed Playwright runtime selected with `PLAYWRIGHT_DIR`, and `--channel=msedge`. On another machine start its own preview with `corepack pnpm --dir extensions/cloudforge/studio run dev`, use the printed URL and a locally installed browser/runtime. Run suites serially from the Studio directory; their scenarios reload owned pages and mock extension-host messages. Do not point them at the user's draft tab or a live project.
+
+| Fresh merged browser suite | Result | Command from Studio (append the owned preview URL and `--channel=msedge`) |
+| --- | --- | --- |
+| Technical graph isolation/layout | 20/20 | `node scripts/technical-view-verify.mjs` |
+| Variable/provider/icon/containment annotations | 16/16 | `node scripts/annotation-followup-verify.mjs` |
+| Hosted refresh/history/Modified state | 20/20 | `node scripts/hosted-refresh-verify.mjs` |
+| Whiteboard controls | 20/20 | `node scripts/whiteboard-controls-verify.mjs` |
+| Loose endpoints/reconnection/export | 16/16 | `node scripts/loose-connectors-verify.mjs` |
+
+**92/92 browser checks passed with zero console/page errors.** The graph, annotation, whiteboard and endpoint matrices cover light/dark at 1360×860 and 1024×768; hosted refresh covers both widths. The graph test attempts a large AKS drag and mutation shortcuts, compares the entire exported project and checks mode/theme boundaries. This is preview and mocked-host evidence, not installed-product proof.
+
+The hosted refresh script now distinguishes an external graph refresh from an acknowledged save: unsaved edits remain **Modified** until the actual save flow acknowledges them. It also moves its note clear of neighbouring selection controls before multi-selection, using ordinary keyboard actions. No forced clicks or product behavior changes were used to make the test pass.
+
+Artifacts live under ignored `output/playwright/`; test counts and commands are recorded here so the handoff remains useful without those local files. Installed Code OSS/service interaction, real save/plan execution, desktop/installer builds, renderer benchmarks and the final Technical Graph design remain unverified or pending as specified by the master phases. Historical verification entries below describe their own earlier source revisions, not this integration.
+
+### Master handoff: Technical Graph rebuild — latest user correction takes precedence
+
+**Dale's correction:** Graph View represents the project. It can be dynamic and interactive, but dragging AKS or any other graph node must never move the Architecture Design layout, reparent resources or change the project. The earlier shared-delta implementation and its passing test encoded the wrong product behavior. They are superseded and have been removed. Do not restore them to satisfy historical tests.
+
+**Latest additions:** evaluate D3.js (Dale wrote “ds3”) for a large technical graph; support limited editing with a strict separation of graph presentation from project edits; give the graph a more tasteful visual design, including curved routes as an option. These extend this plan. They do not authorize another architecture model or implicit topology changes from positioning.
+
+Worktree: `C:/Users/dalep/.codex/worktrees/infrastructure-studio/CloudForge-Code`; branch `codex/studio-whiteboard-2`; integration owner Codex. Research commit: `f48b9c15b3d`; verified graph-isolation code checkpoint: `129b58e0eeb` (pushed). The commit containing this master handoff preserves the guarded experiment and safety correction; resolve its revision with `git log -1 -- extensions/cloudforge/studio/STUDIO-CONTINUATION-2026-11-25.md` from the repository root. Nothing here is a product-release or installed Workbench/service verification claim. Dale's latest explicit main-integration instruction above supersedes the older main restriction for this checkpoint; do not merge unrelated PRs or push Claude/Rust branches.
+
+#### Binding state and interaction contract
+
+- **Canonical project:** resource identity, configuration, ownership/attachments, variables, source references and semantic history. Architecture Design authoring positions remain in the existing model. Graph layout never writes them.
+- **Derived graph snapshot:** immutable display/topology records keyed by canonical resource IDs, source revision and evidence provenance. It refreshes when the project changes. It is a projection, not a second editable project.
+- **Graph presentation:** viewport, positions, pins, expanded groups, filters, route style, selection and trace highlights. Store separately from `Resource.positions`, `parentId`, `visualParentId`, container sizes, Terraform, project save state and architecture Undo. Never serialize graph coordinates through `buildHostViewState().nodePositions`.
+- **Limited editing:** future graph-local rearrangement and pinning affect presentation only. Explicit resource/dependency editing may open the existing project editor or a validated command preview. A graph drag, proximity or layout algorithm cannot create that command. Permission/topology changes need typed field evidence and an explicit operation.
+- **Steady and dynamic:** keep the graph stable for reading; update it incrementally on project revisions, selection, expansion and filter changes. Avoid a continuously moving force simulation. Layout animation must settle and respect reduced motion.
+- **Recovery:** this correction does not reset existing project coordinates or attempt to guess the pre-drag design. Recover a prior damaged layout only from a verified pre-drag Undo entry/snapshot; never apply reverse graph offsets or a blanket rearrangement.
+
+#### Phase 0 — stop cross-view project mutations (implemented; verify before handoff)
+
+`canvasMutationPolicy.ts` blocks all architecture actions dispatched by the technical canvas. Graph nodes explicitly have `draggable`, `connectable` and `deletable` false: React Flow per-node flags can override global flags, so both boundaries are set. Drag/drop, keyboard move/delete/duplicate/paste/Undo, authoring context menus, inline card inputs, connection tools, resize/rotation handles and the drawing toolbar are removed or blocked in Graph View. Global Undo ignores graph-focused events. App catalogue/template/drawing creation also checks the current mode, including asynchronous catalogue completion. Explicit shared Parameters/Code editors still operate on the canonical project; graph selection itself does not edit it.
+
+The experiment's spacing, relationship context and provider metadata are retained for inspection, not approved as the final Technical Graph UI. `DesignCanvas.tsx` still contains both modes and must be split in Phase 3. No D3/ELK dependency was installed. Fresh safety verification is recorded in the verification entry below. The current graph allows selection, inspection, filtering, pan/zoom and automatic spacing. Graph-local draggable pins are future work, not currently enabled.
+
+#### Phased rebuild and exit criteria
+
+| Phase | Work and deliverable | Exit condition |
+| --- | --- | --- |
+| 1. Evidence and graph contract | Complete the provider research matrix below. Define readonly graph nodes/edges, semantic direction/facets, provenance, version applicability and unknown states. Audit source-summary → model projection and catalogue identifiers. | Every relationship rendered has an instance-level reason and source/version record. Missing information stays unknown. No inferred field binding from a compatible type pair. Required families have reviewed fixtures and explicit coverage gaps. |
+| 2. Engineering workflows and visual direction | Define dependency inspection, path tracing, configured impact, troubleshooting and source navigation. Build representative graphs with compact nodes and a contextual details pane. Compare tasteful curved, orthogonal and straight routes at real graph densities. | Engineers can explain why a link exists, distinguish order from traffic, find a missing prerequisite and trace a change without opening every form. Visual direction is checked in both themes and wide/narrow windows. |
+| 3. Renderer/layout prototype and separation | Extract `TechnicalGraph` from the authoring canvas. Benchmark the same graph snapshots in the candidates below. Add a dedicated graph-presentation store, cancellation/revision handling and optional graph-local pins. | AKS dragging/pinning/layout ticks never change canonical coordinates, parentage, Terraform, Modified state or architecture history. Results include measured performance, accessibility and label/routing quality. Select the renderer from evidence. |
+| 4. Provider topology/patterns | Implement evidence-backed Azure hub/spoke, AWS account/landing-zone, AKS/EKS and multi-region views. Add Kubernetes topology only through an explicit supported adapter. | Pattern-specific fixtures prove both positive and negative recognition. Names/proximity never create patterns or runtime links. Mixed provider, module and region boundaries remain honest. |
+| 5. Diagnostics and impact | Add SCC/cycle and missing-reference investigation, upstream/downstream paths, source locations and plan/state overlays when the service supplies them. Separate configured-dependent scope, plan action impact and observed runtime impact. | Each finding identifies evidence, scope, timestamp/source revision and the next useful check. No outage, replacement, reachable-network or cost claim from a generic edge. |
+| 6. Product integration and release proof | Package the chosen implementation in the Code OSS Studio, validate workers/CSP and versioned presentation persistence, then run hosted and installed save/refresh tests. | One canonical model remains intact through refresh, renderer switch and Undo. Actual installed results, Rust/service revision and relevant artifact checks are recorded. Cloud deployment is outside this UI task. |
+
+**Exact next action after this checkpoint:** start Phase 1 with a source capability/coverage matrix and readonly graph projection contract tests. Do not continue adding controls to the shared authoring canvas. Use the current experiment as evidence to refactor, not as an accepted final design. Keep phases bounded and checkpoint after each one; preserve the wider backlog below.
+
+#### What the engineer needs to see
+
+1. Resource identity/address, provider alias/version, module/instance boundary and trustworthy scope/region. Show unavailable values as unavailable; do not display seeded fallback regions/settings as live project facts.
+2. Ownership, attachments, explicit ordering, expression references, runtime intent/observations and telemetry paths with different meanings. Ownership nesting is not an attachment. An edge may have a semantic category plus an ordering facet.
+3. The exact field/expression or source graph reason behind a link, its provenance and confidence. Offer direct source/parameter navigation rather than a full editable form on every node.
+4. Upstream prerequisites, direct/transitive configured dependents, path/cycle isolation and missing references. Distinguish configuration, state, saved plan and observed cloud/Kubernetes data.
+5. Change impact based on actual plan actions when available; otherwise clearly bounded configured impact. Unknown/external resources and incomplete coverage must remain visible.
+
+Offer focused lenses rather than one overloaded diagram: **Dependencies** (prerequisite → consumer), **Topology** (ownership/attachment), **Runtime** (configured intent versus observed flows), **Observability** (collection → destination). A single universal arrow direction would misrepresent these meanings. Design connectors are diagram intent and stay separate.
+
+#### Research scope and present coverage
+
+The 88-document capture and 87 profiles are a **preliminary evidence inventory**, not completed comprehensive provider intelligence. The 4,092 registry records cover all 4,078 catalogue entries plus documented canonical types; **4,005 records remain explicitly unreviewed**. Unknown fields must not become invented relationships. The source manifest has pinned document revisions/hashes; full source captures are ignored artifacts. [Research report](research/provider-intelligence.md), [source manifest](research/provider-source-manifest.json), [registry](assets/provider-intelligence.json).
+
+| Scope to complete | Existing evidence and remaining work |
+| --- | --- |
+| Terraform Core | Graph generation, implicit expressions, `depends_on`, data reads, outputs, providers/aliases, modules/module references, state/orphans, plan, apply and destroy/lifecycle ordering are covered in the report. The final graph projection still needs complete, provenance-backed field/module/provider/output/state/plan records; reuse the existing source-value and plan-report bridges rather than assuming those APIs are absent. Build those capability tests before depicting them. |
+| Azure | Resource groups, VNets/subnets, NSGs/rules and associations, routes, public IPs, LB/pools, Application Gateway, Firewall, AKS, VMs/NICs, identities/role grants, storage, Key Vault, Log Analytics and Monitor: 25 pinned AzureRM 5.14.0 documents. Validate parent/attachment/runtime distinctions, identity propagation, subnet/route/NSG failures, monitoring agent/DCR paths and cycles with versioned fixtures. |
+| AWS | VPC/subnets/SGs/routes, NAT/IGW, EC2/ENIs, EKS/node groups, ALB/NLB listeners/targets, RDS, IAM, S3, Lambda, Route53 and Organizations: 28 documents. The catalogue's 6.73.1 tag was unavailable; current research revision is not version-matched. Resolve applicability and conditional constraints before authoritative rules. Landing-zone recognition needs account/OU/security/logging evidence, not VPC names. |
+| Google Cloud | Global VPC, regional subnetworks, GKE, Compute Engine, Cloud SQL, Storage, IAM/service accounts, Router/NAT, firewall, global/regional LB chains and monitoring/logging: 22 pinned 8.10.0 documents. Audit doubled catalogue prefixes, private-service networking/API prerequisites and actual project/region evidence. |
+| Kubernetes | Namespace, Pod, Deployment, StatefulSet, DaemonSet, Service, Ingress, ConfigMap, Secret, PVC/PV and StorageClass: 13 platform guides / 12 profiles. Paths are manifest syntax, not Terraform provider syntax. Namespace scope, controller/ReplicaSet ownerReferences, Service selectors/EndpointSlices, readiness, network policy and volume lifecycle need an explicit adapter. No Kubernetes provider was added. |
+
+Each reviewed resource entry must retain resource/parent/child/attachment types, dependency possibilities, runtime/security/monitoring evidence requirements, cost category and blast-radius category, plus source/version and field-syntax metadata. Cost category is not a price; shared-component category is not an outage score. Required fixture families must cover creation/import, association resources, computed/read-only fields, advanced/nested blocks, circular references and common deployment failures.
+
+The adapter audit found generic graph edges being converted into guessed NIC bindings and inherited fields. Fresh source summaries now retain edge provenance and suggest visual grouping only. Existing explicit local bindings remain preserved. The original summary-only observation is historical: integrated main now also supplies `readResourceValues` payloads and source-preserving saves. Reuse those capabilities; full expression-to-relationship provenance and the final graph adapter still need Phase 1 work. Do not work around this by guessing fields or reading workspace files directly in the browser. Backend changes belong in `Z:/CloudForge` through the canonical service boundary and its applicable approval scope. Read-only Rust source used for direction: `terraform_graph.rs` at Rust HEAD `8e8dcc38f40f7fb288963008977b3ead9080ceeb`; desktop normalization: `extensions/cloudforge/src/canvas/layout.ts:orientServiceEdgesForCanvas`. No Rust files were edited.
+
+#### Renderer candidates and visual design
+
+| Candidate | Investigate before selecting |
+| --- | --- |
+| D3 with Canvas or an evaluated GPU renderer | Flexible overview and graph-local interaction; measure label picking, keyboard alternatives, compound groups, edge routing and rendering cost. Force layout alone does not supply infrastructure semantics or nested ownership layout. |
+| React Flow with a compound layout engine such as ELK | Reuses accessible node/detail integration and existing UI components; benchmark DOM density, crossings and worker layout on the same fixtures. Keep it a separate graph renderer, not the authoring component. |
+| D3/Canvas overview plus a focused DOM inspector | Evaluate if large-graph overview and detailed resource inspection benefit from different rendering strategies. Do not maintain a second semantic model. |
+
+These are proposed experiments, not measured results or a dependency decision. Test 19-resource regression, 200/1,000/5,000-node fixtures, nested groups, fan-in/out, cycles, long labels and updates. Record hardware, timings, memory, responsiveness and label legibility. Use aggregation, semantic zoom, neighbour focus and level-of-detail before showing thousands of equally detailed cards.
+
+D3's force simulation mutates its node objects. A prototype must use detached graph-layout DTOs; never pass `Architecture.resources`, their position objects or canonical connection records into a simulation/link force. `fx`/`fy` pins belong to graph presentation. Stop/settle layout by default, isolate expensive computation and reject stale revision results. [D3 force simulation](https://d3js.org/d3-force/simulation), [React Flow layout comparison](https://reactflow.dev/learn/layouting/layouting).
+
+The visual direction is a calm engineering graph: compact official provider icons, readable identity/type, restrained category colour, concise validation badges and details on demand. Curved Bézier routes are a candidate for path tracing; compare with orthogonal routes around compound groups. Route style is presentation only. Highlight selected upstream/downstream paths; dim unrelated context; animate only a selected trace or a transition, then settle. Avoid permanent particle motion, glowing lines, duplicated form cards or an undifferentiated hairball. Include reduced motion, strong contrast, accessible edge labels and keyboard source navigation. Use Impeccable for the phase's critique/polish, preserving the product identity.
+
+#### Latest graph annotation — attachment rows and density controls (Phases 2–3)
+
+Dale's [React Flow Database Schema Node reference](https://reactflow.dev/ui/components/database-schema-node) demonstrates labelled row-level connection points. Apply the concept to real resource attachments/references, rather than treating infrastructure as database columns or attaching every line to one central dot. This is a **queued design requirement**, not implemented by the safety checkpoint.
+
+- Prototype compact rows for evidenced NICs, identities, security/routing associations or other actual relationships. A row must explain its field and endpoint; do not create ports for arbitrary compatible resources or every scalar setting.
+- Let the rendered graph node grow to a bounded number of visible rows. At overview zoom, collapse them to semantic groups/counts; on selection/expansion reveal the relevant rows and curved paths. Compare an initial 4–6-row limit with real fixtures rather than allowing unlimited card height.
+- For high-degree resources, show a counted group such as “+12 attachments”, neighbour focus and edge aggregation with an inspectable membership list. Preserve category distinctions and exact endpoints when grouping; avoid a dense fan of near-identical lines and unreadable spacing.
+- Use stable port IDs derived from resource ID, field path and referenced endpoint identity, not current array indices or screen position. Node expansion and port geometry belong to GraphViewState. Node growth must never resize an Architecture icon/container or change semantic history.
+- If React Flow is selected, map unique handles through `sourceHandle`/`targetHandle` and refresh measured internals after handle changes. If D3/Canvas is selected, derive equivalent row-anchor coordinates and hit targets from the same detached graph DTO. [Dynamic and multiple handles](https://reactflow.dev/learn/customization/handles), [Updating node internals](https://reactflow.dev/api-reference/hooks/use-update-node-internals).
+
+Verify 1/2/6/50/200 attachments, expanded/collapsed states, stable handles after reordering/refresh, curve crossings and label collisions, keyboard inspection, both themes, zoom-dependent detail and zero canonical-model changes. No shadcn/table dependency or example installation command was executed; use the existing product styling and choose dependencies only in the renderer evaluation.
+
+#### Checkpoint verification and remaining gaps
+
+Fresh Phase 0: Studio TypeScript/build and **149/149 Node tests** pass. The corrected Edge matrix is **20/20** at 1360×860 and 1024×768 in both themes with zero console/page errors. It attempts a large AKS drag, keyboard movement/delete/duplicate/paste/Undo, checks for absent inline editors/resize/connection tools, inspects the context menu and compares the entire exported project before/after and across mode switches. The unit policy test also compares canonical history and generated Terraform. Explicit Parameters editing still updates the graph, as intended.
+
+Current screenshots/reports: `output/playwright/technical-view/` and `output/playwright/graph-safety-node-tests.txt`. The whiteboard test was corrected to expect no pen or resize controls in Graph View, then verified again: **20/20** whiteboard scenarios and **20/20** hosted-refresh checks passed, zero browser errors. Together with the graph matrix, this is **60 fresh browser checks** after the safety correction. The final Impeccable scan returned only the two unchanged incumbent Mona Sans/Inter warnings; product typography was preserved. Report: `output/playwright/impeccable-graph-safety.json`. Earlier 92 browser checks preceded Dale's interaction correction and must not be treated as final acceptance of the new graph contract. Installed Code OSS/service save, graph presentation persistence, authoritative plan/runtime impact, renderer benchmarking and the final visual redesign remain open. Automatic spacing/export fidelity and source-complete import also need Phase 3/6 work. No claim of a finished Technical View redesign is made.
+
+Implementation ownership: Studio only (`DesignCanvas.tsx`, `ResourceNode.tsx`, `SelectionControls.tsx`, `App.tsx`, `canvasMutationPolicy.ts`, the experimental `technicalLayout.ts`/`infrastructureRelationships.ts`/`RelationshipContext.tsx`, associated model/adapter/geometry/styles/tests/scripts/research files) plus root `HANDOFF.md`. Research capture hashes were rechecked: **88/88** match. Preview `http://127.0.0.1:56797/` is the owned QA server while its process remains running. The user’s `58307` draft/reference tabs were not reset or used to guess a prior layout.
+
+
+### Additional designer annotations — queued after the current graph checkpoint
+
+Dale supplied two Miro screenshots while this checkpoint was being finished. They extend the existing designer backlog; they do not replace the Technical Graph phases or authorize coupling graph movement back to authoring coordinates. These features are **not implemented by this safety checkpoint**. Existing Ctrl+D/menu duplication and endpoint reconnection are already available in Architecture Design.
+
+1. **Copy/connected-copy handle:** add an object-adjacent affordance to create a duplicate, with drag direction/placement feedback and a keyboard equivalent. Investigate ordinary copy versus create-and-connect behavior from live Miro/AFFiNE/source evidence before choosing the gesture. The screenshot establishes the visible controls, not their complete behavior. Preserve copied styling, variable bindings, nested blocks, container rules and stable-ID remapping; never copy source-service provenance as a new confirmed dependency. A copied VM must not invent NIC attachments.
+2. **Perimeter connector attachments:** let a design connector endpoint move between sides/positions around an object, rather than force every input/output to one fixed left/right side. Separate geometric anchor location from logical endpoint role. Retain legacy endpoint defaults and stable IDs. Include rotated shapes, icons, resized/nested containers, moving resources, loose points, locks and cancellation.
+3. **Route/bend handles:** the screenshots also show elbow midpoint controls. Review them alongside perimeter anchoring and the curved-route visual exploration; decide whether manual waypoints are needed rather than treating a route midpoint as an object attachment.
+
+Acceptance: one undoable command per completed gesture; no command on cancel; pointer and keyboard control; no Terraform changes; consistent SVG/PNG/PDF geometry; duplication/remapping, delete/Undo and refresh coverage; light/dark and actual supported viewports. Work belongs to the Architecture designer and drawing/endpoint geometry modules. Graph-local routing/pinning remains separate presentation state and must not reuse designer move/reparent commands. Preserve all earlier backlog sections below.
+
+### Research inventory — historical checkpoint, Phase 1 remains open
+
+Starting revision `64d86b5d17d`. The new request is to resolve overlapping technical cards using real provider semantics. [Research and design decision](research/provider-intelligence.md) covers Terraform Core, Azure/AWS/Google Cloud/Kubernetes, relationship taxonomy, dependency/attachment pitfalls, conditional architecture patterns and the size-aware presentation layout decision. Source manifest: 88 pinned primary documents and SHA-256 hashes. Registry: 4,092 records covering all 4,078 catalogue entries; 87 documented profiles, 4,005 explicitly unreviewed. AWS research revision is not a workspace 6.73.1 compatibility claim. Kubernetes paths are manifest-only; no provider support is added.
+
+Fresh research verification: all 88 local capture hashes match; four registry coverage/provenance/semantics tests pass; Studio TypeScript passes. No Technical View rendering or architecture behavior was changed in this research commit. The original shared-delta proposal was superseded by Dale’s graph-isolation correction above. Follow the master phases; graph movement must never write design coordinates. Preserve the existing backlog below.
+
+### Earlier work queue — completed passes retained
 
 1. **Done:** shared clamped resize geometry between command and live preview; see the continuation pass below.
 2. **Done:** explicit canvas layering prevents nested edge hit areas intercepting node centres; see below.
 3. **Done:** typed design endpoints, loose-end creation, movement/reconnection, refresh/clipboard/delete/export and semantic Undo/Redo; see below.
 4. **Verified:** 128/128 Node tests, TypeScript/build, endpoint matrix 16/16, whiteboard matrix 20/20 and hosted refresh 20/20. Continue the annotation follow-up below, preserving this wider backlog; commit bounded passes and push this feature branch.
 
-### Follow-up annotations from Dale — queued after current connector pass
+### Follow-up annotations from Dale — implemented, with limits below
 
-Dale explicitly asked to continue the current work first and then review/implement these ten browser annotations. Keep this list in this canonical checkpoint; do not create another handoff file.
+The ten browser annotations were implemented after the connector pass; source, research evidence and verification are recorded below. This list remains as the request ledger, not an unimplemented queue. Provider version installation and authoritative plan impact remain backend-dependent. Do not create another continuation handoff file.
 
 1. Improve the variable picker layout, searchable popup and icon/name rows; preserve typed binding, sensitivity masking, keyboard navigation and selected references.
 2. Research replacement/destructive-change constraints using official Terraform/provider documentation and selected schema/plan evidence; present contextual, beginner-readable warnings without claiming every rename necessarily recreates a resource.
@@ -54,6 +240,28 @@ Stable IDs and appearance survive reconnect/reverse, selection copy/paste, delet
 Files: `connectionEndpoints.ts`, `connectionEndpoints.test.ts`, `ConnectionOverlays.tsx`, `model.ts`, `designConnections.ts`, `connectionGeometry.ts`, `canvasOperations.ts`, `historyRebase.ts`, `serviceAdapter.ts`, `DesignCanvas.tsx`, `ConnectionTools.tsx`, `ConnectorDropMenu.tsx`, `ResourceWorkspace.tsx`, `App.tsx`, `exportPresentation.ts`, fixture/template constructors and their existing tests, CSS, package test list and `scripts/loose-connectors-verify.mjs`.
 
 Fresh checks: **128/128** Node tests, TypeScript and build passed. Windows Edge: **16/16** endpoint scenarios at 1360×860 and 1024×768 × light/dark, whiteboard **20/20**, hosted refresh **20/20**; zero console/page errors. Browser coverage includes cancellation, exact one-step Undo/Redo across refresh, endpoint detachment/physical ports/reconnection, no ghost nodes, line-only clipboard/deletion, renderer/theme preservation, far-point focus, SVG and PNG bounds. PDF content was rendered through the actual print surface with native `window.print` stubbed to avoid automation blocking, then printed to PDF by Edge; no OS print-dialog verification is claimed. Screenshots and exports under `output/playwright/loose-connectors`; hosted evidence under `output/playwright/endpoint-hosted` (ignored artifacts). Inspected the narrow dark UI and PNG output visually. This remains preview/mocked-host verification, not an installed Code OSS/Rust save smoke.
+
+### Continuation pass — annotation follow-up
+
+Implemented annotations 1–3: searchable variable popup aligned to its field, selected reference chip, icon/name/type/description rows, fixed search/footer with one scrolling list, compatible inputs first, disabled incompatible inputs, masked sensitive previews, Arrow/Home/End navigation and focus restoration. Annotation 5: a header trash icon on the variable configurator, protected by the original saved variable's uses even when its draft name changes; deletion enters normal Undo history. Shared fields serve the inspector and focused node workspace.
+
+Annotations 6–8: provider names and locally bundled provider marks, catalogue version/schema disclosure, and an icon catalogue with search, all three providers, selected state, incremental loading and restore. Workspace schemas override catalogue forms when loaded; switching the catalogue does not install/change a provider version. Graphic overrides have their own metadata and leave Terraform provider/type/identity intact; canvas, export, refresh, duplicate and Undo preserve them. New provider marks are pinned Devicon MIT assets with license and provenance retained in NOTICES.md. No draw.io or reference-product assets were imported.
+
+Annotation 4: sourced replacement/restart guidance in the shared field UI, including pinned AzureRM resource-group and Google Compute examples, explicit replacement descriptions from workspace/bundled metadata, source labels and documentation links. Unknown impact stays unknown, and a contextual explanation directs the user to a Terraform plan. Live computed-only outputs cannot be resurrected as editable curated fields; existing values remain visible read-only. This is not exhaustive ForceNew metadata or a plan evaluator. The current host schema has no replacement flag. AWS catalogue version 6.73.1's GitHub tag was unavailable during research, so no unverified version-specific AWS rule was invented.
+
+Annotation 9: separate `visualParentId` from provider-compatible `parentId`. A duplicated or newly dragged VM can sit within a VNet while inheriting from its resource group. Visual movement, sizing, child counts, subtree copying and drawing order follow visual ownership; inherited Terraform references still follow provider rules. Container deletion considers both ownership and visual contents and protects locked children. Cross-provider/cycle checks remain. Metadata shows both containers. Position changes remain shared across renderers and one Undo restores the move and parent changes. Refresh preserves overrides and prunes vanished targets from Undo snapshots. Annotation 10: a subtle purple resource tile border on hover/focus/selected controls in both themes.
+
+Source: `VariablePicker.tsx`, `VariablePanel.tsx`, `VariableConfigurator.tsx`, `ProviderMark.tsx`, `ResourceIconPicker.tsx`, `resourceGraphic.ts`, `ResourceCatalogue.tsx`, `ResourceFields.tsx`, `SchemaField.tsx`, `fieldImpact.ts`, `catalogue.ts`, `liveSchema.ts`, `resourceHierarchy.ts`, `model.ts`, `DesignCanvas.tsx`, `App.tsx`, `canvasOperations.ts`, `historyRebase.ts`, `serviceAdapter.ts`, `ResourceNode.tsx`, `exportPresentation.ts`, both CSS files, assets/notices, package test list, `annotationFollowup.test.ts` and `scripts/annotation-followup-verify.mjs`.
+
+Fresh verification: TypeScript/build and **135/135** Node tests; Windows Edge annotation matrix **16/16** (1360×860 and 1024×768 × light/dark), plus a **4/4** final targeted pass that also verified the picker inside the native focused resource dialog and an actual catalogue-to-VNet drag. Whiteboard **20/20**, endpoints **16/16**, hosted refresh **20/20**, all with zero console/page errors. Narrow dark picker, icon catalogue, replacement notice, live green nesting feedback, provider header and export images were visually inspected. Screenshots under `output/playwright/annotation-followup`; hosted regression under `output/playwright/annotation-hosted`. Impeccable's one mechanical scan returned only the two unchanged incumbent Mona Sans/Inter font warnings (`output/playwright/impeccable-annotation-followup.json`); the established Operate identity was retained. Preview and mocked-host results do not establish installed Workbench/Rust save behavior or reload persistence.
+
+Research references (confirmed docs/source, not inferred implementation of Brainboard): [Terraform schema JSON](https://developer.hashicorp.com/terraform/cli/commands/providers/schema), [plan JSON and replacement paths](https://developer.hashicorp.com/terraform/internals/json-format), [conditional plan modifiers](https://developer.hashicorp.com/terraform/plugin/framework/resources/plan-modification), [AzureRM 5.14 resource group](https://github.com/hashicorp/terraform-provider-azurerm/blob/v5.14.0/website/docs/r/resource_group.html.markdown), [AWS instance docs](https://github.com/hashicorp/terraform-provider-aws/blob/main/website/docs/r/instance.html.markdown), [Google 8.10 Compute Instance](https://github.com/hashicorp/terraform-provider-google/blob/v8.10.0/website/docs/r/compute_instance.html.markdown), [draw.io extra icon sets and per-set licenses](https://www.drawio.com/docs/manual/shapes/extra-icon-sets/), [draw.io stencil terms](https://github.com/jgraph/drawio/blob/dev/src/main/webapp/stencils/LICENSE), [Devicon pinned source](https://github.com/devicons/devicon/tree/32fe1d3b3f36ad11f90ab94f7db59738139c2bf6), [Lucide license](https://github.com/lucide-icons/lucide/blob/main/LICENSE). Brainboard screenshots establish the visible UX patterns only; no new live network/storage or backend claims were inferred from them.
+
+### Historical research request — governed by the master handoff above
+
+Dale added this requirement while the annotation pass was being finalized. Preserve all earlier backlog. His screenshot shows technical cards overlapping because larger cards reuse icon positions, including many copied VMs/NICs. Finish/checkpoint the current pass, then research before redesigning. Use official Terraform Core, Azure, AWS, Google Cloud and Kubernetes documentation; cover the full resource lists in the latest chat. Produce a provenance-backed relationship taxonomy and internal resource intelligence registry with parents/children, attachments, execution dependencies, references, runtime links, security, monitoring, cost categories and blast-radius categories. Unreviewed supported resource types must remain explicitly unknown rather than fabricated. Runtime communication is not established by a Terraform edge; Terraform ordering is not proof of reachability or outage impact.
+
+The next implementation should give Technical View a clear purpose (effective configuration, dependency/attachment inspection and troubleshooting) and a non-overlapping layout informed by verified relationships. Keep one architecture and one semantic Undo history. A renderer's derived spacing/viewport is presentation; switching modes must not silently rewrite authoring positions, resource values, attachments or Terraform dependencies. Research hub-spoke, landing-zone, Kubernetes and multi-region patterns before claiming to recognize them. Do not infer hub topology from similar names or force every architecture into a generic vertical chain. Source revision for the completed prior pass is the commit that contains this section. The exact research/implementation action is now this mission, ahead of the wider backend backlog.
 
 ## Historical Codex whiteboard continuation
 

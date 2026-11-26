@@ -5,7 +5,7 @@ import type { Action, DesignConnection } from './model.ts';
 export function ConnectionTools({ connection, dispatch, onClose, children }: { connection: DesignConnection; dispatch: Dispatch<Action>; onClose: () => void; children?: ReactNode }) {
 	const update = (patch: Partial<DesignConnection>) => dispatch({ type: 'updateConnection', id: connection.id, patch });
 	return <section className="connection-tools nodrag nopan" aria-label="Edit design connection" onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); onClose(); } }}>
-		<header><strong>Design connection</strong><span>Visual link · no Terraform dependency</span><button aria-label="Close connection tools" onClick={onClose}><X size={14}/></button></header>
+		<header><strong>{connection.origin ? 'Source graph connection' : 'Design connection'}</strong><span>{connection.origin ? 'Source kind: ' + connection.origin.edgeKind + ' · appearance only' : 'Visual link · no Terraform dependency'}</span><button aria-label="Close connection tools" onClick={onClose}><X size={14}/></button></header>
 		<div className="connection-tool-fields">
 			<label>Label<input aria-label="Connection label" maxLength={200} value={connection.label ?? ''} placeholder="Describe this connection" onChange={event => update({ label: event.target.value })}/></label>
 			<label>Path<select aria-label="Connection path" value={connection.routing ?? 'elbow'} onChange={event => update({ routing: event.target.value as DesignConnection['routing'] })}><option value="straight">Straight</option><option value="elbow">Elbow</option><option value="curve">Curve</option></select></label>
@@ -19,8 +19,8 @@ export function ConnectionTools({ connection, dispatch, onClose, children }: { c
 				<label>Position<select aria-label="Connection label position" value={connection.labelPosition ?? 'center'} onChange={event => update({ labelPosition: event.target.value as DesignConnection['labelPosition'] })}><option value="above">Above line</option><option value="center">On line</option><option value="below">Below line</option></select></label>
 				<label>Text colour<input aria-label="Connection label colour" type="color" value={connection.labelColor ?? '#7565bd'} onChange={event => update({ labelColor: event.target.value })}/></label>
 			</div></details>
-			<button aria-label="Reverse connection direction" title="Reverse connection direction" onClick={() => dispatch({ type: 'reverseConnection', id: connection.id })}><ArrowRightLeft size={15}/></button>
-			<button aria-label="Delete design connection" onClick={() => { dispatch({ type: 'deleteConnection', id: connection.id }); onClose(); }}><Trash2 size={15}/></button>
+			{!connection.origin && <><button aria-label="Reverse connection direction" title="Reverse connection direction" onClick={() => dispatch({ type: 'reverseConnection', id: connection.id })}><ArrowRightLeft size={15}/></button>
+			<button aria-label="Delete design connection" onClick={() => { dispatch({ type: 'deleteConnection', id: connection.id }); onClose(); }}><Trash2 size={15}/></button></>}
 		</div>
 		{children}
 	</section>;

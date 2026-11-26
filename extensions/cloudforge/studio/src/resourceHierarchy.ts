@@ -21,6 +21,32 @@ export function resourceAncestors(architecture: Architecture, resource: Resource
 export function resourceDescendants(architecture: Architecture, id: string): Resource[] {
 	return architecture.resources.filter(resource=>resourceAncestors(architecture,resource).some(parent=>parent.id===id));
 }
+export const visualParentId = (resource: Resource) => resource.visualParentId === undefined ? resource.parentId : resource.visualParentId ?? undefined;
+export function visualAncestors(architecture: Architecture, resource: Resource): Resource[] {
+	const byId = new Map(architecture.resources.map(item => [item.id, item])); const result: Resource[] = []; const seen = new Set([resource.id]);
+	let parent = visualParentId(resource);
+	while (parent && !seen.has(parent)) { seen.add(parent); const item = byId.get(parent); if (!item || !isResourceContainer(item) || item.provider !== resource.provider) { break; } result.push(item); parent = visualParentId(item); }
+	return result;
+}
+export function visualDescendants(architecture: Architecture, id: string): Resource[] {
+	return architecture.resources.filter(resource => visualAncestors(architecture, resource).some(parent => parent.id === id));
+}
+/** Container deletion includes both owned resources and visual contents, including locked checks. */
+export function containedDescendants(architecture: Architecture, id: string): Resource[] {
+	const ids = new Set([id]); let size = 0;
+	while (size !== ids.size) { size = ids.size; for (const resource of architecture.resources) { if (resource.parentId && ids.has(resource.parentId) || visualParentId(resource) && ids.has(visualParentId(resource)!)) { ids.add(resource.id); } } }
+	return architecture.resources.filter(resource => resource.id !== id && ids.has(resource.id));
+}
+/** Diagram ownership is independent of the nearest provider-compatible inheritance container. */
+export function visualResourcePlacement(architecture: Architecture, child: Resource, parentId?: string): Placement {
+	if (!parentId) { return { ok: true, reason: 'Move to the canvas · clear container inheritance' }; }
+	const parent = architecture.resources.find(item => item.id === parentId);
+	if (!parent || !isResourceContainer(parent) || child.provider !== parent.provider) { return { ok: false, reason: 'Choose a container from the same cloud provider.' }; }
+	if (parent.id === child.id || [...visualAncestors(architecture, parent), ...resourceAncestors(architecture, parent)].some(item => item.id === child.id)) { return { ok: false, reason: 'A container cannot be placed inside itself or its descendants.' }; }
+	const semantic = resourcePlacement(architecture, child, parentId);
+	const inheritedParent = semantic.ok ? semantic.parentId : child.parentId;
+	return { ok: true, parentId: inheritedParent, reason: 'Place visually inside ' + (parent.label || parent.name) + (inheritedParent !== parentId ? ' · Terraform inheritance ' + (inheritedParent ? 'from ' + (architecture.resources.find(item => item.id === inheritedParent)?.name ?? inheritedParent) : 'unchanged') : '') };
+}
 export type Placement = { ok: boolean; parentId?: string; reason: string };
 export function resourcePlacement(architecture: Architecture, child: Resource, parentId?: string): Placement {
 	if (!parentId) { return {ok:true,reason:'Move to the canvas'}; }
@@ -78,7 +104,7 @@ export function resourceDimensions(architecture: Architecture, resource: Resourc
 	if (!isResourceContainer(resource) || visited.has(resource.id)) { return mode==='visual'?{width:resourceIconSize(resource),height:resourceIconSize(resource)}:{width:244,height:310}; }
 	const seen = new Set(visited).add(resource.id); const position = resource.positions[mode];
 	let width = resource.containerSize?.width??440; let height = resource.containerSize?.height??300;
-	for (const child of architecture.resources.filter(item=>item.parentId===resource.id)) {
+	for (const child of architecture.resources.filter(item=>visualParentId(item)===resource.id)) {
 		const size = resourceDimensions(architecture,child,mode,seen);
 		width = Math.max(width,child.positions[mode].x-position.x+size.width+32);
 		height = Math.max(height,child.positions[mode].y-position.y+size.height+(mode==='visual'&&!isResourceContainer(child)?64:32));
@@ -87,8 +113,8 @@ export function resourceDimensions(architecture: Architecture, resource: Resourc
 }
 export function fitResourceContainers(architecture: Architecture): Architecture {
 	let resources = architecture.resources;
-	for (const container of [...resources].filter(isResourceContainer).sort((a,b)=>resourceAncestors(architecture,b).length-resourceAncestors(architecture,a).length)) {
-		const current = {...architecture,resources}; const children = resources.filter(item=>item.parentId===container.id); if (!children.length) { continue; }
+	for (const container of [...resources].filter(isResourceContainer).sort((a,b)=>visualAncestors(architecture,b).length-visualAncestors(architecture,a).length)) {
+		const current = {...architecture,resources}; const children = resources.filter(item=>visualParentId(item)===container.id); if (!children.length) { continue; }
 		const original = resources.find(item=>item.id===container.id)!;
 		const x = Math.min(original.positions.visual.x,...children.map(item=>item.positions.visual.x-32));
 		const y = Math.min(original.positions.visual.y,...children.map(item=>item.positions.visual.y-68));
@@ -100,10 +126,12 @@ export function fitResourceContainers(architecture: Architecture): Architecture 
 	}
 	return resources===architecture.resources?architecture:{...architecture,resources};
 }
-export function reparentResource(architecture: Architecture, id: string, parentId: string|undefined): Architecture {
+export function reparentResource(architecture: Architecture, id: string, parentId: string|undefined, visualContainerId?: string|null): Architecture {
 	const child = architecture.resources.find(item=>item.id===id); if (!child || child.canvasLocked) { return architecture; }
 	const placement = resourcePlacement(architecture,child,parentId); if (!placement.ok) { return architecture; }
-	if (child.parentId===placement.parentId && !architecture.items.some(item=>item.members.includes(id))) { return architecture; }
-	const next = {...architecture,resources:architecture.resources.map(resource=>resource.id===id?{...resource,parentId:placement.parentId}:resource),items:architecture.items.map(item=>({...item,members:item.members.filter(member=>member!==id)}))};
+	if (visualContainerId && !visualResourcePlacement(architecture, child, visualContainerId).ok) { return architecture; }
+	const visual = visualContainerId === placement.parentId ? undefined : visualContainerId;
+	if (child.parentId===placement.parentId && child.visualParentId===visual && !architecture.items.some(item=>item.members.includes(id))) { return architecture; }
+	const next = {...architecture,resources:architecture.resources.map(resource=>resource.id===id?{...resource,parentId:placement.parentId,visualParentId:visual}:resource),items:architecture.items.map(item=>({...item,members:item.members.filter(member=>member!==id)}))};
 	return fitResourceContainers(next);
 }

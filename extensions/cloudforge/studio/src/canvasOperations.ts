@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 import type { Architecture, BoardItem, DesignMode, Position, ResourceBlock } from './model.ts';
 import { bindingKey, bindingTarget } from './fieldBindings.ts';
-import { fitResourceContainers, isResourceContainer, resourceAncestors, resourceDescendants } from './resourceHierarchy.ts';
+import { fitResourceContainers, isResourceContainer, visualAncestors, visualDescendants, containedDescendants } from './resourceHierarchy.ts';
 import { iconSizeLimits, resourceIconSize } from './resourceGeometry.ts';
 import { connectionElementIds, endpointElementId, pointEndpoint, remapEndpoint } from './connectionEndpoints.ts';
 import { connectionAnchor } from './designConnections.ts';
@@ -61,15 +61,17 @@ export function sceneOrder(architecture: Architecture): string[] {
 	const frames = architecture.items.filter(item => item.kind === 'frame').map(item => item.id);
 	const defaultOrder = [...architecture.resources.map(item => item.id), ...architecture.items.filter(item => item.kind !== 'frame').map(item => item.id)];
 	const known = new Set(defaultOrder);
-	const containers = architecture.resources.filter(isResourceContainer).sort((a,b)=>resourceAncestors(architecture,a).length-resourceAncestors(architecture,b).length).map(item=>item.id);
+	const containers = architecture.resources.filter(isResourceContainer).sort((a,b)=>visualAncestors(architecture,a).length-visualAncestors(architecture,b).length).map(item=>item.id);
 	return [...frames,...containers,...new Set([...(architecture.layerOrder ?? []).filter(id => known.has(id)&&!containers.includes(id)), ...defaultOrder.filter(id=>!containers.includes(id))])];
 }
 
 export function selectionFragment(architecture: Architecture, ids: string[], connectionIds: string[] = [], mode: DesignMode = 'visual'): Architecture {
 	const selected = new Set(expandGroups(architecture, ids));
 	for (const frame of architecture.items.filter(item => item.kind === 'frame' && selected.has(item.id))) { frame.members.forEach(id => selected.add(id)); }
-	for (const resource of architecture.resources.filter(item=>selected.has(item.id))) { resourceDescendants(architecture,resource.id).forEach(item=>selected.add(item.id)); }
+	for (const resource of architecture.resources.filter(item=>selected.has(item.id))) { visualDescendants(architecture,resource.id).forEach(item=>selected.add(item.id)); }
 	const connections = architecture.connections.flatMap(link => {
+		// Copy source-derived relationships only through copied field bindings, never as invented service evidence.
+		if (link.origin?.kind === 'service' || link.id.includes('->')) { return []; }
 		const endpoints = connectionElementIds(link);
 		if (endpoints.length && endpoints.every(id => selected.has(id))) { return [link]; }
 		if (!connectionIds.includes(link.id)) { return []; }
@@ -87,16 +89,16 @@ export function applyCanvasCommand(architecture: Architecture, command: CanvasCo
 	switch (command.kind) {
 		case 'move': {
 			if (Object.values(command.positions).some(position => !Number.isFinite(position.x) || !Number.isFinite(position.y))) { return architecture; }
-			const pinnedContainers=new Set(architecture.resources.filter(resource=>isResourceContainer(resource)&&resourceDescendants(architecture,resource.id).some(child=>child.canvasLocked)).map(resource=>resource.id));
+			const pinnedContainers=new Set(architecture.resources.filter(resource=>isResourceContainer(resource)&&visualDescendants(architecture,resource.id).some(child=>child.canvasLocked)).map(resource=>resource.id));
 			const destinations = new Map(Object.entries(command.positions).filter(([id]) => byId.has(id) && !byId.get(id)?.canvasLocked && !pinnedContainers.has(id)));
 			// A moved frame owns the delta for its children, even if a child was also selected.
 			for (const frame of architecture.items.filter(item => item.kind === 'frame' && destinations.has(item.id))) {
 				const next = destinations.get(frame.id)!; const before = frame.positions[command.mode];
 				for (const id of frame.members) { const child = byId.get(id); if (child && !child.canvasLocked) { destinations.set(id, { x: child.positions[command.mode].x + next.x - before.x, y: child.positions[command.mode].y + next.y - before.y }); } }
 			}
-			for (const container of architecture.resources.filter(item=>destinations.has(item.id)&&isResourceContainer(item)).sort((a,b)=>resourceAncestors(architecture,a).length-resourceAncestors(architecture,b).length)) {
+			for (const container of architecture.resources.filter(item=>destinations.has(item.id)&&isResourceContainer(item)).sort((a,b)=>visualAncestors(architecture,a).length-visualAncestors(architecture,b).length)) {
 				const next = destinations.get(container.id)!; const before = container.positions[command.mode];
-				for (const child of resourceDescendants(architecture,container.id)) { if (!child.canvasLocked) { destinations.set(child.id,{x:child.positions[command.mode].x+next.x-before.x,y:child.positions[command.mode].y+next.y-before.y}); } }
+				for (const child of visualDescendants(architecture,container.id)) { if (!child.canvasLocked) { destinations.set(child.id,{x:child.positions[command.mode].x+next.x-before.x,y:child.positions[command.mode].y+next.y-before.y}); } }
 			}
 			const changed = [...destinations].some(([id, position]) => { const before = byId.get(id)!.positions[command.mode]; return before.x !== position.x || before.y !== position.y; });
 			if (!changed) { return architecture; }
@@ -141,7 +143,7 @@ export function applyCanvasCommand(architecture: Architecture, command: CanvasCo
 		}
 		case 'delete': {
 			for (const resource of architecture.resources.filter(item=>editable.has(item.id))) {
-				const descendants = resourceDescendants(architecture,resource.id);
+				const descendants = containedDescendants(architecture,resource.id);
 				if (descendants.some(item=>item.canvasLocked)) { editable.delete(resource.id); }
 				else { descendants.forEach(item=>editable.add(item.id)); }
 			}
@@ -221,7 +223,7 @@ export function applyCanvasCommand(architecture: Architecture, command: CanvasCo
 				const cloneBlocks = (blocks: ResourceBlock[]): ResourceBlock[] => blocks.map(block => ({ ...block, id: idMap[resource.id] + ':' + block.id, blocks: cloneBlocks(block.blocks) }));
 				const fieldBindings = resource.fieldBindings && Object.fromEntries(Object.entries(resource.fieldBindings).map(([key, binding]) => { const target = bindingTarget(key); return [target?.kind === 'block' ? bindingKey({...target,blockId:idMap[resource.id] + ':' + target.blockId}) : key,binding]; }));
 				const resourceRefs = resource.resourceRefs && Object.fromEntries(Object.entries(resource.resourceRefs).map(([key, binding]) => { const target = bindingTarget(key); return [target?.kind === 'block' ? bindingKey({...target,blockId:idMap[resource.id] + ':' + target.blockId}) : key,{ refs: binding.refs.map(entry => ({ resourceId: idMap[entry.resourceId] ?? entry.resourceId, attribute: entry.attribute })) }]; }));
-				return { ...resource, id: idMap[resource.id], parentId:resource.parentId?(idMap[resource.parentId]??(architecture.resources.some(item=>item.id===resource.parentId)?resource.parentId:undefined)):undefined, name, terraformName, fieldBindings, resourceRefs, blocks: cloneBlocks(resource.blocks), canvasLocked: false, positions: offset(resource.positions) };
+				return { ...resource, id: idMap[resource.id], parentId:resource.parentId?(idMap[resource.parentId]??(architecture.resources.some(item=>item.id===resource.parentId)?resource.parentId:undefined)):undefined, visualParentId:resource.visualParentId?(idMap[resource.visualParentId]??(architecture.resources.some(item=>item.id===resource.visualParentId)?resource.visualParentId:undefined)):resource.visualParentId, name, terraformName, fieldBindings, resourceRefs, blocks: cloneBlocks(resource.blocks), canvasLocked: false, positions: offset(resource.positions) };
 			});
 			const items = structuredClone(fragment.items).map(item => ({ ...item, id: idMap[item.id], canvasLocked: false, positions: offset(item.positions), members: item.members.map(id => idMap[id]).filter(Boolean) }));
 			const groups = (fragment.groups ?? []).map(group => ({ ...group, id: idMap[group.id], members: group.members.map(id => idMap[id]).filter(Boolean) })).filter(group => group.id && group.members.length > 1);
