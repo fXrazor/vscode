@@ -203,3 +203,4 @@
 .theme-dark .tg-exposure-behind-entry { color: #f3a07e; }
 .tg-export-row { display: flex; align-items: center; gap: 6px; padding-top: 6px; border-top: 1px solid var(--border); margin-top: 2px; }
 .tg-export-row span { font-size: 11.5px; color: var(--muted); margin-right: auto; }
+.tg-chip-module { border: 1px dashed var(--tg-layer, var(--border)); font-family: var(--mono, Consolas, monospace); }

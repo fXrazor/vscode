@@ -76,6 +76,7 @@ const GraphCard = memo(function GraphCard({ data, selected }: NodeProps<CardNode
 			{node.region.known ? <span className="tg-chip">{node.region.value}</span> : <span className="tg-chip tg-chip-unknown" title="No region value in this draft">region unknown</span>}
 			{compact && node.ports.length > 0 && <span className="tg-chip">{node.ports.length} input{node.ports.length === 1 ? '' : 's'}</span>}
 			{node.sourceFile && <span className="tg-chip" title={node.sourceFile + (node.sourceLine ? ':' + node.sourceLine : '')}>{node.sourceFile.split(/[\\/]/).pop()}{node.sourceLine ? ':' + node.sourceLine : ''}</span>}
+			{node.module && <span className="tg-chip tg-chip-module" title={'Module call · source ' + (node.module.source || 'unknown')}>module{node.module.source ? ' · ' + (node.module.source.length > 22 ? '…' + node.module.source.slice(-21) : node.module.source) : ''}</span>}
 			{node.exposure && (node.exposure.kind !== 'behind-entry' || data.lens === 'security') && <span className={'tg-chip tg-chip-exposure tg-exposure-' + node.exposure.kind} title={node.exposure.reason + ' · configured intent; NSG, firewall and route rules are not evaluated'}>{node.exposure.kind === 'entry' ? 'public entry' : node.exposure.kind === 'public-access' ? 'public access' : 'behind entry'}</span>}
 			{node.reviewStatus === 'unreviewed' && <span className="tg-chip tg-chip-unknown" title="No reviewed provider profile; relationships are shown as generic references">unreviewed</span>}
 		</div>
@@ -151,7 +152,7 @@ export interface TechnicalGraphProps {
 	/** Local and host diagnostics (already projected to resource ids). */
 	diagnostics?: readonly { resourceId: string; severity: 'error' | 'warning'; message: string }[];
 	/** Latest engine plan, if one has run. Stale when its source revision differs from the project. */
-	plan?: { sourceRevision: string; stale: boolean; changes: readonly { address: string; mode?: string; actionKind: PlanAction; changedAttributePaths: readonly string[]; hasSensitiveAttributes: boolean }[] };
+	plan?: { sourceRevision: string; stale: boolean; changes: readonly { address: string; moduleAddress?: string; mode?: string; actionKind: PlanAction; changedAttributePaths: readonly string[]; hasSensitiveAttributes: boolean }[] };
 	onOpenSource?: (id: string) => void;
 	hasSource?: Readonly<Record<string, boolean>>;
 	viewports?: RefObject<Partial<Record<DesignMode, Viewport>>>;
@@ -189,6 +190,8 @@ export const TechnicalGraph = memo(function TechnicalGraph({ architecture, theme
 			if (!plan) { return undefined; }
 			const affected = overlays.byNode[node.id]?.affectedBy;
 			const affectedTitle = affected?.length ? ' · depends on planned replace/destroy of ' + affected.map(id => snapshot.nodes.find(item => item.id === id)?.label ?? id).slice(0, 4).join(', ') : '';
+			const inside = overlays.byNode[node.id]?.inside;
+			if (inside && (!change || change.action === 'noOp')) { const parts = [inside.create && '+' + inside.create, inside.update && '~' + inside.update, inside.replace && '±' + inside.replace, inside.delete && '−' + inside.delete].filter(Boolean); return { kind: 'plan', text: 'module ' + parts.join(' '), tone: inside.delete ? 'delete' : inside.replace ? 'replace' : inside.update ? 'update' : 'create', title: 'Planned inside this module: ' + inside.create + ' create, ' + inside.update + ' update, ' + inside.replace + ' replace, ' + inside.delete + ' destroy' + (plan.stale ? ' · plan is older than this draft' : '') }; }
 			if (!change || change.action === 'noOp') { return affected?.length ? { kind: 'plan', text: '⚠ affected', tone: 'affected', title: 'No planned change of its own' + affectedTitle + '. Check that its references survive.' } : { kind: 'plan', text: 'no change', tone: 'muted', title: 'Not in the latest plan, or no changes planned' }; }
 			const symbol: Record<PlanAction, string> = { create: '+ create', update: '~ update', replace: '± replace', delete: '− destroy', read: '↻ read', noOp: 'no change' };
 			return { kind: 'plan', text: symbol[change.action] + (change.instances > 1 ? ' ×' + change.instances : ''), tone: change.action, title: (change.changed.length ? 'Changed: ' + change.changed.slice(0, 8).join(', ') : 'Planned action') + (change.sensitive ? ' · includes sensitive values' : '') + affectedTitle + (plan.stale ? ' · plan is older than this draft' : '') };

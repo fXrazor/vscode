@@ -15,7 +15,7 @@ import type { Architecture, Resource } from './model.ts';
 import { resourceDefinition } from './fixture.ts';
 import { infrastructureLayers, resourceIntelligence, type InfrastructureLayer, type RelationshipCategory } from './providerKnowledge.ts';
 import { documentedHubSpokes, infrastructureRelationships, type InfrastructureRelationship } from './infrastructureRelationships.ts';
-import { resourceAddress, resourceAncestors } from './resourceHierarchy.ts';
+import { resourceAddress, resourceAncestors, terraformIdentifier } from './resourceHierarchy.ts';
 
 export type GraphCategory = RelationshipCategory | 'unclassified';
 /** Focused lenses. One universal arrow direction would misrepresent these meanings. */
@@ -81,6 +81,8 @@ export interface GraphNode {
 	readonly inCycle: boolean;
 	/** Configured exposure intent. Never a claim that traffic can actually reach the resource. */
 	readonly exposure?: { readonly kind: 'entry' | 'public-access' | 'behind-entry'; readonly reason: string };
+	/** Present on module calls: the module source as written. */
+	readonly module?: { readonly source: string };
 }
 export interface GraphEdge {
 	readonly id: string;
@@ -188,6 +190,7 @@ export function projectTechnicalGraph(architecture: Architecture): TechnicalGrap
 			inDegree: edges.filter(edge => edge.target === resource.id && !edge.membership).length,
 			outDegree: edges.filter(edge => edge.source === resource.id && !edge.membership).length,
 			inCycle: inCycle.has(resource.id),
+			...(resource.kind === 'module' ? { module: { source: String(resource.settings?.source ?? '').slice(0, 200) } } : {}),
 		};
 	});
 	const exposure = configuredExposure(architecture, nodes, edges);
@@ -255,7 +258,7 @@ export function graphInputs(architecture: Architecture): GraphInput[] {
 }
 
 export function portId(resourceId: string, field: string, peer: string): string { return 'port:' + JSON.stringify([resourceId, field, peer]); }
-function safeAddress(resource: Resource): string { try { return resourceAddress(resource); } catch { return resourceDefinition(resource).type + '.' + resource.name; } }
+function safeAddress(resource: Resource): string { if (resource.kind === 'module') { return 'module.' + terraformIdentifier(resource); } try { return resourceAddress(resource); } catch { return resourceDefinition(resource).type + '.' + resource.name; } }
 
 /** Edges visible in a lens. Membership edges only appear in Topology, or when explicitly requested. */
 export function lensEdges(snapshot: TechnicalGraphSnapshot, lens: GraphLens, showMembership: boolean): GraphEdge[] {
@@ -317,8 +320,10 @@ export interface NodeOverlay {
 	readonly plan?: { readonly action: PlanAction; readonly instances: number; readonly changed: readonly string[]; readonly sensitive: boolean };
 	/** Planned replace/destroy resources this one configurably depends on (directly or transitively). */
 	readonly affectedBy?: readonly string[];
+	/** Planned changes inside a module call, folded onto the module card by its root module address. */
+	readonly inside?: { readonly create: number; readonly update: number; readonly replace: number; readonly delete: number };
 }
-type PlanChangeInput = { address: string; mode?: string; actionKind: PlanAction; changedAttributePaths: readonly string[]; hasSensitiveAttributes: boolean };
+type PlanChangeInput = { address: string; moduleAddress?: string; mode?: string; actionKind: PlanAction; changedAttributePaths: readonly string[]; hasSensitiveAttributes: boolean };
 const actionRank: Record<PlanAction, number> = { delete: 5, replace: 4, create: 3, update: 2, read: 1, noOp: 0 };
 
 /**
@@ -328,7 +333,7 @@ const actionRank: Record<PlanAction, number> = { delete: 5, replace: 4, create: 
  */
 export function graphOverlays(snapshot: TechnicalGraphSnapshot, diagnostics: readonly { resourceId: string; severity: 'error' | 'warning'; message: string }[], plan?: readonly PlanChangeInput[]): { byNode: Record<string, NodeOverlay>; unmatchedPlan: number } {
 	const byAddress = new Map(snapshot.nodes.map(node => [node.address, node.id]));
-	const byNode: Record<string, { errors: number; warnings: number; messages: { severity: 'error' | 'warning'; message: string }[]; plan?: { action: PlanAction; instances: number; changed: string[]; sensitive: boolean }; affectedBy?: string[] }> = {};
+	const byNode: Record<string, { errors: number; warnings: number; messages: { severity: 'error' | 'warning'; message: string }[]; plan?: { action: PlanAction; instances: number; changed: string[]; sensitive: boolean }; affectedBy?: string[]; inside?: { create: number; update: number; replace: number; delete: number } }> = {};
 	const entry = (id: string) => byNode[id] ??= { errors: 0, warnings: 0, messages: [] };
 	for (const item of diagnostics) { if (!byAddress.size || !snapshot.nodes.some(node => node.id === item.resourceId)) { continue; } const target = entry(item.resourceId); target[item.severity === 'error' ? 'errors' : 'warnings']++; target.messages.push({ severity: item.severity, message: item.message }); }
 	let unmatchedPlan = 0;
@@ -336,7 +341,16 @@ export function graphOverlays(snapshot: TechnicalGraphSnapshot, diagnostics: rea
 		if (change.mode === 'data') { continue; }
 		const base = change.address.replace(/\[[^\]]*\]$/, '');
 		const id = byAddress.get(base);
-		if (!id) { if (change.actionKind !== 'noOp') { unmatchedPlan++; } continue; }
+		if (!id) {
+			// module.NAME[...].type.name → the module call card for module.NAME.
+			const call = /^module\.([A-Za-z_][\w-]*)/.exec(change.moduleAddress ?? change.address)?.[1];
+			const moduleId = call ? byAddress.get('module.' + call) : undefined;
+			if (moduleId && (change.actionKind === 'create' || change.actionKind === 'update' || change.actionKind === 'replace' || change.actionKind === 'delete')) {
+				const inside = entry(moduleId).inside ??= { create: 0, update: 0, replace: 0, delete: 0 }; inside[change.actionKind]++; continue;
+			}
+			if (!moduleId && change.actionKind !== 'noOp') { unmatchedPlan++; }
+			continue;
+		}
 		const target = entry(id); const current = target.plan;
 		target.plan = !current ? { action: change.actionKind, instances: 1, changed: [...change.changedAttributePaths], sensitive: change.hasSensitiveAttributes }
 			: { action: actionRank[change.actionKind] > actionRank[current.action] ? change.actionKind : current.action, instances: current.instances + 1, changed: [...new Set([...current.changed, ...change.changedAttributePaths])], sensitive: current.sensitive || change.hasSensitiveAttributes };

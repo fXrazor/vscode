@@ -222,3 +222,16 @@ test('graph image export draws every laid-out card, edge and input without touch
 	assert.ok(!svg.includes('NaN') && !svg.includes('undefined'));
 	assert.equal(JSON.stringify(architecture), before);
 });
+
+test('planned changes inside a module fold onto the module call card', () => {
+	const architecture = hubSpokeArchitecture();
+	const base = architecture.resources.find(resource => resource.id === 'log')!;
+	architecture.resources.push({ ...base, id: 'mod-net', name: 'network', kind: 'module', catalogue: undefined, parentId: undefined, resourceRefs: {}, settings: { source: './modules/network' } });
+	const snapshot = projectTechnicalGraph(architecture);
+	const module = snapshot.nodes.find(node => node.id === 'mod-net')!;
+	assert.equal(module.address, 'module.network'); assert.deepEqual(module.module, { source: './modules/network' });
+	const change = (address: string, actionKind: 'create' | 'replace' | 'noOp', moduleAddress?: string) => ({ address, moduleAddress, actionKind, changedAttributePaths: [], hasSensitiveAttributes: false });
+	const { byNode, unmatchedPlan } = graphOverlays(snapshot, [], [change('module.network.azurerm_subnet.a', 'create', 'module.network'), change('module.network.azurerm_subnet.b[0]', 'replace', 'module.network'), change('module.network.azurerm_subnet.c', 'noOp', 'module.network'), change('module.other.azurerm_subnet.d', 'create', 'module.other')]);
+	assert.deepEqual(byNode['mod-net'].inside, { create: 1, update: 0, replace: 1, delete: 0 });
+	assert.equal(unmatchedPlan, 1);
+});
