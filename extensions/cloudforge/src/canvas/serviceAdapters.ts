@@ -1049,23 +1049,14 @@ export function parseSaveAllApply(value: unknown): SaveAllApplyResult | undefine
 	return { files, newSourceRevision: value.newSourceRevision };
 }
 
-/**
- * `linkedRepository` is set only when the open project lists the architecture as one imported
- * from a repository. Every other SCOPE_DENIED means the canvas holds ids the service no longer
- * grants: CloudForge reconnected to the project, or another architecture became active.
- */
-export function draftSaveErrorMessage(code: string, options: { readonly linkedRepository?: boolean } = {}): DraftSaveError {
+/** Message for a failed canvas save. SCOPE_DENIED means the canvas holds ids the service no longer grants. */
+export function draftSaveErrorMessage(code: string): DraftSaveError {
 	switch (code) {
 		case 'SCOPE_DENIED':
-			return options.linkedRepository
-				? {
-					code,
-					message: 'This architecture is linked to an imported repository, and CloudForge does not write into linked repositories yet. Edit the files in the repository, or import a copy into the project to edit it on the canvas.',
-				}
-				: {
-					code,
-					message: 'This canvas lost its link to the open project, usually because CloudForge reconnected to the project folder. Reopen the architecture from the CloudForge panel, then save again.',
-				};
+			return {
+				code,
+				message: 'This canvas lost its link to the open project, usually because CloudForge reconnected to the project folder. Reopen the architecture from the CloudForge panel, then save again.',
+			};
 		case 'STALE_SOURCE':
 			return {
 				code,

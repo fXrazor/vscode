@@ -607,44 +607,40 @@ export function activate(context: ExtensionContext): void {
 	/**
 	 * The service mints new workspace and architecture ids each time CloudForge connects to a
 	 * project, so a canvas opened before a reconnect holds ids it no longer grants and every save
-	 * fails with SCOPE_DENIED. Map the canvas to the same local architecture in the open project,
-	 * select it, and let the caller retry. Linked repository architectures are reported instead.
+	 * fails with SCOPE_DENIED. Map the canvas to the same architecture in the open project (local
+	 * or linked), select it, and let the caller retry.
 	 */
-	async function recoverWritableTarget(stale: WritableTarget): Promise<WritableTarget | 'linkedRepository' | undefined> {
+	async function recoverWritableTarget(stale: WritableTarget): Promise<WritableTarget | undefined> {
 		const project = projectControllerRef.current?.current;
 		if (!project) {
 			return undefined;
 		}
-		const sameWorkspace = project.workspaceId === stale.workspaceId;
-		const matches = sameWorkspace
+		const matches = project.workspaceId === stale.workspaceId
 			? project.architectures.filter(item => item.architectureId === stale.architectureId)
 			: project.architectures.filter(item => item.displayName === currentArchitectureName);
 		if (matches.length !== 1) {
 			return undefined;
 		}
-		const architecture = matches[0];
-		if (architecture.source === 'repository') {
-			return 'linkedRepository';
-		}
-		const target = { workspaceId: project.workspaceId, architectureId: architecture.architectureId };
+		const target = { workspaceId: project.workspaceId, architectureId: matches[0].architectureId };
 		const selected = await callService<unknown>('selectArchitecture', { ...target });
 		return selected.ok ? target : undefined;
 	}
 
+	/** True when the architecture's files live in a linked repository rather than the project. */
+	function isLinkedArchitecture(target: WritableTarget): boolean {
+		const project = projectControllerRef.current?.current;
+		return project?.workspaceId === target.workspaceId
+			&& project.architectures.some(item => item.architectureId === target.architectureId && item.source === 'repository');
+	}
+
 	/** Runs a save call, retrying once against the recovered target after a SCOPE_DENIED. */
-	async function callWritable(target: WritableTarget, call: WritableCall): Promise<{ readonly result: ServiceResult<unknown>; readonly target: WritableTarget; readonly linkedRepository: boolean }> {
+	async function callWritable(target: WritableTarget, call: WritableCall): Promise<{ readonly result: ServiceResult<unknown>; readonly target: WritableTarget }> {
 		const result = await call(target);
 		if (result.ok || result.error.code !== 'SCOPE_DENIED') {
-			return { result, target, linkedRepository: false };
+			return { result, target };
 		}
 		const recovered = await recoverWritableTarget(target);
-		if (recovered === 'linkedRepository') {
-			return { result, target, linkedRepository: true };
-		}
-		if (!recovered) {
-			return { result, target, linkedRepository: false };
-		}
-		return { result: await call(recovered), target: recovered, linkedRepository: false };
+		return recovered ? { result: await call(recovered), target: recovered } : { result, target };
 	}
 
 	function toVsSeverity(raw: string): DiagnosticSeverity {
@@ -980,7 +976,7 @@ export function activate(context: ExtensionContext): void {
 			const message = result.error.code === 'STALE_SOURCE'
 				? l10n.t('The Terraform source changed on disk. Refresh the graph before running offline init.')
 				: result.error.code === 'SCOPE_DENIED'
-					? l10n.t('Offline init is only allowed on writable project architectures, not read-only imported repositories.')
+					? l10n.t('Offline init runs only on project architectures, not on linked repositories, so it never changes a repository\'s lock file or provider cache.')
 					: result.error.code === 'SCHEMA_UNAVAILABLE'
 						? l10n.t('One or more locked providers are missing or unverified in the local offline mirror.')
 						: result.error.code === 'WORKSPACE_UNAVAILABLE'
@@ -1371,7 +1367,7 @@ export function activate(context: ExtensionContext): void {
 				result = await callService<unknown>('previewDraftSave', { ...focused.target, expectedSourceRevision, fileName, contents });
 			}
 			if (!result.ok) {
-				return { ok: false, error: draftSaveErrorMessage(result.error.code, { linkedRepository: focused.linkedRepository }) };
+				return { ok: false, error: draftSaveErrorMessage(result.error.code) };
 			}
 			const preview = parseDraftSavePreview(result.value);
 			if (!preview) {
@@ -1389,7 +1385,7 @@ export function activate(context: ExtensionContext): void {
 				: callService<unknown>('applyDraftSave', { ...target, expectedSourceRevision, fileName, contents, previewToken }));
 			const result = call.result;
 			if (!result.ok) {
-				return { ok: false, error: draftSaveErrorMessage(result.error.code, { linkedRepository: call.linkedRepository }) };
+				return { ok: false, error: draftSaveErrorMessage(result.error.code) };
 			}
 			const applied = parseDraftSaveApply(result.value);
 			if (!applied) {
@@ -1404,7 +1400,9 @@ export function activate(context: ExtensionContext): void {
 				canvas.updateIfOpen(toCanvasSnapshot(refreshed, currentArchitectureName));
 				canvas.setNotice({
 					kind: 'info',
-					message: l10n.t('Saved {0} ({1} bytes) and refreshed architecture to revision {2}.', applied.fileName, applied.bytesWritten, applied.newSourceRevision.slice(0, 8)),
+					message: isLinkedArchitecture(call.target)
+						? l10n.t('Saved {0} ({1} bytes) into the linked repository, revision {2}. Review and commit it in Source Control.', applied.fileName, applied.bytesWritten, applied.newSourceRevision.slice(0, 8))
+						: l10n.t('Saved {0} ({1} bytes) and refreshed architecture to revision {2}.', applied.fileName, applied.bytesWritten, applied.newSourceRevision.slice(0, 8)),
 				});
 			}
 			return { ok: true, applied };
@@ -1422,7 +1420,7 @@ export function activate(context: ExtensionContext): void {
 			}));
 			const result = call.result;
 			if (!result.ok) {
-				return { ok: false, error: draftSaveErrorMessage(result.error.code, { linkedRepository: call.linkedRepository }) };
+				return { ok: false, error: draftSaveErrorMessage(result.error.code) };
 			}
 			const preview = parseSaveAllPreview(result.value);
 			return preview ? { ok: true, preview } : { ok: false, error: draftSaveErrorMessage('SERVICE_ERROR') };
@@ -1432,7 +1430,7 @@ export function activate(context: ExtensionContext): void {
 			const call = await callWritable({ workspaceId, architectureId }, target => callService<unknown>('applyFocusedSaveBatch', { ...target, expectedSourceRevision, previewToken }));
 			const result = call.result;
 			if (!result.ok) {
-				return { ok: false, error: draftSaveErrorMessage(result.error.code, { linkedRepository: call.linkedRepository }) };
+				return { ok: false, error: draftSaveErrorMessage(result.error.code) };
 			}
 			const applied = parseSaveAllApply(result.value);
 			if (!applied) {
@@ -1445,7 +1443,9 @@ export function activate(context: ExtensionContext): void {
 				canvas.updateIfOpen(toCanvasSnapshot(refreshed, currentArchitectureName));
 				canvas.setNotice({
 					kind: 'info',
-					message: l10n.t('Saved {0} files and refreshed architecture to revision {1}.', applied.files.length, applied.newSourceRevision.slice(0, 8)),
+					message: isLinkedArchitecture(call.target)
+						? l10n.t('Saved {0} files into the linked repository, revision {1}. Review and commit them in Source Control.', applied.files.length, applied.newSourceRevision.slice(0, 8))
+						: l10n.t('Saved {0} files and refreshed architecture to revision {1}.', applied.files.length, applied.newSourceRevision.slice(0, 8)),
 				});
 			}
 			return { ok: true, applied };

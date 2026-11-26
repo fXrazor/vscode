@@ -23,7 +23,9 @@ import { ensureGit, repositoryRemote } from './git';
 import {
 	buildArchitectureSwitchItems,
 	cloneUrlPrefix,
+	describeImportCopies,
 	isPathComponent,
+	parseImportCopies,
 	parseCreatedProject,
 	parseInspection,
 	parseProjectResult,
@@ -401,10 +403,41 @@ export class ProjectController implements Disposable {
 				l10n.t('{0} reached the CloudForge inspection limit, so only the first {1} Terraform root(s) are shown.', inspection.displayName, inspection.terraformRoots.length)
 			);
 		}
-		const choices = inspection.terraformRoots.filter(root => !root.imported);
-		if (choices.length === 0) {
-			void window.showInformationMessage(l10n.t('Every Terraform root in {0} is already imported.', inspection.displayName));
+		// Copy is the default (Dale's choice, 2026-11-25): the project owns the files, like a
+		// Brainboard import. Link keeps the files in the repository and saves write there.
+		const copyItem = {
+			label: l10n.t('$(files) Copy into project'),
+			description: l10n.t('Recommended'),
+			detail: l10n.t('Copies the .tf files, notes, lock file and local modules into this project. Canvas saves change the copy, not the repository. State files are never copied.'),
+			mode: 'copy' as const,
+		};
+		const linkItem = {
+			label: l10n.t('$(link) Link in place'),
+			detail: l10n.t('Reads the files where they are. Canvas saves write into the repository\'s .tf files after a preview, and you commit the changes.'),
+			mode: 'link' as const,
+		};
+		const how = await window.showQuickPick([copyItem, linkItem], {
+			title: l10n.t('Import Terraform from {0}', inspection.displayName),
+			placeHolder: l10n.t('How should CloudForge bring this Terraform in?'),
+		});
+		if (!how) {
 			return;
+		}
+		const mode = how.mode;
+		const choices = mode === 'copy' ? inspection.terraformRoots : inspection.terraformRoots.filter(root => !root.imported);
+		if (choices.length === 0) {
+			void window.showInformationMessage(l10n.t('Every Terraform root in {0} is already linked. Choose Copy into project to make an editable copy.', inspection.displayName));
+			return;
+		}
+		let includeTfvars = false;
+		if (mode === 'copy' && inspection.findings.some(finding => finding.code === 'TFVARS_FILE')) {
+			const leaveOut = { label: l10n.t('Leave .tfvars files out'), description: l10n.t('Recommended'), include: false };
+			const include = { label: l10n.t('Copy .tfvars files too'), detail: l10n.t('They often hold secrets. Copy them only if they hold none.'), include: true };
+			const vars = await window.showQuickPick([leaveOut, include], { title: l10n.t('Variable files'), placeHolder: l10n.t('{0} has .tfvars files', inspection.displayName) });
+			if (!vars) {
+				return;
+			}
+			includeTfvars = vars.include;
 		}
 		const picked = await window.showQuickPick(
 			choices.map(root => ({ label: root.rootPath.length ? root.rootPath.join('/') : inspection.displayName, description: root.displayName, picked: choices.length === 1, root })),
@@ -445,15 +478,24 @@ export class ProjectController implements Disposable {
 			void window.showErrorMessage(invalid);
 			return;
 		}
-		const rawRemote = await repositoryRemote(folder.uri);
+		const rawRemote = mode === 'link' ? await repositoryRemote(folder.uri) : undefined;
 		const remote = rawRemote ? sanitizeRemoteUrl(rawRemote) : undefined;
 		const imported = await callProjectService('importRepository', {
 			workspaceId: project.workspaceId,
 			inspectionId: inspection.inspectionId,
 			selections,
+			mode,
+			...(includeTfvars ? { includeTfvars } : {}),
 			...(remote ? { remote } : {})
 		});
 		const updated = this.handleProjectChange(imported);
+		if (updated && imported.ok && mode === 'copy') {
+			const outcome = describeImportCopies(parseImportCopies(imported.value));
+			void window.showInformationMessage(outcome.info);
+			if (outcome.warning) {
+				void window.showWarningMessage(outcome.warning);
+			}
+		}
 		const first = updated?.importedArchitectureIds[0];
 		if (updated && first) {
 			const architecture = updated.architectures.find(item => item.architectureId === first);

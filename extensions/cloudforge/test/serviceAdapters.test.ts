@@ -258,7 +258,6 @@ test('Stage 5 guarded save parsers and Webview protocol validation enforce stric
 
 	assert.match(draftSaveErrorMessage('SCOPE_DENIED').message, /Reopen the architecture/);
 	assert.doesNotMatch(draftSaveErrorMessage('SCOPE_DENIED').message, /imported repositor/i);
-	assert.match(draftSaveErrorMessage('SCOPE_DENIED', { linkedRepository: true }).message, /linked to an imported repository/);
 	assert.match(draftSaveErrorMessage('STALE_SOURCE').message, /Refresh/i);
 });
 

@@ -5,10 +5,11 @@ Covers everything built in both repos on 25 November 2026 (updated for three-way
 ## 0. Build and automated checks (Windows)
 
 - [ ] Rust: in a checkout of the branch (now including Stage 11D `listCloudAccounts`), from `service/`, with a **fresh** `CARGO_TARGET_DIR` (a stale one gives bogus `hcl-edit` E0599 errors), run `cargo test`. Expect everything to pass, including the `focused_save` (14) and `resource_values` (1) unit tests and, in `tests/draft_save.rs`, `focused_save_rewrites_only_changed_values_and_keeps_comments`, `read_resource_values_returns_file_values_without_secrets` and `focused_batch_saves_several_files_under_one_token`. `tests/stage11_state_connections.rs` (it writes and then deletes one generic credential in your Credential Manager, and runs `az account show` once if the Azure CLI is installed). `fixtures.rs` expects 22 Stage 2 fixtures, including `create-architecture-adopt-root-files`. `tests/stdio.rs` now expects the 2 MiB request limit.
+- [ ] Rust: `cargo test --test import_copy` passes (import as a copy, `.tfvars` choice, saving into a linked root, offline init still refused there).
 - [ ] Rust: `node docs/protocol/fixtures/check-fixtures.mjs` reports the fixtures consistent.
 - [ ] Code OSS: build with the new service binary staged, then run the electron-main test `src/vs/code/test/electron-main/cloudForgeServiceChannel.test.ts`.
 - [ ] Code OSS: full type-check (`npm run compile` or the usual watch build). This covers `cloudForgeService.contribution.ts`, which couldn't be checked in the cloud.
-- [ ] Studio: `pnpm check` and tests (142 expected) in `extensions/cloudforge/studio`; extension tests (104 expected).
+- [ ] Studio: `pnpm check` and tests (142 expected) in `extensions/cloudforge/studio`; extension tests (105 expected).
 
 Use a test project with at least two architectures and one `.tf` file that has comments, a `tags = local.tags` line, a `lifecycle` block and a `dynamic` block.
 
@@ -169,11 +170,22 @@ Use a test project with at least two architectures and one `.tf` file that has c
 
 - [ ] Open an architecture on the canvas and make a change without saving. Reconnect the project (close and reopen the folder in the same window, or run **CloudForge: Open Project** again) while the canvas stays open. Save from the canvas. The preview and save work without reopening, and the canvas shows the new revision.
 - [ ] If the save still can't find the architecture (for example it was renamed), the message says "This canvas lost its link to the open project… Reopen the architecture", not "Imported repositories are read-only".
-- [ ] On an architecture imported with **Import Terraform from Folder…** (a linked repository), saving says it is linked to an imported repository and suggests importing a copy.
+
+## 10h. Importing Terraform: copy or link
+
+Use a repository folder (added to the window) with `main.tf`, a `README.md`, a `prod.tfvars`, a `terraform.tfstate`, a `.terraform` folder, a `modules/net/main.tf` used as `source = "./modules/net"`, and one module with `source = "../shared"`.
+
+- [ ] **Import Terraform from Folder…** first asks **Copy into project** (marked Recommended) or **Link in place**.
+- [ ] Copy: because of `prod.tfvars` it asks whether to copy `.tfvars` files; leave them out. After naming, a notice says how many files were copied and that state files stayed in the repository; a warning names `main.tf` for the module source outside the copy.
+- [ ] `architectures/<name>/` holds `main.tf`, `README.md`, `.terraform.lock.hcl` (if present) and `modules/net/main.tf`, and no `prod.tfvars`, `terraform.tfstate` or `.terraform`. The repository folder is unchanged.
+- [ ] The copy opens on the canvas; save a change and check only the copy changes.
+- [ ] Import the same root again as a copy with a different name and **Copy .tfvars files too**: the new copy has `prod.tfvars`.
+- [ ] Link in place: save a change from the canvas. The preview shows the diff, the notice says it was saved into the linked repository, and Source Control shows the changed `.tf` file in the repository. `.git`, `.terraform` and state are untouched.
+- [ ] On the linked architecture, offline init (Stage 10) still says it runs only on project architectures.
 
 ## 8. Known gaps (not bugs)
 
 - Moving a resource between files works only through Save all (both files in one save); the single-file save still keeps the old block.
 - The schema check appears in the inspector's Code tab, not in the focused workspace's code pane.
-- Linked repository architectures (Import Terraform from Folder…) are still read-only. The product spec now proposes allowing guarded saves into them and adding import-as-copy; that waits for Dale's decision.
+- The save dialog doesn't yet show the repository path for a linked architecture, and links have no read-only switch yet.
 - Validate, plan and other canvas actions don't yet reconnect a stale canvas the way saves do; reopen the architecture if they report it isn't active.

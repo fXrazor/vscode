@@ -287,7 +287,16 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 			return { workspaceId: value.workspaceId, workspaceFolderIndex: index };
 		}
 		case 'importRepository': {
-			if (!hasOnlyKeys(value, ['workspaceId', 'inspectionId', 'selections', 'remote']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.inspectionId)) {
+			if (!hasOnlyKeys(value, ['workspaceId', 'inspectionId', 'selections', 'remote', 'mode', 'includeTfvars']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.inspectionId)) {
+				return undefined;
+			}
+			// `copy` copies the roots into the project; `link` (or no mode) records a link.
+			const mode = value.mode;
+			if (mode !== undefined && mode !== 'copy' && mode !== 'link') {
+				return undefined;
+			}
+			const includeTfvars = value.includeTfvars;
+			if (includeTfvars !== undefined && (typeof includeTfvars !== 'boolean' || (includeTfvars && mode !== 'copy'))) {
 				return undefined;
 			}
 			if (!Array.isArray(value.selections) || value.selections.length === 0 || value.selections.length > maxSelections) {
@@ -308,7 +317,9 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 				workspaceId: value.workspaceId,
 				inspectionId: value.inspectionId,
 				selections,
-				...(remote === undefined ? {} : { remote })
+				...(remote === undefined ? {} : { remote }),
+				...(mode === undefined ? {} : { mode }),
+				...(includeTfvars ? { includeTfvars: true } : {})
 			};
 		}
 		case 'removeRepository': {

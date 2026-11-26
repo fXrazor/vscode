@@ -140,6 +140,8 @@ suite('CloudForgeServiceChannel', () => {
 			validateCloudForgeServiceParams('inspectRepository', { workspaceId, workspaceFolderIndex: 2 }),
 			validateCloudForgeServiceParams('importRepository', { workspaceId, inspectionId: `${workspaceId}-inspection-1`, selections }),
 			validateCloudForgeServiceParams('importRepository', { workspaceId, inspectionId: `${workspaceId}-inspection-1`, selections, remote: 'https://github.com/contoso/infra.git' }),
+			validateCloudForgeServiceParams('importRepository', { workspaceId, inspectionId: `${workspaceId}-inspection-1`, selections, mode: 'copy', includeTfvars: true }),
+			validateCloudForgeServiceParams('importRepository', { workspaceId, inspectionId: `${workspaceId}-inspection-1`, selections, mode: 'link', includeTfvars: false }),
 			validateCloudForgeServiceParams('removeRepository', { workspaceId, repositoryId: `${workspaceId}-repository-1` }),
 		], [
 			{ name: 'Contoso Platform' },
@@ -151,6 +153,8 @@ suite('CloudForgeServiceChannel', () => {
 			{ workspaceId, workspaceFolderIndex: 2 },
 			{ workspaceId, inspectionId: `${workspaceId}-inspection-1`, selections },
 			{ workspaceId, inspectionId: `${workspaceId}-inspection-1`, selections, remote: 'https://github.com/contoso/infra.git' },
+			{ workspaceId, inspectionId: `${workspaceId}-inspection-1`, selections, mode: 'copy', includeTfvars: true },
+			{ workspaceId, inspectionId: `${workspaceId}-inspection-1`, selections, mode: 'link' },
 			{ workspaceId, repositoryId: `${workspaceId}-repository-1` },
 		]);
 	});
@@ -179,6 +183,10 @@ suite('CloudForgeServiceChannel', () => {
 			['importRepository', { workspaceId, inspectionId, selections: [selection], remote: 'https://example.com/\nrepo' }],
 			['importRepository', { workspaceId, inspectionId, selections: [selection], remote: 'x'.repeat(2049) }],
 			['importRepository', { workspaceId, inspectionId, selections: [selection], folderPath: 'C:\\repo' }],
+			['importRepository', { workspaceId, inspectionId, selections: [selection], mode: 'move' }],
+			['importRepository', { workspaceId, inspectionId, selections: [selection], includeTfvars: true }],
+			['importRepository', { workspaceId, inspectionId, selections: [selection], mode: 'link', includeTfvars: true }],
+			['importRepository', { workspaceId, inspectionId, selections: [selection], mode: 'copy', includeTfvars: 'yes' }],
 			['removeRepository', { workspaceId }],
 			['createWorkspaceFile', { workspaceId, projectPath: 'C:\\Projects\\Contoso' }],
 		];
