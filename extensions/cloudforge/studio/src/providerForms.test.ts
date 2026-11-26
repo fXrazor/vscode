@@ -6,10 +6,10 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
-import { ensureTypes, getDef, setCatalogReader, type AttrDef } from './cloudlab-core/catalog/index.ts';
+import { clearFormAttributes, ensureTypes, getDef, registerFormAttributes, setCatalogReader, type AttrDef } from './cloudlab-core/catalog/index.ts';
 import { additionalBlocks, editableFields, fieldIssue, type BlockDefinition } from './formDefinition.ts';
 import { bindingKey, fieldDefinition } from './fieldBindings.ts';
-import { sampleArchitecture } from './fixture.ts';
+import { resourceDefinition, sampleArchitecture } from './fixture.ts';
 import { formCoverageGaps, liveSchemaAttributes, liveSchemaBlocks, type HostFormSchema } from './liveSchema.ts';
 import { createHistory, historyReducer, type Resource } from './model.ts';
 import { projectGraphSnapshotToArchitecture } from './serviceAdapter.ts';
@@ -324,4 +324,45 @@ test('mixed list HCL typed in code editor or hydrated from source files parses i
 		],
 	});
 	assert.equal(hydrateResourceValues(hydrated, graph, [file]), hydrated, 'mixed list hydration is idempotent');
+});
+
+test('inferred references on an imported-schema type survive file hydration', () => {
+	const type = 'azurerm_virtual_machine';
+	registerFormAttributes(type, 'azurerm', [
+		{ name: 'network_interface_ids', type: 'list', description: '' },
+		{ name: 'resource_group_name', type: 'string', description: '' },
+	]);
+	try {
+		const base = sampleArchitecture();
+		const template = base.resources.find(item => item.id === 'vm')!;
+		const nic = base.resources.find(item => item.id === 'nic')!;
+		const group = base.resources.find(item => resourceDefinition(item).type === 'azurerm_resource_group')!;
+		const vm = { ...template, id: 'legacy-vm', name: 'legacy-vm', settings: {}, resourceRefs: {}, fieldBindings: {}, catalogue: { type, label: 'Virtual machine', service: 'Compute', category: 'Compute', icon: '', curated: false, fields: [] } } as unknown as Resource;
+		const architecture = { ...base, resources: [...base.resources, vm] };
+		const address = (resource: Resource, resourceType: string) => resourceType + '.' + (resource.terraformName ?? resource.name.replace(/[^A-Za-z0-9_-]/g, '_'));
+		const nicAddress = address(nic, 'azurerm_network_interface');
+		const groupAddress = address(group, 'azurerm_resource_group');
+		const graph = {
+			workspaceId: 'ws', architectureId: 'arch', architectureName: architecture.name, sourceRevision: 'd'.repeat(64), status: 'complete' as const, edges: [], diagnostics: [],
+			nodes: [
+				{ id: vm.id, kind: 'resource' as const, resourceType: type, name: 'legacy-vm', label: vm.name, hasSource: true },
+				{ id: nic.id, kind: 'resource' as const, resourceType: 'azurerm_network_interface', name: nicAddress.split('.')[1], label: nic.name, hasSource: true },
+			],
+		};
+		const file: FileResourceValues = {
+			address: type + '.legacy-vm', file: 'main.tf', blocks: [],
+			attributes: {
+				network_interface_ids: { kind: 'expression', text: `[${nicAddress}.id, "/subscriptions/x/nic2"]` },
+				resource_group_name: { kind: 'expression', text: `${groupAddress}.name` },
+			},
+		};
+		const hydrated = hydrateResourceValues(architecture, graph, [file]).resources.find(item => item.id === vm.id)!;
+		assert.deepEqual(hydrated.resourceRefs?.[bindingKey({ kind: 'setting', name: 'network_interface_ids' })], {
+			refs: [{ resourceId: nic.id, attribute: 'id' }],
+			items: [{ kind: 'ref', resourceId: nic.id, attribute: 'id' }, { kind: 'value', value: '/subscriptions/x/nic2' }],
+		});
+		assert.equal(hydrated.terraformExtras?.attrs.network_interface_ids, undefined, 'the list is editable, not Configured in Terraform');
+	} finally {
+		clearFormAttributes(type);
+	}
 });

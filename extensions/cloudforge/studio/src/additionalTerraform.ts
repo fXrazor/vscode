@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 import { getDef, type AttrDef } from './cloudlab-core/catalog/index.ts';
+import { withInferredReferenceTypes } from './referenceInference.ts';
 import { key, parseHcl, quote, type HclBlock } from './cloudlab-core/hcl.ts';
 import { isExpr, isRef, type Value } from './cloudlab-core/model.ts';
 import { resourceDefinition } from './fixture.ts';
@@ -123,7 +124,7 @@ export function resourceFromTerraform(resource: Resource, block: HclBlock, basel
 		const blocks: ResourceBlock[] = [];
 		const extras = empty();
 		for (const [name, value] of Object.entries(source.attrs)) {
-			const definition = definitions.find(attribute => attribute.name === name && attribute.type !== 'block');
+			const definition = withInferredReferenceTypes(resourceDefinition(resource).type, definitions.find(attribute => attribute.name === name && attribute.type !== 'block'));
 			const fullPath = prefix + name;
 			if (definition?.readOnly) { throw new Error(fullPath + ' is a provider output and cannot be configured.'); }
 			if (schema && [...schema.attributes, ...schema.blocks.flatMap(item => item.attributes)].some(attribute => attribute.path === fullPath && attribute.access === 'computedOnly')) { throw new Error(fullPath + ' is a provider output and cannot be configured.'); }

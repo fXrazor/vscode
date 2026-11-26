@@ -177,10 +177,7 @@ export function eligibleReferenceTargets(architecture: Architecture, resource: R
 			if (candidate.id === resource.id || candidate.kind === 'module' || candidate.provider !== resource.provider) { return false; }
 			const candidateType = resourceDefinition(candidate).type;
 			if (!definition.refTypes!.includes(candidateType)) { return false; }
-			const candidateDef = getDef(candidateType);
-			const liveOutputs = liveSchemaOutputs(liveSchemas?.[candidateType]);
-			const exported = liveOutputs.length ? [...new Set([...liveOutputs, ...(candidateDef?.exported ?? ['id'])])] : (candidateDef?.exported ?? ['id']);
-			if (!exported.includes(attribute)) { return false; }
+			if (!referenceableAttribute(candidateType, attribute, definition, liveSchemas)) { return false; }
 			return !wouldCreateReferenceCycle(architecture, resource.id, candidate.id);
 		})
 		.map(candidate => ({
@@ -188,6 +185,15 @@ export function eligibleReferenceTargets(architecture: Architecture, resource: R
 			attribute,
 			expression: resourceAddress(candidate) + '.' + attribute,
 		}));
+}
+
+/**
+ * Every Terraform resource exports `id`, even a type that is only known from an imported schema (whose definition
+ * lists no exports). A reference inferred from a `*_name` argument reads the target's `name`.
+ */
+function referenceableAttribute(type: string, attribute: string, definition: AttrDef, liveSchemas?: LiveSchemaMap): boolean {
+	if (attribute === 'id' || (definition.refInferred && attribute === 'name')) { return true; }
+	return (getDef(type)?.exported ?? []).includes(attribute) || liveSchemaOutputs(liveSchemas?.[type]).includes(attribute);
 }
 
 export function acceptsResourceRefs(architecture: Architecture, resource: Resource, refs: readonly ResourceRefEntry[], definition?: AttrDef): boolean {
@@ -228,8 +234,7 @@ export function resourceRefBindingIssue(binding: ResourceRefBinding | undefined,
 		if (!definition.refTypes.includes(targetType) || target.provider !== resource.provider) {
 			return 'The referenced resource type does not match this field.';
 		}
-		const exported = getDef(targetType)?.exported ?? ['id'];
-		if (!exported.includes(entry.attribute)) {
+		if (!referenceableAttribute(targetType, entry.attribute, definition)) {
 			return 'The referenced attribute is not exported by this resource.';
 		}
 	}
