@@ -87,6 +87,28 @@ try {
         throw "The VSIX SHA-256 is $vsixHash. Expected $($sample.sha256)."
     }
 
+    # JSON Crack (MIT, Open VSX) is pinned by build/cloudforge/pinOpenVsx.ts. Fetch the pinned
+    # archive when it is absent; the upstream bundler checks the digest again while packaging.
+    $jsonCrack = $product.builtInExtensions | Where-Object name -eq 'AykutSarac.jsoncrack-vscode'
+    $jsonCrackHash = $null
+    if (-not $jsonCrack) {
+        Write-Warning 'JSON Crack is not pinned in product.json. Run "node build/cloudforge/pinOpenVsx.ts", commit product.json, then package again to bundle it.'
+    } else {
+        if ($jsonCrack.vsix -cne ".build/cloudforge/AykutSarac.jsoncrack-vscode.$($jsonCrack.version).vsix" -or $jsonCrack.sha256 -cnotmatch '^[0-9a-f]{64}$') {
+            throw 'The JSON Crack entry in product.json was not written by pinOpenVsx.ts.'
+        }
+        $jsonCrackVsix = Join-Path $repo $jsonCrack.vsix
+        if (-not (Test-Path -LiteralPath $jsonCrackVsix -PathType Leaf)) {
+            New-Item -ItemType Directory -Path (Split-Path -Parent $jsonCrackVsix) -Force | Out-Null
+            $v = $jsonCrack.version
+            Invoke-WebRequest -Uri "https://open-vsx.org/api/AykutSarac/jsoncrack-vscode/$v/file/AykutSarac.jsoncrack-vscode-$v.vsix" -OutFile $jsonCrackVsix -TimeoutSec 60
+        }
+        $jsonCrackHash = (Get-FileHash -LiteralPath $jsonCrackVsix).Hash.ToLowerInvariant()
+        if ($jsonCrackHash -cne $jsonCrack.sha256) {
+            throw "The JSON Crack VSIX SHA-256 is $jsonCrackHash. Expected $($jsonCrack.sha256)."
+        }
+    }
+
     if (-not $UseBuiltDesktop) {
         $studioDir = Join-Path $repo 'extensions/cloudforge/studio'
         if ((Test-Path -LiteralPath (Join-Path $studioDir 'package.json') -PathType Leaf) -and
@@ -137,6 +159,14 @@ try {
         -not (Test-Path -LiteralPath (Join-Path $packedSample 'ThirdPartyNotices.txt') -PathType Leaf)) {
         throw 'The reviewed extension version or notices are missing from the desktop payload.'
     }
+    if ($jsonCrack) {
+        $packedJsonCrack = Join-Path $app 'extensions/AykutSarac.jsoncrack-vscode'
+        $jsonCrackManifest = Get-Content -LiteralPath (Join-Path $packedJsonCrack 'package.json') -Raw | ConvertFrom-Json
+        if ($jsonCrackManifest.version -ne $jsonCrack.version -or $jsonCrackManifest.license -ne 'MIT' -or
+            -not (Get-ChildItem -LiteralPath $packedJsonCrack -Filter 'LICENSE*' -File)) {
+            throw 'The JSON Crack extension version or MIT licence is missing from the desktop payload.'
+        }
+    }
 
     # A reused desktop payload may still hold the previous run's service. Remove it only when it
     # contains exactly the files this script stages; anything else needs a fresh desktop build.
@@ -186,6 +216,7 @@ try {
         ServiceSha256 = $hash
         ServiceSigned = $serviceSigned
         VsixSha256 = $vsixHash
+        JsonCrackSha256 = $jsonCrackHash
     } | ConvertTo-Json
 }
 finally {
