@@ -18,7 +18,7 @@ import { PenOptions } from './PenOptions.tsx';
 import type { InkStyle } from './ink.ts';
 import { ConnectorDropMenu } from './ConnectorDropMenu.tsx';
 import { droppedItem } from './connectorDrop.ts';
-import { elementEndpoint, endpointElementId, needsConnectionOverlay, pointEndpoint } from './connectionEndpoints.ts';
+import { elementEndpoint, endpointElementId, needsConnectionOverlay, pointEndpoint, type EndpointPort } from './connectionEndpoints.ts';
 import { connectionPathBounds } from './connectionGeometry.ts';
 import { resizeBounds } from './resizeGeometry.ts';
 import { resourceIconSize } from './resourceGeometry.ts';
@@ -30,7 +30,7 @@ import { SelectionAnchor } from './SelectionAnchor.tsx';
 import { alignmentGuides, type GuideLine } from './alignmentGuides.ts';
 import { AlignmentGuides } from './AlignmentGuides.tsx';
 import {
-	Background, BackgroundVariant, MarkerType, MiniMap, ReactFlow, SelectionMode,
+	Background, BackgroundVariant, ConnectionMode, MarkerType, MiniMap, ReactFlow, SelectionMode,
 	useNodesState, useViewport, type OnNodesChange, type ReactFlowInstance, type Viewport
 } from '@xyflow/react';
 import { BoardNode, ResourceNode, type CanvasNode } from './ResourceNode.tsx';
@@ -390,7 +390,13 @@ export const DesignCanvas = memo(function DesignCanvas({
 				nodes={(nodes[0]?.data.mode===mode ? nodes : displayNodes).map(node=>({...node,className:dropFeedback?.target===node.id?'container-drop-'+(dropFeedback.ok?'valid':'invalid'):undefined}))} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange}
 				onInit={instance => { setFlow(instance); setZoom(instance.getZoom()); onInit(instance); if(!viewports.current[mode]){autoFit.current={mode,at:performance.now()};requestAnimationFrame(()=>{void instance.fitView({padding:canvasFitPadding,maxZoom:1}).then(()=>{viewports.current[mode]=instance.getViewport();setZoom(instance.getZoom());});});} }}
 				onMoveStart={event => { if (event) { autoFit.current = { at: 0 }; } }}
-				onConnect={connection => dispatch({ type: 'connect', source: connection.source, target: connection.target })}
+				onConnect={connection => {
+					// Default sides keep the compact form; any other side (top, bottom, a reversed side) is stored on the endpoint.
+					const from = connection.sourceHandle ?? 'output'; const to = connection.targetHandle ?? 'input';
+					if (from === 'output' && to === 'input') { dispatch({ type: 'connect', source: connection.source, target: connection.target }); return; }
+					dispatch({ type: 'connectEndpoints', id: crypto.randomUUID(), source: elementEndpoint(connection.source, from as EndpointPort), target: elementEndpoint(connection.target, to as EndpointPort) });
+				}}
+				connectionMode={ConnectionMode.Loose}
 				onConnectEnd={(event, state) => {
 					// A connector released on empty canvas offers to create the element it points at.
 					const client = 'changedTouches' in event ? event.changedTouches[0] : event; const area = bounds.current?.getBoundingClientRect();

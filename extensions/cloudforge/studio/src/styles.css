@@ -932,7 +932,8 @@ dialog::backdrop { background: #12152488; backdrop-filter: blur(3px); }
 .resource-container-heading strong { max-width: 44%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 600; }
 .resource-container-heading > span { font-size: 11px; color: var(--muted); }
 .resource-container-heading small { margin-left: auto; color: var(--muted); white-space: nowrap; }
-.resource-container .react-flow__handle { top: 22px; opacity: 0; }
+.resource-container .react-flow__handle { opacity: 0; }
+.resource-container .react-flow__handle-left, .resource-container .react-flow__handle-right { top: 22px; }
 .resource-container:hover .react-flow__handle, .resource-container.is-selected .react-flow__handle { opacity: 1; }
 .container-properties { position: absolute; top: 47px; left: 12px; right: 12px; display: flex; align-items: center; gap: 16px; font-size: 10px; color: var(--muted); pointer-events: none; }
 .container-properties span { display: inline-flex; align-items: center; gap: 4px; max-width: 60%; overflow: hidden; white-space: nowrap; }

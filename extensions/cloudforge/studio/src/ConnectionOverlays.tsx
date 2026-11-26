@@ -5,7 +5,7 @@
 import { useLayoutEffect, useRef, useState, type Dispatch, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
 import { useInternalNodes, useViewport, ViewportPortal } from '@xyflow/react';
 import type { Action, Architecture, DesignConnection, DesignEndpoint, DesignMode, Position } from './model.ts';
-import { connectionElementIds, elementEndpoint, endpointElementId, needsConnectionOverlay, pointEndpoint } from './connectionEndpoints.ts';
+import { connectionElementIds, elementEndpoint, endpointPorts, type EndpointPort, endpointElementId, needsConnectionOverlay, pointEndpoint } from './connectionEndpoints.ts';
 import { canConnectEndpoints, connectableElements, connectionAnchor } from './designConnections.ts';
 import { connectionDash, connectionPath } from './connectionGeometry.ts';
 import { ConnectionTools } from './ConnectionTools.tsx';
@@ -44,7 +44,7 @@ export function ConnectionOverlays({ architecture, mode, selectedId, showLabels,
 		if (!node) { return point; }
 		const drawing = architecture.items.find(item => item.id === endpoint.elementId);
 		const port = endpoint.port ?? (side === 'source' ? 'output' : 'input');
-		const handle = node.internals.handleBounds?.[port === 'output' ? 'source' : 'target']?.find(handle => handle.id === port);
+		const handle = [...node.internals.handleBounds?.source ?? [], ...node.internals.handleBounds?.target ?? []].find(handle => handle.id === port);
 		if (handle && !drawing?.rotation) {
 			return { x: node.internals.positionAbsolute.x + handle.x + handle.width / 2, y: node.internals.positionAbsolute.y + handle.y + handle.height / 2 };
 		}
@@ -65,7 +65,7 @@ export function ConnectionOverlays({ architecture, mode, selectedId, showLabels,
 		// Empty infrastructure container space is still canvas, not an invisible connection target.
 		if (target && (!node?.querySelector('.resource-container') || hit?.closest('.resource-container-heading, .react-flow__handle'))) {
 			const port = hit?.closest<HTMLElement>('.react-flow__handle')?.dataset.handleid;
-			endpoint = elementEndpoint(target.id, port === 'input' || port === 'output' ? port : side === 'source' ? 'output' : 'input');
+			endpoint = elementEndpoint(target.id, endpointPorts.includes(port as EndpointPort) ? port as EndpointPort : side === 'source' ? 'output' : 'input');
 		}
 		const valid = !!selected && canConnectEndpoints(architecture, side === 'source' ? endpoint : selected.source, side === 'target' ? endpoint : selected.target, selected.id);
 		return { side, endpoint, valid, label: !valid ? 'Cannot connect here' : endpoint.kind === 'point' ? keys.free ? 'Free point · snapping off' : keys.straight ? 'Straight · 45° steps' : 'Loose point · hold Ctrl to place freely' : 'Attach to ' + target!.label };
@@ -153,7 +153,7 @@ function EndpointField({ architecture, connection, side, point, onChange }: { ar
 	return <fieldset><legend>{name}</legend><label>Attach to<select aria-label={name + ' endpoint target'} value={endpointElementId(endpoint) ?? ''} onChange={event => onChange(event.target.value ? elementEndpoint(event.target.value) : pointEndpoint(point))}>
 		<option value="">Loose canvas point</option>{connectableElements(architecture).map(element => <option key={element.id} value={element.id} disabled={!canConnectEndpoints(architecture, side === 'source' ? elementEndpoint(element.id) : connection.source, side === 'target' ? elementEndpoint(element.id) : connection.target, connection.id)}>{element.label}</option>)}
 	</select></label>
-		{endpoint.kind === 'element' ? <label>Port<select aria-label={name + ' endpoint port'} value={endpoint.port ?? (side === 'source' ? 'output' : 'input')} onChange={event => onChange({ ...endpoint, port: event.target.value as 'input' | 'output' })}><option value="input">Input / left</option><option value="output">Output / right</option></select></label> : <div className="endpoint-coordinates">
+		{endpoint.kind === 'element' ? <label>Port<select aria-label={name + ' endpoint port'} value={endpoint.port ?? (side === 'source' ? 'output' : 'input')} onChange={event => onChange({ ...endpoint, port: event.target.value as EndpointPort })}><option value="input">Input / left</option><option value="output">Output / right</option><option value="top">Top</option><option value="bottom">Bottom</option></select></label> : <div className="endpoint-coordinates">
 			{(['x', 'y'] as const).map(axis => <CoordinateInput key={axis + ':' + endpoint.position[axis]} label={name + ' endpoint ' + axis.toUpperCase()} value={endpoint.position[axis]} onCommit={value => onChange(pointEndpoint({ ...endpoint.position, [axis]: value }))}/>)}
 		</div>}
 	</fieldset>;
