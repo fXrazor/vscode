@@ -792,8 +792,7 @@ function ForceGraph({ spotlight, onSpotlight, snapshot, edges, membership, visib
 	// Screen pixels per graph unit, for zoom-aware labels.
 	const scale = view && svg.current ? svg.current.clientWidth / view.w : 1;
 	const base = forceSettings.radius;
-	const maxRadius = Math.max(base, ...simNodes.map(node => node.r));
-	const hubRadius = maxRadius > base * 1.15 ? Math.max(base * 1.32, base + (maxRadius - base) * 0.55) : Number.POSITIVE_INFINITY;
+	const hubRadius = base * (1 + network.sizeBy / 100 * 0.55);
 	const showLabel = (id: string, r: number) => network.labels === 'all' || id === focus || related.has(id) || id === selectedId || !!activePath?.nodes.has(id) || (network.labels === 'auto' && (nodes.length <= 36 || (!!spotlight && spotlight.size <= 60 && spotlight.has(id)) || scale >= 0.9 || r >= hubRadius || (!!query.trim() && matchesQuery(info.get(id)!, query))));
 	// Soft cluster hulls behind everything, labelled with the scope or layer they gather.
 	const hulls = network.clusters === 'none' ? [] : [...simNodes.reduce((groups, node) => { if (node.group) { groups.set(node.group, [...(groups.get(node.group) ?? []), node]); } return groups; }, new Map<string, ForceNode[]>())].filter(([, members]) => members.length > 1).map(([group, members]) => {
@@ -849,9 +848,6 @@ function ForceGraph({ spotlight, onSpotlight, snapshot, edges, membership, visib
 			{[...simNodes].sort((a, b) => a.r - b.r).map(simNode => {
 				const node = info.get(simNode.id); if (!node) { return null; }
 				const r = simNode.r; const icon = Math.round(r * 1.25);
-				const prominence = maxRadius > base ? Math.min(1, Math.max(0, (r - base) / (maxRadius - base))) : 0;
-				const discStroke = Math.round((1.6 + prominence * 1.0) * 10) / 10;
-				const labelSize = Math.round((10.5 + prominence * 4.5) * 10) / 10;
 				const overlay = overlays.byNode[node.id]; const issues = (overlay?.errors ?? 0) + (overlay?.warnings ?? 0);
 				const state = activePath ? (node.id === selectedId || node.id === pathTargetId ? ' is-focus' : activePath.nodes.has(node.id) ? ' is-related' : ' is-dim') : !focus ? '' : node.id === focus ? ' is-focus' : related.has(node.id) ? ' is-related' : ' is-dim';
 				const match = !query.trim() || matchesQuery(node, query);
@@ -860,10 +856,10 @@ function ForceGraph({ spotlight, onSpotlight, snapshot, edges, membership, visib
 					<title>{node.address}</title>
 					{node.exposure && node.exposure.kind !== 'behind-entry' && <circle r={r + 7} className="tg-force-exposed" />}
 					<circle r={r + 4} className="tg-force-halo" />
-					<circle r={r} className="tg-force-disc" style={{ strokeWidth: discStroke }} />
+					<circle r={r} className="tg-force-disc" />
 					<image href={'./assets/' + node.icon} x={-icon / 2} y={-icon / 2} width={icon} height={icon} />
 					{issues > 0 && <g transform={`translate(${r * 0.72} ${-r * 0.72})`} className={overlay?.errors ? 'tg-force-issue is-error' : 'tg-force-issue'}><circle r={7.5} /><text dy="0.35em" textAnchor="middle">{issues > 9 ? '9+' : issues}</text></g>}
-					{showLabel(node.id, r) && <text y={r + 15} textAnchor="middle" className="tg-force-label" style={{ fontSize: labelSize + 'px' }}>{node.label.length > 24 ? node.label.slice(0, 23) + '…' : node.label}</text>}
+					{showLabel(node.id, r) && <text y={r + 15} textAnchor="middle" className="tg-force-label" style={{ fontSize: Math.min(15, 11.5 + (r - base) * 0.12) + 'px' }}>{node.label.length > 24 ? node.label.slice(0, 23) + '…' : node.label}</text>}
 				</g>;
 			})}
 		</svg>}
