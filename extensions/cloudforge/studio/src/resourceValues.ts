@@ -9,6 +9,7 @@
 // secrets keep the canvas value, and the three-way save keeps the file's text for those.
 
 import { providerRegions, resourceDefinition } from './fixture.ts';
+import { withInferredReferenceTypes } from './referenceInference.ts';
 import type { Architecture, Resource, ResourceBlock } from './model.ts';
 import { projectTerraform } from './terraformProjection.ts';
 import type { HostGraphSnapshot } from './webviewBridge.ts';
@@ -342,7 +343,7 @@ export function hydrateResourceValues(architecture: Architecture, snapshot: Host
 				const existingBindings = bindings.get(resource.id) ?? [];
 				const transfer = (source: Pick<FileResourceValues, 'attributes' | 'blocks'>, fields: readonly AttrDef[], previous: readonly ResourceBlock[], oldExtras: TerraformExtraBody | undefined, blockId?: string): { values: Record<string, string>; blocks: ResourceBlock[]; extras: TerraformExtraBody } => {
 					const result: { values: Record<string, string>; blocks: ResourceBlock[]; extras: TerraformExtraBody } = { values: {}, blocks: [], extras: structuredClone(oldExtras ?? { attrs: {}, blocks: [] }) };
-					for (const definition of fields.filter(field => field.type !== 'block' && !field.readOnly)) {
+					for (const definition of fields.filter(field => field.type !== 'block' && !field.readOnly).map(field => withInferredReferenceTypes(resourceDefinition(resource).type, field)!)) {
 						const field = source.attributes[definition.name];
 						if (!field || field.kind === 'redacted') { continue; }
 						const key = !blockId ? existingBindings.find(binding => binding.path.length === 1 && binding.path[0] === definition.name && binding.target === 'setting')?.key ?? definition.name : definition.name;
