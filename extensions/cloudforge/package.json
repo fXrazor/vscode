@@ -5,6 +5,7 @@
 	"version": "0.0.1",
 	"publisher": "cloudforge",
 	"license": "MIT",
+	"icon": "resources/cloudforge-icon.png",
 	"engines": {
 		"vscode": "^1.74.0"
 	},

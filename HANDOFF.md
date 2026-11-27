@@ -1,5 +1,16 @@
 # CloudForge Code OSS handoff
 
+## Forge F Full Product Rebrand & Claude Branch Merges (`2irlth` + `2dm0k0`) — 27 November 2026
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, owner Antigravity.
+- **Merged Claude branches:**
+  - `origin/claude/project-thread-2irlth` (`76bf8fc9ad3`): startup screen auto-dismiss on workbench paint (`cloudForgeStartupScreen.ts`, `workbench.ts`).
+  - `origin/claude/project-thread-2dm0k0` (`36068991338`): Template Library specification (`docs/cloudforge/CLOUD-FORGE-TEMPLATE-LIBRARY-SPECIFICATION.md`), Electron-main broker allowlist & native `.zip` template picker (`cloudForgeService.ts`, `cloudForgeServiceChannel.ts`, `cloudForgeServiceChannel.test.ts`, `cloudForgeService.contribution.ts`), and strict extension adapters + tests (`extensions/cloudforge/src/templates/model.ts`, `extensions/cloudforge/test/templateLibraryModel.test.ts`).
+- **Complete Forge F Branding Overhaul** (from `Z:\cloudforge logo\forge-editable-svgs\forge-white-on-violet.svg` and `forge-violet-transparent.svg`):
+  - **App icons, favicons & Windows/Linux/Server assets (white-on-violet):** regenerated multi-res `resources/win32/code.ico` (`16`–`256px`), `resources/server/favicon.ico` (`16`/`32`/`48px`), `resources/win32/code_70x70.png`, `resources/win32/code_150x150.png`, `resources/linux/code.png`, `resources/server/code-192.png`, `resources/server/code-512.png`, and all 14 Inno Setup wizard 24-bit bitmaps (`resources/win32/inno-big-*.bmp`, `resources/win32/inno-small-*.bmp`).
+  - **Workbench titlebar, empty-editor watermarks & startup screen (replacing default VS Code logos):** replaced `src/vs/workbench/browser/media/code-icon.svg`, `src/vs/sessions/browser/media/vscode-icon.svg`, `src/vs/workbench/browser/parts/editor/media/letterpress-{dark,light,hcDark,hcLight}.svg`, and `src/vs/code/electron-browser/workbench/media/cloudforge-mark.png`.
+  - **CloudForge Studio, Welcome, Extensions list & Activity Bar:** updated `extensions/cloudforge/studio/assets/cloudforge.png`, `extensions/cloudforge/media/studio/assets/cloudforge.png`, `extensions/cloudforge-welcome/media/cloudforge.png`, and `extensions/cloudforge/studio/index.html` favicon with white-on-violet Forge F; added transparent violet Forge F (`extensions/cloudforge/resources/cloudforge-icon.png` + `extensions/cloudforge-welcome/media/cloudforge-icon.png`) wired as `"icon"` in both extension `package.json` manifests; replaced the cloud Activity Bar icon (`extensions/cloudforge/resources/cloudforge-activity.svg`) with the Forge F mark (`fill="currentColor"`).
+
 ## Studio Rotate-Handle Deduplication, Source-Port Drop Preservation, Circular Connector Wheel & Sticky-Note Presets — 27 November 2026
 
 - **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `1b264e9658d`, owner Antigravity. Zero overlap with unmerged Claude branches (`2dm0k0`, `ksv8z9`) or Rust; no installer build touched.
