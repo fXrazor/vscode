@@ -43,7 +43,7 @@ import { cloudForgeStartupTheme, showCloudForgeStartupScreen } from './cloudForg
 		}
 		try {
 			const theme = cloudForgeStartupTheme(configuration.partsSplash?.baseTheme, configuration.colorScheme);
-			setStartupStatus = showCloudForgeStartupScreen({ theme, delayMs: 400, slowAfterMs: 20_000 });
+			setStartupStatus = showCloudForgeStartupScreen({ theme, delayMs: 400, slowAfterMs: 8_000 });
 			setStartupStatus('Loading the workbench…');
 		} catch {
 			// Branding must never block startup.
