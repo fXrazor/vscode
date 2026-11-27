@@ -77,6 +77,24 @@ export interface HostViewState {
 	readonly nodePositions: Partial<Record<'visual' | 'technical', Readonly<Record<string, HostPoint>>>>;
 	readonly checkpoints: readonly unknown[];
 	readonly sampleContext: unknown;
+	/** Technical Graph presentation and graph-only pins; never merged into nodePositions. */
+	readonly graph?: HostGraphViewState;
+}
+
+export interface HostGraphViewState {
+	readonly lens: string;
+	readonly layout: string;
+	readonly route: string;
+	readonly density: string;
+	readonly overlay: string;
+	readonly spacing: 'auto' | number;
+	readonly height: number;
+	readonly showMembership: boolean;
+	readonly showInputs?: boolean;
+	readonly expanded: readonly string[];
+	readonly collapsed?: readonly string[];
+	readonly pins: Readonly<Record<string, HostPoint>>;
+	readonly network?: { readonly sizeBy: number; readonly sizeCount: string; readonly spread: number; readonly linkLength: number; readonly spacing: number; readonly clusters: string; readonly labels: string; readonly links: string };
 }
 
 export interface HostCloudRegion {
@@ -404,6 +422,7 @@ export type HostInboundMessage =
 	| { readonly type: 'openExport' }
 	| { readonly type: 'openTemplates' }
 	| { readonly type: 'exportResult'; readonly ok: boolean; readonly message: string }
+	| { readonly type: 'applyBundleLayout'; readonly architecture: unknown }
 	| { readonly type: 'focusModeChanged'; readonly active: boolean };
 
 export type HostOutboundMessage =
@@ -426,7 +445,7 @@ export type HostOutboundMessage =
 	| { readonly type: 'requestEngineValidate'; readonly engine?: 'openTofu' | 'terraform' }
 	| { readonly type: 'requestEnginePlan'; readonly engine?: 'openTofu' | 'terraform' }
 	| { readonly type: 'requestEngineInitOffline'; readonly engine?: 'openTofu' | 'terraform' }
-	| { readonly type: 'exportArtifact'; readonly format: 'svg' | 'png' | 'markdown'; readonly suggestedFileName: string; readonly content: string; readonly encoding: 'utf8' | 'base64' };
+	| { readonly type: 'exportArtifact'; readonly format: 'svg' | 'png' | 'markdown' | 'bundle'; readonly suggestedFileName: string; readonly content: string; readonly encoding: 'utf8' | 'base64' };
 
 interface VsCodeWebviewApi {
 	postMessage(message: unknown): void;

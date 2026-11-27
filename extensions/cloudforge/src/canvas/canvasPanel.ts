@@ -152,8 +152,11 @@ export interface CanvasPanelHost {
 export class CloudForgeCanvasPanel implements Disposable {
 	private panel: WebviewPanel | undefined;
 	private ready = false;
+	private readonly pendingBundleLayouts = new Map<string, unknown>();
 	private showSequence = 0;
 	private graph: CanvasGraphSnapshot | undefined;
+	private readonly schemaRequests = new Map<string, number>();
+	private readonly draftRequests = new Map<string, number>();
 	private notice: CanvasNotice | null = null;
 	private pendingValidation: { readonly scope: 'architecture' | 'resource'; readonly nodeId?: string } | undefined;
 	private pendingSelectNodeId: string | undefined;
@@ -300,6 +303,25 @@ export class CloudForgeCanvasPanel implements Disposable {
 			this.post({ type: 'openExport' });
 		} else {
 			this.pendingOpenExport = true;
+		}
+	}
+
+	/**
+	 * Queues a bundle's canvas model for one architecture. It is sent with that architecture's next
+	 * graph (or straight away when it is already showing), then dropped.
+	 */
+	seedBundleLayout(architectureId: string, architecture: unknown): void {
+		this.pendingBundleLayouts.set(architectureId, architecture);
+		if (this.ready && this.graph?.architectureId === architectureId) {
+			this.flushBundleLayout(architectureId);
+		}
+	}
+
+	private flushBundleLayout(architectureId: string): void {
+		const layout = this.pendingBundleLayouts.get(architectureId);
+		if (layout !== undefined) {
+			this.pendingBundleLayouts.delete(architectureId);
+			this.post({ type: 'applyBundleLayout', architecture: layout });
 		}
 	}
 
@@ -600,12 +622,16 @@ export class CloudForgeCanvasPanel implements Disposable {
 				return;
 			}
 			case 'requestSchema': {
+				const graph = this.graph;
+				const key = message.kind + ':' + message.typeName;
+				const request = (this.schemaRequests.get(key) ?? 0) + 1;
+				this.schemaRequests.set(key, request);
 				if (!this.host.onLoadResourceSchema) {
 					this.post({ type: 'liveSchema', typeName: message.typeName, schema: null });
 					return;
 				}
 				const schema = await this.host.onLoadResourceSchema(message.kind, message.typeName);
-				if (this.panel && this.ready) {
+				if (this.panel && this.ready && this.graph === graph && this.schemaRequests.get(key) === request) {
 					this.post({ type: 'liveSchema', typeName: message.typeName, schema });
 				}
 				return;
@@ -737,8 +763,11 @@ export class CloudForgeCanvasPanel implements Disposable {
 				return;
 			}
 			case 'renderResourceDraft': {
+				const graph = this.graph;
+				const request = (this.draftRequests.get(message.resourceId) ?? 0) + 1;
+				this.draftRequests.set(message.resourceId, request);
 				const preview = this.host.onRenderResourceDraft ? await this.host.onRenderResourceDraft(message.resourceId, message.draft) : null;
-				if (this.panel && this.ready) {
+				if (this.panel && this.ready && this.graph === graph && this.draftRequests.get(message.resourceId) === request) {
 					this.post({ type: 'resourceDraftRendered', resourceId: message.resourceId, preview });
 				}
 				return;
@@ -819,6 +848,7 @@ export class CloudForgeCanvasPanel implements Disposable {
 			viewState,
 			notice: this.notice,
 		});
+		this.flushBundleLayout(this.graph.architectureId);
 		if (this.host.onReadResourceValues) {
 			const snapshot = this.graph;
 			void this.host.onReadResourceValues(snapshot.workspaceId, snapshot.architectureId, snapshot.sourceRevision).then(values => {

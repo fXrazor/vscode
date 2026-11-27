@@ -13,8 +13,17 @@ import {
 	renderDraftPreview,
 } from '../src/canvas/schemaForm.ts';
 import type { CanvasGraphSnapshot, CanvasNodeSummary } from '../src/canvas/protocol.ts';
+import type { FormSchema } from '../src/canvas/schemaForm.ts';
 
 const rev = 'a'.repeat(64);
+
+test('dynamic schema literals stay typed HCL rather than quoted JSON text', () => {
+	const schema: FormSchema = { kind: 'resource', typeName: 'aws_dynamic_test', providerSource: 'hashicorp/aws', providerVersion: 'test', description: '', docsUrl: '', exampleHcl: '', attributes: [{ name: 'config', path: 'config', access: 'optional', valueType: 'json', description: '' }], blocks: [], outputs: [] };
+	const draft = createInitialDraft({ id: 'test', kind: 'resource', resourceType: schema.typeName, name: 'example', label: '', hasSource: false }, schema, rev);
+	const rendered = renderDraftPreview(schema, { ...draft, attributes: { config: { kind: 'literal', value: 42 } } });
+	assert.equal(rendered.hasErrors, false);
+	assert.match(rendered.hcl, /config\s*=\s*42/);
+});
 
 const rgNode: CanvasNodeSummary = {
 	id: 'n1',

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { Architecture, DesignMode } from './model.ts';
 import { exportPresentation } from './exportPresentation.ts';
 import { Download, PanelLeft, PanelRight, Pencil, Waypoints, Moon, Sun, Undo2, Redo2, Menu, RefreshCw, ShieldCheck, Save, Maximize2, Minimize2 } from 'lucide-react';
@@ -20,9 +20,10 @@ export interface TopbarHostProps {
 	readonly onExportArtifact?: (format: 'svg' | 'png') => void;
 }
 
-export function VisualTopbar({ mode, onMode, architecture, name, onRename, onTechnical, onExport, onToggleLibrary, onToggleInspector, revisions, onUndo, onRedo, canRedo, theme, onTheme, libraryOpen, inspectorOpen, errors, warnings, onIssues, host }: {
+export function VisualTopbar({ mode, onMode, architecture, name, onRename, onTechnical, onExport, onExportBundle, onImportBundle, onToggleLibrary, onToggleInspector, revisions, onUndo, onRedo, canRedo, theme, onTheme, libraryOpen, inspectorOpen, errors, warnings, onIssues, host }: {
  mode: DesignMode; onMode: (mode: DesignMode) => void; architecture: Architecture; name: string;
  onRename: (name: string) => void; onTechnical: () => void; onExport: () => void;
+ onExportBundle?: () => void; onImportBundle?: (file: File) => void;
  onToggleLibrary: () => void; onToggleInspector: () => void; revisions: number;
  onUndo: () => void; onRedo: () => void; canRedo: boolean;
  theme: 'light' | 'dark'; onTheme: () => void;
@@ -30,6 +31,8 @@ export function VisualTopbar({ mode, onMode, architecture, name, onRename, onTec
  host?: TopbarHostProps;
 }) {
  const [environment, setEnvironment] = useState('Development');
+ const bundleInput = useRef<HTMLInputElement>(null);
+ const closeMenus = (target: Element) => { const menu = target.closest('details'); if (menu) { (menu as HTMLDetailsElement).open = false; } };
  const revisionLabel = host?.isHosted
   ? (host.sourceRevision ? 'rev ' + host.sourceRevision.slice(0, 8) : 'Sample preview') + (host.sourceRevision && host.isDirty ? ' · Modified' : host.status === 'partial' ? ' · Partial' : '')
   : 'Sample draft';
@@ -55,7 +58,10 @@ export function VisualTopbar({ mode, onMode, architecture, name, onRename, onTec
     <button aria-label="Configuration" title="Infrastructure Configuration View" aria-pressed={mode === 'technical'} onClick={onTechnical}><Waypoints /></button>
    </div>
    <button aria-label="Toggle light or dark theme" onClick={onTheme}>{theme === 'dark' ? <Sun /> : <Moon />}</button>
-   <details className="shell-export" onKeyDown={event => { if (event.key === 'Escape') { event.currentTarget.open = false; event.currentTarget.querySelector('summary')?.focus(); } }}><summary aria-label="Export architecture"><Download /><span>Export</span></summary><div onClick={event => { const menu = event.currentTarget.parentElement as HTMLDetailsElement; menu.open = false; menu.querySelector('summary')?.focus(); }}>
+   <details className="shell-export"><summary aria-label="Export architecture"><Download /><span>Export</span></summary><div>
+    {onExportBundle && <button title="Terraform, canvas layout, drawings, variables and diagram in one portable .zip" onClick={event => { closeMenus(event.currentTarget); onExportBundle(); }}>Project bundle (.zip)</button>}
+    {onImportBundle && <button title="Open a CloudForge project bundle (.cloudforge.zip)" onClick={event => { closeMenus(event.currentTarget); bundleInput.current?.click(); }}>Import project bundle…</button>}
+    {(onExportBundle || onImportBundle) && <hr aria-hidden="true" />}
     <button onClick={onExport}>Graph JSON</button>
     <button onClick={() => { if (host?.onExportArtifact) { host.onExportArtifact('svg'); } else { void exportPresentation(architecture, 'svg'); } }}>SVG image</button>
     <button onClick={() => { if (host?.onExportArtifact) { host.onExportArtifact('png'); } else { void exportPresentation(architecture, 'png'); } }}>PNG image</button>
@@ -68,11 +74,13 @@ export function VisualTopbar({ mode, onMode, architecture, name, onRename, onTec
    {host?.isHosted && host.sourceRevision && host.isDirty && <button disabled={host.saving} onClick={host.onSaveDraft}>Preview and save Terraform draft</button>}
    {host?.isHosted && host.onToggleFocusMode && <button aria-pressed={!!host.focusMode} onClick={host.onToggleFocusMode}>{host.focusMode ? 'Exit Canvas Focus Mode' : 'Focus Canvas (Full Screen)'}</button>}
    <button disabled={!revisions} onClick={onUndo}>Undo</button><button disabled={!canRedo} onClick={onRedo}>Redo</button>
-   <button aria-expanded={libraryOpen} onClick={onToggleLibrary}>{libraryOpen?'Hide':'Show'} resource library</button><button aria-expanded={inspectorOpen} onClick={onToggleInspector}>{inspectorOpen?'Hide':'Show'} resource inspector</button><button onClick={onIssues}>{host?.isHosted ? 'Checks' : 'Local checks'} · {errors} {errors === 1 ? 'error' : 'errors'} · {warnings} {warnings === 1 ? 'warning' : 'warnings'}</button>
+   <button aria-expanded={libraryOpen} onClick={onToggleLibrary}>{libraryOpen?'Hide':'Show'} resource library</button><button aria-expanded={inspectorOpen} onClick={onToggleInspector}>{inspectorOpen?'Hide':'Show'} resource inspector</button><button onClick={onIssues}>Local checks · {errors} errors · {warnings} warnings</button>
    <button onClick={() => onMode('visual')}>Architecture view</button><button onClick={onTechnical}>Configuration view</button>
    <button onClick={onTheme}>Switch to {theme === 'dark' ? 'light' : 'dark'} theme</button>
+   {onExportBundle && <button onClick={onExportBundle}>Export project bundle (.zip)</button>}{onImportBundle && <button onClick={() => bundleInput.current?.click()}>Import project bundle…</button>}
    <button onClick={onExport}>Export graph JSON</button><button onClick={() => { if (host?.onExportArtifact) { host.onExportArtifact('svg'); } else { void exportPresentation(architecture, 'svg'); } }}>Export SVG</button>
    <button onClick={() => { if (host?.onExportArtifact) { host.onExportArtifact('png'); } else { void exportPresentation(architecture, 'png'); } }}>Export PNG</button><button onClick={() => { void exportPresentation(architecture, 'pdf'); }}>Print / Save PDF</button>
   </div></details>
+  {onImportBundle && <input ref={bundleInput} type="file" accept=".zip,application/zip" hidden aria-hidden="true" tabIndex={-1} onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) { onImportBundle(file); } }} />}
  </header>;
 }

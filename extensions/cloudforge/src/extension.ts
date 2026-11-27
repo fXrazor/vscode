@@ -3,11 +3,13 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { selectLockedSnapshot } from './canvas/lockedCatalogue';
 import {
 	commands,
 	ConfigurationTarget,
 	Diagnostic,
 	DiagnosticSeverity,
+	env,
 	EventEmitter,
 	l10n,
 	languages,
@@ -27,6 +29,8 @@ import {
 	type TreeView
 } from 'vscode';
 import { activateProjects } from './project/index';
+import { StartupSequence } from './startup/startupSequence';
+import { showStartupStatus } from './startup/startupStatus';
 import { registerTerraformEditorProviders } from './editor/providers';
 import {
 	extractTerraformReferenceAtPosition,
@@ -72,7 +76,6 @@ import {
 	parseSaveAllPreview,
 	parseEngineValidateReport,
 	parseExportAuditReport,
-	parseMirrorPackages,
 	parseModuleInspection,
 	parseOfflineMirrorReadiness,
 	parseSchemaDiffReport,
@@ -82,9 +85,25 @@ import {
 	parseCatalogueTypes,
 	parseFormCoverage,
 	parseSchemaPreview,
-	selectBestSnapshotForType,
 	type ServicePollEvent
 } from './canvas/serviceAdapters';
+import {
+	confirmAndEvictMirrorPackage,
+	runGuidedMirrorCleanup,
+	runOfflineProviderMirrorManager,
+	runVerifiedMirrorIntegrityCheck,
+	type OfflineMirrorHost
+} from './providerMirror/manager';
+import {
+	formatMirrorBytes,
+	formatMirrorPackageKey,
+	parseMirrorInventory,
+	parseMirrorPackageKeyStrict,
+	resolveMirrorExtractTarget,
+	type MirrorPackageKey
+} from './providerMirror/model';
+import { buildProvidersModel, isProviderAddress, LOCAL_PLATFORM, newestMatchingVersion, parseProviderVersions, shortProviderName, type ProvidersModel } from './providers/model';
+import { ProvidersViewProvider, registryPageUrl, type ProvidersNode } from './providers/providersView';
 
 interface WorkspaceArchitecture {
 	readonly architectureId: string;
@@ -390,6 +409,8 @@ function errorMessage(code: string): string {
 		case 'WORKSPACE_UNAVAILABLE': return l10n.t('The selected workspace is not available.');
 		case 'LIMIT_EXCEEDED': return l10n.t('The workspace exceeds the CloudForge inspection limit.');
 		case 'SCOPE_DENIED': return l10n.t('This workspace is no longer active in this window.');
+		case 'REGISTRY_UNAVAILABLE': return l10n.t('The provider registry could not be reached, or it has no release for that version and platform.');
+		case 'ALREADY_EXISTS': return l10n.t('A different archive for that provider version is already downloaded.');
 		default: return l10n.t('The CloudForge service could not complete the request.');
 	}
 }
@@ -698,6 +719,13 @@ export function activate(context: ExtensionContext): void {
 	let lastValidationRunId: string | null = null;
 	let cachedCatalogueSnapshots: readonly CanvasCatalogueSnapshot[] | undefined;
 	const cachedLiveSchemas = new Map<string, FormSchema | null>();
+	const selectedSchemaKeys = new Map<string, string>();
+	const selectedSchemaSnapshots = new Map<string, CanvasCatalogueSnapshot>();
+	const schemaContext = () => {
+		const graph = provider.getGraph();
+		return graph ? JSON.stringify([graph.workspaceId, graph.architectureId, graph.sourceRevision]) : '';
+	};
+	const selectedSchemaKey = (kind: string, typeName: string) => selectedSchemaKeys.get(`${schemaContext()}:${kind}:${typeName}`);
 	const cachedCloudRegions = new Map<'azure' | 'aws' | 'google', CanvasCloudRegionsPayload | null>();
 
 	async function loadCloudRegions(provider: 'azure' | 'aws' | 'google'): Promise<CanvasCloudRegionsPayload | undefined> {
@@ -874,13 +902,15 @@ export function activate(context: ExtensionContext): void {
 		workspaceId: string,
 		architectureId: string,
 		sourceRevision: string,
-		engine?: 'openTofu' | 'terraform'
+		engine?: 'openTofu' | 'terraform',
+		createLockFile?: boolean
 	) {
 		const result = await callService<unknown>('runEngineInitOffline', {
 			workspaceId,
 			architectureId,
 			expectedSourceRevision: sourceRevision,
 			...(engine ? { engine } : {}),
+			...(createLockFile ? { createLockFile: true } : {}),
 		});
 		if (!result.ok) {
 			const message = result.error.code === 'STALE_SOURCE'
@@ -1064,16 +1094,23 @@ export function activate(context: ExtensionContext): void {
 	}
 
 	async function loadResourceSchema(kind: 'resource' | 'dataSource', typeName: string): Promise<FormSchema | null> {
-		const cacheKey = `${kind}:${typeName}`;
+		const graph = provider.getGraph();
+		if (!graph) { return null; }
+		const context = schemaContext();
+		// The guarded service supplies both requirement addresses and exact lock entries.
+		// Re-read for each selection: the graph's source hash need not include the lock file.
+		const report = await inspectArchitectureDependencies(graph.workspaceId, graph.architectureId, graph.sourceRevision);
+		const snapshots = await loadCatalogueSnapshots();
+		const snap = selectLockedSnapshot(snapshots, typeName, report, graph.sourceRevision);
+		const selectionKey = `${context}:${kind}:${typeName}`;
+		if (schemaContext() !== context) { return null; }
+		if (!snap) { selectedSchemaKeys.delete(selectionKey); return null; }
+		const cacheKey = `${selectionKey}:${snap.address}:${snap.version}:${snap.sha256}`;
+		selectedSchemaKeys.set(selectionKey, cacheKey);
+		selectedSchemaSnapshots.set(cacheKey, snap);
 		const cached = cachedLiveSchemas.get(cacheKey);
 		if (cached !== undefined) {
 			return cached;
-		}
-		const snapshots = await loadCatalogueSnapshots();
-		const snap = selectBestSnapshotForType(snapshots, typeName);
-		if (!snap) {
-			cachedLiveSchemas.set(cacheKey, null);
-			return null;
 		}
 		const result = await callService<unknown>('getResourceFormSchema', {
 			key: {
@@ -1092,6 +1129,7 @@ export function activate(context: ExtensionContext): void {
 		const bundled = lookupBundledSchema({ kind: kind === 'dataSource' ? 'data' : 'resource', resourceType: typeName });
 		let adapted = mapRustFormSchemaToCanvasFormSchema(result.value, bundled) ?? null;
 		if (adapted) {
+			adapted = { ...adapted, selection: { sourceRevision: graph.sourceRevision, address: snap.address, snapshotSha256: snap.sha256, lockedVersionVerified: true } };
 			const coverage = await callService<unknown>('getCatalogueCoverage', {
 				key: { address: snap.address, version: snap.version, formatVersion: snap.formatVersion, sha256: snap.sha256 },
 				kind,
@@ -1349,8 +1387,13 @@ export function activate(context: ExtensionContext): void {
 		},
 		async onRenderResourceDraft(resourceId, draft) {
 			const typeName = typeof draft.typeName === 'string' ? draft.typeName : '';
-			const snap = selectBestSnapshotForType(await loadCatalogueSnapshots(), typeName);
-			if (!snap) {
+			const graph = provider.getGraph();
+			const previousKey = selectedSchemaKey('resource', typeName);
+			if (!graph?.nodes.some(node => node.id === resourceId && node.resourceType === typeName)) { return null; }
+			const schema = await loadResourceSchema('resource', typeName);
+			const currentKey = selectedSchemaKey('resource', typeName);
+			const snap = currentKey ? selectedSchemaSnapshots.get(currentKey) : undefined;
+			if (!schema || !snap || !previousKey || previousKey !== currentKey || provider.getGraph() !== graph) {
 				return null;
 			}
 			const result = await callService<unknown>('renderResourceDraft', {
@@ -1372,7 +1415,9 @@ export function activate(context: ExtensionContext): void {
 		async onExportArtifact(format, suggestedFileName, content, encoding) {
 			const folder = workspace.workspaceFolders?.[0]?.uri;
 			const defaultUri = folder ? Uri.joinPath(folder, suggestedFileName) : Uri.file(suggestedFileName);
-			const filters: Record<string, string[]> = format === 'svg'
+			const filters: Record<string, string[]> = format === 'bundle'
+				? { 'CloudForge Project Bundle': ['zip'] }
+				: format === 'svg'
 				? { 'SVG Diagram': ['svg'] }
 				: format === 'png'
 					? { 'PNG Image': ['png'] }
@@ -1389,7 +1434,7 @@ export function activate(context: ExtensionContext): void {
 				defaultUri,
 				filters,
 				saveLabel: l10n.t('Export'),
-				title: l10n.t('Export CloudForge Architecture'),
+				title: format === 'bundle' ? l10n.t('Export CloudForge Project Bundle') : l10n.t('Export CloudForge Architecture'),
 			});
 			if (!target) {
 				return { ok: false, message: l10n.t('Export cancelled.') };
@@ -1427,11 +1472,14 @@ export function activate(context: ExtensionContext): void {
 			return graph ? toCanvasSnapshot(graph, currentArchitectureName) : undefined;
 		},
 		getCachedSchema(kind, typeName) {
-			return cachedLiveSchemas.get(`${kind}:${typeName}`) ?? undefined;
+			const key = selectedSchemaKey(kind, typeName);
+			return key ? cachedLiveSchemas.get(key) ?? undefined : undefined;
 		},
 		listCachedSchemas() {
 			const out: FormSchema[] = [];
-			for (const schema of cachedLiveSchemas.values()) {
+			for (const [selection, key] of selectedSchemaKeys) {
+				if (!selection.startsWith(schemaContext() + ':')) { continue; }
+				const schema = cachedLiveSchemas.get(key);
 				if (schema) {
 					out.push(schema);
 				}
@@ -2136,43 +2184,417 @@ export function activate(context: ExtensionContext): void {
 			);
 		}
 	}));
-	context.subscriptions.push(commands.registerCommand('cloudforge.extractMirrorSchema', async () => {
+	/** Downloads each provider version through the Rust service, then extracts its schema for this PC. */
+	/** Version quick pick from the registry (cached); falls back to typing a version when offline. */
+	async function pickProviderVersion(address: string): Promise<string | undefined> {
+		const loaded = await window.withProgress({ location: ProgressLocation.Window, title: l10n.t('Loading {0} versions…', shortProviderName(address)) }, () => providersView.versionsFor(address));
+		const model = providersView.current;
+		const installed = new Set(model?.installed.find(row => row.address === address)?.versions.map(row => row.version) ?? []);
+		const used = model?.project.find(row => row.address === address)?.version;
+		const typeIt = l10n.t('Type a version…');
+		if (loaded?.versions.length) {
+			const picked = await window.showQuickPick([
+				...loaded.versions.map((version, index) => ({
+					label: version,
+					description: [index === 0 ? l10n.t('latest') : '', version === used ? l10n.t('used by this project') : '', installed.has(version) ? l10n.t('downloaded') : ''].filter(Boolean).join(' · '),
+				})),
+				{ label: typeIt, description: '' },
+			], {
+				title: l10n.t('{0}: choose a version', shortProviderName(address)),
+				placeHolder: loaded.stale ? l10n.t('Offline: showing the last list fetched from the registry') : l10n.t('Older projects can keep older versions side by side'),
+				matchOnDescription: true,
+			});
+			if (!picked || picked.label !== typeIt) {
+				return picked?.label;
+			}
+		}
+		return (await window.showInputBox({
+			title: l10n.t('{0}: version', shortProviderName(address)),
+			prompt: loaded ? undefined : l10n.t('The registry could not be reached. Type an exact version, such as 3.116.0.'),
+			value: used ?? '',
+			validateInput: text => /^\d+\.\d+\.\d+([-+][A-Za-z0-9.-]+)?$/.test(text.trim()) ? undefined : l10n.t('Enter an exact version such as 3.116.0.'),
+		}))?.trim();
+	}
+
+	const providerErrorMessage = (code: string) => code === 'WORKSPACE_UNAVAILABLE'
+		? l10n.t('No usable OpenTofu or Terraform CLI was found on this PC.')
+		: code === 'INVALID_STATE' ? l10n.t('That provider package is in use; try again shortly.') : errorMessage(code);
+	async function downloadProviderVersions(items: readonly { readonly address: string; readonly version: string }[], platforms: readonly string[], options: { readonly quiet?: boolean } = {}): Promise<readonly string[]> {
+		const failed: string[] = [];
+		await window.withProgress({ location: ProgressLocation.Notification, title: l10n.t('Downloading providers'), cancellable: false }, async progress => {
+			for (const [index, item] of items.entries()) {
+				const label = `${shortProviderName(item.address)} ${item.version}`;
+				progress.report({ message: l10n.t('{0} ({1} of {2})', label, index + 1, items.length), increment: index ? 100 / items.length : 0 });
+				const downloaded = await callService<unknown>('downloadProviderPackage', { address: item.address, version: item.version, platforms: [...platforms] });
+				if (!downloaded.ok && downloaded.error.code !== 'ALREADY_EXISTS') {
+					failed.push(label + ': ' + providerErrorMessage(downloaded.error.code));
+					continue;
+				}
+				if (platforms.includes(LOCAL_PLATFORM)) {
+					progress.report({ message: l10n.t('Extracting the {0} schema…', label) });
+					const extracted = await callService<unknown>('extractProviderSchemaFromMirror', { address: item.address, version: item.version });
+					if (!extracted.ok) {
+						failed.push(l10n.t('{0}: downloaded, but the schema could not be extracted ({1})', label, providerErrorMessage(extracted.error.code)));
+					}
+				}
+			}
+		});
+		cachedCatalogueSnapshots = undefined;
+		cachedLiveSchemas.clear();
+		const graph = provider.getGraph();
+		if (graph) {
+			canvas.updateIfOpen(toCanvasSnapshot(graph, currentArchitectureName));
+		}
+		await providersView.refresh();
+		if (options.quiet) {
+			return failed;
+		}
+		if (failed.length) {
+			void window.showWarningMessage(l10n.t('Some providers could not be prepared: {0}', failed.join('; ')));
+		} else {
+			void window.showInformationMessage(items.length === 1
+				? l10n.t('{0} {1} is downloaded and its schema is ready.', shortProviderName(items[0].address), items[0].version)
+				: l10n.t('{0} providers are downloaded and their schemas are ready.', items.length));
+		}
+		return failed;
+	}
+
+	/**
+	 * Get Ready: one step from "Terraform on disk" to "schemas in Studio, init and plan done".
+	 * Downloads locked-but-missing versions, picks the newest version that fits the constraint for
+	 * providers with no lock entry (older projects), extracts schemas, runs offline init (creating
+	 * the lock file only when there is none), then a credential-free plan. Every download and write
+	 * goes through the Rust service; this function only orchestrates.
+	 */
+	async function getArchitectureReady(): Promise<void> {
+		const graph = provider.getGraph();
+		if (!graph) {
+			void window.showInformationMessage(l10n.t('Open an architecture first, then run Get Ready.'));
+			return;
+		}
+		await window.withProgress({ location: ProgressLocation.Window, title: l10n.t('Checking providers…') }, () => providersView.refresh());
+		const model = providersView.current;
+		if (!model?.hasArchitecture) {
+			void window.showWarningMessage(l10n.t('The provider report for this architecture could not be read.'));
+			return;
+		}
+		const showProviders = l10n.t('Show Providers');
+		const reveal = (choice: string | undefined) => { if (choice === showProviders) { void commands.executeCommand('cloudforge.providers.focus'); } };
+		const conflicts = model.project.filter(row => row.status === 'conflict');
+		if (conflicts.length) {
+			void window.showWarningMessage(
+				l10n.t('Fix the version conflict for {0} first: the lock file and required_providers disagree.', conflicts.map(row => row.display).join(', ')),
+				showProviders
+			).then(reveal);
+			return;
+		}
+		const installedFor = (address: string) => (model.installed.find(row => row.address === address)?.versions ?? []).filter(row => row.platforms.includes(LOCAL_PLATFORM));
+		const downloads: { address: string; version: string }[] = [];
+		const extracts: { address: string; version: string }[] = [];
+		const steps: string[] = [];
+		const problems: string[] = [];
+		for (const row of model.project) {
+			if (!row.address) {
+				problems.push(l10n.t('{0} has no registry address', row.display));
+				continue;
+			}
+			if (row.status === 'notDownloaded' && row.version) {
+				downloads.push({ address: row.address, version: row.version });
+				steps.push(l10n.t('Download {0} {1}', row.display, row.version));
+			} else if (row.status === 'schemaNotExtracted' && row.version) {
+				extracts.push({ address: row.address, version: row.version });
+				steps.push(l10n.t('Extract the {0} {1} schema', row.display, row.version));
+			} else if (row.status === 'unlocked') {
+				const listed = await providersView.versionsFor(row.address);
+				const local = installedFor(row.address).map(entry => entry.version);
+				const picked = newestMatchingVersion(listed?.versions ?? [], row.constraint) ?? newestMatchingVersion(local, row.constraint);
+				if (!picked) {
+					problems.push(listed ? l10n.t('no {0} release fits {1}', row.display, row.constraint ?? '') : l10n.t('{0} versions could not be loaded (offline?)', row.display));
+					continue;
+				}
+				const have = installedFor(row.address).find(entry => entry.version === picked);
+				if (!have) {
+					downloads.push({ address: row.address, version: picked });
+					steps.push(row.constraint ? l10n.t('Download {0} {1}, the newest that fits {2}', row.display, picked, row.constraint) : l10n.t('Download {0} {1}, the latest', row.display, picked));
+				} else if (!have.hasSchema) {
+					extracts.push({ address: row.address, version: picked });
+					steps.push(l10n.t('Extract the {0} {1} schema', row.display, picked));
+				}
+			}
+		}
+		if (problems.length) {
+			void window.showWarningMessage(l10n.t('Get Ready stopped: {0}.', problems.join('; ')), showProviders).then(reveal);
+			return;
+		}
+		const creatingLock = model.lockState === 'absent' && model.project.length > 0;
+		steps.push(creatingLock ? l10n.t('Initialize offline and create .terraform.lock.hcl') : l10n.t('Initialize offline from the local provider mirror'));
+		steps.push(l10n.t('Run a credential-free plan'));
+		const go = l10n.t('Get Ready');
+		const noPlan = l10n.t('Without Plan');
+		const choice = await window.showInformationMessage(
+			l10n.t('Get {0} ready?', currentArchitectureName),
+			{ modal: true, detail: steps.map((step, index) => `${index + 1}. ${step}`).join('\n') },
+			go, noPlan
+		);
+		if (choice !== go && choice !== noPlan) {
+			return;
+		}
+		if (downloads.length) {
+			const failed = await downloadProviderVersions(downloads, [LOCAL_PLATFORM], { quiet: true });
+			if (failed.length) {
+				void window.showWarningMessage(l10n.t('Get Ready stopped: {0}', failed.join('; ')), showProviders).then(reveal);
+				return;
+			}
+		}
+		for (const item of extracts) {
+			const extracted = await window.withProgress(
+				{ location: ProgressLocation.Notification, title: l10n.t('Extracting the {0} {1} schema…', shortProviderName(item.address), item.version) },
+				() => callService<unknown>('extractProviderSchemaFromMirror', { address: item.address, version: item.version })
+			);
+			if (!extracted.ok) {
+				void window.showWarningMessage(l10n.t('Get Ready stopped: the {0} schema could not be extracted ({1}).', shortProviderName(item.address), providerErrorMessage(extracted.error.code)), showProviders).then(reveal);
+				return;
+			}
+		}
+		if (extracts.length) {
+			cachedCatalogueSnapshots = undefined;
+			cachedLiveSchemas.clear();
+		}
+		const current = provider.getGraph();
+		if (!current || current.architectureId !== graph.architectureId) {
+			return;
+		}
+		const init = await window.withProgress(
+			{ location: ProgressLocation.Notification, title: l10n.t('CloudForge: Initializing {0} offline…', currentArchitectureName) },
+			() => runArchitectureEngineInitOffline(current.workspaceId, current.architectureId, current.sourceRevision, undefined, creatingLock)
+		);
+		if (!init.ok) {
+			void window.showWarningMessage(init.message, showProviders).then(reveal);
+			return;
+		}
+		if (init.report.status !== 'initialized') {
+			const engineLabel = init.report.engine === 'openTofu' ? 'OpenTofu' : 'Terraform';
+			void window.showWarningMessage(l10n.t('{0} offline init failed (exit {1}): {2}', engineLabel, init.report.exitCode, init.report.summary), showProviders).then(reveal);
+			return;
+		}
+		// A new lock file changes the source revision, so reload before planning.
+		const refreshed = await showGraph(provider, treeView, current.workspaceId, current.architectureId) ?? current;
+		updateStatusBar(refreshed);
+		syncProblems(refreshed);
+		canvas.updateIfOpen(toCanvasSnapshot(refreshed, currentArchitectureName));
+		void providersView.refresh();
+		if (choice === noPlan) {
+			void window.showInformationMessage(init.report.lockFileCreated
+				? l10n.t('{0} is ready: schemas are in Studio, the lock file was created and offline init succeeded.', currentArchitectureName)
+				: l10n.t('{0} is ready: schemas are in Studio and offline init succeeded.', currentArchitectureName));
+			return;
+		}
+		await runAndPresentLocalPlan(refreshed);
+	}
+
+	const providerPromptsShown = new Set<string>();
+	/** Auto-detect: once per architecture revision, offer to fetch locked providers that are missing. */
+	function offerMissingProviders(model: ProvidersModel | undefined): void {
+		const graph = provider.getGraph();
+		const missing = model?.project.filter(row => row.address && (row.status === 'notDownloaded' && row.version || row.status === 'unlocked')) ?? [];
+		if (!graph || !missing.length) {
+			return;
+		}
+		const promptKey = graph.architectureId + ':' + missing.map(row => row.address + '@' + row.version).join(',');
+		if (providerPromptsShown.has(promptKey)) {
+			return;
+		}
+		providerPromptsShown.add(promptKey);
+		const names = missing.slice(0, 3).map(row => row.version ? `${row.display} ${row.version}` : row.constraint ? `${row.display} ${row.constraint}` : row.display).join(', ') + (missing.length > 3 ? l10n.t(' and {0} more', missing.length - 3) : '');
+		const ready = l10n.t('Get Ready');
+		const show = l10n.t('Show Providers');
+		void window.showInformationMessage(
+			missing.some(row => row.status === 'unlocked')
+				? l10n.t('This architecture uses {0} and has no lock file yet. Get Ready downloads matching versions, creates the lock file offline and runs a plan.', names)
+				: l10n.t('This architecture uses {0}. Get Ready downloads them so Studio shows the matching fields, then runs init and plan offline.', names),
+			ready, show, l10n.t('Not Now')
+		).then(choice => {
+			if (choice === ready) {
+				void getArchitectureReady();
+			} else if (choice === show) {
+				void commands.executeCommand('cloudforge.providers.focus');
+			}
+		});
+	}
+
+	const providersView = new ProvidersViewProvider(async () => {
+		const listed = await callService<unknown>('listMirrorPackages', {});
+		if (!listed.ok) {
+			return undefined;
+		}
+		const inventory = parseMirrorInventory(listed.value);
+		cachedCatalogueSnapshots = undefined;
+		const snapshots = await loadCatalogueSnapshots();
+		const graph = provider.getGraph();
+		const report = graph ? await inspectArchitectureDependencies(graph.workspaceId, graph.architectureId, graph.sourceRevision) : undefined;
+		return buildProvidersModel({ report, packages: inventory.ok ? inventory.value.packages : [], snapshots });
+	}, async (address, refresh) => {
+		const result = await callService<unknown>('listProviderVersions', { address, ...(refresh ? { refresh: true } : {}) });
+		return result.ok ? parseProviderVersions(result.value) : undefined;
+	});
+	const providersTree = window.createTreeView('cloudforge.providers', { treeDataProvider: providersView, showCollapseAll: true });
+	context.subscriptions.push(
+		providersTree,
+		providersView.onDidChangeModel(model => {
+			offerMissingProviders(model);
+			providersTree.badge = model?.attentionCount
+				? { value: model.attentionCount, tooltip: l10n.t('{0} providers need attention in this architecture', model.attentionCount) }
+				: undefined;
+		}),
+		provider.onDidChangeTreeData(() => { void providersView.refresh(); }),
+		commands.registerCommand('cloudforge.providers.refresh', () => { providersView.refreshVersions(); return providersView.refresh(); }),
+		commands.registerCommand('cloudforge.providers.extractSchema', async (node?: ProvidersNode) => {
+			const target = node?.type === 'project' || node?.type === 'version' ? node.row : undefined;
+			await commands.executeCommand('cloudforge.extractMirrorSchema', target?.address && target.version ? { address: target.address, version: target.version, platform: LOCAL_PLATFORM } : undefined);
+		}),
+		commands.registerCommand('cloudforge.providers.download', async (node?: ProvidersNode) => {
+			// Where the click came from decides what is already known: address, and maybe an exact version.
+			const known: { address?: string; version?: string } =
+				node?.type === 'browseVersion' ? { address: node.address, version: node.version }
+					: node?.type === 'project' && node.row.status === 'notDownloaded' ? { address: node.row.address, version: node.row.version }
+						: node?.type === 'project' || node?.type === 'version' ? { address: node.row.address }
+							: node?.type === 'provider' ? { address: node.row.address }
+								: node?.type === 'browseProvider' ? { address: node.provider.address }
+									: {};
+			const address = known.address ?? (await window.showInputBox({
+				title: l10n.t('Download Provider: Address'),
+				prompt: l10n.t('Full registry address, such as registry.terraform.io/hashicorp/azurerm'),
+				value: 'registry.terraform.io/hashicorp/',
+				validateInput: text => isProviderAddress(text.trim()) ? undefined : l10n.t('Enter hostname/namespace/type, such as registry.terraform.io/hashicorp/azurerm.'),
+			}))?.trim().toLowerCase();
+			if (!address) {
+				return;
+			}
+			const version = known.version ?? await pickProviderVersion(address);
+			if (!version) {
+				return;
+			}
+			const platforms = await window.showQuickPick([
+				{ label: 'windows_amd64', description: l10n.t('This PC: schema, init and plan'), picked: true },
+				{ label: 'linux_amd64', description: l10n.t('CI and portable exports') },
+			], { title: l10n.t('Download {0} {1} for', shortProviderName(address), version), canPickMany: true });
+			if (!platforms?.length) {
+				return;
+			}
+			providersView.addBrowseProvider(address);
+			await downloadProviderVersions([{ address, version }], platforms.map(item => item.label));
+		}),
+		commands.registerCommand('cloudforge.providers.changeVersion', (node?: ProvidersNode) => commands.executeCommand('cloudforge.providers.download', node?.type === 'project' && node.row.address ? { type: 'browseProvider', provider: { address: node.row.address, label: node.row.display, description: node.row.display } } : node)),
+		commands.registerCommand('cloudforge.providers.browseOther', async () => {
+			const address = (await window.showInputBox({
+				title: l10n.t('Browse Another Provider'),
+				prompt: l10n.t('Full registry address, such as registry.terraform.io/mongodb/mongodbatlas'),
+				value: 'registry.terraform.io/',
+				validateInput: text => isProviderAddress(text.trim()) ? undefined : l10n.t('Enter hostname/namespace/type.'),
+			}))?.trim().toLowerCase();
+			if (address) {
+				providersView.addBrowseProvider(address);
+			}
+		}),
+		commands.registerCommand('cloudforge.providers.refreshVersions', (node?: ProvidersNode) => {
+			providersView.refreshVersions(node?.type === 'browseProvider' ? node.provider.address : undefined);
+		}),
+		commands.registerCommand('cloudforge.providers.importArchive', (node?: ProvidersNode) => {
+			const target = node?.type === 'project' || node?.type === 'version' ? node.row : undefined;
+			return commands.executeCommand('cloudforge.importMirrorPackage', target?.address ? { address: target.address, version: target.version, platform: LOCAL_PLATFORM } : undefined);
+		}),
+		commands.registerCommand('cloudforge.providers.downloadMissing', async () => {
+			const missing = providersView.current?.project.filter(row => row.status === 'notDownloaded' && row.address && row.version) ?? [];
+			if (!missing.length) {
+				void window.showInformationMessage(l10n.t('Every locked provider in this architecture is already downloaded.'));
+				return;
+			}
+			await downloadProviderVersions(missing.map(row => ({ address: row.address!, version: row.version! })), [LOCAL_PLATFORM]);
+		}),
+		commands.registerCommand('cloudforge.providers.remove', async (node?: ProvidersNode) => {
+			if (node?.type !== 'version' || node.row.schemaOnly) {
+				return;
+			}
+			const row = node.row;
+			const platforms = row.platforms.length > 1
+				? (await window.showQuickPick(row.platforms, { title: l10n.t('Remove {0} {1}', shortProviderName(row.address), row.version), placeHolder: l10n.t('Choose the platform package to remove') }))
+				: row.platforms[0];
+			if (platforms) {
+				await confirmAndEvictMirrorPackage(offlineMirrorHost, { address: row.address, version: row.version, platform: platforms });
+			}
+		}),
+		commands.registerCommand('cloudforge.providers.openRegistry', async (node?: ProvidersNode) => {
+			const target = node?.type === 'project' || node?.type === 'version' ? node.row : node?.type === 'provider' ? node.row : undefined;
+			const version = target && Object.hasOwn(target, 'version') ? (target as { version?: string }).version : undefined;
+			const url = target?.address ? registryPageUrl(target.address, version) : undefined;
+			if (url) {
+				await env.openExternal(Uri.parse(url));
+			}
+		}),
+		commands.registerCommand('cloudforge.providers.verify', () => commands.executeCommand('cloudforge.verifyMirrorIntegrity')),
+		commands.registerCommand('cloudforge.providers.initOffline', () => commands.executeCommand('cloudforge.initArchitectureOffline')),
+		commands.registerCommand('cloudforge.getReady', () => getArchitectureReady()),
+		commands.registerCommand('cloudforge.providers.importSchemaFile', async () => {
+			await commands.executeCommand('cloudforge.importProviderSchema');
+			void providersView.refresh();
+		}),
+	);
+	context.subscriptions.push(commands.registerCommand('cloudforge.extractMirrorSchema', async (rawKey?: unknown) => {
+		const preselectedKey: MirrorPackageKey | undefined = rawKey === undefined ? undefined : parseMirrorPackageKeyStrict(rawKey);
+		if (rawKey !== undefined && !preselectedKey) {
+			void window.showErrorMessage(l10n.t('The selected provider package identity is invalid.'));
+			return;
+		}
 		const listed = await callService<unknown>('listMirrorPackages', {});
 		if (!listed.ok) {
 			showServiceError(listed.error);
 			return;
 		}
-		const winPackages = parseMirrorPackages(listed.value).filter(pkg => pkg.key.platform === 'windows_amd64');
-		if (winPackages.length === 0) {
-			void window.showInformationMessage(
-				l10n.t('No verified windows_amd64 provider packages were found in the local CloudForge mirror.')
-			);
+		const inventory = parseMirrorInventory(listed.value);
+		if (!inventory.ok) {
+			void window.showErrorMessage(inventory.reason);
 			return;
 		}
-		const picked = await window.showQuickPick(
-			winPackages.map(pkg => ({
-				label: `${pkg.key.address} ${pkg.key.version}`,
-				description: pkg.publisher ? `${pkg.publisher} · ${pkg.sha256.slice(0, 8)}` : pkg.sha256.slice(0, 8),
-				detail: l10n.t('windows_amd64 · {0} bytes · recorded {1}', pkg.sizeBytes, pkg.recordedAt),
-				pkg,
-			})),
-			{
-				title: l10n.t('Extract Provider Schema from Local Offline Mirror'),
-				placeHolder: l10n.t('Select a verified mirrored provider package to extract into the catalogue'),
-			}
-		);
-		if (!picked) {
+		const resolved = resolveMirrorExtractTarget(inventory.value.packages, preselectedKey);
+		if (!resolved.ok) {
+			void window.showWarningMessage(resolved.reason);
 			return;
+		}
+		let targetPkg = resolved.value;
+		if (!targetPkg) {
+			const winPackages = inventory.value.packages.filter(pkg => pkg.key.platform === 'windows_amd64');
+			if (winPackages.length === 0) {
+				void window.showInformationMessage(
+					l10n.t('No verified windows_amd64 provider packages were found in the local CloudForge mirror.')
+				);
+				return;
+			}
+			const picked = await window.showQuickPick(
+				winPackages.map(pkg => ({
+					label: `${pkg.key.address} ${pkg.key.version}`,
+					description: pkg.publisher ? `${pkg.publisher} · ${pkg.sha256.slice(0, 8)}` : pkg.sha256.slice(0, 8),
+					detail: l10n.t('windows_amd64 · {0} · recorded {1}', formatMirrorBytes(pkg.sizeBytes), pkg.recordedAt),
+					pkg,
+				})),
+				{
+					title: l10n.t('Extract Provider Schema from Local Offline Mirror'),
+					placeHolder: l10n.t('Select a verified mirrored provider package to extract into the catalogue'),
+				}
+			);
+			if (!picked) {
+				return;
+			}
+			targetPkg = picked.pkg;
 		}
 		const extracted = await window.withProgress(
 			{
 				location: ProgressLocation.Notification,
-				title: l10n.t('Extracting {0} {1} schema offline from local mirror…', picked.pkg.key.address, picked.pkg.key.version),
+				title: l10n.t('Extracting {0} {1} schema offline from local mirror…', targetPkg.key.address, targetPkg.key.version),
 				cancellable: false,
 			},
 			() => callService<unknown>('extractProviderSchemaFromMirror', {
-				address: picked.pkg.key.address,
-				version: picked.pkg.key.version,
+				address: targetPkg.key.address,
+				version: targetPkg.key.version,
 			})
 		);
 		if (!extracted.ok) {
@@ -2185,16 +2607,21 @@ export function activate(context: ExtensionContext): void {
 		if (graph) {
 			canvas.updateIfOpen(toCanvasSnapshot(graph, currentArchitectureName));
 		}
+		void providersView.refresh();
 		void window.showInformationMessage(
-			l10n.t('Extracted {0} {1} into the CloudForge provider catalogue from the local offline mirror.', picked.pkg.key.address, picked.pkg.key.version)
+			l10n.t('Extracted {0} {1} into the CloudForge provider catalogue from the local offline mirror.', targetPkg.key.address, targetPkg.key.version)
 		);
 	}));
-	context.subscriptions.push(commands.registerCommand('cloudforge.importMirrorPackage', async () => {
+	context.subscriptions.push(commands.registerCommand('cloudforge.importMirrorPackage', async (preset?: { readonly address?: unknown; readonly version?: unknown; readonly platform?: unknown }) => {
 		const graph = provider.getGraph();
 		let suggestedAddress = 'registry.terraform.io/hashicorp/azurerm';
 		let suggestedVersion = '';
 		let suggestedPlatform = 'windows_amd64';
-		if (graph) {
+		if (typeof preset?.address === 'string') {
+			suggestedAddress = preset.address;
+			suggestedVersion = typeof preset.version === 'string' ? preset.version : '';
+			suggestedPlatform = typeof preset.platform === 'string' ? preset.platform : suggestedPlatform;
+		} else if (graph) {
 			const readiness = await checkArchitectureOfflineMirrorReadiness(graph.workspaceId, graph.architectureId, graph.sourceRevision);
 			const firstMissing = readiness?.missing[0];
 			if (firstMissing) {
@@ -2272,9 +2699,41 @@ export function activate(context: ExtensionContext): void {
 		if (currentGraph) {
 			canvas.updateIfOpen(toCanvasSnapshot(currentGraph, currentArchitectureName));
 		}
+		void providersView.refresh();
 		void window.showInformationMessage(
 			l10n.t('Verified and imported {0} {1} ({2}) into the local offline provider mirror.', address.trim(), version.trim(), platformPick.label)
 		);
+	}));
+	const offlineMirrorHost: OfflineMirrorHost = {
+		callService,
+		showServiceError,
+		getScope: () => {
+			const graph = provider.getGraph();
+			return graph
+				? {
+					workspaceId: graph.workspaceId,
+					architectureId: graph.architectureId,
+					architectureName: currentArchitectureName ?? graph.architectureId,
+					sourceRevision: graph.sourceRevision,
+				}
+				: undefined;
+		},
+		onMirrorMutated: () => {
+			void providersView.refresh();
+			const currentGraph = provider.getGraph();
+			if (currentGraph) {
+				canvas.updateIfOpen(toCanvasSnapshot(currentGraph, currentArchitectureName));
+			}
+		},
+		runExtractSchema: async key => {
+			await commands.executeCommand('cloudforge.extractMirrorSchema', key);
+		},
+		runInitOffline: async () => {
+			await commands.executeCommand('cloudforge.initArchitectureOffline');
+		},
+	};
+	context.subscriptions.push(commands.registerCommand('cloudforge.manageOfflineMirror', async () => {
+		await runOfflineProviderMirrorManager(offlineMirrorHost);
 	}));
 	context.subscriptions.push(commands.registerCommand('cloudforge.evictMirrorPackage', async () => {
 		const listed = await callService<unknown>('listMirrorPackages', {});
@@ -2282,172 +2741,37 @@ export function activate(context: ExtensionContext): void {
 			showServiceError(listed.error);
 			return;
 		}
-		const packages = parseMirrorPackages(listed.value);
-		if (packages.length === 0) {
+		const inventory = parseMirrorInventory(listed.value);
+		if (!inventory.ok) {
+			void window.showErrorMessage(inventory.reason);
+			return;
+		}
+		if (inventory.value.packages.length === 0) {
 			void window.showInformationMessage(l10n.t('The local CloudForge provider mirror is currently empty.'));
 			return;
 		}
 		const picked = await window.showQuickPick(
-			packages.map(pkg => ({
-				label: `${pkg.key.address} ${pkg.key.version} (${pkg.key.platform})`,
-				description: `${pkg.sizeBytes} bytes · ${pkg.sha256.slice(0, 8)}`,
+			inventory.value.packages.map(pkg => ({
+				label: formatMirrorPackageKey(pkg.key),
+				description: `${formatMirrorBytes(pkg.sizeBytes)} · ${pkg.sha256.slice(0, 8)}`,
 				detail: pkg.publisher ? l10n.t('{0} · recorded {1}', pkg.publisher, pkg.recordedAt) : l10n.t('Recorded {0}', pkg.recordedAt),
 				pkg,
 			})),
 			{
 				title: l10n.t('Remove Package from Local Offline Mirror'),
-				placeHolder: l10n.t('Select a mirrored provider archive to remove'),
+				placeHolder: l10n.t('Select a mirrored provider archive to review removal'),
 			}
 		);
 		if (!picked) {
 			return;
 		}
-		const confirmAction = l10n.t('Remove Package');
-		const confirm = await window.showWarningMessage(
-			l10n.t('Remove {0} {1} ({2}) from the local offline provider mirror?', picked.pkg.key.address, picked.pkg.key.version, picked.pkg.key.platform),
-			{ modal: true },
-			confirmAction
-		);
-		if (confirm !== confirmAction) {
-			return;
-		}
-		const evicted = await callService<unknown>('evictMirrorPackage', {
-			address: picked.pkg.key.address,
-			version: picked.pkg.key.version,
-			platform: picked.pkg.key.platform,
-		});
-		if (!evicted.ok) {
-			showServiceError(evicted.error);
-			return;
-		}
-		const bytesReclaimed = isRecord(evicted.value) && typeof evicted.value.bytesReclaimed === 'number' ? evicted.value.bytesReclaimed : picked.pkg.sizeBytes;
-		const currentGraph = provider.getGraph();
-		if (currentGraph) {
-			canvas.updateIfOpen(toCanvasSnapshot(currentGraph, currentArchitectureName));
-		}
-		void window.showInformationMessage(
-			l10n.t('Removed {0} {1} ({2}) from the local mirror ({3} bytes reclaimed).', picked.pkg.key.address, picked.pkg.key.version, picked.pkg.key.platform, bytesReclaimed)
-		);
+		await confirmAndEvictMirrorPackage(offlineMirrorHost, picked.pkg.key, picked.pkg.sizeBytes);
 	}));
 	context.subscriptions.push(commands.registerCommand('cloudforge.verifyMirrorIntegrity', async () => {
-		const verified = await window.withProgress(
-			{
-				location: ProgressLocation.Notification,
-				title: l10n.t('CloudForge: Verifying local offline provider mirror integrity…'),
-				cancellable: false,
-			},
-			() => callService<unknown>('verifyMirrorIntegrity', {})
-		);
-		if (!verified.ok) {
-			showServiceError(verified.error);
-			return;
-		}
-		if (!isRecord(verified.value)) {
-			void window.showErrorMessage(l10n.t('The CloudForge service returned an invalid mirror verification report.'));
-			return;
-		}
-		const verifiedCount = typeof verified.value.verifiedCount === 'number' ? verified.value.verifiedCount : 0;
-		const missingCount = typeof verified.value.missingArchiveCount === 'number' ? verified.value.missingArchiveCount : 0;
-		const corruptedCount = typeof verified.value.corruptedCount === 'number' ? verified.value.corruptedCount : 0;
-		const totalBytes = typeof verified.value.totalBytes === 'number' ? verified.value.totalBytes : 0;
-		const totalMiB = (totalBytes / (1024 * 1024)).toFixed(1);
-		if (missingCount === 0 && corruptedCount === 0) {
-			void window.showInformationMessage(
-				l10n.t('Local provider mirror verified: {0} intact package(s) ({1} MiB total).', verifiedCount, totalMiB)
-			);
-			return;
-		}
-		void window.showWarningMessage(
-			l10n.t('Local provider mirror integrity issues found: {0} verified, {1} missing archive(s), {2} corrupted.', verifiedCount, missingCount, corruptedCount)
-		);
+		await runVerifiedMirrorIntegrityCheck(offlineMirrorHost);
 	}));
 	context.subscriptions.push(commands.registerCommand('cloudforge.planMirrorCleanup', async () => {
-		const quotaText = await window.showInputBox({
-			title: l10n.t('Target Local Provider Mirror Quota (MiB)'),
-			value: '512',
-			placeHolder: '512',
-			validateInput: text => /^\d+$/.test(text.trim()) ? undefined : l10n.t('Enter a non-negative integer quota in MiB.'),
-		});
-		if (quotaText === undefined) {
-			return;
-		}
-		const quotaBytes = Number(quotaText.trim()) * 1024 * 1024;
-		const graph = provider.getGraph();
-		const params: Record<string, unknown> = graph
-			? {
-				quotaBytes,
-				workspaceId: graph.workspaceId,
-				architectureId: graph.architectureId,
-				expectedSourceRevision: graph.sourceRevision,
-			}
-			: { quotaBytes };
-		const planned = await callService<unknown>('planMirrorCleanup', params);
-		if (!planned.ok) {
-			showServiceError(planned.error);
-			return;
-		}
-		if (!isRecord(planned.value)) {
-			void window.showErrorMessage(l10n.t('The CloudForge service returned an invalid mirror cleanup plan.'));
-			return;
-		}
-		const evictable = Array.isArray(planned.value.evictable) ? planned.value.evictable : [];
-		const pinned = Array.isArray(planned.value.pinnedRequiringReview) ? planned.value.pinnedRequiringReview : [];
-		const totalBytes = typeof planned.value.totalBytes === 'number' ? planned.value.totalBytes : 0;
-		const bytesOverQuota = typeof planned.value.bytesOverQuota === 'number' ? planned.value.bytesOverQuota : 0;
-		if (evictable.length === 0 && pinned.length === 0) {
-			void window.showInformationMessage(
-				l10n.t('Local provider mirror is within quota ({0} MiB used; {1} MiB limit).', (totalBytes / (1024 * 1024)).toFixed(1), quotaText.trim())
-			);
-			return;
-		}
-		type CleanupPick = {
-			readonly label: string;
-			readonly description: string;
-			readonly detail?: string;
-			readonly evictKey?: { readonly address: string; readonly version: string; readonly platform: string };
-		};
-		const picks: CleanupPick[] = [];
-		for (const item of evictable) {
-			if (!isRecord(item) || !isRecord(item.key) || typeof item.key.address !== 'string' || typeof item.key.version !== 'string' || typeof item.key.platform !== 'string') {
-				continue;
-			}
-			const bytes = typeof item.bytes === 'number' ? item.bytes : 0;
-			picks.push({
-				label: `$(trash) ${item.key.address} ${item.key.version} (${item.key.platform})`,
-				description: l10n.t('Evictable · {0} bytes', bytes),
-				detail: l10n.t('Select to remove this unpinned mirrored archive now'),
-				evictKey: { address: item.key.address, version: item.key.version, platform: item.key.platform },
-			});
-		}
-		for (const item of pinned) {
-			if (!isRecord(item) || !isRecord(item.key) || typeof item.key.address !== 'string' || typeof item.key.version !== 'string' || typeof item.key.platform !== 'string') {
-				continue;
-			}
-			const bytes = typeof item.bytes === 'number' ? item.bytes : 0;
-			picks.push({
-				label: `$(pin) ${item.key.address} ${item.key.version} (${item.key.platform})`,
-				description: l10n.t('Pinned by active architecture · {0} bytes (protected)', bytes),
-			});
-		}
-		const selected = await window.showQuickPick(picks, {
-			title: l10n.t('Mirror Cleanup Plan ({0} MiB over quota)', (bytesOverQuota / (1024 * 1024)).toFixed(1)),
-			placeHolder: l10n.t('Choose an unpinned candidate to remove, or press Escape to cancel'),
-		});
-		if (!selected?.evictKey) {
-			return;
-		}
-		const evicted = await callService<unknown>('evictMirrorPackage', selected.evictKey);
-		if (!evicted.ok) {
-			showServiceError(evicted.error);
-			return;
-		}
-		const currentGraph = provider.getGraph();
-		if (currentGraph) {
-			canvas.updateIfOpen(toCanvasSnapshot(currentGraph, currentArchitectureName));
-		}
-		void window.showInformationMessage(
-			l10n.t('Removed {0} {1} ({2}) from the local offline provider mirror.', selected.evictKey.address, selected.evictKey.version, selected.evictKey.platform)
-		);
+		await runGuidedMirrorCleanup(offlineMirrorHost);
 	}));
 	let opening: Promise<void> | undefined;
 	context.subscriptions.push(commands.registerCommand('cloudforge.openWorkspace', () => {
@@ -2502,6 +2826,9 @@ export function activate(context: ExtensionContext): void {
 		openTemplates() {
 			const graph = provider.getGraph();
 			canvas.openTemplates(graph ? toCanvasSnapshot(graph, currentArchitectureName) : undefined);
+		},
+		seedBundleLayout(architectureId, architecture) {
+			canvas.seedBundleLayout(architectureId, architecture);
 		}
 	});
 
@@ -2519,8 +2846,8 @@ export function activate(context: ExtensionContext): void {
 		openNodeSource: (graph, nodeId) => openNodeSource(graph.workspaceId, graph.architectureId, graph.sourceRevision, nodeId),
 	});
 
-	// Stage 12B: Learning Studio, 12 baked-in skills, 5 multi-cloud starter blueprints,
-	// guarded proposal review, and VS Code open-source Agent View MCP auto-discovery.
+	// Stage 12B: Learning Studio, 12 baked-in skills, 6 multi-cloud starter blueprints,
+	// guarded proposal review, seamless AI Models & Simple Auth, and VS Code Agent View MCP auto-discovery.
 	activateLearning(context, {
 		callService,
 		getGraph: () => provider.getGraph(),
@@ -2539,4 +2866,71 @@ export function activate(context: ExtensionContext): void {
 			}
 		}
 	});
+
+	void runStartupSequence();
+
+	/**
+	 * Startup warm-up, behind a usable window: start the service and reopen the project and last
+	 * architecture, load provider schemas so Studio forms open instantly, then check this
+	 * architecture's providers (which raises the Get Ready prompt when something is missing).
+	 * Nothing here downloads or reaches the network.
+	 */
+	async function runStartupSequence(): Promise<void> {
+		const startupOutput = window.createOutputChannel(l10n.t('CloudForge Startup'));
+		const sequence = new StartupSequence([
+			{ id: 'project', label: l10n.t('Start the service and open the project') },
+			{ id: 'schemas', label: l10n.t('Load provider schemas') },
+			{ id: 'providers', label: l10n.t('Check this architecture\'s providers') },
+		]);
+		context.subscriptions.push(startupOutput, showStartupStatus(sequence, startupOutput));
+		await sequence.run('project', async () => {
+			const controller = projectControllerRef.current;
+			if (!controller) {
+				return { skipped: l10n.t('projects are not available') };
+			}
+			// Done when the last architecture is on screen, without waiting for later prompts.
+			let subscription: { dispose(): void } | undefined;
+			const graphShown = new Promise<void>(resolve => {
+				subscription = provider.onDidChangeTreeData(() => { if (provider.getGraph()) { resolve(); } });
+			});
+			try {
+				await Promise.race([controller.connect(), graphShown]);
+			} finally {
+				subscription?.dispose();
+			}
+			const project = controller.current;
+			if (!project) {
+				return { skipped: l10n.t('no CloudForge project in this window') };
+			}
+			return provider.getGraph()
+				? l10n.t('{0} open, {1} architectures', currentArchitectureName, project.architectures.length)
+				: l10n.t('{0} architectures, none open', project.architectures.length);
+		});
+		if (!workspace.getConfiguration('cloudforge').get<boolean>('startup.preload', true)) {
+			sequence.skip('schemas', l10n.t('turned off in settings'));
+			sequence.skip('providers', l10n.t('turned off in settings'));
+			return;
+		}
+		await sequence.run('schemas', async () => {
+			const snapshots = await loadCatalogueSnapshots();
+			if (!snapshots.length) {
+				return { skipped: l10n.t('none downloaded yet') };
+			}
+			await loadCatalogueTypes();
+			return l10n.t('{0} schemas', snapshots.length);
+		});
+		await sequence.run('providers', async () => {
+			if (!provider.getGraph()) {
+				return { skipped: l10n.t('no architecture open') };
+			}
+			await providersView.refresh();
+			const model = providersView.current;
+			if (!model) {
+				throw new Error(l10n.t('the provider report could not be read'));
+			}
+			return model.attentionCount
+				? l10n.t('{0} of {1} need attention', model.attentionCount, model.project.length)
+				: l10n.t('{0} ready', model.project.length);
+		});
+	}
 }

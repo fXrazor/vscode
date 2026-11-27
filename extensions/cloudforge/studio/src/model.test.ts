@@ -4,7 +4,8 @@ import { applyTerraformDraft, terraformCode } from './terraformProjection.ts';
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-import { importVariableDraft, exportableArchitecture, variableDeclarations, variableUses, type VariableDefinition } from './variables.ts';
+import { importVariableDraft, exportableArchitecture, objectVariablePaths, variableDeclarations, variableError, variableUses, type VariableDefinition } from './variables.ts';
+import { acceptsVariable } from './fieldBindings.ts';
 import type { BoardItem } from './model.ts';
 import { presentationSvg } from './exportPresentation.ts';
 import { shapeDefinitions } from './shapes.ts';
@@ -15,10 +16,11 @@ import { sampleArchitecture } from './fixture.ts';
 import { additionalBlocks, blockDefinitions, fieldIssue, resourceFormIssues } from './formDefinition.ts';
 import { connectionDash, connectionPath } from './connectionGeometry.ts';
 import { canConnect, connectionAnchor, connectableElements } from './designConnections.ts';
-import { applyCanvasCommand, expandGroups, sceneOrder, selectionFragment } from './canvasOperations.ts';
-import { layoutSelection, selectionUnits } from './selectionGeometry.ts';
+import { applyCanvasCommand, connectedElementIds, expandGroups, sceneOrder, selectionFragment, stickyClusterFromText } from './canvasOperations.ts';
+import { applyUniformSpacing, detectSpacingLayout, layoutSelection, selectionUnitBoxes, selectionUnits } from './selectionGeometry.ts';
 import type { Architecture, Action } from './model.ts';
 import { bindingKey, variableBindingIssue, variablePreview, type FieldTarget } from './fieldBindings.ts';
+import { inheritedDependencies } from './resourceHierarchy.ts';
 import { resourceIconSize } from './resourceGeometry.ts';
 import { alignmentGuides } from './alignmentGuides.ts';
 import { inheritedReferences, resourcePlacement, resourceDimensions, resourceDescendants } from './resourceHierarchy.ts';
@@ -544,7 +546,7 @@ test('variable declaration and tfvars imports distinguish defaults, assigned val
 
 test('variable imports refuse unsupported expressions, validations and structural types', () => {
  assert.throws(() => importVariableDraft('input_value = var.other', [], 'tfvars'), /Expression/);
- assert.throws(() => importVariableDraft('variable "x" {\n type = object({ a = string })\n}', [], 'tf'), /structural type/);
+ assert.throws(() => importVariableDraft('variable "x" {\n type = tuple([string, number])\n}', [], 'tf'), /structural type/);
  assert.throws(() => importVariableDraft('variable "x" {\n type = string\n validation {\n condition = true\n error_message = "bad"\n }\n}', [], 'tf'), /advanced attributes/);
 });
 
@@ -715,4 +717,235 @@ test('typed variable feedback rejects wrong values and expressions before a save
  assert.ok(variableInputIssue('','number'));
  assert.equal(variableInputIssue('0','number'),undefined);
  assert.equal(variableInputIssue('','string'),undefined);
+});
+
+test('object variables declare their shape and fields bind one nested value as var.NAME.path', () => {
+	const network = { id: 'input-network', name: 'network', type: 'object' as const, description: 'Shared network settings', sensitive: false, defaultValue: { location: 'uksouth', dns: { servers: ['10.0.0.4'], zone: 'corp.local' } } };
+	assert.match(variableDeclarations([network]), /type = object\(\{ location = string, dns = object\(\{ servers = list\(string\), zone = string \}\) \}\)/);
+	assert.deepEqual(objectVariablePaths(network).map(entry => entry.path.join('.')), ['location', 'dns', 'dns.servers', 'dns.zone']);
+	assert.equal(acceptsVariable(network, { type: 'string' }), false);
+	assert.equal(acceptsVariable(network, { type: 'string' }, ['location']), true);
+	assert.equal(acceptsVariable(network, { type: 'string' }, ['dns', 'servers']), false);
+	assert.equal(acceptsVariable(network, { type: 'list' }, ['dns', 'servers']), true);
+	assert.equal(acceptsVariable(network, { type: 'string' }, ['missing']), false);
+	const architecture = { ...sampleArchitecture(), variables: [network] };
+	const bound = historyReducer(createHistory(architecture), { type: 'bindVariable', id: 'network', target: { kind: 'region' }, variableId: 'input-network', path: ['location'] });
+	assert.match(terraformCode(bound.present, 'network'), /location\s*=\s*var\.network\.location/);
+	assert.deepEqual(bound.present.resources.find(item => item.id === 'network')!.fieldBindings?.[JSON.stringify(['region'])], { variableId: 'input-network', path: ['location'] });
+	assert.ok(variableUses(bound.present).get('network')?.has('network'));
+	assert.equal(historyReducer(bound, { type: 'bindVariable', id: 'network', target: { kind: 'region' }, variableId: 'input-network', path: ['dns', 'servers'] }), bound, 'a list value cannot bind to a text field');
+	assert.equal(variableBindingIssue({ variableId: 'input-network', path: ['gone'] }, [network], { type: 'string' }), 'var.network.gone no longer exists in the object. Choose another value.');
+	assert.equal(variableError({ ...network, defaultValue: ['not', 'an', 'object'] }, []), 'The default and value must match the selected type.');
+	const imported = importVariableDraft('variable "network" {\n  type = object({ location = string })\n  default = { location = "uksouth" }\n}', [], 'tf');
+	assert.equal(imported[0].type, 'object');
+	assert.match(variableDeclarations(imported), /type = object\(\{ location = string \}\)/, 'the imported constraint is written back unchanged');
+});
+
+test('dependency line styles are appearance only, validated, undoable and never touch Terraform', () => {
+	const initial = createHistory(sampleArchitecture());
+	const before = terraformCode(initial.present);
+	let history = historyReducer(initial, { type: 'styleDependency', key: '*', patch: { routing: 'curve', width: 2 } });
+	history = historyReducer(history, { type: 'styleDependency', key: 'dependency:a:b', patch: { stroke: '#123456', pattern: 'solid' } });
+	assert.deepEqual(history.present.dependencyStyles, { '*': { routing: 'curve', width: 2 }, 'dependency:a:b': { stroke: '#123456', pattern: 'solid' } });
+	assert.equal(terraformCode(history.present), before);
+	assert.equal(historyReducer(history, { type: 'styleDependency', key: '*', patch: { width: 99 } }), history);
+	assert.equal(historyReducer(history, { type: 'styleDependency', key: '*', patch: { routing: 'zigzag' as 'curve' } }), history);
+	assert.equal(historyReducer(history, { type: 'styleDependency', key: '*', patch: { routing: 'curve' } }), history);
+	history = historyReducer(history, { type: 'styleDependency', key: 'dependency:a:b', patch: null });
+	history = historyReducer(history, { type: 'styleDependency', key: '*', patch: null });
+	assert.equal(history.present.dependencyStyles, undefined);
+	history = historyReducer(history, { type: 'undo' });
+	assert.deepEqual(history.present.dependencyStyles, { '*': { routing: 'curve', width: 2 } });
+});
+
+test('list fields mix typed values, variables and resource references entry by entry', () => {
+	const architecture = sampleArchitecture();
+	architecture.variables = [{ id: 'v-nic', name: 'extra_nic_id', type: 'string', description: '', sensitive: false }];
+	const target = { kind: 'setting' as const, name: 'network_interface_ids' };
+	let history = historyReducer(createHistory(architecture), { type: 'setListEntries', id: 'vm', target, items: [
+		{ kind: 'ref', resourceId: 'nic', attribute: 'id' }, { kind: 'variable', variableId: 'v-nic' }, { kind: 'value', value: '/subscriptions/x/nic3' },
+	] });
+	const vm = history.present.resources.find(resource => resource.id === 'vm')!;
+	assert.deepEqual(vm.resourceRefs?.[bindingKey(target)]?.refs, [{ resourceId: 'nic', attribute: 'id' }]);
+	const code = terraformCode(history.present);
+	assert.match(code, /network_interface_ids\s*=\s*\[\s*azurerm_network_interface\.[\w-]+\.id,\s*var\.extra_nic_id,\s*"\/subscriptions\/x\/nic3",?\s*\]/);
+	assert.ok(inheritedDependencies(history.present).some(edge => edge.source === 'nic' && edge.target === 'vm'), 'a reference entry is a dependency');
+	assert.equal(historyReducer(history, { type: 'setListEntries', id: 'vm', target, items: [{ kind: 'variable', variableId: 'missing' }] }), history);
+	history = historyReducer(history, { type: 'setListEntries', id: 'vm', target, items: [{ kind: 'value', value: 'a' }, { kind: 'value', value: 'b' }] });
+	const plain = history.present.resources.find(resource => resource.id === 'vm')!;
+	assert.equal(plain.resourceRefs?.[bindingKey(target)], undefined);
+	assert.equal(plain.settings.network_interface_ids, '["a","b"]');
+	history = historyReducer(history, { type: 'undo' });
+	assert.equal(history.present.resources.find(resource => resource.id === 'vm')!.resourceRefs?.[bindingKey(target)]?.items?.length, 3);
+});
+
+test('duplicate supports independent X/Y drag deltas (Alt+Drag clone) across items, resources, waypoints, and 1-step Undo', () => {
+	const note: BoardItem = { id: 'n1', kind: 'note', text: 'Original', width: 160, height: 100, positions: { visual: { x: 100, y: 200 }, technical: { x: 100, y: 200 } }, members: [] };
+	const arch: Architecture = {
+		name: 'AltDrag',
+		resources: [],
+		items: [note],
+		connections: [{ id: 'c1', source: elementEndpoint('n1'), target: { kind: 'point', position: { x: 350, y: 250 } }, waypoint: { x: 240, y: 180 } }],
+	};
+	const fragment = selectionFragment(arch, ['n1'], ['c1']);
+	let history = historyReducer(createHistory(arch), {
+		type: 'canvas',
+		command: { kind: 'duplicate', fragment, idMap: { n1: 'n2', c1: 'c2' }, offset: 180, offsetY: -60 },
+	});
+	assert.equal(history.past.length, 1);
+	assert.equal(history.present.items.length, 2);
+	assert.deepEqual(history.present.items.find(i => i.id === 'n1')?.positions.visual, { x: 100, y: 200 }, 'original stays untouched');
+	assert.deepEqual(history.present.items.find(i => i.id === 'n2')?.positions.visual, { x: 280, y: 140 }, 'clone lands at exact (dx, dy)');
+	const clonedLink = history.present.connections.find(c => c.id === 'c2')!;
+	assert.deepEqual(clonedLink.target, { kind: 'point', position: { x: 530, y: 190 } });
+	assert.deepEqual(clonedLink.waypoint, { x: 420, y: 120 });
+	// Invalid NaN offsetY consumes zero history
+	assert.equal(historyReducer(history, { type: 'canvas', command: { kind: 'duplicate', fragment, idMap: { n1: 'n3', c1: 'c3' }, offset: 10, offsetY: Number.NaN } }), history);
+	// 1-step Undo removes clone cleanly
+	history = historyReducer(history, { type: 'undo' });
+	assert.equal(history.present.items.length, 1);
+	assert.equal(history.present.connections.length, 1);
+});
+
+test('Miro tidy-up, interactive uniform spacing, and horizontal/vertical flip arrange elements atomically', () => {
+	const mkNote = (id: string, x: number, y: number, width = 100, height = 80): BoardItem => ({
+		id, kind: 'note', text: id, width, height, positions: { visual: { x, y }, technical: { x, y } }, members: [],
+	});
+	// 1) Irregular row -> Tidy up equalizes gaps to 24px and aligns centres
+	const rowArch: Architecture = { name: 'Row', resources: [], items: [mkNote('a', 0, 10), mkNote('b', 180, 34), mkNote('c', 310, 4)], connections: [] };
+	const sizes = { a: { width: 100, height: 80 }, b: { width: 100, height: 80 }, c: { width: 100, height: 80 } };
+	const tidyRow = layoutSelection(rowArch, ['a', 'b', 'c'], 'visual', 'tidy', sizes);
+	assert.equal(tidyRow.a.x, 0);
+	assert.equal(tidyRow.b.x, 124);
+	assert.equal(tidyRow.c.x, 248);
+	assert.equal(tidyRow.a.y, tidyRow.b.y);
+	assert.equal(tidyRow.b.y, tidyRow.c.y);
+
+	// 2) Detect spacing handles & adjust uniform gap to 48px
+	const tidiedArch = applyCanvasCommand(rowArch, { kind: 'move', mode: 'visual', positions: tidyRow });
+	const units = selectionUnitBoxes(tidiedArch, ['a', 'b', 'c'], 'visual', sizes);
+	const detected = detectSpacingLayout(units);
+	assert.ok(detected?.x && detected.x.handles.length === 2 && detected.x.gap === 24);
+	const spaced = applyUniformSpacing(tidiedArch, ['a', 'b', 'c'], 'visual', 'x', 48, sizes);
+	assert.equal(spaced.a.x, 0);
+	assert.equal(spaced.b.x, 148);
+	assert.equal(spaced.c.x, 296);
+
+	// 3) 2D grid -> Tidy up aligns rows and columns, detects BOTH X and Y gap handles
+	const gridArch: Architecture = {
+		name: 'Grid',
+		resources: [],
+		items: [mkNote('g1', 10, 10), mkNote('g2', 190, 18), mkNote('g3', 18, 160), mkNote('g4', 210, 175)],
+		connections: [],
+	};
+	const gridSizes = { g1: { width: 100, height: 80 }, g2: { width: 100, height: 80 }, g3: { width: 100, height: 80 }, g4: { width: 100, height: 80 } };
+	const tidyGrid = layoutSelection(gridArch, ['g1', 'g2', 'g3', 'g4'], 'visual', 'tidy', gridSizes);
+	assert.equal(tidyGrid.g1.x, tidyGrid.g3.x);
+	assert.equal(tidyGrid.g2.x, tidyGrid.g4.x);
+	assert.equal(tidyGrid.g1.y, tidyGrid.g2.y);
+	assert.equal(tidyGrid.g3.y, tidyGrid.g4.y);
+	const tidiedGridArch = applyCanvasCommand(gridArch, { kind: 'move', mode: 'visual', positions: tidyGrid });
+	const gridSpacing = detectSpacingLayout(selectionUnitBoxes(tidiedGridArch, ['g1', 'g2', 'g3', 'g4'], 'visual', gridSizes));
+	assert.ok(gridSpacing?.x?.handles.length === 1 && gridSpacing?.y?.handles.length === 1, '2x2 grid exposes both X and Y gap handles');
+
+	// 4) Flip horizontal & flip vertical mirror positions about selection bounds in 1 undo step
+	const flippedH = layoutSelection(tidiedArch, ['a', 'b', 'c'], 'visual', 'flip-h', sizes);
+	assert.equal(flippedH.a.x, 248);
+	assert.equal(flippedH.b.x, 124);
+	assert.equal(flippedH.c.x, 0);
+	const flippedV = layoutSelection(tidiedGridArch, ['g1', 'g2', 'g3', 'g4'], 'visual', 'flip-v', gridSizes);
+	assert.equal(flippedV.g1.y, tidiedGridArch.items.find(i => i.id === 'g3')!.positions.visual.y);
+	assert.equal(flippedV.g3.y, tidiedGridArch.items.find(i => i.id === 'g1')!.positions.visual.y);
+});
+
+test('Miro Wrap in Frame and Fit Frame to Contents create/resize frames atomically with 1-step Undo', () => {
+	const mkNote = (id: string, x: number, y: number): BoardItem => ({
+		id, kind: 'note', text: id, width: 140, height: 90, positions: { visual: { x, y }, technical: { x, y } }, members: [],
+	});
+	const base: Architecture = { name: 'FrameWrap', resources: [], items: [mkNote('a', 100, 120), mkNote('b', 320, 200)], connections: [] };
+	let history = historyReducer(createHistory(base), {
+		type: 'canvas',
+		command: { kind: 'frameSelection', ids: ['a', 'b'], id: 'f1', mode: 'visual' },
+	});
+	assert.equal(history.past.length, 1);
+	const frame = history.present.items.find(item => item.id === 'f1')!;
+	assert.equal(frame.kind, 'frame');
+	assert.deepEqual(frame.members.sort(), ['a', 'b']);
+	assert.deepEqual(frame.positions.visual, { x: 64, y: 80 });
+	assert.equal(frame.width, 432);
+	assert.equal(frame.height, 246);
+
+	// Move a member outward and call fitFrame -> frame expands tightly in 1 atomic Undo step
+	history = historyReducer(history, { type: 'canvas', command: { kind: 'move', mode: 'visual', positions: { b: { x: 500, y: 200 } } } });
+	history = historyReducer(history, { type: 'canvas', command: { kind: 'fitFrame', id: 'f1', mode: 'visual' } });
+	const fitted = history.present.items.find(item => item.id === 'f1')!;
+	assert.equal(fitted.width, 612);
+	// Calling fitFrame again when already fitted consumes zero history
+	assert.equal(historyReducer(history, { type: 'canvas', command: { kind: 'fitFrame', id: 'f1', mode: 'visual' } }), history);
+	// Undo reverts fitFrame cleanly
+	history = historyReducer(history, { type: 'undo' });
+	assert.equal(history.present.items.find(item => item.id === 'f1')!.width, 432);
+});
+
+test('Miro Switch Type (convertItem) and Quick-Add Connected Copy (spawnConnected) preserve content and undo atomically', () => {
+	const note: BoardItem = { id: 'n1', kind: 'note', text: 'API Gateway', fill: '#fff0b5', width: 180, height: 100, positions: { visual: { x: 100, y: 100 }, technical: { x: 100, y: 100 } }, members: [] };
+	const base: Architecture = { name: 'SwitchAndSpawn', resources: [], items: [note], connections: [] };
+
+	// Convert sticky note -> diamond shape keeping text & geometry in 1 undo step
+	let history = historyReducer(createHistory(base), {
+		type: 'canvas',
+		command: { kind: 'convertItem', ids: ['n1'], targetKind: 'shape', shape: 'diamond' },
+	});
+	const converted = history.present.items[0];
+	assert.equal(converted.kind, 'shape');
+	assert.equal(converted.shape, 'diamond');
+	assert.equal(converted.text, 'API Gateway');
+	assert.equal(history.past.length, 1);
+
+	// Ctrl+ArrowRight -> spawns matching diamond to the right with exact output->input directional link in 1 undo step
+	history = historyReducer(history, {
+		type: 'canvas',
+		command: { kind: 'spawnConnected', sourceId: 'n1', id: 'n2', connectionId: 'link-1', direction: 'right', mode: 'visual' },
+	});
+	assert.equal(history.present.items.length, 2);
+	const spawned = history.present.items.find(item => item.id === 'n2')!;
+	assert.equal(spawned.kind, 'shape');
+	assert.equal(spawned.shape, 'diamond');
+	assert.deepEqual(spawned.positions.visual, { x: 100 + 180 + 72, y: 100 });
+	const link = history.present.connections.find(c => c.id === 'link-1')!;
+	assert.deepEqual(link.source, elementEndpoint('n1', 'output'));
+	assert.deepEqual(link.target, elementEndpoint('n2', 'input'));
+
+	// 1-step Undo removes both spawned shape and its connector together
+	history = historyReducer(history, { type: 'undo' });
+	assert.equal(history.present.items.length, 1);
+	assert.equal(history.present.connections.length, 0);
+});
+
+test('Miro paste-lines-as-sticky-notes cluster and Select Connected traverse subgraphs atomically', () => {
+	let seq = 0;
+	const notes = stickyClusterFromText('- Ingress gateway\n- Auth service\n1. Order API\n2. Postgres DB\n\n', { x: 400, y: 300 }, () => 'p-' + (++seq));
+	assert.equal(notes.length, 4);
+	assert.deepEqual(notes.map(n => n.text), ['Ingress gateway', 'Auth service', 'Order API', 'Postgres DB']);
+	// 2x2 grid: row 0 shares Y, row 1 shares Y, col 0 shares X
+	assert.equal(notes[0].positions.visual.y, notes[1].positions.visual.y);
+	assert.equal(notes[2].positions.visual.y, notes[3].positions.visual.y);
+	assert.equal(notes[0].positions.visual.x, notes[2].positions.visual.x);
+
+	const base: Architecture = { name: 'PasteCluster', resources: [], items: [], connections: [] };
+	let history = historyReducer(createHistory(base), { type: 'canvas', command: { kind: 'addItems', items: notes } });
+	assert.equal(history.present.items.length, 4);
+	assert.equal(history.past.length, 1);
+	assert.equal(historyReducer(history, { type: 'undo' }).present.items.length, 0);
+
+	// Select Connected BFS across p-1 -> p-2 -> p-3 leaves disconnected p-4 unselected
+	const linked: Architecture = {
+		...history.present,
+		connections: [
+			{ id: 'e1', source: elementEndpoint('p-1'), target: elementEndpoint('p-2') },
+			{ id: 'e2', source: elementEndpoint('p-3'), target: elementEndpoint('p-2') },
+		],
+	};
+	assert.deepEqual(connectedElementIds(linked, ['p-1']).sort(), ['p-1', 'p-2', 'p-3']);
+	assert.deepEqual(connectedElementIds(linked, ['p-4']), ['p-4']);
 });

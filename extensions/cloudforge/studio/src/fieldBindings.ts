@@ -3,16 +3,29 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 import type { Architecture, Resource, ResourceBlock } from './model.ts';
-import { isSensitiveProperty, type VariableDefinition } from './variables.ts';
+import { withInferredReferenceTypes } from './referenceInference.ts';
+import { isExpr, type Value } from './cloudlab-core/model.ts';
+import { isObjectValue, isSensitiveProperty, variableValueAt, type VariableDefinition } from './variables.ts';
 import { getDef, type AttrDef } from './cloudlab-core/catalog/index.ts';
 import { resourceDefinition } from './fixture.ts';
 import { inheritedReference, inheritedReferences, resourceAddress } from './resourceHierarchy.ts';
-import { liveSchemaAttributes, liveSchemaBlocks, liveSchemaOutputs, type LiveSchemaMap } from './liveSchema.ts';
+import { liveSchemaDefinitionTree, liveSchemaOutputs, type LiveSchemaMap } from './liveSchema.ts';
 
 export type FieldTarget = { kind: 'name' } | { kind: 'region' } | { kind: 'setting'; name: string } | { kind: 'block'; blockId: string; name: string };
-export type VariableBinding = { variableId: string };
+/** `path` picks one attribute of an object variable: { variableId, path: ['dns', 'enabled'] } writes var.NAME.dns.enabled. */
+export type VariableBinding = { variableId: string; path?: string[] };
 export type ResourceRefEntry = { resourceId: string; attribute: string };
-export type ResourceRefBinding = { refs: ResourceRefEntry[] };
+/** One entry of a mixed list: a typed value, a variable or a resource reference, written in order as [a, var.b, type.name.id]. */
+export type ListEntry = { kind: 'value'; value: string } | { kind: 'variable'; variableId: string; path?: string[] } | { kind: 'ref'; resourceId: string; attribute: string };
+/** `refs` lists every referenced resource (dependencies, cycles, validation); `items`, when set, is the full mixed list in order. */
+export type ResourceRefBinding = { refs: ResourceRefEntry[]; items?: ListEntry[] };
+export const hasRefBinding = (binding?: ResourceRefBinding) => !!(binding?.refs.length || binding?.items?.length);
+export function listEntryExpression(entry: ListEntry, architecture?: Architecture): string {
+	if (entry.kind === 'value') { return JSON.stringify(entry.value); }
+	if (entry.kind === 'variable') { return variableBindingExpression(architecture?.variables?.find(item => item.id === entry.variableId), entry); }
+	const source = architecture?.resources.find(item => item.id === entry.resourceId);
+	return source ? resourceAddress(source) + '.' + entry.attribute : 'Missing resource';
+}
 export type ResourceRefCandidate = { resource: Resource; attribute: string; expression: string };
 export const fieldAliases: Record<string, string> = {
 	'Address space': 'address_space', 'Address prefix': 'address_prefixes', SKU: 'sku.name', Capacity: 'sku.capacity',
@@ -68,29 +81,26 @@ export function fieldDefinition(resource: Resource, target: FieldTarget, liveSch
 	const curatedAttrs = getDef(typeName)?.attributes ?? [];
 	const live = liveSchemas?.[typeName];
 	const attrs: AttrDef[] = live
-		? [
-			...liveSchemaAttributes(live, curatedAttrs),
-			...liveSchemaBlocks(live, curatedAttrs).map(block => ({
-				name: block.type,
-				type: 'block' as const,
-				description: block.description ?? '',
-				required: block.required,
-				repeat: block.max > 1,
-				children: block.attributes ?? [],
-			})),
-		]
+		? liveSchemaDefinitionTree(live, curatedAttrs)
 		: curatedAttrs;
 	const lookup = (attributes: AttrDef[], path: string[]): AttrDef | undefined => { const field = attributes.find(item => item.name === path[0]); return path.length > 1 ? lookup(field?.children ?? [], path.slice(1)) : field; };
 	if (target.kind === 'name' || target.kind === 'region') { return { name: target.kind, type: 'string', description: '' }; }
-	if (target.kind === 'setting') { const field = lookup(attrs, resource.catalogue ? [target.name] : fieldPath(target.name)); const descriptor = resource.catalogue?.fields.find(field => field.name === target.name); return field ?? (descriptor ? { ...descriptor, description: descriptor.description ?? '' } : undefined); }
+	if (target.kind === 'setting') { const field = lookup(attrs, resource.catalogue ? [target.name] : fieldPath(target.name)); const descriptor = resource.catalogue?.fields.find(field => field.name === target.name); return withInferredReferenceTypes(typeName, field ?? (!live && descriptor ? { ...descriptor, description: descriptor.description ?? '' } : undefined)); }
 	const visit = (blocks: ResourceBlock[], attributes: AttrDef[]): AttrDef | undefined => {
-		for (const block of blocks) { const definition = attributes.find(item => item.name === block.type); if (block.id === target.blockId) { return lookup(definition?.children ?? [], fieldPath(target.name)); } const found = visit(block.blocks, definition?.children ?? []); if (found) { return found; } }
+		for (const block of blocks) { const definition = attributes.find(item => item.name === block.type); if (block.id === target.blockId) { return withInferredReferenceTypes(typeName, lookup(definition?.children ?? [], fieldPath(target.name))); } const found = visit(block.blocks, definition?.children ?? []); if (found) { return found; } }
 		return undefined;
 	};
 	return visit(resource.blocks, attrs);
 }
 
-export function acceptsVariable(variable: VariableDefinition, definition?: Pick<AttrDef, 'type'>): boolean {
+export function acceptsVariable(variable: VariableDefinition, definition?: Pick<AttrDef, 'type'>, path?: readonly string[]): boolean {
+	if (path?.length) {
+		const value = variableValueAt(variable, path);
+		if (value === undefined) { return false; }
+		if (!definition || value === null) { return true; }
+		const kind = typeof value === 'string' ? 'string' : typeof value === 'number' ? 'number' : typeof value === 'boolean' ? 'bool' : Array.isArray(value) ? 'list' : isObjectValue(value) ? 'map' : 'any';
+		return ['string', 'number', 'bool', 'list', 'map'].includes(definition.type) ? definition.type === kind : true;
+	}
 	if (!definition || variable.type === 'any') { return true; }
 	const type = definition.type;
 	return type === 'list' ? variable.type === 'list(string)' : type === 'map' ? variable.type === 'map(string)' : !['string', 'number', 'bool'].includes(type) || variable.type === type;
@@ -99,7 +109,13 @@ export function acceptsVariable(variable: VariableDefinition, definition?: Pick<
 export function variableBindingIssue(binding: VariableBinding | undefined, variables: VariableDefinition[], definition?: Pick<AttrDef, 'type'>): string | undefined {
 	if (!binding) { return undefined; }
 	const variable = variables.find(item => item.id === binding.variableId);
-	return !variable ? 'The bound variable is missing. Choose another variable or a fixed value.' : !acceptsVariable(variable, definition) ? 'Variable type does not match this field.' : undefined;
+	if (variable && binding.path?.length && variableValueAt(variable, binding.path) === undefined) { return 'var.' + variable.name + '.' + binding.path.join('.') + ' no longer exists in the object. Choose another value.'; }
+	return !variable ? 'The bound variable is missing. Choose another variable or a fixed value.' : !acceptsVariable(variable, definition, binding.path) ? 'Variable type does not match this field.' : undefined;
+}
+
+/** The Terraform expression for a variable binding: var.NAME, or var.NAME.a.b for one attribute of an object variable. */
+export function variableBindingExpression(variable: VariableDefinition | undefined, binding: VariableBinding | undefined): string {
+	return variable ? 'var.' + variable.name + (binding?.path?.length ? '.' + binding.path.join('.') : '') : 'Missing variable';
 }
 
 export function boundVariable(architecture: Architecture, resource: Resource, target: FieldTarget) {
@@ -112,6 +128,7 @@ export function fieldExpression(resource: Resource, target: FieldTarget, variabl
 	if (inherited) { return inherited.expression; }
 	const key = bindingKey(target);
 	const refBinding = resource.resourceRefs?.[key];
+	if (refBinding?.items?.length) { return '[' + refBinding.items.map(entry => listEntryExpression(entry, architecture)).join(', ') + ']'; }
 	if (refBinding?.refs.length) {
 		const parts = refBinding.refs.map(entry => {
 			const source = architecture?.resources.find(item => item.id === entry.resourceId);
@@ -123,7 +140,7 @@ export function fieldExpression(resource: Resource, target: FieldTarget, variabl
 	const binding = resource.fieldBindings?.[key];
 	if (!binding) { return undefined; }
 	const variable = variables?.find(item=>item.id===binding.variableId);
-	return variable ? 'var.'+variable.name : 'Missing variable';
+	return variableBindingExpression(variable, binding);
 }
 
 export function wouldCreateReferenceCycle(architecture: Architecture, consumerId: string, providerId: string): boolean {
@@ -160,10 +177,7 @@ export function eligibleReferenceTargets(architecture: Architecture, resource: R
 			if (candidate.id === resource.id || candidate.kind === 'module' || candidate.provider !== resource.provider) { return false; }
 			const candidateType = resourceDefinition(candidate).type;
 			if (!definition.refTypes!.includes(candidateType)) { return false; }
-			const candidateDef = getDef(candidateType);
-			const liveOutputs = liveSchemaOutputs(liveSchemas?.[candidateType]);
-			const exported = liveOutputs.length ? [...new Set([...liveOutputs, ...(candidateDef?.exported ?? ['id'])])] : (candidateDef?.exported ?? ['id']);
-			if (!exported.includes(attribute)) { return false; }
+			if (!referenceableAttribute(candidateType, attribute, definition, liveSchemas)) { return false; }
 			return !wouldCreateReferenceCycle(architecture, resource.id, candidate.id);
 		})
 		.map(candidate => ({
@@ -171,6 +185,15 @@ export function eligibleReferenceTargets(architecture: Architecture, resource: R
 			attribute,
 			expression: resourceAddress(candidate) + '.' + attribute,
 		}));
+}
+
+/**
+ * Every Terraform resource exports `id`, even a type that is only known from an imported schema (whose definition
+ * lists no exports). A reference inferred from a `*_name` argument reads the target's `name`.
+ */
+function referenceableAttribute(type: string, attribute: string, definition: AttrDef, liveSchemas?: LiveSchemaMap): boolean {
+	if (attribute === 'id' || (definition.refInferred && attribute === 'name')) { return true; }
+	return (getDef(type)?.exported ?? []).includes(attribute) || liveSchemaOutputs(liveSchemas?.[type]).includes(attribute);
 }
 
 export function acceptsResourceRefs(architecture: Architecture, resource: Resource, refs: readonly ResourceRefEntry[], definition?: AttrDef): boolean {
@@ -188,6 +211,13 @@ export function acceptsResourceRefs(architecture: Architecture, resource: Resour
 }
 
 export function resourceRefBindingIssue(binding: ResourceRefBinding | undefined, architecture: Architecture | undefined, resource: Resource, definition?: AttrDef): string | undefined {
+	if (binding?.items?.length) {
+		if (definition && definition.type !== 'list') { return 'Only list fields can mix values, variables and references.'; }
+		for (const entry of binding.items) {
+			if (entry.kind === 'variable' && architecture && !architecture.variables?.some(item => item.id === entry.variableId)) { return 'A variable in this list no longer exists. Choose another variable or a value.'; }
+			if (entry.kind === 'value' && !entry.value.trim()) { return 'An entry in this list is empty. Fill it in or remove it.'; }
+		}
+	}
 	if (!binding || !binding.refs.length) { return undefined; }
 	if (!definition?.refTypes?.length || isSensitiveProperty(definition.name, definition.sensitive)) {
 		return 'This field does not support typed resource references.';
@@ -204,16 +234,72 @@ export function resourceRefBindingIssue(binding: ResourceRefBinding | undefined,
 		if (!definition.refTypes.includes(targetType) || target.provider !== resource.provider) {
 			return 'The referenced resource type does not match this field.';
 		}
-		const exported = getDef(targetType)?.exported ?? ['id'];
-		if (!exported.includes(entry.attribute)) {
+		if (!referenceableAttribute(targetType, entry.attribute, definition)) {
 			return 'The referenced attribute is not exported by this resource.';
 		}
 	}
 	return undefined;
 }
 
-export function variablePreview(variable: VariableDefinition, sensitiveField = false): string {
+export function variablePreview(variable: VariableDefinition, sensitiveField = false, path?: readonly string[]): string {
 	if (sensitiveField || variable.sensitive) { return 'Sensitive value'; }
-	const value = variable.value !== undefined ? variable.value : variable.defaultValue;
+	const value = path?.length ? variableValueAt(variable, path) : variable.value !== undefined ? variable.value : variable.defaultValue;
 	return value === undefined ? 'Required input · value not set' : typeof value === 'string' ? value || 'Empty string' : JSON.stringify(value);
+}
+
+/**
+ * Parses an HCL list containing expressions (e.g. `[azurerm_network_interface.nic.id, var.extra, "manual"]`)
+ * into a validated mixed `ResourceRefBinding` (`refs` + ordered `items`). Returns `undefined` for plain
+ * literal lists or any element that cannot round-trip losslessly (such as function calls, non-string
+ * literals, unknown targets, duplicate refs, or reference cycles), leaving complex HCL in `terraformExtras`.
+ */
+export function parseMixedListHclValue(
+	value: Value,
+	architecture: Architecture,
+	resource: Resource,
+	definition?: AttrDef,
+	variables?: readonly VariableDefinition[]
+): ResourceRefBinding | undefined {
+	if (definition?.type !== 'list' || !Array.isArray(value) || value.length === 0 || !value.some(isExpr)) {
+		return undefined;
+	}
+	const elementType: AttrDef['type'] = (definition.literalShape?.kind === 'list' || definition.literalShape?.kind === 'set')
+		&& definition.literalShape.element?.kind === 'number' ? 'number' : 'string';
+	const availableVars = variables ?? architecture.variables ?? [];
+	const eligibleRefs = eligibleReferenceTargets(architecture, resource, definition);
+	const items: ListEntry[] = [];
+	const refs: ResourceRefEntry[] = [];
+
+	for (const element of value) {
+		if (typeof element === 'string') {
+			items.push({ kind: 'value', value: element });
+			continue;
+		}
+		if (!isExpr(element)) {
+			return undefined;
+		}
+		const expr = element.$expr.trim();
+		const varMatch = /^var\.([A-Za-z_][A-Za-z0-9_-]*)((?:\.[A-Za-z_][A-Za-z0-9_-]*)*)$/.exec(expr);
+		if (varMatch) {
+			const variable = availableVars.find(item => item.name === varMatch[1]);
+			const path = varMatch[2] ? varMatch[2].slice(1).split('.') : [];
+			if (!variable || !acceptsVariable(variable, { type: elementType }, path.length ? path : undefined)) {
+				return undefined;
+			}
+			items.push({ kind: 'variable', variableId: variable.id, ...(path.length ? { path } : {}) });
+			continue;
+		}
+		const candidate = eligibleRefs.find(item => item.expression === expr);
+		if (candidate) {
+			items.push({ kind: 'ref', resourceId: candidate.resource.id, attribute: candidate.attribute });
+			refs.push({ resourceId: candidate.resource.id, attribute: candidate.attribute });
+			continue;
+		}
+		return undefined;
+	}
+
+	if (refs.length > 0 && !acceptsResourceRefs(architecture, resource, refs, definition)) {
+		return undefined;
+	}
+	return { refs, items };
 }

@@ -61,8 +61,8 @@ const engineInitOfflineTimeoutMs = 125 * 1000;
 const extractMirrorSchemaTimeoutMs = 245 * 1000;
 /** Stage 10B `importMirrorPackage` streams & verifies large provider ZIP archives; wait 65 s. */
 const importMirrorPackageTimeoutMs = 65 * 1000;
-/** Stage 10C `downloadProviderPackage` mirrors provider archives over HTTPS; wait 5 min. */
-const downloadProviderPackageTimeoutMs = 5 * 60 * 1000;
+/** `downloadProviderPackage` lets the engine download for up to 600 s; the broker waits 610 s. */
+const downloadProviderPackageTimeoutMs = 610 * 1000;
 const maxPathLength = 32767;
 const maxNameLength = 255;
 const maxRemoteBytes = 2048;
@@ -1568,10 +1568,10 @@ export class CloudForgeServiceBroker implements IServerChannel<string> {
 						? engineInitOfflineTimeoutMs
 						: method === 'extractProviderSchemaFromMirror'
 							? extractMirrorSchemaTimeoutMs
-							: method === 'downloadProviderPackage'
-								? downloadProviderPackageTimeoutMs
-								: method === 'importMirrorPackage' || method === 'verifyMirrorIntegrity'
-									? importMirrorPackageTimeoutMs
+							: method === 'importMirrorPackage' || method === 'verifyMirrorIntegrity'
+								? importMirrorPackageTimeoutMs
+								: method === 'downloadProviderPackage'
+									? downloadProviderPackageTimeoutMs
 									: undefined;
 			let value = await service.call(method, request.params, timeoutMs);
 			if (method === 'createProject') {

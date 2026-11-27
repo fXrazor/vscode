@@ -3,7 +3,7 @@ html, body, #root { margin: 0; padding: 0; width: 100%; height: 100%; overflow: 
 .studio .variable-configurator { padding: 0; height: 100%; min-height: 0; display: flex; flex-direction: column; }
 .studio .inspector-content:has(.variable-configurator) { display: flex; flex-direction: column; overflow: hidden; }
 .studio .variable-container:has(.variable-configurator) { flex: 1; min-height: 0; overflow: hidden; }
-.studio .variable-configurator > .configurator-heading { display: flex; align-items: flex-start; gap: 10px; padding: 20px; margin: 0; border-bottom: 1px solid var(--border); }
+.studio .variable-configurator > .configurator-heading { display: flex; flex-shrink: 0; align-items: flex-start; gap: 10px; padding: 20px; margin: 0; border-bottom: 1px solid var(--border); }
 .configurator-heading > div { flex: 1; min-width: 0; }
 .studio .configurator-heading h2 { font-size: 16px; line-height: 1.4; font-weight: 600; }
 .configurator-heading p { margin-top: 5px; color: var(--muted); font-size: 12px; line-height: 1.6; }
@@ -11,6 +11,7 @@ html, body, #root { margin: 0; padding: 0; width: 100%; height: 100%; overflow: 
 .configurator-back:hover { background: var(--hover); }
 .configurator-symbol { margin-top: 5px; color: var(--accent); flex-shrink: 0; }
 .configurator-body { flex: 1; min-height: 0; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 24px; }
+.configurator-body > * { flex-shrink: 0; }
 .configurator-field { display: grid; gap: 8px; min-width: 0; }
 .configurator-field > label, .configurator-label { font-size: 12px; font-weight: 550; line-height: 1.5; }
 .optional-label { font-size: 11px; font-weight: 400; color: var(--muted); margin-left: 4px; }
@@ -66,7 +67,7 @@ html, body, #root { margin: 0; padding: 0; width: 100%; height: 100%; overflow: 
 .variable-empty-example code { overflow-wrap: anywhere; }
 .studio .variable-empty > button { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 8px 10px; }
 
-.resource-workspace { width: min(1520px, calc(100vw - 48px)); height: min(960px, calc(100dvh - 64px)); border-radius: 12px; }
+.resource-workspace { --workspace-context-width: clamp(300px, 27vw, 440px); width: min(1920px, calc(100vw - 32px)); height: min(1200px, calc(100dvh - 32px)); border-radius: 12px; }
 .resource-workspace[open] { display: flex; flex-direction: column; overflow: hidden; }
 .resource-workspace::backdrop { background: #11182766; backdrop-filter: blur(1px); }
 .studio.theme-dark .resource-workspace::backdrop { background: #04071399; }
@@ -82,24 +83,71 @@ html, body, #root { margin: 0; padding: 0; width: 100%; height: 100%; overflow: 
 .resource-workspace .workspace-header .workspace-close:hover { background: var(--hover); }
 .resource-workspace .workspace-check-summary { display: inline-flex; align-items: center; gap: 6px; color: var(--success); border: 0; background: transparent; font-size: 11px; white-space: nowrap; }
 .resource-workspace .workspace-check-summary.has-findings { color: var(--warning, var(--warn)); }
-.resource-workspace .workspace-columns { flex: 1; min-height: 0; height: auto; grid-template-columns: minmax(280px, var(--workspace-code-width)) minmax(340px, 1fr) 300px; overflow: hidden; }
-.resource-workspace.workspace-code-closed .workspace-columns { grid-template-columns: minmax(340px, 1fr) 300px; }
-.resource-workspace.workspace-context-closed .workspace-columns { grid-template-columns: minmax(280px, var(--workspace-code-width)) minmax(340px, 1fr); }
+.resource-workspace .workspace-columns { flex: 1; min-height: 0; height: auto; grid-template-columns: minmax(280px, min(var(--workspace-code-width), 44vw)) minmax(340px, 1fr) var(--workspace-context-width); overflow: hidden; }
+.resource-workspace.workspace-code-closed .workspace-columns { grid-template-columns: minmax(340px, 1fr) var(--workspace-context-width); }
+.resource-workspace.workspace-context-closed .workspace-columns { grid-template-columns: minmax(280px, min(var(--workspace-code-width), 55vw)) minmax(340px, 1fr); }
 .resource-workspace.workspace-code-closed.workspace-context-closed .workspace-columns { grid-template-columns: 1fr; }
 .resource-workspace .workspace-parameters { display: flex; flex-direction: column; overflow: hidden; padding: 0; background: var(--panel-solid); }
 .workspace-pane-heading { display: flex; gap: 10px; align-items: flex-start; min-height: 84px; flex-shrink: 0; padding: 20px 24px 16px; border-bottom: 1px solid var(--border); }
 .workspace-pane-heading > svg { color: var(--muted); flex-shrink: 0; margin-top: 2px; }
 .workspace-pane-heading h3 { font-size: 14px; font-weight: 600; line-height: 1.4; }
 .workspace-pane-heading p { font-size: 11px; color: var(--muted); line-height: 1.6; margin-top: 5px; }
-.resource-workspace .workspace-parameters > .resource-fields { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 24px 24px; gap: 0; }
+.resource-workspace .workspace-parameters > .resource-fields { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 24px 24px; gap: 0; align-content: start; }
 .workspace-parameters .form-section > summary { min-height: 46px; padding: 12px 0; }
-.workspace-parameters .form-section-body { gap: 18px; padding: 4px 0 20px; }
+.workspace-parameters .form-section-body { gap: 16px; padding: 4px 0 20px; align-content: start; }
 .workspace-parameters .schema-field { gap: 8px; }
 .workspace-parameters .schema-field input, .workspace-parameters .schema-field select, .workspace-parameters .schema-field textarea, .workspace-parameters .form-section-body > label input, .workspace-parameters .form-section-body > label select { min-height: 36px; padding: 8px 10px; font-size: 12px; }
 .workspace-parameters .schema-field-heading { margin-bottom: 2px; }
-.resource-workspace .workspace-parameters .form-coverage { display: none; }
+.schema-field-heading { justify-content: flex-start; }
+.field-label-help { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.literal-control, .literal-fields, .literal-member { display: grid; gap: 8px; min-width: 0; }
+.literal-control > button, .literal-fields > button, .literal-member > button { justify-self: start; }
+/* Literal (list / map / object) editor buttons: icon remove beside each entry, a dashed add row, a quiet Unset and a ghost JSON toggle. */
+.literal-control button { font: inherit; font-size: 12px; cursor: pointer; }
+.literal-control button:disabled { opacity: .45; cursor: default; }
+.literal-control .literal-ghost { display: inline-flex; align-items: center; gap: 5px; min-height: 26px; padding: 0 9px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--muted); }
+.literal-control .literal-ghost:hover { color: var(--text); border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
+.literal-control > .literal-mode { justify-self: end; margin-bottom: -4px; }
+.literal-control .literal-add { display: flex; align-items: center; justify-content: center; gap: 6px; justify-self: stretch; min-height: 32px; padding: 0 10px; border: 1px dashed color-mix(in srgb, var(--accent) 45%, var(--border)); border-radius: 7px; background: color-mix(in srgb, var(--accent) 5%, transparent); color: var(--accent); font-weight: 600; }
+.literal-control .literal-add:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 11%, transparent); border-style: solid; }
+.literal-control .literal-remove { display: grid; place-items: center; width: 30px; height: 32px; padding: 0; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--muted); }
+.literal-control .literal-remove:hover { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); border-color: color-mix(in srgb, var(--danger) 25%, transparent); }
+.literal-control .literal-unset { justify-self: start; padding: 2px 0; border: 0; background: none; color: var(--muted); font-size: 11.5px; text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 35%, transparent); text-underline-offset: 3px; }
+.literal-control .literal-unset:hover { color: var(--danger); }
+.literal-actions { display: flex; justify-content: flex-end; }
+.literal-entry { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 6px; align-items: end; }
+.literal-entry > .literal-group + .literal-remove { align-self: start; margin-top: 2px; }
+.literal-new-key { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
+.literal-new-key .literal-add { min-width: 72px; }
+.literal-new-key-label { font-size: 12px; color: var(--muted); }
+.literal-group { min-width: 0; }
+.literal-group > summary { padding: 8px 0; cursor: pointer; font-size: 12px; }
+.literal-group > .literal-fields { padding: 8px 0 8px 12px; gap: 16px; }
+.literal-entry { padding: 8px 0; border-bottom: 1px solid var(--border); }
+.literal-member output { padding: 8px 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.resource-fields .field-label-help > label { display: inline-flex; align-items: baseline; gap: 3px; }
+.field-label-help + .field-value-mode { margin-left: auto; }
+.schema-field-heading .field-help-trigger { display: inline-flex; flex-shrink: 0; align-items: center; justify-content: center; padding: 4px; border: 0; min-width: 24px; min-height: 24px; color: var(--muted); background: transparent; }
+.schema-field-heading .field-help-trigger:hover { background: var(--hover); color: var(--text); }
+.terraform-configured { display: grid; gap: 8px; padding: 12px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 4px; font-size: 12px; }
+.terraform-configured code { overflow-wrap: anywhere; white-space: pre-wrap; font-family: var(--font-code); }
+.terraform-configured button, .additional-config-item button { justify-self: start; }
+/* "Configure in Terraform": a code action, outlined in the accent so it reads as the way into the code editor. */
+.code-action { display: inline-flex; align-items: center; gap: 6px; justify-self: start; min-height: 30px; padding: 0 12px; border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border)); border-radius: 7px; background: color-mix(in srgb, var(--accent) 6%, var(--panel-solid)); color: var(--accent); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+.code-action:hover { background: color-mix(in srgb, var(--accent) 13%, var(--panel-solid)); border-color: var(--accent); }
+.code-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.additional-config-item { display: grid; gap: 8px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.provider-example pre, .terraform-review pre { padding: 12px; overflow: auto; max-height: 280px; font-family: var(--font-code); font-size: 11px; line-height: 1.6; background: var(--panel-2); }
+.terraform-review { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 20px; display: grid; gap: 12px; align-content: start; }
+.terraform-review > div { display: flex; flex-wrap: wrap; gap: 8px; }
+.terraform-review p { font-size: 12px; line-height: 1.6; }
+.terraform-review summary, .provider-example summary { min-height: 32px; cursor: pointer; font-size: 12px; }
+.resource-workspace .workspace-parameters .form-coverage { margin: 12px 0; font-size: 11px; line-height: 1.6; color: var(--muted); }
+.resource-workspace .workspace-parameters .form-coverage code { overflow-wrap: anywhere; }
 .studio .workspace-code .code-panel-focused { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--panel-solid); }
 .code-panel-focused .code-content { min-height: 0; }
+.code-panel-focused .resource-code-actions { flex-shrink: 0; padding: 8px 20px; flex-wrap: wrap; }
+.code-panel-focused .editor-toolbar { flex-shrink: 0; padding: 8px 20px; gap: 6px; flex-wrap: wrap; }
 .code-panel-focused .focused-code-help { flex-shrink: 0; margin: 12px 20px 4px; font-size: 11px; line-height: 1.6; color: var(--muted); }
 .focused-code-help summary { cursor: pointer; min-height: 24px; }
 .focused-code-help p { padding: 6px 0 8px; }
@@ -110,11 +158,12 @@ html, body, #root { margin: 0; padding: 0; width: 100%; height: 100%; overflow: 
 .workspace-context:has(.variable-configurator) { overflow: hidden; }
 .workspace-context:has(.variable-configurator) .workspace-context-root { height: 100%; min-height: 0; display: flex; flex-direction: column; }
 .workspace-context:has(.variable-configurator) [role=tabpanel][id$="content-variables"] { flex: 1; min-height: 0; overflow: hidden; }
-.resource-workspace .workspace-context-tabs { padding: 14px 12px; min-height: 64px; gap: 4px; }
+.resource-workspace .workspace-context-tabs { padding: 14px 12px; min-height: 64px; gap: 4px; flex-shrink: 0; }
 .resource-workspace .workspace-context-tabs > button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 34px; padding: 4px 7px; font-size: 11px; }
 .workspace-tab-count { font-size: 10px; font-variant-numeric: tabular-nums; }
 .workspace-context [role=tabpanel] { padding: 20px; }
 .workspace-context [role=tabpanel][id$="content-variables"] { padding: 0; }
+.resource-workspace .workspace-context .variable-value-heading h3 { margin: 0; }
 .workspace-context-section { margin-bottom: 24px; }
 .workspace-context-section h3 { display: flex; gap: 6px; align-items: center; margin: 0 0 10px; font-size: 12px; }
 .workspace-context-section > .field-help { font-size: 11px; margin-bottom: 8px; }
@@ -278,3 +327,13 @@ html, body, #root { margin: 0; padding: 0; width: 100%; height: 100%; overflow: 
 .save-all-file-head strong { font-family: var(--mono, monospace); }
 .save-all-file-head span { color: var(--muted); }
 .save-all-file-head button { margin-left: auto; }
+/* List fields edited entry by entry: each entry is a value, a variable or a resource reference. */
+.list-entries { gap: 6px; }
+.list-entry { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 6px; }
+.list-entry .list-entry-icon { display: none; }
+.list-entry > input, .list-entry > select:not(.list-entry-kind) { min-height: 32px; min-width: 0; width: 100%; }
+.list-entry.is-variable > select:not(.list-entry-kind) { color: var(--accent); background-color: color-mix(in srgb, var(--accent) 6%, var(--input)); font-family: var(--font-code); font-size: 12px; }
+.list-entry.is-ref > select:not(.list-entry-kind) { background-color: color-mix(in srgb, var(--accent) 4%, var(--input)); }
+.list-entry .list-entry-kind { width: 112px; min-height: 32px; padding: 0 22px 0 8px; border: 1px solid var(--border); border-radius: 6px; background-color: var(--panel-2); color: var(--muted); font-size: 11.5px; cursor: pointer; }
+.list-entries-add { display: grid; grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)); gap: 6px; margin-top: 2px; }
+.list-entries-empty { margin: 0; color: var(--muted); font-size: 12px; }

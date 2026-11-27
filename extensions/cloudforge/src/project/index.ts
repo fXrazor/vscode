@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { commands, window, workspace, type ExtensionContext } from 'vscode';
+import { commands, Uri, window, workspace, type ExtensionContext } from 'vscode';
 import { ProjectController, type GraphHost } from './controller';
 import { ensureGit } from './git';
 import type { CloneProvider } from './model';
@@ -43,7 +43,10 @@ export function activateProjects(context: ExtensionContext, graph: GraphHost): P
 		commands.registerCommand('cloudforge.cloneRepository', (provider?: unknown) =>
 			controller.cloneRepository(typeof provider === 'string' && providers.has(provider) ? provider as CloneProvider : undefined)),
 		commands.registerCommand('cloudforge.createProject', () => controller.createProject()),
+		commands.registerCommand('cloudforge.openProjectInNewWindow', () => controller.openProjectInNewWindow()),
 		commands.registerCommand('cloudforge.createArchitecture', () => controller.createArchitecture()),
+		commands.registerCommand('cloudforge.addArchitecture', () => controller.addArchitecture()),
+		commands.registerCommand('cloudforge.addArchitectureFromBundle', (uri?: unknown) => controller.createArchitectureFromBundle(uri instanceof Uri ? uri : undefined)),
 		commands.registerCommand('cloudforge.openProjectGallery', () => gallery.show()),
 		commands.registerCommand('cloudforge.switchArchitecture', () => controller.switchArchitecture()),
 		commands.registerCommand('cloudforge.refreshProject', () => controller.connect(true)),

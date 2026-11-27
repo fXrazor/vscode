@@ -8,18 +8,20 @@
  * into CloudForge Studio's `AttrDef` and `BlockDefinition` models.
  *
  * Curated `cloudlab-core` metadata (`refTypes`, `refAttr`, `cidr`, `default`) is preserved when
- * present so live version-matched Rust provider schemas enrich forms and diagnostics without
+ * present so imported Rust provider schemas enrich forms and diagnostics without
  * losing typed reference or inheritance constraints.
  */
 
 import type { AttrDef, AttrType } from './cloudlab-core/catalog/types.ts';
 import type { BlockDefinition } from './formDefinition.ts';
+import type { LiteralShape } from '../../src/canvas/literalSchema.ts';
 
 export type HostSchemaKind = 'resource' | 'dataSource';
 export type HostFieldAccess = 'required' | 'optional' | 'computedOnly';
-export type HostFieldValueType = 'string' | 'number' | 'bool' | 'listString' | 'mapString';
+export type HostFieldValueType = 'string' | 'number' | 'bool' | 'listString' | 'mapString' | 'json';
 
 export interface HostFormAttribute {
+	readonly literalShape?: LiteralShape;
 	readonly name: string;
 	readonly path: string;
 	readonly access: HostFieldAccess;
@@ -56,6 +58,7 @@ export interface HostFormCoverage {
 }
 
 export interface HostFormSchema {
+	readonly selection?: { readonly sourceRevision: string; readonly address: string; readonly snapshotSha256: string; readonly lockedVersionVerified: true };
 	readonly kind: HostSchemaKind;
 	readonly typeName: string;
 	readonly providerSource: string;
@@ -71,12 +74,23 @@ export interface HostFormSchema {
 
 export type LiveSchemaMap = Readonly<Record<string, HostFormSchema>>;
 
+/** JSON controls can represent complex literal collections which older coverage reports marked code-only. */
+export function formCoverageGaps(schema: HostFormSchema): HostFormCoverage['gaps'] {
+	const normalize = (path: string) => path.replace(/\[(?:\d*|\*)\]/g, '');
+	const attributes = [...schema.attributes, ...schema.blocks.flatMap(block => block.attributes)];
+	return (schema.coverage?.gaps ?? []).filter(gap => !attributes.some(attribute => {
+		const path = normalize(attribute.path), target = normalize(gap.path);
+		return target === path || (['listString','mapString','json'].includes(attribute.valueType) && target.startsWith(path + '.'));
+	}));
+}
+
 function mapFieldType(valueType: HostFieldValueType): AttrType {
 	switch (valueType) {
 		case 'number': return 'number';
 		case 'bool': return 'bool';
 		case 'listString': return 'list';
 		case 'mapString': return 'map';
+		case 'json': return 'json';
 		case 'string':
 		default:
 			return 'string';
@@ -86,11 +100,11 @@ function mapFieldType(valueType: HostFieldValueType): AttrType {
 function toAttrDef(attribute: HostFormAttribute, curated?: AttrDef): AttrDef {
 	return {
 		name: attribute.name,
+		...(attribute.literalShape ? { literalShape: attribute.literalShape } : {}),
 		type: mapFieldType(attribute.valueType),
 		required: attribute.access === 'required',
 		description: attribute.description || curated?.description || '',
-		...(curated?.default !== undefined ? { default: curated.default } : {}),
-		...(attribute.options?.length ? { options: [...attribute.options] } : curated?.options?.length ? { options: [...curated.options] } : {}),
+		...(attribute.options?.length ? { options: [...attribute.options] } : {}),
 		...(curated?.refTypes?.length ? { refTypes: [...curated.refTypes] } : {}),
 		...(curated?.refAttr ? { refAttr: curated.refAttr } : {}),
 		...(curated?.cidr ? { cidr: true } : {}),
@@ -110,23 +124,23 @@ export function liveSchemaAttributes(schema: HostFormSchema, curatedAttributes: 
 		}
 		merged.set(attr.name, toAttrDef(attr, curatedByName.get(attr.name)));
 	}
-	for (const curated of curatedAttributes) {
-		if (curated.type !== 'block' && !merged.has(curated.name)) {
-			merged.set(curated.name, curated);
-		}
-	}
 	return [...merged.values()];
 }
 
 /** Convert live Rust `FormSchema` nested blocks to Studio `BlockDefinition[]`, preserving curated child rules. */
 export function liveSchemaBlocks(schema: HostFormSchema, curatedAttributes: readonly AttrDef[] = []): BlockDefinition[] {
-	const curatedBlocks = new Map(curatedAttributes.filter(attr => attr.type === 'block').map(attr => [attr.name, attr]));
-	const out: BlockDefinition[] = [];
-	const seen = new Set<string>();
+	const definitions = new Map<string, BlockDefinition>();
+	const pathOf = (path: string) => path.replace(/\[(?:\d*|\*)\]/g, '').split('.').filter(Boolean);
+	const curatedAt = (path: string[]): AttrDef | undefined => {
+		let attributes = curatedAttributes;
+		let found: AttrDef | undefined;
+		for (const name of path) { found = attributes.find(attribute => attribute.name === name); attributes = found?.children ?? []; }
+		return found;
+	};
 
 	for (const block of schema.blocks) {
-		seen.add(block.name);
-		const curated = curatedBlocks.get(block.name);
+		const path = pathOf(block.path || block.name);
+		const curated = curatedAt(path);
 		const curatedChildren = new Map((curated?.children ?? []).filter(child => child.type !== 'block').map(child => [child.name, child]));
 		const attributes: AttrDef[] = block.attributes
 			.filter(attr => attr.access !== 'computedOnly')
@@ -137,10 +151,11 @@ export function liveSchemaBlocks(schema: HostFormSchema, curatedAttributes: read
 				.map(attr => [attr.name, typeof attr.default === 'string' ? attr.default : JSON.stringify(attr.default)])
 		);
 		const max = typeof block.maxItems === 'number' && block.maxItems > 0 ? block.maxItems : Infinity;
-		out.push({
+		definitions.set(path.join('.'), {
 			type: block.name,
 			label: block.name.replaceAll('_', ' '),
 			max,
+			min: block.minItems,
 			required: typeof block.minItems === 'number' && block.minItems > 0,
 			description: block.description || curated?.description,
 			attributes,
@@ -149,25 +164,23 @@ export function liveSchemaBlocks(schema: HostFormSchema, curatedAttributes: read
 		});
 	}
 
-	// Retain curated nested blocks not yet emitted by a flat block summary (if any).
-	for (const curated of curatedBlocks.values()) {
-		if (seen.has(curated.name)) {
-			continue;
-		}
-		const children = (curated.children ?? []).filter(child => child.type !== 'block');
-		out.push({
-			type: curated.name,
-			label: curated.name.replaceAll('_', ' '),
-			max: curated.repeat ? Infinity : 1,
-			required: curated.required,
-			description: curated.description,
-			attributes: children,
-			fields: Object.fromEntries(children.filter(c => c.default !== undefined).map(c => [c.name, typeof c.default === 'string' ? c.default : JSON.stringify(c.default)])),
-			children: [],
-		});
+	// Rust sends a flat list with full paths. Reconstruct the actual nesting, never a second root block.
+	const out: BlockDefinition[] = [];
+	for (const [path, definition] of definitions) {
+		const parts = path.split('.');
+		if (parts.length === 1) { out.push(definition); }
+		else { definitions.get(parts.slice(0, -1).join('.'))?.children.push(definition); }
 	}
-
 	return out;
+}
+
+/** Shared recursive tree for field binding/validation, matching the nested form exactly. */
+export function liveSchemaDefinitionTree(schema: HostFormSchema, curatedAttributes: readonly AttrDef[] = []): AttrDef[] {
+	const convert = (block: BlockDefinition): AttrDef => ({
+		name: block.type, type: 'block', description: block.description ?? '', required: block.required,
+		repeat: block.max > 1, children: [...block.attributes ?? [], ...block.children.map(convert)],
+	});
+	return [...liveSchemaAttributes(schema, curatedAttributes), ...liveSchemaBlocks(schema, curatedAttributes).map(convert)];
 }
 
 /** Exported attribute names known for a resource from its live Rust `FormSchema`. */

@@ -5,7 +5,7 @@
 
 import assert from 'assert';
 import type * as electron from 'electron';
-import { Event } from '../../../base/common/event.js';
+import { Emitter, Event } from '../../../base/common/event.js';
 import { URI } from '../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../base/test/common/utils.js';
 import { NullLogService } from '../../../platform/log/common/log.js';
@@ -627,6 +627,20 @@ suite('CloudForgeServiceChannel', () => {
 			architectureId: 'workspace-1-architecture-1',
 			cliConfigPath: 'C:\\evil.tofurc'
 		}), undefined);
+		assert.deepStrictEqual(validateCloudForgeServiceParams('runEngineInitOffline', {
+			workspaceId: 'workspace-1',
+			architectureId: 'workspace-1-architecture-1',
+			createLockFile: true
+		}), {
+			workspaceId: 'workspace-1',
+			architectureId: 'workspace-1-architecture-1',
+			createLockFile: true
+		});
+		assert.strictEqual(validateCloudForgeServiceParams('runEngineInitOffline', {
+			workspaceId: 'workspace-1',
+			architectureId: 'workspace-1-architecture-1',
+			createLockFile: 'yes'
+		}), undefined);
 
 		assert.deepStrictEqual(validateCloudForgeServiceParams('extractProviderSchemaFromMirror', {
 			address: 'registry.terraform.io/hashicorp/azurerm',
@@ -703,6 +717,26 @@ suite('CloudForgeServiceChannel', () => {
 		assert.deepStrictEqual(validateCloudForgeServiceParams('planMirrorCleanup', { quotaBytes: 0 }), { quotaBytes: 0 });
 		assert.strictEqual(validateCloudForgeServiceParams('planMirrorCleanup', { quotaBytes: -1 }), undefined);
 		assert.strictEqual(validateCloudForgeServiceParams('planMirrorCleanup', { quotaBytes: 1024, workspaceId: 'workspace-1' }), undefined);
+	});
+
+	test('validates listProviderVersions params', () => {
+		const address = 'registry.opentofu.org/hashicorp/aws';
+		assert.deepStrictEqual(validateCloudForgeServiceParams('listProviderVersions', { address }), { address });
+		assert.deepStrictEqual(validateCloudForgeServiceParams('listProviderVersions', { address, refresh: true }), { address, refresh: true });
+		assert.strictEqual(validateCloudForgeServiceParams('listProviderVersions', { address, refresh: 'yes' }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('listProviderVersions', { address: 'https://evil/x/y' }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('listProviderVersions', { address, url: 'x' }), undefined);
+	});
+
+	test('validates downloadProviderPackage params', () => {
+		const address = 'registry.terraform.io/hashicorp/azurerm';
+		assert.deepStrictEqual(validateCloudForgeServiceParams('downloadProviderPackage', { address, version: '3.116.0' }), { address, version: '3.116.0' });
+		assert.deepStrictEqual(validateCloudForgeServiceParams('downloadProviderPackage', { address, version: '3.116.0', platforms: ['windows_amd64', 'linux_amd64'], engine: 'terraform' }), { address, version: '3.116.0', platforms: ['windows_amd64', 'linux_amd64'], engine: 'terraform' });
+		assert.strictEqual(validateCloudForgeServiceParams('downloadProviderPackage', { address: 'hashicorp/azurerm', version: '3.116.0' }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('downloadProviderPackage', { address, version: '../3' }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('downloadProviderPackage', { address, version: '3.116.0', platforms: [] }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('downloadProviderPackage', { address, version: '3.116.0', platforms: ['../x'] }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('downloadProviderPackage', { address, version: '3.116.0', archivePath: 'C:\\x.zip' }), undefined);
 	});
 
 	test('picks a local .zip archive in Electron main for importMirrorPackage and blocks UNC paths', async () => {
@@ -962,5 +996,79 @@ suite('CloudForgeServiceChannel', () => {
 			architectureId: `${workspaceId}-architecture-1`,
 			createLockFile: 'true'
 		}), undefined);
+	});
+
+	test('isolates separate CloudForge sidecar instances across multiple open windows and stops only closed windows', async () => {
+		const onOpen = new Emitter<{ readonly id: number }>();
+		const onDestroy = new Emitter<{ readonly id: number }>();
+		const activeWindows = new Map<number, FakeWindow>([[1, contosoWindow]]);
+		const created: Array<{ readonly service: FakeService; started: boolean; stopped: boolean }> = [];
+
+		const broker = new CloudForgeServiceBroker(
+			'C:\\app',
+			new NullLogService(),
+			{
+				onDidOpenWindow: onOpen.event,
+				onDidDestroyWindow: onDestroy.event,
+				getWindows: () => [...activeWindows.values()],
+				getWindowById: id => {
+					const win = activeWindows.get(id);
+					return win ? { openedWorkspace: win.openedWorkspace, win: null } : undefined;
+				}
+			},
+			{
+				resolveLocalWorkspace: async configPath => [...activeWindows.values()].find(win => win.resolved?.configPath.toString() === configPath.toString())?.resolved
+			},
+			{
+				showOpenDialog: async () => ({ canceled: true, filePaths: [] })
+			},
+			() => {
+				const entry = {
+					started: false,
+					stopped: false,
+					service: new FakeService((_method, params) => ({ echoProject: params.projectPath }))
+				};
+				const origStart = entry.service.start.bind(entry.service);
+				const origStop = entry.service.stop.bind(entry.service);
+				entry.service.start = async () => { entry.started = true; return origStart(); };
+				entry.service.stop = async () => { entry.stopped = true; return origStop(); };
+				created.push(entry);
+				return entry.service;
+			}
+		);
+
+		try {
+			assert.strictEqual(created.length, 1);
+			assert.strictEqual(created[0].started, true);
+
+			// Open a second independent project window
+			activeWindows.set(2, fabrikamWindow);
+			onOpen.fire({ id: 2 });
+			assert.strictEqual(created.length, 2);
+			assert.strictEqual(created[1].started, true);
+
+			const res1 = await broker.call<CloudForgeCallResult>('window:1', 'openProject', {});
+			const res2 = await broker.call<CloudForgeCallResult>('window:2', 'openProject', {});
+			assert.deepStrictEqual(res1, { ok: true, value: { echoProject: fsPath('C:\\Projects\\Contoso Platform') } });
+			assert.deepStrictEqual(res2, { ok: true, value: { echoProject: fsPath('D:\\Work\\Fabrikam') } });
+			assert.strictEqual(created[0].service.calls.length, 1);
+			assert.strictEqual(created[1].service.calls.length, 1);
+
+			// Closing window 1 stops only window 1's sidecar; window 2 continues serving requests
+			activeWindows.delete(1);
+			onDestroy.fire({ id: 1 });
+			assert.strictEqual(created[0].stopped, true);
+			assert.strictEqual(created[1].stopped, false);
+
+			const afterClose1 = await broker.call<CloudForgeCallResult>('window:1', 'openProject', {});
+			assert.strictEqual(afterClose1.ok, false);
+			const afterClose2 = await broker.call<CloudForgeCallResult>('window:2', 'openProject', {});
+			assert.deepStrictEqual(afterClose2, { ok: true, value: { echoProject: fsPath('D:\\Work\\Fabrikam') } });
+		} finally {
+			await broker.stop();
+			onOpen.dispose();
+			onDestroy.dispose();
+		}
+		assert.strictEqual(created[1].stopped, true);
 	});
 });

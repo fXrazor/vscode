@@ -11,6 +11,9 @@ import {
 	isSafeFolderName,
 	normalizeFsPathForMatch,
 	parseProjectResult,
+	parseProjectWindowPreference,
+	pickProjectWorkspaceEntry,
+	resolveProjectWindowOpenAction,
 	sanitizeRemoteUrl,
 	suggestArchitectureName,
 } from '../src/project/model.ts';
@@ -110,4 +113,33 @@ test('workspacePresets define valid built-in zero-core-patch layout descriptors'
 	const focus = findWorkspacePreset('canvas-focus');
 	assert.equal(focus.focusMode, true);
 	assert.equal(focus.showPrimarySidebar, false);
+});
+
+test('multi-window project helpers resolve preferences and single .code-workspace entries cleanly', () => {
+	assert.equal(parseProjectWindowPreference('newWindow'), 'newWindow');
+	assert.equal(parseProjectWindowPreference('currentWindow'), 'currentWindow');
+	assert.equal(parseProjectWindowPreference('ask'), 'ask');
+	assert.equal(parseProjectWindowPreference('invalid'), 'ask');
+
+	// Empty window always reuses the current window without prompting
+	assert.equal(resolveProjectWindowOpenAction('ask', false), 'currentWindow');
+	assert.equal(resolveProjectWindowOpenAction('newWindow', false), 'currentWindow');
+	// Active workspace honors user preference
+	assert.equal(resolveProjectWindowOpenAction('ask', true), 'ask');
+	assert.equal(resolveProjectWindowOpenAction('newWindow', true), 'newWindow');
+	assert.equal(resolveProjectWindowOpenAction('currentWindow', true), 'currentWindow');
+
+	// Single .code-workspace file inside picked project directory is selected automatically
+	assert.equal(
+		pickProjectWorkspaceEntry([['cloudforge.project.json', 1], ['Platform.code-workspace', 1], ['architectures', 2]], 1),
+		'Platform.code-workspace'
+	);
+	assert.equal(
+		pickProjectWorkspaceEntry([['a.code-workspace', 1], ['b.code-workspace', 1]], 1),
+		undefined
+	);
+	assert.equal(
+		pickProjectWorkspaceEntry([['main.tf', 1]], 1),
+		undefined
+	);
 });
