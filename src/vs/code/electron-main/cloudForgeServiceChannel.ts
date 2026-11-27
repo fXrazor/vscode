@@ -48,7 +48,9 @@ const cloudForgeMethods: ReadonlySet<string> = new Set<CloudForgeServiceMethod>(
 	'importMirrorPackage', 'listProviderVersions', 'downloadProviderPackage', 'evictMirrorPackage', 'verifyMirrorIntegrity', 'planMirrorCleanup',
 	'selectTerraformSkills', 'listBuiltinSkills', 'getTopologyBlueprint',
 	'getLearningRecord', 'saveLearningRecord', 'submitProposal', 'reviewProposal',
-	'issueMcpGrant', 'listMcpGrants', 'revokeMcpGrant'
+	'issueMcpGrant', 'listMcpGrants', 'revokeMcpGrant',
+	'listTemplates', 'getTemplateDetails', 'checkTemplateCompatibility',
+	'listTemplateSources', 'importTemplatePackageFile', 'removeCachedTemplate'
 ]);
 
 /** The service allows `installGit` 10 minutes; the broker waits a little longer for its reply. */
@@ -99,6 +101,21 @@ const serviceErrorMessages: Readonly<Record<string, string>> = {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+const templateListSorts: ReadonlySet<string> = new Set(['recommended', 'name', 'difficulty', 'resources']);
+const templateListFacets = ['providers', 'categories', 'templateTypes', 'difficulties', 'certifications', 'sources'] as const;
+
+function isTemplateId(value: unknown): value is string {
+	return typeof value === 'string' && value.length <= 128 && /^[a-z0-9]+(-[a-z0-9]+)*(\.[a-z0-9]+(-[a-z0-9]+)*)+$/.test(value);
+}
+
+function isTemplateVersion(value: unknown): value is string {
+	return typeof value === 'string' && value.length <= 64 && /^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$/.test(value);
+}
+
+function isFacetList(value: unknown): value is string[] {
+	return Array.isArray(value) && value.length <= 32 && value.every(item => typeof item === 'string' && /^[a-z0-9-]{1,64}$/.test(item));
 }
 
 function hasOnlyKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
@@ -945,6 +962,81 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 				...(value.engine === undefined ? {} : { engine: value.engine })
 			};
 		}
+		case 'listTemplates': {
+			if (!hasOnlyKeys(value, ['query', 'sort', 'offset', 'limit', ...templateListFacets])) {
+				return undefined;
+			}
+			if (value.query !== undefined && (typeof value.query !== 'string' || value.query.length > 200)) {
+				return undefined;
+			}
+			if (value.sort !== undefined && (typeof value.sort !== 'string' || !templateListSorts.has(value.sort))) {
+				return undefined;
+			}
+			if (value.offset !== undefined && (!Number.isInteger(value.offset) || (value.offset as number) < 0 || (value.offset as number) > 100_000)) {
+				return undefined;
+			}
+			if (value.limit !== undefined && (!Number.isInteger(value.limit) || (value.limit as number) < 1 || (value.limit as number) > 200)) {
+				return undefined;
+			}
+			const result: Record<string, unknown> = {};
+			for (const key of ['query', 'sort', 'offset', 'limit'] as const) {
+				if (value[key] !== undefined) {
+					result[key] = value[key];
+				}
+			}
+			for (const facet of templateListFacets) {
+				if (value[facet] !== undefined) {
+					if (!isFacetList(value[facet])) {
+						return undefined;
+					}
+					result[facet] = [...value[facet] as string[]];
+				}
+			}
+			return result;
+		}
+		case 'getTemplateDetails': {
+			if (!hasOnlyKeys(value, ['templateId', 'version']) || !isTemplateId(value.templateId) || (value.version !== undefined && !isTemplateVersion(value.version))) {
+				return undefined;
+			}
+			return { templateId: value.templateId, ...(value.version === undefined ? {} : { version: value.version }) };
+		}
+		case 'importTemplatePackageFile': {
+			// `archivePath` is broker-owned: it comes from the Electron-main native picker only.
+			if (!hasOnlyKeys(value, ['replace', 'acceptHighRisk'])) {
+				return undefined;
+			}
+			if ((value.replace !== undefined && typeof value.replace !== 'boolean') || (value.acceptHighRisk !== undefined && typeof value.acceptHighRisk !== 'boolean')) {
+				return undefined;
+			}
+			return {
+				...(value.replace === undefined ? {} : { replace: value.replace }),
+				...(value.acceptHighRisk === undefined ? {} : { acceptHighRisk: value.acceptHighRisk })
+			};
+		}
+		case 'removeCachedTemplate': {
+			if (!hasOnlyKeys(value, ['templateId', 'version']) || !isTemplateId(value.templateId) || !isTemplateVersion(value.version)) {
+				return undefined;
+			}
+			return { templateId: value.templateId, version: value.version };
+		}
+		case 'checkTemplateCompatibility': {
+			if (!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'expectedSourceRevision', 'templateId', 'version']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId) || !isTemplateId(value.templateId)) {
+				return undefined;
+			}
+			if (value.expectedSourceRevision !== undefined && (typeof value.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(value.expectedSourceRevision))) {
+				return undefined;
+			}
+			if (value.version !== undefined && !isTemplateVersion(value.version)) {
+				return undefined;
+			}
+			return {
+				workspaceId: value.workspaceId,
+				architectureId: value.architectureId,
+				templateId: value.templateId,
+				...(value.expectedSourceRevision === undefined ? {} : { expectedSourceRevision: value.expectedSourceRevision }),
+				...(value.version === undefined ? {} : { version: value.version })
+			};
+		}
 		case 'listProviderVersions': {
 			if (!hasOnlyKeys(value, ['address', 'refresh', 'engine']) || typeof value.address !== 'string') {
 				return undefined;
@@ -1074,6 +1166,7 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 		case 'detectEngines':
 		case 'listMirrorPackages':
 		case 'verifyMirrorIntegrity':
+		case 'listTemplateSources':
 			return hasOnlyKeys(value, []) ? {} : undefined;
 		case 'listCloudRegions': {
 			if (!hasOnlyKeys(value, ['provider', 'scope', 'configuredRegions'])) {
@@ -1381,6 +1474,8 @@ export interface ICloudForgeRequestContext {
 	pickMirrorArchive?(): Promise<string | undefined>;
 	/** Opens a native export destination folder picker owned by the calling window. `undefined` when cancelled. */
 	pickExportDestination?(): Promise<string | undefined>;
+	/** Opens a native template package `.zip` picker owned by the calling window. `undefined` when cancelled. */
+	pickTemplatePackage?(): Promise<string | undefined>;
 }
 
 export type CloudForgeResolvedRequest =
@@ -1454,6 +1549,16 @@ export async function resolveCloudForgeRequest(method: CloudForgeServiceMethod, 
 				return { kind: 'failure', code: 'SCOPE_DENIED' };
 			}
 			return { kind: 'call', params: { ...params, destinationPath } };
+		}
+		case 'importTemplatePackageFile': {
+			const archivePath = await context.pickTemplatePackage?.();
+			if (archivePath === undefined) {
+				return { kind: 'failure', code: 'CANCELLED' };
+			}
+			if (!isLocalPath(archivePath)) {
+				return { kind: 'failure', code: 'SCOPE_DENIED' };
+			}
+			return { kind: 'call', params: { ...params, archivePath } };
 		}
 		default:
 			return { kind: 'call', params };
@@ -1555,7 +1660,8 @@ export class CloudForgeServiceBroker implements IServerChannel<string> {
 				pickParentFolder: () => this.pickParentFolder(window.win ?? undefined),
 				pickSchemaFile: () => this.pickSchemaFile(window.win ?? undefined),
 				pickMirrorArchive: () => this.pickMirrorArchive(window.win ?? undefined),
-				pickExportDestination: () => this.pickExportDestination(window.win ?? undefined)
+				pickExportDestination: () => this.pickExportDestination(window.win ?? undefined),
+				pickTemplatePackage: () => this.pickTemplatePackage(window.win ?? undefined)
 			});
 			if (request.kind === 'failure') {
 				return safeFailure(new CloudForgeServiceError(request.code)) as T;
@@ -1645,6 +1751,19 @@ export class CloudForgeServiceBroker implements IServerChannel<string> {
 			title: localize('cloudForge.pickExportDestination', "Choose Where to Save the Portable Terraform Bundle"),
 			buttonLabel: localize('cloudForge.exportHere', "Export Bundle Here"),
 			properties: ['openDirectory', 'createDirectory']
+		}, window);
+		if (result.canceled || result.filePaths.length !== 1) {
+			return undefined;
+		}
+		return result.filePaths[0];
+	}
+
+	private async pickTemplatePackage(window: electron.BrowserWindow | undefined): Promise<string | undefined> {
+		const result = await this.dialogMainService.showOpenDialog({
+			title: localize('cloudForge.pickTemplatePackage', "Choose a CloudForge Template Package (.zip)"),
+			buttonLabel: localize('cloudForge.importTemplatePackage', "Import Template"),
+			properties: ['openFile'],
+			filters: [{ name: localize('cloudForge.templateZipFilter', "CloudForge Template Package (.zip)"), extensions: ['zip'] }]
 		}, window);
 		if (result.canceled || result.filePaths.length !== 1) {
 			return undefined;

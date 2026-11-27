@@ -35,13 +35,14 @@ type CloudForgeServiceMethod =
 	| 'summarizeState' | 'listCloudConnections' | 'setCloudConnection' | 'storeCloudKey' | 'removeCloudConnection' | 'checkCloudSignIn'
 	| 'inspectDependencies' | 'readModule' | 'auditExportReadiness' | 'exportPortableBundle' | 'previewProviderUpgrade' | 'applyProviderUpgrade' | 'recoverUpgradeJournal' | 'runEngineValidate' | 'runEnginePlan' | 'runEngineFmt'
 	| 'checkOfflineMirrorReadiness' | 'runEngineInitOffline'
-	| 'getLearningRecord' | 'saveLearningRecord' | 'submitProposal' | 'reviewProposal' | 'issueMcpGrant';
-type CloudForgeCatalogueMethod = 'inspectCatalogueSchemaFile' | 'importCatalogueSnapshot' | 'listCatalogueSnapshots' | 'listCatalogueTypes' | 'getResourceFormSchema' | 'getCatalogueCoverage' | 'renderResourceDraft' | 'listCloudRegions' | 'diffCatalogueSnapshots' | 'detectEngines' | 'listMirrorPackages' | 'extractProviderSchemaFromMirror' | 'importMirrorPackage' | 'listProviderVersions' | 'downloadProviderPackage' | 'evictMirrorPackage' | 'verifyMirrorIntegrity' | 'planMirrorCleanup' | 'selectTerraformSkills' | 'listBuiltinSkills' | 'getTopologyBlueprint' | 'listMcpGrants' | 'revokeMcpGrant';
+	| 'getLearningRecord' | 'saveLearningRecord' | 'submitProposal' | 'reviewProposal' | 'issueMcpGrant' | 'checkTemplateCompatibility';
+type CloudForgeCatalogueMethod = 'inspectCatalogueSchemaFile' | 'importCatalogueSnapshot' | 'listCatalogueSnapshots' | 'listCatalogueTypes' | 'getResourceFormSchema' | 'getCatalogueCoverage' | 'renderResourceDraft' | 'listCloudRegions' | 'diffCatalogueSnapshots' | 'detectEngines' | 'listMirrorPackages' | 'extractProviderSchemaFromMirror' | 'importMirrorPackage' | 'listProviderVersions' | 'downloadProviderPackage' | 'evictMirrorPackage' | 'verifyMirrorIntegrity' | 'planMirrorCleanup' | 'selectTerraformSkills' | 'listBuiltinSkills' | 'getTopologyBlueprint' | 'listMcpGrants' | 'revokeMcpGrant' | 'listTemplates' | 'getTemplateDetails' | 'listTemplateSources' | 'importTemplatePackageFile' | 'removeCachedTemplate';
 type CloudForgeProjectMethod = 'createProject' | 'openProject' | 'grantProject' | 'forgetProjectAccess' | 'createWorkspaceFile' | 'inspectRepository' | 'importRepository' | 'removeRepository' | 'createArchitecture' | 'summarizeArchitectures' | 'installGit';
 
 const catalogueMethods: ReadonlySet<string> = new Set<CloudForgeCatalogueMethod>([
 	'inspectCatalogueSchemaFile', 'importCatalogueSnapshot', 'listCatalogueSnapshots', 'listCatalogueTypes', 'getResourceFormSchema', 'getCatalogueCoverage', 'renderResourceDraft', 'listCloudRegions', 'diffCatalogueSnapshots', 'detectEngines', 'listMirrorPackages', 'extractProviderSchemaFromMirror', 'importMirrorPackage', 'listProviderVersions', 'downloadProviderPackage', 'evictMirrorPackage', 'verifyMirrorIntegrity', 'planMirrorCleanup',
-	'selectTerraformSkills', 'listBuiltinSkills', 'getTopologyBlueprint', 'listMcpGrants', 'revokeMcpGrant'
+	'selectTerraformSkills', 'listBuiltinSkills', 'getTopologyBlueprint', 'listMcpGrants', 'revokeMcpGrant',
+	'listTemplates', 'getTemplateDetails', 'listTemplateSources', 'importTemplatePackageFile', 'removeCachedTemplate'
 ]);
 
 /**
@@ -297,7 +298,7 @@ CommandsRegistry.registerCommand('_cloudforge.callService', async (accessor, met
 		method !== 'runEngineValidate' &&
 		method !== 'runEnginePlan' && method !== 'runEngineFmt' && method !== 'checkOfflineMirrorReadiness' && method !== 'runEngineInitOffline' &&
 		method !== 'getLearningRecord' && method !== 'saveLearningRecord' && method !== 'submitProposal' &&
-		method !== 'reviewProposal' && method !== 'issueMcpGrant'
+		method !== 'reviewProposal' && method !== 'issueMcpGrant' && method !== 'checkTemplateCompatibility'
 	) {
 		return failure('INVALID_PARAMS', 'The CloudForge request is invalid.');
 	}
@@ -336,6 +337,7 @@ CommandsRegistry.registerCommand('_cloudforge.callService', async (accessor, met
 		case 'submitProposal':
 		case 'reviewProposal':
 		case 'issueMcpGrant':
+		case 'checkTemplateCompatibility':
 			if (!isOpaqueId(params.architectureId) || params.architectureId !== activeArchitectureId || (params.expectedSourceRevision !== undefined && (typeof params.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(params.expectedSourceRevision)))) {
 				return failure('SCOPE_DENIED', 'The requested architecture is not active in this window.');
 			}

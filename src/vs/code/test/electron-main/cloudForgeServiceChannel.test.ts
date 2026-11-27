@@ -728,6 +728,71 @@ suite('CloudForgeServiceChannel', () => {
 		assert.strictEqual(validateCloudForgeServiceParams('listProviderVersions', { address, url: 'x' }), undefined);
 	});
 
+	test('validates Template Library params', () => {
+		assert.deepStrictEqual(validateCloudForgeServiceParams('listTemplates', {}), {});
+		assert.deepStrictEqual(
+			validateCloudForgeServiceParams('listTemplates', { query: 'hub spoke', providers: ['azure'], difficulties: ['advanced'], sort: 'name', offset: 0, limit: 20 }),
+			{ query: 'hub spoke', sort: 'name', offset: 0, limit: 20, providers: ['azure'], difficulties: ['advanced'] }
+		);
+		assert.strictEqual(validateCloudForgeServiceParams('listTemplates', { sort: 'popularity' }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('listTemplates', { limit: 0 }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('listTemplates', { limit: 201 }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('listTemplates', { providers: ['Azure'] }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('listTemplates', { providers: 'azure' }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('listTemplates', { query: 'x'.repeat(201) }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('listTemplates', { url: 'https://evil' }), undefined);
+
+		assert.deepStrictEqual(validateCloudForgeServiceParams('getTemplateDetails', { templateId: 'cloudforge.azure.hub-spoke' }), { templateId: 'cloudforge.azure.hub-spoke' });
+		assert.deepStrictEqual(validateCloudForgeServiceParams('getTemplateDetails', { templateId: 'cloudforge.azure.hub-spoke', version: '1.0.0' }), { templateId: 'cloudforge.azure.hub-spoke', version: '1.0.0' });
+		assert.strictEqual(validateCloudForgeServiceParams('getTemplateDetails', { templateId: '../etc' }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('getTemplateDetails', { templateId: 'single' }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('getTemplateDetails', { templateId: 'cloudforge.azure.hub-spoke', version: 'latest' }), undefined);
+
+		const scoped = { workspaceId: 'workspace-1', architectureId: 'architecture-1', templateId: 'cloudforge.azure.basic-vnet' };
+		assert.deepStrictEqual(validateCloudForgeServiceParams('checkTemplateCompatibility', scoped), scoped);
+		assert.strictEqual(validateCloudForgeServiceParams('checkTemplateCompatibility', { ...scoped, expectedSourceRevision: 'abc' }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('checkTemplateCompatibility', { workspaceId: 'workspace-1', templateId: 'cloudforge.azure.basic-vnet' }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('checkTemplateCompatibility', { ...scoped, rootPath: 'C:/x' }), undefined);
+
+		assert.deepStrictEqual(validateCloudForgeServiceParams('listTemplateSources', {}), {});
+		assert.strictEqual(validateCloudForgeServiceParams('listTemplateSources', { url: 'https://evil' }), undefined);
+
+		assert.deepStrictEqual(validateCloudForgeServiceParams('importTemplatePackageFile', {}), {});
+		assert.deepStrictEqual(validateCloudForgeServiceParams('importTemplatePackageFile', { replace: true, acceptHighRisk: false }), { replace: true, acceptHighRisk: false });
+		assert.strictEqual(validateCloudForgeServiceParams('importTemplatePackageFile', { archivePath: 'C:\\x.zip' }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('importTemplatePackageFile', { replace: 'yes' }), undefined);
+
+		assert.deepStrictEqual(validateCloudForgeServiceParams('removeCachedTemplate', { templateId: 'example.team.net', version: '1.0.0' }), { templateId: 'example.team.net', version: '1.0.0' });
+		assert.strictEqual(validateCloudForgeServiceParams('removeCachedTemplate', { templateId: 'example.team.net' }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('removeCachedTemplate', { templateId: '..', version: '1.0.0' }), undefined);
+	});
+
+	test('picks a template package in Electron main for importTemplatePackageFile and blocks UNC paths', async () => {
+		const cancelled = createBroker([contosoWindow]);
+		assert.deepStrictEqual(await cancelled.call(1, 'importTemplatePackageFile', {}), {
+			ok: false,
+			error: { code: 'CANCELLED', message: 'The CloudForge request was cancelled.' }
+		});
+		assert.deepStrictEqual(cancelled.dialogs.map(dialog => dialog.properties), [['openFile']]);
+		assert.deepStrictEqual(cancelled.callsByWindow(), { 1: [] });
+
+		const unc = createBroker([contosoWindow], { picked: ['\\\\server\\share\\template.zip'] });
+		assert.strictEqual((await unc.call(1, 'importTemplatePackageFile', {})).ok, false);
+		assert.deepStrictEqual(unc.callsByWindow(), { 1: [] });
+
+		const local = createBroker([contosoWindow], {
+			picked: ['D:\\Templates\\my-network.zip'],
+			reply: () => ({ imported: true, outcome: 'added', templateId: 'example.team.my-network', version: '1.0.0' })
+		});
+		const imported = await local.call(1, 'importTemplatePackageFile', { replace: true });
+		assert.strictEqual(imported.ok, true);
+		assert.deepStrictEqual(local.callsByWindow(), {
+			1: [{ method: 'importTemplatePackageFile', params: { replace: true, archivePath: 'D:\\Templates\\my-network.zip' } }]
+		});
+
+		await Promise.all([cancelled, unc, local].map(item => item.broker.stop()));
+	});
+
 	test('validates downloadProviderPackage params', () => {
 		const address = 'registry.terraform.io/hashicorp/azurerm';
 		assert.deepStrictEqual(validateCloudForgeServiceParams('downloadProviderPackage', { address, version: '3.116.0' }), { address, version: '3.116.0' });
