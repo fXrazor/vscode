@@ -1,5 +1,12 @@
 # CloudForge Code OSS handoff
 
+## Staged & Verified CloudForge Windows x64 Installer (`2be6bbe194f` + Rust `d210d55`) — 27 November 2026
+
+- **Staged installer:** `Z:/CFStage/CloudForgeSetup-x64-2be6bbe194f.exe` (`332,052,852` bytes, SHA-256 `94984d5e000d06a2e10a8faf6d892ba57207119c34eab108d9d91693e45fe61a`) built cleanly via `build/cloudforge/package-win32-x64.ps1` from `Z:/CFStage/Code` at desktop `origin/main` **`2be6bbe194f27a06242977423f58e0f72b44c20f`**.
+- **Bundled Rust service:** commit **`d210d55e8300130cc0b47c72c0b882c1063c61c8`** (latest `fXrazor/CloudForge` `origin/main`, including `aacef4f` disposable Windows home provider download fix and Stage 9C/10C/12G), protocol `1`, `x64`, `7,260,160` bytes, SHA-256 `c95e49d589f4a134af3537bbd556acfc4ee6e1387bdafa40771a36673c488816` (`ServiceSigned: false`).
+- **Bundled built-in extensions:** `AykutSarac.jsoncrack-vscode@5.1.0` (SHA-256 `7c7bb618e8e7834b9674953206d1e44a1fcb94c10676e2c4ab97121342134753`), `ms-vscode.js-debug@1.140.1` (SHA-256 `7accf7857ea4f4717b6211a2b75f5b434faf477033203a8919b6d26b6abc1897`), `cloudforge-welcome`, and `extensions/cloudforge` (`dist/extension.js` `492,981` bytes, `media/studio/studio.js` `1,315,063` bytes).
+- **Verified packaged contents (`Z:/CFStage/VSCode-win32-x64/resources/app`):** passed `node build/cloudforge/serviceArtifact.ts --verify` with all flags pinned; confirmed `product.json` (`nameLong: "CloudForge"`, `commit: "2be6bbe194f27a06242977423f58e0f72b44c20f"`), transparent violet Forge F extension icons (`extensions/cloudforge/resources/cloudforge-icon.png` + `extensions/cloudforge-welcome/media/cloudforge-icon.png`), Forge F activity bar icon (`forge-mark`), white-on-violet Studio/Welcome/Startup marks (`cloudforge.png`, `cloudforge-mark.png`), Inno Setup banners (`inno-big-*.bmp`, `inno-small-*.bmp`), multi-res `code.ico`, and **5/5** new Studio feature markers in `media/studio/studio.js`. Left ready for user install after uninstalling previous CloudForge build.
+
 ## Forge F Full Product Rebrand & Claude Branch Merges (`2irlth` + `2dm0k0`) — 27 November 2026
 
 - **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, owner Antigravity.
