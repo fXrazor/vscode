@@ -23,9 +23,13 @@ export function ModuleImport({ onClose, onImport }: { onClose: () => void; onImp
 		const element = dialog.current;
 		const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 		backdropPress.current = false;
-		element?.showModal();
+		if (element && !element.open) {
+			element.showModal();
+		}
 		return () => {
-			element?.close();
+			if (element?.open) {
+				element.close();
+			}
 			if (previous?.isConnected) { previous.focus(); }
 		};
 	}, []);

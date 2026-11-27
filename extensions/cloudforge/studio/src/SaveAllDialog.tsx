@@ -34,14 +34,20 @@ export function SaveAllDialog({ open, fileNames, busy, preview, error, onRefresh
 	useEffect(() => {
 		const element = dialog.current;
 		if (!open) {
-			element?.close();
+			if (element?.open) {
+				element.close();
+			}
 			return;
 		}
 		const previous = document.activeElement as HTMLElement | null;
 		backdropPress.current = false;
-		element?.showModal();
+		if (element && !element.open) {
+			element.showModal();
+		}
 		return () => {
-			element?.close();
+			if (element?.open) {
+				element.close();
+			}
 			previous?.focus();
 		};
 	}, [open]);

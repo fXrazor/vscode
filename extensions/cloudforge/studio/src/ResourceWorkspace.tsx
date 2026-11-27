@@ -40,11 +40,11 @@ export function ResourceWorkspace({ resource, architecture, dispatch, open, onCl
 	function configureTerraform(query?: string) { setCodeOpen(true); setMobileTab('code'); setReveal(previous=>({id:(previous?.id??0)+1,query})); }
 	useEffect(() => {
 		const element = dialog.current;
-		if (!open) { element?.close(); return; }
+		if (!open) { if (element?.open) { element.close(); } return; }
 		const previous = document.activeElement as HTMLElement | null;
 		backdropPress.current = false;
-		element?.showModal();
-		return () => { element?.close(); previous?.focus(); };
+		if (element && !element.open) { element.showModal(); }
+		return () => { if (element?.open) { element.close(); } previous?.focus(); };
 	}, [open]);
 	const metadata = resourceDefinition(resource);
 	const incoming = architecture.connections.filter(link => !link.origin && endpointElementId(link.target) === resource.id);

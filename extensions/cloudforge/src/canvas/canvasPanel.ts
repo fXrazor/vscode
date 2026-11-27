@@ -71,7 +71,7 @@ export interface CanvasPanelHost {
 		fileName: string,
 		contents: string,
 		previewToken: string
-	): Promise<{ readonly ok: true; readonly applied: DraftSaveApplyResult } | { readonly ok: false; readonly error: DraftSaveError }>;
+	): Promise<{ readonly ok: true; readonly applied: DraftSaveApplyResult; readonly refreshedGraph?: CanvasGraphSnapshot; readonly notice?: CanvasNotice } | { readonly ok: false; readonly error: DraftSaveError }>;
 	/** Merges several canvas files into the files on disk under one token (`previewFocusedSaveBatch`). */
 	onPreviewSaveAll?(
 		workspaceId: string,
@@ -84,7 +84,7 @@ export interface CanvasPanelHost {
 		architectureId: string,
 		expectedSourceRevision: string,
 		previewToken: string
-	): Promise<{ readonly ok: true; readonly applied: SaveAllApplyResult } | { readonly ok: false; readonly error: DraftSaveError }>;
+	): Promise<{ readonly ok: true; readonly applied: SaveAllApplyResult; readonly refreshedGraph?: CanvasGraphSnapshot; readonly notice?: CanvasNotice } | { readonly ok: false; readonly error: DraftSaveError }>;
 	onLoadCatalogueSnapshots?(): Promise<readonly CanvasCatalogueSnapshot[]>;
 	/** Resource types of the newest imported snapshot per palette provider. */
 	onLoadCatalogueTypes?(): Promise<readonly CanvasCatalogueTypes[]>;
@@ -399,6 +399,13 @@ export class CloudForgeCanvasPanel implements Disposable {
 			&& this.graph?.sourceRevision === graph.sourceRevision;
 	}
 
+	private isSameArchitecture(graph: CanvasGraphSnapshot): boolean {
+		return this.panel !== undefined
+			&& this.ready
+			&& this.graph?.workspaceId === graph.workspaceId
+			&& this.graph?.architectureId === graph.architectureId;
+	}
+
 	private async handleMessage(raw: unknown): Promise<void> {
 		const message = parseWebviewMessage(raw);
 		if (!message) {
@@ -565,16 +572,30 @@ export class CloudForgeCanvasPanel implements Disposable {
 					message.contents,
 					message.previewToken
 				);
-				if (!this.isSameGraph(graph)) {
+				if (!this.isSameArchitecture(graph)) {
 					return;
 				}
-				if (!result.ok && result.error.code === 'STALE_SOURCE') {
-					this.setNotice({
-						kind: 'stale',
-						message: l10n.t('The Terraform source changed on disk. Refresh the graph before applying changes.'),
-					});
+				if (!result.ok) {
+					if (result.error.code === 'STALE_SOURCE') {
+						this.setNotice({
+							kind: 'stale',
+							message: l10n.t('The Terraform source changed on disk. Refresh the graph before applying changes.'),
+						});
+					}
+					this.post({ type: 'draftSaveApplied', result });
+					return;
 				}
-				this.post({ type: 'draftSaveApplied', result });
+				// Post draftSaveApplied before pushing the refreshed graph so Studio closes the
+				// save dialog and records the saved files before projecting the new sourceRevision.
+				this.post({ type: 'draftSaveApplied', result: { ok: true, applied: result.applied } });
+				if (result.refreshedGraph) {
+					this.updateIfOpen(result.refreshedGraph);
+					if (result.notice) {
+						this.setNotice(result.notice);
+					}
+				} else {
+					await this.host.onRefresh(graph.workspaceId, graph.architectureId);
+				}
 				return;
 			}
 			case 'requestSaveAllPreview': {
@@ -609,16 +630,30 @@ export class CloudForgeCanvasPanel implements Disposable {
 					return;
 				}
 				const result = await this.host.onApplySaveAll(graph.workspaceId, graph.architectureId, graph.sourceRevision, message.previewToken);
-				if (!this.isSameGraph(graph)) {
+				if (!this.isSameArchitecture(graph)) {
 					return;
 				}
-				if (!result.ok && result.error.code === 'STALE_SOURCE') {
-					this.setNotice({
-						kind: 'stale',
-						message: l10n.t('The Terraform source changed on disk. Refresh the graph before applying changes.'),
-					});
+				if (!result.ok) {
+					if (result.error.code === 'STALE_SOURCE') {
+						this.setNotice({
+							kind: 'stale',
+							message: l10n.t('The Terraform source changed on disk. Refresh the graph before applying changes.'),
+						});
+					}
+					this.post({ type: 'saveAllApplied', result });
+					return;
 				}
-				this.post({ type: 'saveAllApplied', result });
+				// Post saveAllApplied before pushing the refreshed graph so Studio closes the
+				// save dialog and records the saved files before projecting the new sourceRevision.
+				this.post({ type: 'saveAllApplied', result: { ok: true, applied: result.applied } });
+				if (result.refreshedGraph) {
+					this.updateIfOpen(result.refreshedGraph);
+					if (result.notice) {
+						this.setNotice(result.notice);
+					}
+				} else {
+					await this.host.onRefresh(graph.workspaceId, graph.architectureId);
+				}
 				return;
 			}
 			case 'requestSchema': {

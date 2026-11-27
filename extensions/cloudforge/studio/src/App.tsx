@@ -181,6 +181,7 @@ export function Studio() {
 			return;
 		}
 		const unsubscribe = hostBridge.subscribe(incoming => {
+			try {
 			switch (incoming.type) {
 				case 'graph': {
 					sourceValuesRef.current = undefined;
@@ -231,7 +232,22 @@ export function Studio() {
 					dispatch(sameArch ? { type: 'rebase', architecture: projected.architecture, ...(previousBaseline ? { base: previousBaseline } : {}) } : { type: 'replace', architecture: projected.architecture });
 					setHostBaseline(projected.architecture);
 					hostBaselineRef.current = projected.architecture;
-					if (incoming.viewState?.selectedId && projected.architecture.resources.some(r => r.id === incoming.viewState?.selectedId)) {
+					if (sameArch && Object.keys(projected.idRemap).length > 0) {
+						const validIds = new Set([
+							...projected.architecture.resources.map(r => r.id),
+							...projected.architecture.items.map(i => i.id),
+						]);
+						setSelectedIds(prev => [...new Set(prev.map(id => projected.idRemap[id] ?? id))].filter(id => validIds.has(id)));
+						setWorkspaceResourceId(prev => {
+							if (!prev) { return prev; }
+							const next = projected.idRemap[prev] ?? prev;
+							if (!projected.architecture.resources.some(r => r.id === next)) {
+								setWorkspaceOpen(false);
+								return '';
+							}
+							return next;
+						});
+					} else if (incoming.viewState?.selectedId && projected.architecture.resources.some(r => r.id === incoming.viewState?.selectedId)) {
 						setSelectedId(incoming.viewState.selectedId);
 					}
 					setMessage('Loaded ' + incoming.graph.architectureName + ' · rev ' + incoming.graph.sourceRevision.slice(0, 8));
@@ -368,7 +384,6 @@ export function Studio() {
 						setSaveError(null);
 						savedFilesRef.current = { state: architectureRef.current, files: new Set([incoming.result.applied.fileName]) };
 						setMessage('Saved ' + incoming.result.applied.fileName + ' · rev ' + incoming.result.applied.newSourceRevision.slice(0, 8));
-						hostBridge.post({ type: 'refresh' });
 					} else {
 						setSaveError(incoming.result.error);
 					}
@@ -391,7 +406,6 @@ export function Studio() {
 						setSaveAllError(null);
 						savedFilesRef.current = { state: architectureRef.current, files: new Set(incoming.result.applied.files.map(file => file.fileName)) };
 						setMessage('Saved ' + incoming.result.applied.files.map(file => file.fileName).join(', ') + ' · rev ' + incoming.result.applied.newSourceRevision.slice(0, 8));
-						hostBridge.post({ type: 'refresh' });
 					} else {
 						setSaveAllError(incoming.result.error);
 					}
@@ -435,6 +449,13 @@ export function Studio() {
 				case 'focusModeChanged':
 					setFocusMode(incoming.active);
 					break;
+			}
+			} catch (err) {
+				setSaving(false);
+				setValidating(false);
+				setPlanning(false);
+				setInitializingOffline(false);
+				setMessage(err instanceof Error ? 'Canvas update error: ' + err.message : 'Canvas update failed; refresh to recover.');
 			}
 		});
 		hostBridge.post({ type: 'ready' });

@@ -1326,16 +1326,21 @@ export function activate(context: ExtensionContext): void {
 				return { ok: false, error: draftSaveErrorMessage('SERVICE_ERROR') };
 			}
 			// Re-read the architecture so both the native CloudForge Graph tree and Canvas reflect
-			// the newly saved file and updated sourceRevision.
+			// the newly saved file and updated sourceRevision. Return the refreshed snapshot so the
+			// canvas posts `draftSaveApplied` before projecting the new revision.
 			const refreshed = await showGraph(provider, treeView, workspaceId, architectureId);
 			if (refreshed) {
 				updateStatusBar(refreshed);
 				syncProblems(refreshed);
-				canvas.updateIfOpen(toCanvasSnapshot(refreshed, currentArchitectureName));
-				canvas.setNotice({
-					kind: 'info',
-					message: l10n.t('Saved {0} ({1} bytes) and refreshed architecture to revision {2}.', applied.fileName, applied.bytesWritten, applied.newSourceRevision.slice(0, 8)),
-				});
+				return {
+					ok: true,
+					applied,
+					refreshedGraph: toCanvasSnapshot(refreshed, currentArchitectureName),
+					notice: {
+						kind: 'info' as const,
+						message: l10n.t('Saved {0} ({1} bytes) and refreshed architecture to revision {2}.', applied.fileName, applied.bytesWritten, applied.newSourceRevision.slice(0, 8)),
+					},
+				};
 			}
 			return { ok: true, applied };
 		},
@@ -1370,11 +1375,15 @@ export function activate(context: ExtensionContext): void {
 			if (refreshed) {
 				updateStatusBar(refreshed);
 				syncProblems(refreshed);
-				canvas.updateIfOpen(toCanvasSnapshot(refreshed, currentArchitectureName));
-				canvas.setNotice({
-					kind: 'info',
-					message: l10n.t('Saved {0} files and refreshed architecture to revision {1}.', applied.files.length, applied.newSourceRevision.slice(0, 8)),
-				});
+				return {
+					ok: true,
+					applied,
+					refreshedGraph: toCanvasSnapshot(refreshed, currentArchitectureName),
+					notice: {
+						kind: 'info' as const,
+						message: l10n.t('Saved {0} files and refreshed architecture to revision {1}.', applied.files.length, applied.newSourceRevision.slice(0, 8)),
+					},
+				};
 			}
 			return { ok: true, applied };
 		},

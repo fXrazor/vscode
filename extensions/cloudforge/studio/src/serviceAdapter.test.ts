@@ -523,3 +523,129 @@ test('hosted snapshot icon projection never double-prefixes catalog-icons paths'
 	assert.ok(kv?.catalogue?.icon);
 	assert.doesNotMatch(kv.catalogue.icon, /^catalog-icons\/catalog-icons\//);
 });
+
+test('opaque Rust node ID shifts after saving a newly added resource never cross-contaminate settings or break Terraform projection', () => {
+	// Before save: 8 Azure resources assigned node-1..node-8 in BTreeMap alphabetical order.
+	const beforeSnapshot: HostGraphSnapshot = {
+		workspaceId: 'ws-1',
+		architectureId: 'arch-test-1',
+		architectureName: 'ArchitectureTest1',
+		sourceRevision: '1'.repeat(64),
+		status: 'complete',
+		nodes: [
+			{ id: 'node-1', kind: 'resource', resourceType: 'azurerm_managed_disk', name: 'managed_disk_1', label: 'managed_disk_1', hasSource: true, sourceFile: 'architecturetest1.tf' },
+			{ id: 'node-2', kind: 'resource', resourceType: 'azurerm_network_interface', name: 'network_interface_1', label: 'network_interface_1', hasSource: true, sourceFile: 'architecturetest1.tf' },
+			{ id: 'node-3', kind: 'resource', resourceType: 'azurerm_network_interface', name: 'network_interface_2', label: 'network_interface_2', hasSource: true, sourceFile: 'architecturetest1.tf' },
+			{ id: 'node-4', kind: 'resource', resourceType: 'azurerm_resource_group', name: 'new-group-1', label: 'new-group-1', hasSource: true, sourceFile: 'architecturetest1.tf' },
+			{ id: 'node-5', kind: 'resource', resourceType: 'azurerm_subnet', name: 'snet-applications-54d6', label: 'snet-applications-54d6', hasSource: true, sourceFile: 'architecturetest1.tf' },
+			{ id: 'node-6', kind: 'resource', resourceType: 'azurerm_subnet_network_security_group_association', name: 'assoc_1', label: 'assoc_1', hasSource: true, sourceFile: 'architecturetest1.tf' },
+			{ id: 'node-7', kind: 'resource', resourceType: 'azurerm_virtual_machine', name: 'virtual_machine_1', label: 'virtual_machine_1', hasSource: true, sourceFile: 'architecturetest1.tf' },
+			{ id: 'node-8', kind: 'resource', resourceType: 'azurerm_virtual_network', name: 'vnet-production', label: 'vnet-production', hasSource: true, sourceFile: 'architecturetest1.tf' },
+		],
+		edges: [
+			{ fromId: 'node-8', toId: 'node-4', kind: 'reference' },
+			{ fromId: 'node-5', toId: 'node-8', kind: 'reference' },
+			{ fromId: 'node-2', toId: 'node-5', kind: 'reference' },
+			{ fromId: 'node-7', toId: 'node-2', kind: 'reference' },
+		],
+		diagnostics: [],
+	};
+
+	const initial = projectGraphSnapshotToArchitecture(beforeSnapshot);
+	// User repositions the VM (leaf node-7 -> shifts to node-8) before adding an Application Load Balancer and saving.
+	const movedBeforeSave = {
+		...initial.architecture,
+		resources: initial.architecture.resources.map(r => r.id === 'node-7'
+			? { ...r, positions: { visual: { x: 444, y: 555 }, technical: { x: 444, y: 555 } } }
+			: r),
+	};
+
+	// After save: azurerm_application_load_balancer sorts first -> EVERY existing node shifts by +1!
+	// Critically, old node-8 (azurerm_virtual_network with 'Address space') shifts to node-9,
+	// while azurerm_virtual_machine (generic catalogue resource) now occupies node-8!
+	const afterSnapshot: HostGraphSnapshot = {
+		...beforeSnapshot,
+		sourceRevision: '64d0dd12'.padEnd(64, '0'),
+		nodes: [
+			{ id: 'node-1', kind: 'resource', resourceType: 'azurerm_application_load_balancer', name: 'application_load_balancer_1', label: 'application_load_balancer_1', hasSource: true, sourceFile: 'architecturetest1.tf' },
+			{ id: 'node-2', kind: 'resource', resourceType: 'azurerm_managed_disk', name: 'managed_disk_1', label: 'managed_disk_1', hasSource: true, sourceFile: 'architecturetest1.tf' },
+			{ id: 'node-3', kind: 'resource', resourceType: 'azurerm_network_interface', name: 'network_interface_1', label: 'network_interface_1', hasSource: true, sourceFile: 'architecturetest1.tf' },
+			{ id: 'node-4', kind: 'resource', resourceType: 'azurerm_network_interface', name: 'network_interface_2', label: 'network_interface_2', hasSource: true, sourceFile: 'architecturetest1.tf' },
+			{ id: 'node-5', kind: 'resource', resourceType: 'azurerm_resource_group', name: 'new-group-1', label: 'new-group-1', hasSource: true, sourceFile: 'architecturetest1.tf' },
+			{ id: 'node-6', kind: 'resource', resourceType: 'azurerm_subnet', name: 'snet-applications-54d6', label: 'snet-applications-54d6', hasSource: true, sourceFile: 'architecturetest1.tf' },
+			{ id: 'node-7', kind: 'resource', resourceType: 'azurerm_subnet_network_security_group_association', name: 'assoc_1', label: 'assoc_1', hasSource: true, sourceFile: 'architecturetest1.tf' },
+			{ id: 'node-8', kind: 'resource', resourceType: 'azurerm_virtual_machine', name: 'virtual_machine_1', label: 'virtual_machine_1', hasSource: true, sourceFile: 'architecturetest1.tf' },
+			{ id: 'node-9', kind: 'resource', resourceType: 'azurerm_virtual_network', name: 'vnet-production', label: 'vnet-production', hasSource: true, sourceFile: 'architecturetest1.tf' },
+		],
+		edges: [
+			{ fromId: 'node-1', toId: 'node-5', kind: 'reference' },
+			{ fromId: 'node-9', toId: 'node-5', kind: 'reference' },
+			{ fromId: 'node-6', toId: 'node-9', kind: 'reference' },
+			{ fromId: 'node-3', toId: 'node-6', kind: 'reference' },
+			{ fromId: 'node-8', toId: 'node-3', kind: 'reference' },
+		],
+	};
+
+	const refreshed = projectGraphSnapshotToArchitecture(afterSnapshot, { previousArchitecture: movedBeforeSave });
+	assert.equal(refreshed.idRemap['node-8'], 'node-9', 'VNet opaque ID shift is tracked');
+	assert.equal(refreshed.idRemap['node-7'], 'node-8', 'VM opaque ID shift is tracked');
+	assert.equal(refreshed.idRemap['node-5'], 'node-6', 'Subnet opaque ID shift is tracked');
+	assert.equal(refreshed.idRemap['node-4'], 'node-5', 'RG opaque ID shift is tracked');
+
+	const vm = refreshed.architecture.resources.find(r => r.id === 'node-8')!;
+	const vnet = refreshed.architecture.resources.find(r => r.id === 'node-9')!;
+	const subnet = refreshed.architecture.resources.find(r => r.id === 'node-6')!;
+	assert.equal(vm.catalogue?.type, 'azurerm_virtual_machine');
+	assert.equal(vm.settings['Address space'], undefined, 'VM must never inherit VNet display setting keys');
+	assert.deepEqual(vm.positions.visual, { x: 444, y: 555 }, 'VM keeps its custom position across ID shift');
+	assert.equal(vnet.visualParentId, 'node-5', 'VNet visualParentId remaps to new RG node ID');
+	assert.equal(subnet.visualParentId, 'node-9', 'Subnet visualParentId remaps to new VNet node ID');
+
+	// Hydrate Terraform expression attributes (which populate terraformExtras) and project HCL:
+	// previously this threw an uncaught HclError inside CodePanel render and blanked Studio!
+	const hydrated = hydrateResourceValues(refreshed.architecture, afterSnapshot, [
+		{
+			address: 'azurerm_application_load_balancer.application_load_balancer_1',
+			file: 'architecturetest1.tf',
+			attributes: { resource_group_name: { kind: 'expression', text: 'azurerm_resource_group.new-group-1.name' } },
+			blocks: [],
+		},
+		{
+			address: 'azurerm_virtual_machine.virtual_machine_1',
+			file: 'architecturetest1.tf',
+			attributes: { resource_group_name: { kind: 'expression', text: 'azurerm_resource_group.new-group-1.name' } },
+			blocks: [],
+		},
+	]);
+	const projectedHcl = terraformCode(hydrated);
+	assert.match(projectedHcl, /resource "azurerm_virtual_machine" "virtual_machine_1"/);
+	assert.match(projectedHcl, /resource "azurerm_virtual_network" "vnet-production"/);
+	assert.doesNotMatch(projectedHcl, /"Address space"/);
+});
+
+test('terraformCode does not throw when a generic resource has a spaced setting key alongside terraformExtras', () => {
+	const snapshot: HostGraphSnapshot = {
+		workspaceId: 'ws-safe',
+		architectureId: 'arch-safe',
+		architectureName: 'SafeHcl',
+		sourceRevision: 'c'.repeat(64),
+		status: 'complete',
+		nodes: [
+			{ id: 'node-1', kind: 'resource', resourceType: 'azurerm_virtual_machine', name: 'vm_1', label: 'vm_1', hasSource: true },
+		],
+		edges: [],
+		diagnostics: [],
+	};
+	const { architecture } = projectGraphSnapshotToArchitecture(snapshot);
+	const corrupted = {
+		...architecture,
+		resources: architecture.resources.map(r => ({
+			...r,
+			settings: { ...r.settings, 'Address space': '10.0.0.0/16' },
+			terraformExtras: { attrs: { resource_group_name: { $expr: 'azurerm_resource_group.rg.name' } }, blocks: [] },
+		})),
+	};
+	assert.doesNotThrow(() => terraformCode(corrupted));
+	const hcl = terraformCode(corrupted);
+	assert.match(hcl, /resource "azurerm_virtual_machine" "vm_1"/);
+});

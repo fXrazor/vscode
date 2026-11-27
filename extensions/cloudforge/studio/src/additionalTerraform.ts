@@ -60,12 +60,16 @@ function mergeBody(block: HclBlock, extras: TerraformExtraBody, resourceBlocks: 
 /** Merge sparse additional configuration into a generated file, preserving labelled dynamic blocks. */
 export function includeAdditionalTerraform(code: string, resources: readonly Resource[]): string {
 	if (!resources.some(resource => hasTerraformExtras(resource.terraformExtras))) { return code; }
-	const file = parseHcl(code);
-	const blocks = file.blocks.map(block => {
-		const resource = resources.find(item => block.type === 'resource' && block.labels[0] === resourceDefinition(item).type && block.labels[1] === (item.terraformName ?? item.name));
-		return resource?.terraformExtras ? mergeBody(block, resource.terraformExtras, resource.blocks) : block;
-	});
-	return [...Object.entries(file.attrs).map(([name, value]) => key(name) + ' = ' + terraformValueText(value)), ...blocks.map(block => writeBlock(block))].join('\n\n');
+	try {
+		const file = parseHcl(code);
+		const blocks = file.blocks.map(block => {
+			const resource = resources.find(item => block.type === 'resource' && block.labels[0] === resourceDefinition(item).type && block.labels[1] === (item.terraformName ?? item.name));
+			return resource?.terraformExtras ? mergeBody(block, resource.terraformExtras, resource.blocks) : block;
+		});
+		return [...Object.entries(file.attrs).map(([name, value]) => key(name) + ' = ' + terraformValueText(value)), ...blocks.map(block => writeBlock(block))].join('\n\n');
+	} catch {
+		return code;
+	}
 }
 
 export function extraFieldValue(resource: Resource, target: FieldTarget): Value | undefined {

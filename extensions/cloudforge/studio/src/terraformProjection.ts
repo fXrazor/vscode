@@ -89,7 +89,10 @@ export function projectTerraform(architecture: Architecture): Projected {
 			const regionField = regionAttribute(resource);
 			if (regionField && (resource.region.trim() || resource.fieldBindings?.[bindingKey({ kind: 'region' })])) { node.config[regionField] = resolve({ kind: 'region' }, regionCode(resource.region)); list.push({ path: [regionField], target: 'region', key: regionField, original: resource.region }); }
 			for (const [key, text] of Object.entries(resource.settings)) {
-				const path = (resource.catalogue ? key : aliases[key] ?? key.toLowerCase().replace(/\s+/g, '_')).split('.');
+				const mapped = resource.catalogue && /^[A-Za-z_][A-Za-z0-9_.-]*$/.test(key)
+					? key
+					: (aliases[key] ?? key.toLowerCase().replace(/\s+/g, '_'));
+				const path = mapped.split('.');
 				const attr = attribute(def?.attributes, path) ?? resource.catalogue?.fields.find(field => field.name === key);
 				set(node.config, path, resolve({ kind: 'setting', name: key }, isSensitiveProperty(key, attr?.sensitive) ? { $expr: 'var.' + node.name + '_' + path.join('_') } : valueFor(text, attr && { type: attr.type }), attr && { type: attr.type }));
 				list.push({ path, target: 'setting', key, original: text });

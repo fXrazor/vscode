@@ -1098,3 +1098,70 @@ select, summary, label:has(> select), label:has(> input[type=checkbox]), label:h
 /* Miro floating "+" quick-add connected copy dots around a single selected upright drawing. */
 .connected-copy-handle { position: absolute; z-index: 18; pointer-events: auto; display: grid; place-items: center; padding: 0; min-height: 0; border-radius: 50%; background: var(--panel-solid); color: var(--accent); border-style: solid; border-color: color-mix(in srgb, var(--accent) 65%, var(--border)); opacity: .78; box-shadow: 0 2px 6px #00000020; cursor: pointer; transition: opacity 100ms ease, background 100ms ease, color 100ms ease; }
 .connected-copy-handle:hover, .connected-copy-handle:focus-visible { opacity: 1; background: var(--accent); border-color: var(--accent); color: #ffffff; outline: none; }
+
+.studio-root-shell {
+	height: 100dvh;
+	min-height: 600px;
+}
+
+.studio-error-boundary {
+	height: 100dvh;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 24px;
+	background: #f5f5f5;
+	color: #24283d;
+}
+
+.studio-error-boundary.is-dark {
+	background: #1a1b26;
+	color: #f3f1fa;
+}
+
+.studio-error-card {
+	max-width: 520px;
+	width: 100%;
+	padding: 24px;
+	border-radius: 8px;
+	border: 1px solid #dfe2ec;
+	background: #ffffff;
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+}
+
+.studio-error-boundary.is-dark .studio-error-card {
+	border-color: #3c3e52;
+	background: #242632;
+}
+
+.studio-error-card h1 {
+	font-size: 16px;
+	font-weight: 650;
+}
+
+.studio-error-detail {
+	margin: 0;
+	padding: 10px 12px;
+	border-radius: 6px;
+	background: rgba(186, 53, 69, 0.08);
+	color: #ba3545;
+	font-size: 12px;
+	white-space: pre-wrap;
+	word-break: break-word;
+	max-height: 160px;
+	overflow: auto;
+}
+
+.studio-error-boundary.is-dark .studio-error-detail {
+	background: rgba(248, 113, 113, 0.14);
+	color: #fca5a5;
+}
+
+.studio-error-actions {
+	display: flex;
+	gap: 8px;
+	justify-content: flex-end;
+}

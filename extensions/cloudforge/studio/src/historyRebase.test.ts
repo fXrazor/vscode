@@ -168,3 +168,32 @@ test('an undone rename remains in redo after refresh; a different architecture t
 	assert.equal(h.past.length, 0);
 	assert.equal(h.future.length, 0);
 });
+
+test('rebase follows shifted opaque node IDs and never merges settings across incompatible resource types', () => {
+	const beforeGraph = snapshot([
+		node('node-1', 'azurerm_virtual_machine', 'vm_one'),
+		node('node-2', 'azurerm_virtual_network', 'vnet_one'),
+	], 'a');
+	const baseline = projectGraphSnapshotToArchitecture(beforeGraph).architecture;
+	let h = createHistory(baseline);
+	// User makes an unsaved canvas edit to the VNet (currently node-2).
+	h = historyReducer(h, { type: 'update', id: 'node-2', patch: { settings: { ...baseline.resources[1].settings, 'Address space': '10.99.0.0/16' } } });
+
+	// A newly saved resource sorts first, shifting vm_one -> node-2 and vnet_one -> node-3!
+	const afterGraph = snapshot([
+		node('node-1', 'azurerm_application_load_balancer', 'alb_one'),
+		node('node-2', 'azurerm_virtual_machine', 'vm_one'),
+		node('node-3', 'azurerm_virtual_network', 'vnet_one'),
+	], 'b');
+	const incoming = projectGraphSnapshotToArchitecture(afterGraph, { previousArchitecture: baseline }).architecture;
+	h = historyReducer(h, { type: 'rebase', architecture: incoming, base: baseline });
+
+	const alb = h.present.resources.find(r => r.id === 'node-1')!;
+	const vm = h.present.resources.find(r => r.id === 'node-2')!;
+	const vnet = h.present.resources.find(r => r.id === 'node-3')!;
+	assert.equal(alb.catalogue?.type, 'azurerm_application_load_balancer');
+	assert.equal(vm.catalogue?.type, 'azurerm_virtual_machine');
+	assert.equal(vm.settings['Address space'], undefined, 'VM must not receive VNet settings on ID shift');
+	assert.equal(vnet.kind, 'network');
+	assert.equal(vnet.settings['Address space'], '10.99.0.0/16', 'unsaved VNet edit follows VNet to its new opaque ID');
+});
