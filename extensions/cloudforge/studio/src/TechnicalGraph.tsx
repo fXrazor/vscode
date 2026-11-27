@@ -132,7 +132,10 @@ const GhostCard = memo(function GhostCard({ data }: NodeProps<GhostNode>) {
 });
 
 const LaneBand = memo(function LaneBand({ data }: NodeProps<LaneNode>) {
-	return <div className={'tg-lane tg-lane-' + data.lane.kind} style={{ width: data.lane.width, height: data.lane.height }}><span>{data.lane.label}</span></div>;
+	const label = data.lane.label;
+	// Scope titles are `type.name`: zoomed out only the name shows, and a title never runs past its box.
+	const dot = data.lane.kind === 'scope' ? label.lastIndexOf('.') : -1;
+	return <div className={'tg-lane tg-lane-' + data.lane.kind} style={{ width: data.lane.width, height: data.lane.height }}><span title={label}>{dot > 0 ? <><small className="tg-lane-type">{label.slice(0, dot + 1)}</small>{label.slice(dot + 1)}</> : label}</span></div>;
 });
 
 function GraphRoute(props: EdgeProps<GraphFlowEdge>) {
