@@ -1,5 +1,14 @@
 # CloudForge Code OSS handoff
 
+## Non-Overlapping Appearance Popover, Aligned Controls & Shape-Aware Text Insets — 27 November 2026
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `0448062741b`, owner Antigravity. Zero overlap with unmerged Claude branches (`2dm0k0`, `ksv8z9`) or Rust; no installer build touched.
+- **Scope:**
+  - **Non-overlapping `ContextPopover` placement** ([ContextPopover.tsx](extensions/cloudforge/studio/src/ContextPopover.tsx)): measures available space above vs below the trigger button, picks the larger side, clamps `maxHeight` to fit inside that side, and uses `top` (below) or `bottom` (above) anchoring so the Appearance popover never covers its parent floating selection toolbar (`Appearance` / `...` / `×`).
+  - **Shape-aware inscribed text insets & pixel-exact inline editing** ([drawingTextFit.ts](extensions/cloudforge/studio/src/drawingTextFit.ts), [DrawingText.tsx](extensions/cloudforge/studio/src/DrawingText.tsx), [exportPresentation.ts](extensions/cloudforge/studio/src/exportPresentation.ts), [styles.css](extensions/cloudforge/studio/src/styles.css)): added `shapeTextInsets()` for diamonds (`25%`), triangles (`38% 24% 12% 24%`), pentagons, hexagons, cylinders, documents, and subprocess boxes shared across live canvas and SVG/PNG/PDF exports, plus matched `.drawing-text-measure.is-editing` padding/border to `<textarea>` so live typing scales accurately. Covered in [model.test.ts](extensions/cloudforge/studio/src/model.test.ts).
+  - **Aligned Appearance popover controls** ([styles.css](extensions/cloudforge/studio/src/styles.css)): unified `.element-appearance-grid` inputs, selects, `Fill` colour picker, `No fill` button, and `B`/`I`/`U` toggles to an exact `34px` baseline (`box-sizing: border-box; align-self: end`).
+- **Fresh verification (27 November 2026):** Studio `tsc --noEmit` **PASS**, **254/254** Studio unit tests PASS (0 skipped), Studio `build` + `esbuild.webview.mts` + `oxlint` + `hygiene` (`drawingTextFit.ts`) **PASS**, and real Windows Edge (`--channel=msedge`): `whiteboard-controls-verify.mjs` **20/20 PASS** + live dark-mode check confirming `clearOfBar: true` (`barY: 404`, `popTop: 444`), `fillH: 34 === noFillH: 34`, diamond inscribed `25%` inset (`insideContent: true`), and 0 browser errors.
+
 ## Miro Sticky-Note / Shape Text Auto-Scaling & Circular Swatch Picker Fix — 27 November 2026
 
 - **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `716a9dac689`, owner Antigravity. Zero overlap with unmerged Claude branches (`2dm0k0`, `ksv8z9`) or Rust; no installer build touched.

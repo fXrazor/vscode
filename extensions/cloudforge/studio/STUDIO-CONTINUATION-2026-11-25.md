@@ -1,5 +1,11 @@
 # Studio continuation checkpoint — 25 November 2026
 
+## Non-Overlapping Appearance Popover, Aligned Controls & Shape-Aware Text Insets — 27 November 2026
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `0448062741b`, owner Antigravity. Zero overlap with Claude branches (`2dm0k0`, `ksv8z9`) or Rust; no installer build touched.
+- **Scope:** fixed `ContextPopover` vertical placement so Appearance never overlaps the floating selection toolbar (`src/ContextPopover.tsx`), added shape-aware inscribed text insets (`shapeTextInsets()`) shared between live `DrawingText` and SVG/PNG/PDF export (`src/drawingTextFit.ts`, `src/DrawingText.tsx`, `src/exportPresentation.ts`), matched inline-edit probe padding, aligned all `ElementAppearance` inputs/buttons to `34px` (`src/styles.css`), and added diamond/triangle tests (`src/model.test.ts`).
+- **Fresh checks:** Studio `tsc --noEmit` **PASS**, **254/254** Studio tests (0 skipped), Studio `build` + `esbuild.webview.mts` + `oxlint` + `hygiene` **PASS**, real Windows Edge `whiteboard-controls-verify.mjs` **20/20 PASS** + live popover clearance (`clearOfBar: true`, `fillH: 34 === noFillH: 34`, diamond `25%` inset `insideContent: true`, 0 browser errors).
+
 ## Miro Sticky-Note / Shape Text Auto-Scaling & Circular Swatch Picker Fix — 27 November 2026
 
 - **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `716a9dac689`, owner Antigravity. Zero overlap with Claude branches (`2dm0k0`, `ksv8z9`) or Rust; no installer build touched.

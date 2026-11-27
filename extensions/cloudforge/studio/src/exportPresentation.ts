@@ -24,12 +24,12 @@ function drawingMarkup(item: BoardItem): string {
 	}
 	const fill = item.fill ?? (item.kind === 'note' ? '#fff0b5' : item.kind === 'shape' ? '#eef2ff' : 'transparent');
 	const { fontSize, lines } = resolveDrawingTypography(item);
-	const { insetX, insetY, width: boxWidth, height: boxHeight } = drawingTextBox(item);
+	const { insetTop, insetRight, insetBottom, insetLeft, width: boxWidth, height: boxHeight } = drawingTextBox(item);
 	const alignment = item.textAlign ?? (item.kind === 'shape' ? 'center' : 'left');
 	const vertical = item.verticalAlign ?? (item.kind === 'shape' ? 'middle' : 'top');
 	const lineHeight = fontSize * DRAWING_LINE_HEIGHT; const blockHeight = lines.length * lineHeight;
-	const textX = alignment === 'center' ? item.width / 2 : alignment === 'right' ? item.width - insetX : insetX;
-	const textY = item.kind === 'frame' ? -12 : (vertical === 'middle' ? (item.height - blockHeight) / 2 : vertical === 'bottom' ? item.height - insetY - blockHeight : insetY) + fontSize;
+	const textX = alignment === 'center' ? insetLeft + boxWidth / 2 : alignment === 'right' ? item.width - insetRight : insetLeft;
+	const textY = item.kind === 'frame' ? -12 : (vertical === 'middle' ? insetTop + (boxHeight - blockHeight) / 2 : vertical === 'bottom' ? item.height - insetBottom - blockHeight : insetTop) + fontSize;
 	const family = item.fontFamily === 'serif' ? 'Georgia, serif' : item.fontFamily === 'mono' ? 'Consolas, monospace' : 'Mona Sans, Segoe UI, sans-serif';
 	const colour = item.textColor ?? (item.kind === 'text' || item.kind === 'frame' ? '#203049' : shapeTextColor(fill));
 	const border = escape(item.strokeColor ?? (item.kind === 'shape' ? '#7565bd' : '#b8c6dc'));
@@ -37,7 +37,7 @@ function drawingMarkup(item: BoardItem): string {
 	const dash = shapeStrokeDash(item.strokeStyle ?? (item.kind === 'frame' ? 'dashed' : 'solid'), strokeWidth);
 	const geometry = item.kind === 'shape' ? `<svg width="${item.width}" height="${item.height}" viewBox="0 0 100 100" preserveAspectRatio="none"><path d="${shapeDefinition(item.shape).path}" fill="${escape(fill)}" stroke="${border}" stroke-width="${strokeWidth}" ${dash ? `stroke-dasharray="${dash}"` : ''} stroke-linecap="round" vector-effect="non-scaling-stroke"/></svg>` : `<rect width="${item.width}" height="${item.height}" rx="${item.kind === 'frame' ? 8 : 0}" fill="${escape(fill)}" stroke="${item.kind === 'text' ? 'none' : border}" stroke-width="${strokeWidth}" ${dash ? `stroke-dasharray="${dash}"` : ''}/>`;
 	const clipId = item.kind === 'note' || item.kind === 'shape' ? 'clip-' + escape(item.id.replace(/[^a-zA-Z0-9_-]/g, '_')) : '';
-	const clipDef = clipId ? `<defs><clipPath id="${clipId}"><rect x="${insetX}" y="${insetY}" width="${boxWidth}" height="${boxHeight}"/></clipPath></defs>` : '';
+	const clipDef = clipId ? `<defs><clipPath id="${clipId}"><rect x="${insetLeft}" y="${insetTop}" width="${boxWidth}" height="${boxHeight}"/></clipPath></defs>` : '';
 	const textEl = `<text x="${textX}" y="${textY}" text-anchor="${alignment === 'center' ? 'middle' : alignment === 'right' ? 'end' : 'start'}" fill="${escape(colour)}" font-family="${family}" font-size="${fontSize}" font-weight="${item.bold ? 700 : 400}" font-style="${item.italic ? 'italic' : 'normal'}" text-decoration="${item.underline ? 'underline' : 'none'}"${clipId ? ` clip-path="url(#${clipId})"` : ''}>${lines.map((line, index) => `<tspan x="${textX}" dy="${index ? lineHeight : 0}">${escape(line)}</tspan>`).join('')}</text>`;
 	return `<g data-element="${escape(item.id)}" aria-label="${escape(item.text)}" transform="translate(${x},${y})${item.rotation ? ` rotate(${item.rotation} ${item.width / 2} ${item.height / 2})` : ''}" opacity="${item.opacity ?? 1}">${clipDef}${geometry}${textEl}</g>`;
 }

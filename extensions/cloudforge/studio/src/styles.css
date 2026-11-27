@@ -261,7 +261,8 @@ h1 { font-size: 19px; font-weight: 650; letter-spacing: -0.4px; display: flex; a
 .board-item.shape .drawing-content { inset: 18% 18%; }
 .drawing-content.frame-label { inset: auto auto calc(100% + 8px) 0; width: max-content; max-width: 100%; min-width: 140px; padding: 0; overflow: visible; }
 .drawing-content > span { width: 100%; }
-.drawing-text-measure { position: absolute; top: 0; left: 0; width: 100%; visibility: hidden; pointer-events: none; white-space: pre-wrap; overflow-wrap: normal; }
+.drawing-text-measure { position: absolute; top: 0; left: 0; width: 100%; visibility: hidden; pointer-events: none; white-space: pre-wrap; overflow-wrap: normal; box-sizing: border-box; }
+.drawing-text-measure.is-editing { padding: 4px; border: 1px solid transparent; }
 .drawing-placeholder { opacity: .68; }
 .drawing-inline-editor { width: 100%; min-height: 0; height: 100%; resize: none; border: 1px solid var(--accent); border-radius: 3px; padding: 4px; background: var(--input); color: inherit; font: inherit; line-height: inherit; text-align: inherit; text-decoration: inherit; overflow: auto; }
 .drawing-lock { position: absolute; top: 5px; right: 6px; color: var(--accent); }
@@ -788,12 +789,15 @@ dialog::backdrop { background: #12152488; backdrop-filter: blur(3px); }
 .context-popover h2, .variable-picker h2 { font-size: 14px; margin: 0; }
 .context-popover button, .variable-picker button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 30px; padding: 5px 8px; border: 1px solid var(--border); background: var(--input); color: var(--text); }
 .context-popover button[aria-pressed=true], .variable-picker button[aria-pressed=true] { background: var(--selection); color: var(--accent); border-color: var(--accent); }
-.element-appearance-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px 12px; }
-.element-appearance-grid > label { display: grid; align-content: start; gap: 6px; font-size: 12px; }
-.element-appearance-grid input, .element-appearance-grid select { width: 100%; min-width: 0; }
-.element-appearance-grid textarea { width: 100%; resize: vertical; min-height: 58px; padding: 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--input); color: var(--text); font: inherit; }
+.element-appearance-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; align-items: end; }
+.element-appearance-grid > label { display: grid; align-content: start; gap: 5px; font-size: 12px; }
+.element-appearance-grid input, .element-appearance-grid select { width: 100%; min-width: 0; height: 34px; min-height: 34px; border-radius: 5px; box-sizing: border-box; }
+.element-appearance-grid input[type="color"] { padding: 2px; cursor: pointer; }
+.element-appearance-grid > button { align-self: end; height: 34px; min-height: 34px; border-radius: 5px; box-sizing: border-box; }
+.element-appearance-grid textarea { width: 100%; resize: vertical; min-height: 58px; padding: 8px; border: 1px solid var(--border); border-radius: 5px; background: var(--input); color: var(--text); font: inherit; }
 .appearance-wide { grid-column: 1 / -1; }
 .appearance-toggle-row { display: flex; gap: 6px; }
+.appearance-toggle-row button { flex: 1; height: 34px; min-height: 34px; border-radius: 5px; }
 .studio .resource-node.visual { width: 100%; height: 100%; padding: 0; border: 0; border-radius: 0; }
 .studio .resource-node.visual .resource-node-heading { display: block; width: 100%; height: 100%; margin: 0; padding: 0; }
 .studio .resource-node.visual .resource-node-heading > img { display: block; width: 100%; height: 100%; object-fit: contain; }

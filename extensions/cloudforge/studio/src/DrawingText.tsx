@@ -5,7 +5,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type Dispatch } from 'react';
 import type { Action, BoardItem } from './model.ts';
 import { shapeTextColor } from './shapes.ts';
-import { DRAWING_MIN_FONT, drawingTargetFontSize, drawingTextBox, fitDrawingFontSize } from './drawingTextFit.ts';
+import { DRAWING_MIN_FONT, drawingTargetFontSize, drawingTextBox, fitDrawingFontSize, shapeTextInsets } from './drawingTextFit.ts';
 
 export function drawingTextStyle(item: BoardItem, fittedFontSize?: number): CSSProperties {
 	return { fontSize: fittedFontSize ?? drawingTargetFontSize(item), fontWeight: item.bold ? 700 : 400, fontStyle: item.italic ? 'italic' : 'normal', textDecoration: item.underline ? 'underline' : 'none', fontFamily: item.fontFamily === 'mono' ? "'JetBrains Mono', Consolas, monospace" : item.fontFamily === 'serif' ? 'Georgia, serif' : 'inherit', color: item.textColor ?? (item.kind === 'text' || item.kind === 'frame' ? 'var(--text)' : shapeTextColor(item.fill ?? (item.kind === 'note' ? '#fff0b5' : '#eef2ff'))), textAlign: item.textAlign ?? (item.kind === 'shape' ? 'center' : 'left') };
@@ -85,8 +85,11 @@ export function DrawingText({ item, dispatch, editToken = 0 }: { item: BoardItem
 	};
 	const vertical = item.verticalAlign ?? (item.kind === 'shape' ? 'middle' : 'top');
 	const displayText = activeText || 'Double-click to add text';
-	return <div ref={container} className={'drawing-content' + (item.kind === 'frame' ? ' frame-label' : '')} style={{ ...drawingTextStyle(item, autoFits ? fittedFont : targetFont), ...(item.fill === 'transparent' && !item.textColor ? { color: 'var(--text)' } : {}), justifyContent: vertical === 'top' ? 'flex-start' : vertical === 'bottom' ? 'flex-end' : 'center' }} onDoubleClick={event => { event.stopPropagation(); start(); }}>
-		{autoFits && <span ref={measure} className="drawing-text-measure" aria-hidden="true">{displayText}</span>}
+	const shapeInsetStyle: CSSProperties | undefined = item.kind === 'shape'
+		? (() => { const [t, r, b, l] = shapeTextInsets(item.shape); return { inset: `${t * 100}% ${r * 100}% ${b * 100}% ${l * 100}%` }; })()
+		: undefined;
+	return <div ref={container} className={'drawing-content' + (item.kind === 'frame' ? ' frame-label' : '')} style={{ ...drawingTextStyle(item, autoFits ? fittedFont : targetFont), ...shapeInsetStyle, ...(item.fill === 'transparent' && !item.textColor ? { color: 'var(--text)' } : {}), justifyContent: vertical === 'top' ? 'flex-start' : vertical === 'bottom' ? 'flex-end' : 'center' }} onDoubleClick={event => { event.stopPropagation(); start(); }}>
+		{autoFits && <span ref={measure} className={'drawing-text-measure' + (editing ? ' is-editing' : '')} aria-hidden="true">{displayText}</span>}
 		{editing ? <textarea ref={editor} className="drawing-inline-editor nodrag nopan" aria-label="Edit drawing text" autoFocus value={draft} onChange={event => setDraft(event.target.value)} onBlur={() => finish()} onKeyDown={event => { event.stopPropagation(); if (event.key === 'Escape') { event.preventDefault(); finish(true, true); } else if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); finish(false, true); } }}/> : <span className={item.text ? undefined : 'drawing-placeholder'}>{displayText}</span>}
 	</div>;
 }

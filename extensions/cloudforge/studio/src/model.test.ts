@@ -970,6 +970,13 @@ test('Miro sticky-note and shape text scaling fits bounds without overflow and s
 	const heading = resolveDrawingTypography({ kind: 'text', text: 'Architecture Title', fontSize: 64, width: 220, height: 130 });
 	assert.equal(heading.fontSize, 64);
 
+	// Narrow shapes (diamond / triangle) use tighter inscribed insets than rectangles so text stays inside the outline
+	const rectFit = resolveDrawingTypography({ kind: 'shape', shape: 'rectangle', text: 'Route traffic', fontSize: 32, width: 180, height: 120 });
+	const diamondFit = resolveDrawingTypography({ kind: 'shape', shape: 'diamond', text: 'Route traffic', fontSize: 32, width: 180, height: 120 });
+	const triangleFit = resolveDrawingTypography({ kind: 'shape', shape: 'triangle', text: 'Route traffic', fontSize: 32, width: 180, height: 120 });
+	assert.ok(diamondFit.fontSize < rectFit.fontSize, `diamond (${diamondFit.fontSize}) should fit tighter than rectangle (${rectFit.fontSize})`);
+	assert.ok(triangleFit.fontSize < rectFit.fontSize, `triangle (${triangleFit.fontSize}) should fit tighter than rectangle (${rectFit.fontSize})`);
+
 	// Setting fontSize back to undefined returns a sticky note to Auto mode in 1 atomic Undo step
 	const base: Architecture = {
 		name: 'AutoNote',

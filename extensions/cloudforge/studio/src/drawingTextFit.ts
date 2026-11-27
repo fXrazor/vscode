@@ -13,18 +13,59 @@ function charWidthRatio(fontFamily: BoardItem['fontFamily'], bold?: boolean): nu
 	return bold ? base * 1.06 : base;
 }
 
+/** Fractional [top, right, bottom, left] safe-text insets per flowchart/basic shape outline. */
+export function shapeTextInsets(shape?: BoardItem['shape']): readonly [number, number, number, number] {
+	switch (shape) {
+		case 'diamond':
+		case 'decision':
+			return [0.25, 0.25, 0.25, 0.25];
+		case 'triangle':
+			return [0.38, 0.24, 0.12, 0.24];
+		case 'pentagon':
+			return [0.24, 0.22, 0.14, 0.22];
+		case 'hexagon':
+		case 'preparation':
+		case 'data':
+		case 'manual':
+			return [0.16, 0.22, 0.16, 0.22];
+		case 'database':
+			return [0.28, 0.14, 0.14, 0.14];
+		case 'document':
+			return [0.14, 0.14, 0.24, 0.14];
+		case 'rectangle':
+		case 'process':
+			return [0.12, 0.12, 0.12, 0.12];
+		case 'subprocess':
+			return [0.12, 0.2, 0.12, 0.2];
+		default:
+			return [0.18, 0.18, 0.18, 0.18];
+	}
+}
+
 /** Inner content box dimensions available for drawing text, matching CSS `.drawing-content` insets. */
-export function drawingTextBox(item: Pick<BoardItem, 'kind' | 'width' | 'height'>): { width: number; height: number; insetX: number; insetY: number } {
+export function drawingTextBox(item: Pick<BoardItem, 'kind' | 'shape' | 'width' | 'height'>): {
+	width: number; height: number; insetX: number; insetY: number;
+	insetTop: number; insetRight: number; insetBottom: number; insetLeft: number;
+} {
 	if (item.kind === 'shape') {
-		const insetX = item.width * 0.18;
-		const insetY = item.height * 0.18;
-		return { width: Math.max(16, item.width - insetX * 2), height: Math.max(16, item.height - insetY * 2), insetX, insetY };
+		const [topFrac, rightFrac, bottomFrac, leftFrac] = shapeTextInsets(item.shape);
+		const insetTop = item.height * topFrac;
+		const insetRight = item.width * rightFrac;
+		const insetBottom = item.height * bottomFrac;
+		const insetLeft = item.width * leftFrac;
+		return {
+			width: Math.max(16, item.width - insetLeft - insetRight),
+			height: Math.max(16, item.height - insetTop - insetBottom),
+			insetX: (insetLeft + insetRight) / 2,
+			insetY: (insetTop + insetBottom) / 2,
+			insetTop, insetRight, insetBottom, insetLeft,
+		};
 	}
 	if (item.kind === 'frame') {
-		return { width: Math.max(16, item.width), height: Math.max(16, item.height), insetX: 0, insetY: 0 };
+		return { width: Math.max(16, item.width), height: Math.max(16, item.height), insetX: 0, insetY: 0, insetTop: 0, insetRight: 0, insetBottom: 0, insetLeft: 0 };
 	}
 	const inset = 16;
-	return { width: Math.max(16, item.width - inset * 2), height: Math.max(16, item.height - inset * 2), insetX: inset, insetY: inset };
+	return { width: Math.max(16, item.width - inset * 2), height: Math.max(16, item.height - inset * 2), insetX: inset, insetY: inset, insetTop: inset, insetRight: inset, insetBottom: inset, insetLeft: inset };
 }
 
 /**
@@ -132,7 +173,7 @@ export function fitDrawingFontSize(
 }
 
 /** Resolve fitted font size and wrapped lines for any `BoardItem` (notes and shapes auto-fit; text and frame keep exact size). */
-export function resolveDrawingTypography(item: Pick<BoardItem, 'kind' | 'text' | 'fontSize' | 'fontFamily' | 'bold' | 'width' | 'height'>): { fontSize: number; lines: string[] } {
+export function resolveDrawingTypography(item: Pick<BoardItem, 'kind' | 'shape' | 'text' | 'fontSize' | 'fontFamily' | 'bold' | 'width' | 'height'>): { fontSize: number; lines: string[] } {
 	const maxFont = drawingTargetFontSize(item);
 	const box = drawingTextBox(item);
 	if (item.kind === 'note' || item.kind === 'shape') {
