@@ -46,6 +46,19 @@ import {
 	groupUpgradeableSnapshots,
 	sanitizeExportStem
 } from './project/architectureTools';
+import {
+	defaultUpgradeConstraint,
+	formatEngineFmtSummary,
+	formatPortableBundleSummaryMarkdown,
+	formatProviderUpgradePreviewMarkdown,
+	isValidBundleName,
+	isValidSemverVersion,
+	parseEngineFmtResult,
+	parsePortableBundleExport,
+	parseProviderUpgradeApply,
+	parseProviderUpgradePreview,
+	parseUpgradeJournalRecovery
+} from './project/architectureWorkflows';
 import { findWorkspacePreset, isWorkspacePresetId, WORKSPACE_PRESETS, type WorkspacePresetId } from './project/workspacePresets';
 import { explainResource } from './canvas/advisorRecipes';
 import { CloudForgeCanvasPanel } from './canvas/canvasPanel';
@@ -411,7 +424,9 @@ function errorMessage(code: string): string {
 		case 'LIMIT_EXCEEDED': return l10n.t('The workspace exceeds the CloudForge inspection limit.');
 		case 'SCOPE_DENIED': return l10n.t('This workspace is no longer active in this window.');
 		case 'REGISTRY_UNAVAILABLE': return l10n.t('The provider registry could not be reached, or it has no release for that version and platform.');
-		case 'ALREADY_EXISTS': return l10n.t('A different archive for that provider version is already downloaded.');
+		case 'ALREADY_EXISTS': return l10n.t('A different archive or folder with that name already exists.');
+		case 'INVALID_STATE': return l10n.t('The requested action cannot run in the current architecture state.');
+		case 'ENGINE_UNAVAILABLE': return l10n.t('Neither OpenTofu nor Terraform was found on PATH. Install an engine to run this operation.');
 		default: return l10n.t('The CloudForge service could not complete the request.');
 	}
 }
@@ -2553,6 +2568,325 @@ export function activate(context: ExtensionContext): void {
 		commands.registerCommand('cloudforge.providers.importSchemaFile', async () => {
 			await commands.executeCommand('cloudforge.importProviderSchema');
 			void providersView.refresh();
+		}),
+		commands.registerCommand('cloudforge.formatArchitecture', async () => {
+			const graph = provider.getGraph();
+			if (!graph) {
+				void window.showInformationMessage(l10n.t('Open an architecture before formatting Terraform files.'));
+				return;
+			}
+			const checkResult = await window.withProgress(
+				{
+					location: ProgressLocation.Notification,
+					title: l10n.t('Checking Terraform formatting for {0}…', currentArchitectureName),
+					cancellable: false,
+				},
+				() => callService<unknown>('runEngineFmt', {
+					workspaceId: graph.workspaceId,
+					architectureId: graph.architectureId,
+					expectedSourceRevision: graph.sourceRevision,
+					mode: 'check',
+				})
+			);
+			if (!checkResult.ok) {
+				showServiceError(checkResult.error);
+				return;
+			}
+			const checked = parseEngineFmtResult(checkResult.value);
+			if (!checked) {
+				void window.showErrorMessage(l10n.t('CloudForge received an unexpected engine formatting response.'));
+				return;
+			}
+			if (checked.formatted || checked.changedFiles.length === 0) {
+				void window.showInformationMessage(formatEngineFmtSummary(checked));
+				return;
+			}
+			const applyLabel = l10n.t('Format {0} File(s)', checked.changedFiles.length);
+			const choice = await window.showInformationMessage(formatEngineFmtSummary(checked), { modal: true }, applyLabel);
+			if (choice !== applyLabel) {
+				return;
+			}
+			const applyResult = await window.withProgress(
+				{
+					location: ProgressLocation.Notification,
+					title: l10n.t('Formatting {0} Terraform file(s)…', checked.changedFiles.length),
+					cancellable: false,
+				},
+				() => callService<unknown>('runEngineFmt', {
+					workspaceId: graph.workspaceId,
+					architectureId: graph.architectureId,
+					expectedSourceRevision: graph.sourceRevision,
+					engine: checked.engine,
+					mode: 'apply',
+				})
+			);
+			if (!applyResult.ok) {
+				showServiceError(applyResult.error);
+				return;
+			}
+			const applied = parseEngineFmtResult(applyResult.value);
+			const refreshed = await showGraph(provider, treeView, graph.workspaceId, graph.architectureId);
+			if (refreshed) {
+				updateStatusBar(refreshed);
+				syncProblems(refreshed);
+				canvas.updateIfOpen(toCanvasSnapshot(refreshed, currentArchitectureName));
+			}
+			void window.showInformationMessage(applied ? formatEngineFmtSummary(applied) : l10n.t('Formatted Terraform files for {0}.', currentArchitectureName));
+		}),
+		commands.registerCommand('cloudforge.exportPortableBundle', async () => {
+			const graph = provider.getGraph();
+			if (!graph) {
+				void window.showInformationMessage(l10n.t('Open an architecture before exporting a portable Terraform bundle.'));
+				return;
+			}
+			const defaultName = `${sanitizeExportStem(currentArchitectureName)}-bundle`;
+			const bundleName = await window.showInputBox({
+				title: l10n.t('Export Portable Terraform Bundle ({0})', currentArchitectureName),
+				prompt: l10n.t('Enter a folder name for the exported secret-free Terraform bundle. Next, choose the destination folder.'),
+				value: defaultName,
+				validateInput: value => isValidBundleName(value)
+					? undefined
+					: l10n.t('Use a single folder name without slashes, leading dots, or reserved Windows names.'),
+			});
+			if (!bundleName) {
+				return;
+			}
+			const exported = await window.withProgress(
+				{
+					location: ProgressLocation.Notification,
+					title: l10n.t('Exporting portable bundle "{0}"…', bundleName.trim()),
+					cancellable: false,
+				},
+				() => callService<unknown>('exportPortableBundle', {
+					workspaceId: graph.workspaceId,
+					architectureId: graph.architectureId,
+					expectedSourceRevision: graph.sourceRevision,
+					bundleName: bundleName.trim(),
+				})
+			);
+			if (!exported.ok) {
+				if (exported.error.code === 'CANCELLED') {
+					return;
+				}
+				showServiceError(exported.error);
+				return;
+			}
+			const parsed = parsePortableBundleExport(exported.value);
+			if (!parsed) {
+				void window.showErrorMessage(l10n.t('CloudForge received an unexpected portable bundle export result.'));
+				return;
+			}
+			const viewManifestLabel = l10n.t('View Export Summary');
+			const choice = await window.showInformationMessage(
+				l10n.t('Exported portable bundle "{0}" ({1} files, {2} excluded artifacts, sha256 {3}).', parsed.bundleName, parsed.fileCount, parsed.excludedCount, parsed.bundleSha256.slice(0, 12)),
+				viewManifestLabel
+			);
+			if (choice === viewManifestLabel) {
+				const doc = await workspace.openTextDocument({
+					content: formatPortableBundleSummaryMarkdown(parsed, currentArchitectureName),
+					language: 'markdown',
+				});
+				await window.showTextDocument(doc, { preview: true });
+			}
+		}),
+		commands.registerCommand('cloudforge.upgradeProvider', async (node?: ProvidersNode) => {
+			const graph = provider.getGraph();
+			if (!graph) {
+				void window.showInformationMessage(l10n.t('Open an architecture before upgrading a provider version.'));
+				return;
+			}
+			let providerAddress = node?.type === 'project' ? node.row.address : undefined;
+			let currentVersion = node?.type === 'project' ? node.row.version : undefined;
+			if (!providerAddress) {
+				const depReport = await inspectArchitectureDependencies(graph.workspaceId, graph.architectureId, graph.sourceRevision);
+				const candidates = (depReport?.providers ?? []).filter(item => !!item.address);
+				if (candidates.length === 0) {
+					void window.showInformationMessage(l10n.t('No declared Terraform providers were found in {0}.', currentArchitectureName));
+					return;
+				}
+				const pickedProvider = await window.showQuickPick(
+					candidates.map(item => ({
+						label: item.display,
+						description: item.lockedVersion ? l10n.t('locked {0}', item.lockedVersion) : l10n.t('unlocked'),
+						detail: item.address,
+						item,
+					})),
+					{
+						title: l10n.t('Upgrade Provider Version ({0})', currentArchitectureName),
+						placeHolder: l10n.t('Select a provider declared in required_providers'),
+					}
+				);
+				if (!pickedProvider?.item.address) {
+					return;
+				}
+				providerAddress = pickedProvider.item.address;
+				currentVersion = pickedProvider.item.lockedVersion ?? undefined;
+			}
+
+			const versionList = await providersView.versionsFor(providerAddress).catch(() => undefined);
+			const customSentinel = '__custom__';
+			let targetVersion: string | undefined;
+			if (versionList && versionList.versions.length > 0) {
+				const picks = [
+					...versionList.versions.slice(0, 25).map((version, index) => ({
+						label: version,
+						description: [
+							...(index === 0 ? [l10n.t('latest')] : []),
+							...(version === currentVersion ? [l10n.t('current')] : []),
+						].join(' · '),
+						value: version,
+					})),
+					{ label: l10n.t('Enter another version…'), description: 'major.minor.patch', value: customSentinel },
+				];
+				const pickedVersion = await window.showQuickPick(picks, {
+					title: l10n.t('Target Version for {0}', providerAddress),
+					placeHolder: currentVersion
+						? l10n.t('Current version: {0}. Choose the target provider release.', currentVersion)
+						: l10n.t('Choose the target provider release.'),
+				});
+				if (!pickedVersion) {
+					return;
+				}
+				targetVersion = pickedVersion.value === customSentinel ? undefined : pickedVersion.value;
+			}
+			if (!targetVersion) {
+				targetVersion = await window.showInputBox({
+					title: l10n.t('Target Version for {0}', providerAddress),
+					prompt: l10n.t('Enter a stable provider release version (major.minor.patch).'),
+					placeHolder: '5.14.0',
+					validateInput: value => isValidSemverVersion(value)
+						? undefined
+						: l10n.t('Enter a stable semantic version such as 5.14.0.'),
+				});
+				if (!targetVersion) {
+					return;
+				}
+			}
+
+			const constraintInput = await window.showInputBox({
+				title: l10n.t('Version Constraint for {0}', providerAddress),
+				prompt: l10n.t('Confirm or edit the required_providers version constraint.'),
+				value: defaultUpgradeConstraint(targetVersion),
+				validateInput: value => value.trim().length > 0 && value.length <= 128 && !/["\\\u0000-\u001f\u007f]/.test(value)
+					? undefined
+					: l10n.t('Enter a valid Terraform version constraint (for example ~> 5.14).'),
+			});
+			if (!constraintInput) {
+				return;
+			}
+
+			const previewResult = await window.withProgress(
+				{
+					location: ProgressLocation.Notification,
+					title: l10n.t('Previewing upgrade of {0} to {1}…', providerAddress, targetVersion),
+					cancellable: false,
+				},
+				() => callService<unknown>('previewProviderUpgrade', {
+					workspaceId: graph.workspaceId,
+					architectureId: graph.architectureId,
+					expectedSourceRevision: graph.sourceRevision,
+					providerAddress,
+					targetVersion: targetVersion.trim(),
+					targetConstraint: constraintInput.trim(),
+				})
+			);
+			if (!previewResult.ok) {
+				showServiceError(previewResult.error);
+				return;
+			}
+			const preview = parseProviderUpgradePreview(previewResult.value);
+			if (!preview) {
+				void window.showErrorMessage(l10n.t('CloudForge received an unexpected provider upgrade preview.'));
+				return;
+			}
+
+			const doc = await workspace.openTextDocument({
+				content: formatProviderUpgradePreviewMarkdown(preview, currentArchitectureName),
+				language: 'markdown',
+			});
+			await window.showTextDocument(doc, { preview: true });
+
+			const applyLabel = preview.hasArchitectureBreakingChanges
+				? l10n.t('Apply Upgrade (Breaking Changes Detected)')
+				: l10n.t('Apply Provider Upgrade');
+			const summary = preview.hasArchitectureBreakingChanges
+				? l10n.t('Upgrade {0} to {1} ({2})? Breaking schema changes affect resources in {3}. Review the preview document first.', preview.providerAddress, preview.targetVersion, preview.targetConstraint, currentArchitectureName)
+				: l10n.t('Apply upgrade of {0} to {1} ({2}) across {3} file(s)?', preview.providerAddress, preview.targetVersion, preview.targetConstraint, preview.fileChanges.length);
+			const confirm = await window.showInformationMessage(summary, { modal: true }, applyLabel);
+			if (confirm !== applyLabel) {
+				return;
+			}
+
+			const applyResult = await window.withProgress(
+				{
+					location: ProgressLocation.Notification,
+					title: l10n.t('Applying transactional provider upgrade…'),
+					cancellable: false,
+				},
+				() => callService<unknown>('applyProviderUpgrade', {
+					workspaceId: graph.workspaceId,
+					architectureId: graph.architectureId,
+					expectedSourceRevision: preview.sourceRevision,
+					proposalId: preview.proposalId,
+				})
+			);
+			if (!applyResult.ok) {
+				showServiceError(applyResult.error);
+				return;
+			}
+			const applied = parseProviderUpgradeApply(applyResult.value);
+			const refreshed = await showGraph(provider, treeView, graph.workspaceId, graph.architectureId);
+			if (refreshed) {
+				updateStatusBar(refreshed);
+				syncProblems(refreshed);
+				canvas.updateIfOpen(toCanvasSnapshot(refreshed, currentArchitectureName));
+			}
+			void providersView.refresh();
+
+			const getReadyLabel = l10n.t('Run Get Ready');
+			const doneChoice = await window.showInformationMessage(
+				applied
+					? l10n.t('Upgraded {0} ({1} updated · rev {2}). Run Get Ready to download the new provider and refresh .terraform.lock.hcl.', preview.providerAddress, applied.updatedFiles.join(', '), applied.newSourceRevision.slice(0, 8))
+					: l10n.t('Applied provider upgrade for {0}.', preview.providerAddress),
+				getReadyLabel
+			);
+			if (doneChoice === getReadyLabel) {
+				await commands.executeCommand('cloudforge.getReady');
+			}
+		}),
+		commands.registerCommand('cloudforge.recoverProviderUpgrade', async () => {
+			const graph = provider.getGraph();
+			if (!graph) {
+				void window.showInformationMessage(l10n.t('Open an architecture before checking for an interrupted provider upgrade.'));
+				return;
+			}
+			const result = await callService<unknown>('recoverUpgradeJournal', {
+				workspaceId: graph.workspaceId,
+				architectureId: graph.architectureId,
+			});
+			if (!result.ok) {
+				showServiceError(result.error);
+				return;
+			}
+			const recovery = parseUpgradeJournalRecovery(result.value);
+			if (!recovery) {
+				void window.showErrorMessage(l10n.t('CloudForge received an unexpected upgrade recovery response.'));
+				return;
+			}
+			if (!recovery.recovered) {
+				void window.showInformationMessage(l10n.t('No interrupted provider upgrade journal was found for {0}.', currentArchitectureName));
+				return;
+			}
+			const refreshed = await showGraph(provider, treeView, graph.workspaceId, graph.architectureId);
+			if (refreshed) {
+				updateStatusBar(refreshed);
+				syncProblems(refreshed);
+				canvas.updateIfOpen(toCanvasSnapshot(refreshed, currentArchitectureName));
+			}
+			void providersView.refresh();
+			void window.showInformationMessage(
+				l10n.t('Recovered interrupted provider upgrade and restored {0} file(s): {1}.', recovery.restoredFiles.length, recovery.restoredFiles.join(', '))
+			);
 		}),
 	);
 	context.subscriptions.push(commands.registerCommand('cloudforge.extractMirrorSchema', async (rawKey?: unknown) => {

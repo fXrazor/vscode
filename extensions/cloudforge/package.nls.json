@@ -104,5 +104,9 @@
 	"command.providers.refreshVersions": "Refresh Versions from Registry",
 	"command.providers.changeVersion": "Download Another Version…",
 	"command.addArchitecture": "Add Architecture…",
-	"command.addArchitectureFromBundle": "Add Architecture from Project Bundle…"
+	"command.addArchitectureFromBundle": "Add Architecture from Project Bundle…",
+	"command.formatArchitecture": "Format Terraform Files (OpenTofu / Terraform)",
+	"command.exportPortableBundle": "Export Portable Terraform Bundle…",
+	"command.upgradeProvider": "Upgrade Provider Version…",
+	"command.recoverProviderUpgrade": "Check / Recover Interrupted Provider Upgrade"
 }

@@ -239,7 +239,7 @@ export function registerCloudForgeChatParticipant(host: ChatParticipantHost): Di
 
 		// Default overview response
 		const mcpLine = host.vscodeAgentEnabled()
-			? 'VS Code Agent View MCP provider **`cloudforge.mcp`** is active (8 scoped tools + live self-updating docs at `cloudforge://docs/catalogue`).'
+			? 'VS Code Agent View MCP provider **`cloudforge.mcp`** is active (10 scoped tools + live self-updating docs at `cloudforge://docs/catalogue`).'
 			: 'Scoped MCP grants can be copied for Codex CLI or Claude Code from Learning Studio.';
 		stream.markdown(
 			`### CloudForge Assistant\n\n` +

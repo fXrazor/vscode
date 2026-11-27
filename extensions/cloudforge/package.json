@@ -647,6 +647,30 @@
 				"title": "%command.addCustomModel%",
 				"category": "%displayName%",
 				"icon": "$(add)"
+			},
+			{
+				"command": "cloudforge.formatArchitecture",
+				"title": "%command.formatArchitecture%",
+				"category": "%displayName%",
+				"icon": "$(symbol-ruler)"
+			},
+			{
+				"command": "cloudforge.exportPortableBundle",
+				"title": "%command.exportPortableBundle%",
+				"category": "%displayName%",
+				"icon": "$(package)"
+			},
+			{
+				"command": "cloudforge.upgradeProvider",
+				"title": "%command.upgradeProvider%",
+				"category": "%displayName%",
+				"icon": "$(arrow-up)"
+			},
+			{
+				"command": "cloudforge.recoverProviderUpgrade",
+				"title": "%command.recoverProviderUpgrade%",
+				"category": "%displayName%",
+				"icon": "$(history)"
 			}
 		],
 		"languageModelChatProviders": [
@@ -980,6 +1004,21 @@
 					"group": "1_tools@3"
 				},
 				{
+					"command": "cloudforge.exportPortableBundle",
+					"when": "view =~ /^cloudforge\\.(panel\\.)?resources$/",
+					"group": "1_tools@4"
+				},
+				{
+					"command": "cloudforge.formatArchitecture",
+					"when": "view =~ /^cloudforge\\.(panel\\.)?resources$/",
+					"group": "1_tools@5"
+				},
+				{
+					"command": "cloudforge.upgradeProvider",
+					"when": "view =~ /^cloudforge\\.(panel\\.)?resources$/",
+					"group": "1_tools@6"
+				},
+				{
 					"command": "cloudforge.openProjectStatus",
 					"when": "view == cloudforge.status",
 					"group": "navigation@1"
@@ -1043,6 +1082,16 @@
 					"command": "cloudforge.providers.initOffline",
 					"when": "view == cloudforge.providers",
 					"group": "3_engine@1"
+				},
+				{
+					"command": "cloudforge.upgradeProvider",
+					"when": "view == cloudforge.providers && cloudforge.projectOpen",
+					"group": "3_engine@2"
+				},
+				{
+					"command": "cloudforge.recoverProviderUpgrade",
+					"when": "view == cloudforge.providers && cloudforge.projectOpen",
+					"group": "3_engine@3"
 				},
 				{
 					"command": "cloudforge.providers.importArchive",
@@ -1205,6 +1254,11 @@
 					"command": "cloudforge.providers.changeVersion",
 					"when": "view == cloudforge.providers && viewItem =~ /^providerProject.*\\.registry/",
 					"group": "inline@3"
+				},
+				{
+					"command": "cloudforge.upgradeProvider",
+					"when": "view == cloudforge.providers && viewItem =~ /^providerProject.*\\.registry/",
+					"group": "1_more@2"
 				}
 			],
 			"editor/context": [
@@ -1222,6 +1276,11 @@
 					"command": "cloudforge.addResourceNote",
 					"when": "resourceLangId == terraform || resourceLangId == hcl",
 					"group": "cloudforge@3"
+				},
+				{
+					"command": "cloudforge.formatArchitecture",
+					"when": "resourceLangId == terraform || resourceLangId == hcl",
+					"group": "cloudforge@4"
 				}
 			]
 		},
