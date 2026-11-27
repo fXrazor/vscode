@@ -337,3 +337,8 @@ html, body, #root { margin: 0; padding: 0; width: 100%; height: 100%; overflow: 
 .list-entry .list-entry-kind { width: 112px; min-height: 32px; padding: 0 22px 0 8px; border: 1px solid var(--border); border-radius: 6px; background-color: var(--panel-2); color: var(--muted); font-size: 11.5px; cursor: pointer; }
 .list-entries-add { display: grid; grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)); gap: 6px; margin-top: 2px; }
 .list-entries-empty { margin: 0; color: var(--muted); font-size: 12px; }
+/* A target already attached to another resource (a NIC on another VM) stays listed but greyed out and unpickable. */
+.resource-ref-picker-item.is-in-use { opacity: .5; filter: grayscale(1); cursor: not-allowed; }
+.resource-ref-picker-item.is-in-use:hover { background: transparent; }
+.resource-ref-picker-item .resource-ref-in-use { color: var(--muted); font-style: italic; white-space: nowrap; }
+.list-entries-add .literal-add:disabled { opacity: .45; cursor: not-allowed; }

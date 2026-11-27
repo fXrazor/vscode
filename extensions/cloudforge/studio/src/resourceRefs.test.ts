@@ -141,3 +141,36 @@ test('uncurated catalogue types infer reference targets from *_id and *_ids argu
 	// Curated definitions keep their own reference metadata.
 	assert.equal(fieldDefinition(template, { kind: 'setting', name: 'network_interface_ids' })?.refInferred, undefined);
 });
+
+test('a NIC attached to one VM is shown as in use and cannot be attached to a second VM', () => {
+	const base = sampleArchitecture();
+	const vm = base.resources.find(r => r.name === 'vm-application')!;
+	const nic = base.resources.find(r => r.name === 'nic-application')!;
+	const target = { kind: 'setting' as const, name: 'network_interface_ids' };
+	const other = { ...structuredClone(vm), id: vm.id + '-b', name: 'vm-second', resourceRefs: {} };
+	let history = createHistory({ ...base, resources: [...base.resources, other] });
+	history = historyReducer(history, { type: 'bindResourceRef', id: vm.id, target, refs: [{ resourceId: nic.id, attribute: 'id' }] });
+	const def = fieldDefinition(other, target);
+
+	// The first VM still sees its own NIC as free; the second sees it held by the first.
+	assert.equal(eligibleReferenceTargets(history.present, history.present.resources.find(r => r.id === vm.id)!, def)[0].inUseBy, undefined);
+	const candidates = eligibleReferenceTargets(history.present, history.present.resources.find(r => r.id === other.id)!, def);
+	assert.equal(candidates[0].resource.id, nic.id);
+	assert.equal(candidates[0].inUseBy?.id, vm.id);
+
+	// Neither the picker nor a mixed list can attach it to the second VM.
+	const before = history.present;
+	history = historyReducer(history, { type: 'bindResourceRef', id: other.id, target, refs: [{ resourceId: nic.id, attribute: 'id' }] });
+	assert.equal(history.present, before);
+	history = historyReducer(history, { type: 'setListEntries', id: other.id, target, items: [{ kind: 'value', value: 'x' }, { kind: 'ref', resourceId: nic.id, attribute: 'id' }] });
+	assert.equal(history.present, before);
+
+	// A conflict read from a file is kept and reported, not silently dropped.
+	const conflicted = { ...before, resources: before.resources.map(r => r.id === other.id ? { ...r, resourceRefs: { '["setting","network_interface_ids"]': { refs: [{ resourceId: nic.id, attribute: 'id' }] } } } : r) };
+	const second = conflicted.resources.find(r => r.id === other.id)!;
+	assert.match(resourceRefBindingIssue(second.resourceRefs!['["setting","network_interface_ids"]'], conflicted, second, def) ?? '', /already attached to vm-application/);
+
+	// Non-exclusive references (many VMs in one subnet) are unaffected.
+	const subnetDef = fieldDefinition(other, { kind: 'setting', name: 'subnet_id' });
+	for (const candidate of eligibleReferenceTargets(history.present, other, subnetDef)) { assert.equal(candidate.inUseBy, undefined); }
+});

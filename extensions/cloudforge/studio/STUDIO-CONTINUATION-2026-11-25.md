@@ -925,3 +925,10 @@ Known limits: when a drawing is rotated, the resize frame stays axis-aligned (it
 4. Then the wider backlog: making Studio the default engine after a parity check against Classic; Stage 9B plan capture once Rust adds it; arbitrary HCL round-trip; authoritative validation and pricing; collaboration.
 
 Keep the rules in the repository AGENTS.md: one architecture and one semantic undo history across renderers; theme and viewport stay in presentation state; canvas first; Rust owns authorization and guarded I/O.
+
+## 2026-11-27: exclusive references and Network view layout
+
+- `src/exclusiveReferences.ts` lists one-owner attachments (Azure NIC via `network_interface_ids`/`primary_network_interface_id`, Azure public IP via `public_ip_address_id`, managed disk via `managed_disk_id`, AWS ENI/EIP/EBS, GCP address/disk). `eligibleReferenceTargets` marks a candidate `inUseBy` when another resource already holds it through one of those fields.
+- The Reference picker greys out in-use targets ("In use by …"); list `+ Reference` only adds a free resource and is disabled when none is free; per-entry dropdowns disable in-use and already-listed options.
+- `bindResourceRef`/`setListEntries` reject newly attaching a held target (`attachesHeldReference`); a conflict hydrated from a file is kept and reported by `resourceRefBindingIssue`.
+- Network and Bundled canvases now fill the graph area (`inset: 0`, was a 64px top / 52px bottom band). The Spread dial sits in a boxed floating control matching the rail.
