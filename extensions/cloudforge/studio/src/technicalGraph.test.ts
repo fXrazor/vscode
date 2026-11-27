@@ -416,7 +416,7 @@ test('service-graph edges gain exact field provenance and card ports from readRe
 	assert.deepEqual(modNode.module, { source: './modules/net' }, 'reads capitalised module Source setting');
 });
 
-test('network node sizing: the most connected node is biggest and every extra connection adds size', () => {
+test('network node sizing: the most connected node is biggest, every extra connection adds size, and tiny graphs stay compact', () => {
 	const small = nodeRadii(
 		[{ id: 'vm' }, { id: 'vnet1' }, { id: 'vnet2' }, { id: 'rg' }],
 		[{ source: 'rg', target: 'vnet1', membership: true }, { source: 'rg', target: 'vnet2', membership: true }],
@@ -424,7 +424,7 @@ test('network node sizing: the most connected node is biggest and every extra co
 	);
 	assert.equal(small.vm, forceSettings.radius, 'a node with no lines keeps the base size');
 	assert.ok(small.vm < small.vnet1 && small.vnet1 < small.rg, 'size follows connections');
-	assert.equal(small.rg, forceSettings.radius * 2.5, 'the busiest node is exactly sizeBy % bigger');
+	assert.ok(small.rg > forceSettings.radius * 1.6 && small.rg < forceSettings.radius * 2.5, 'a two-link node in a tiny graph grows without ballooning: ' + small.rg);
 
 	const cluster = nodeRadii(
 		[{ id: 'rg' }, { id: 'snet' }, { id: 'vnet' }, { id: 'nic' }, { id: 'vm' }, { id: 'aks' }, { id: 'log' }, { id: 'orphan' }],
