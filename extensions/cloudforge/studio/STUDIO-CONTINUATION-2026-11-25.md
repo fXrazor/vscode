@@ -1,5 +1,11 @@
 # Studio continuation checkpoint — 25 November 2026
 
+## Native provider mirror verification — 27 November 2026
+
+Desktop baseline **`407089c3ffebedc129a3ea1e6aa1abfc448a77f2`**, tested in `codex/native-mirror-roundtrip` at `C:/Users/dalep/.codex/worktrees/guided-variable-values/CloudForge-Code`: **242/242 Studio tests**, **125/125 extension tests**, both TypeScript checks and Studio build passed. No Studio renderer or other product source changed. The owned staged desktop with pinned service `68cbe03e5425fa0d55db9cd7144a1178ef38fe77` now passes native empty-mirror import of the authentic AzureRM ZIP, inventory/digest/integrity, removal Cancel, explicit removal/reclaimed bytes and empty inventory. This closes those specific native first-import/final-removal gaps from the older continuation below. Main advanced during this run; later integrations are outside this proof. [Exact provenance and evidence](research/populated-mirror-verification.md#native-staged-application-roundtrip--27-november-2026).
+
+Still pending: active-operation lease protection, selected-package schema extraction through the guarded desktop engine flow, and installed-product verification of this revision. Then resume the remaining provider/schema/editor work below; preserve the implemented Claude/Antigravity Studio changes. The guided-variable and import-navigation feature checkpoints remain separate; this verification does not merge them.
+
 ## Miro Arbitrary Perimeter Connector Attachment & Interactive Bottom-Left Rotate Handle — 27 November 2026
 
 - **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `407089c3ffe` (preserving PR #7/#8/#9/#10), owner Antigravity. Zero overlap with Claude branches (`2dm0k0`, `ksv8z9`) or Rust; no installer build touched.

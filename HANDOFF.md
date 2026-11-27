@@ -1,5 +1,13 @@
 # CloudForge Code OSS handoff
 
+## Native provider mirror roundtrip reviewed and tested — 27 November 2026
+
+Codex tested desktop main baseline **`407089c3ffebedc129a3ea1e6aa1abfc448a77f2`** on branch `codex/native-mirror-roundtrip`, worktree `C:/Users/dalep/.codex/worktrees/guided-variable-values/CloudForge-Code`. No product source, Studio renderer, Rust source, shared stage or installed application was changed. A private copy of the staged desktop used the matching recorded service **`68cbe03e5425fa0d55db9cd7144a1178ef38fe77`**, protocol `1`, SHA-256 `20ffe53c7c30f140a1016c6f04aa485055d461584a6e35f0e4ef1b4db50dae87`; artifact staging and pinned verification passed. This is an **owned staged application** proof, not an installed-product proof. Additional main changes landed during testing; the checks here are pinned to `407089c3ffe` and do not certify those later integrations.
+
+Fresh verification: **242/242 Studio tests**, **125/125 extension tests**, Studio and extension TypeScript checks, and Studio build passed. Native Windows UI testing now proves empty inventory, archive-picker cancellation, authentic AzureRM `5.14.0` import, exact inventory/digest/bytes, removal cancellation, one intact package through Verify Mirror Integrity, explicit final removal reporting **84,176,060 bytes reclaimed**, and empty inventory afterward. Independent filesystem checks confirmed stored SHA-256, archive/manifest paths of **263/264 characters**, then zero mirror archives/entry manifests after removal; the original downloaded ZIP remains intact. The owned QA window was closed. See [exact evidence and remaining work](extensions/cloudforge/studio/research/populated-mirror-verification.md#native-staged-application-roundtrip--27-november-2026).
+
+Next: prove active-operation lease protection and selected-package schema extraction through the guarded desktop engine flow, then repeat relevant checks in the installed product when that exact build is available. These remain unverified; no provider or Terraform engine operation ran in this roundtrip. Other feature checkpoints and Claude/Antigravity worktrees remain preserved.
+
 ## Miro Arbitrary Perimeter Connector Attachment & Interactive Bottom-Left Rotate Handle — 27 November 2026
 
 - **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `98e80f83d35` (preserving PR #7–#10 and Stage 8B/8C/9C/10C/12 broker/Learning/AI merges), owner Antigravity. Zero overlap with unmerged Claude branches (`2dm0k0`, `ksv8z9`), local Claude worktrees, or Rust; no installer build touched.
