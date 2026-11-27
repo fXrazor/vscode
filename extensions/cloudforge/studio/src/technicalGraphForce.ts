@@ -50,8 +50,8 @@ export const forceSettings = { radius: 22, linkDistance: 110, charge: -460, labe
  * Node radius from the lines drawn to it. 'all' counts every line, including resource-group
  * membership, so a resource group holding twenty resources is the biggest node. 'dependents'
  * counts resources that reference this one (edge source = the referenced resource), 'dependencies'
- * the resources it references. Logarithmic growth relative to the busiest node keeps mid-sized
- * hubs visibly bigger than leaves even beside a large resource group; the busiest node is exactly sizeBy % bigger than a node with no lines.
+ * the resources it references. Size blends logarithmic growth (mid-sized hubs stay visibly bigger than leaves) with a
+ * gentle convex curve (tiny graphs stay compact). Once the busiest node has six or more lines it is exactly sizeBy % bigger.
  */
 export function nodeRadii(nodes: readonly Pick<GraphNode, 'id'>[], edges: readonly Pick<GraphEdge, 'source' | 'target' | 'membership'>[], sizeBy: number, count: NetworkOptions['sizeCount'] = 'all'): Record<string, number> {
 	const degree = new Map(nodes.map(node => [node.id, 0]));
@@ -64,7 +64,10 @@ export function nodeRadii(nodes: readonly Pick<GraphNode, 'id'>[], edges: readon
 		if (count !== 'dependents') { bump(edge.target); }
 	}
 	const max = Math.max(1, ...degree.values()); const growth = Math.max(0, Math.min(300, sizeBy)) / 100;
-	return Object.fromEntries([...degree].map(([id, d]) => [id, Math.round(forceSettings.radius * (1 + growth * Math.log1p(d) / Math.log1p(max)) * 10) / 10]));
+	// Half logarithmic (every connection adds size, the busiest node is the biggest) and half a gentle convex curve
+	// over at least six connections (small graphs do not balloon a two-link node into a hub).
+	const ratio = (d: number) => d <= 0 ? 0 : 0.5 * Math.log1p(d) / Math.log1p(max) + 0.5 * Math.pow(d / Math.max(max, 6), 1.35);
+	return Object.fromEntries([...degree].map(([id, d]) => [id, Math.round(forceSettings.radius * (1 + growth * ratio(d)) * 10) / 10]));
 }
 
 /** Deterministic phyllotaxis start, like d3-force, so the same project always settles the same way. */
