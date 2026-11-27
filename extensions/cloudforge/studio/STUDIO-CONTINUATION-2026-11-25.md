@@ -1,5 +1,13 @@
 # Studio continuation checkpoint — 25 November 2026
 
+## Miro Arbitrary Perimeter Connector Attachment & Interactive Bottom-Left Rotate Handle — 27 November 2026
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `407089c3ffe` (preserving PR #7/#8/#9/#10), owner Antigravity. Zero overlap with Claude branches (`2dm0k0`, `ksv8z9`) or Rust; no installer build touched.
+- **Scope:**
+  - Completed the remaining arbitrary perimeter attachment backlog item (`src/connectionEndpoints.ts`, `src/designConnections.ts`, `src/ConnectionOverlays.tsx`, `src/connectionEndpoints.test.ts`): optional `PerimeterAnchor` (`[0..1]`), `projectPerimeterAnchor()` with rotated-element support and 10% midpoint port snap, multiple links per side via `endpointKey()`, `(perimeter)` drag status feedback, and identical SVG/PNG/PDF export coordinates.
+  - Added Miro-style bottom-left interactive rotate handle `DrawingRotateHandle` (`src/SelectionResizeHandle.tsx`, `src/DesignCanvas.tsx`, `src/styles.css`) with live rotating ghost + degree badge, `Shift` 15° snap, `Escape` cancel, double-click / `0` reset, and 1 atomic Undo/Redo step (preserving upright 8-handle / rotated 0-handle resize contract).
+- **Fresh checks:** Studio `tsc --noEmit` **PASS**, **243/243** Studio tests (0 skipped), Studio `build` + `esbuild.webview.mts` + `oxlint` + `hygiene` **PASS**, real Windows Edge `whiteboard-controls-verify.mjs` **20/20 PASS**, `loose-connectors-verify.mjs` **16/16 PASS**, and live rotate handle + perimeter attachment check **PASS** (0 browser errors).
+
 ## Miro Floating `+` Connected-Copy Dots & Compact Narrow-Viewport Bar — 26 November 2026
 
 - **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `addaee8aaee`, owner Antigravity.

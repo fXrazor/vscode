@@ -1,5 +1,18 @@
 # CloudForge Code OSS handoff
 
+## Miro Arbitrary Perimeter Connector Attachment & Interactive Bottom-Left Rotate Handle — 27 November 2026
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `98e80f83d35` (preserving PR #7–#10 and Stage 8B/8C/9C/10C/12 broker/Learning/AI merges), owner Antigravity. Zero overlap with unmerged Claude branches (`2dm0k0`, `ksv8z9`), local Claude worktrees, or Rust; no installer build touched.
+- **Scope:**
+  - **Arbitrary Perimeter Attachment Positions on Connectors** ([connectionEndpoints.ts](extensions/cloudforge/studio/src/connectionEndpoints.ts), [designConnections.ts](extensions/cloudforge/studio/src/designConnections.ts), [ConnectionOverlays.tsx](extensions/cloudforge/studio/src/ConnectionOverlays.tsx)):
+    - Added optional normalised `anchor?: { x: number; y: number }` (`PerimeterAnchor`) on element endpoints plus `normaliseAnchor()` and `projectPerimeterAnchor()` (un-rotating rotated elements, projecting onto the nearest of 4 sides, snapping to cardinal centre ports within 10% of midpoint, and appending `@x,y` to `endpointKey()` so multiple links can attach along the same side of one element).
+    - Updated `connectionAnchor()` and `ConnectionOverlays` so live dragging, rotated drawings, and SVG/PNG/PDF exports share identical perimeter coordinates, with `(perimeter)` drag feedback when dropping off-centre while keeping direct `.react-flow__handle` drops on classic 4-side ports.
+    - Covered with unit tests in [connectionEndpoints.test.ts](extensions/cloudforge/studio/src/connectionEndpoints.test.ts).
+  - **Miro Interactive Bottom-Left Rotation Handle** ([SelectionResizeHandle.tsx](extensions/cloudforge/studio/src/SelectionResizeHandle.tsx), [DesignCanvas.tsx](extensions/cloudforge/studio/src/DesignCanvas.tsx), [styles.css](extensions/cloudforge/studio/src/styles.css)):
+    - Added `DrawingRotateHandle` (`.drawing-rotate-handle`) cleanly outside the bottom-left corner of any single selected unlocked non-frame drawing (works for both upright and already-rotated drawings without touching `.react-flow__resize-control` or `.connected-copy-handle`).
+    - Dragging renders a live dashed rotating ghost (`.drawing-rotate-ghost`) and degree badge (`°`), `Shift` snaps to `15°` steps, `Escape` cancels, double-click or `0` resets to `0°`, and release commits **1 atomic `rotate` Undo/Redo step**.
+- **Fresh verification (27 November 2026):** Studio `tsc --noEmit` **PASS**, **243/243** Studio unit tests PASS (0 skipped), Studio `build` + `esbuild.webview.mts` **PASS**, `oxlint` & `hygiene` **PASS** (0 errors/warnings), and real Windows Edge (`--channel=msedge`): `whiteboard-controls-verify.mjs` **20/20 PASS**, `loose-connectors-verify.mjs` **16/16 PASS**, plus live Edge verification of bottom-left rotate handle (`0° → 26° → double-click 0° → 1-step Undo 26°`) and off-centre perimeter attachment (`Attach to Untitled note (perimeter)`, persisted `anchor: { x: 0, y: 0.2 }`, 0 browser errors).
+
 ## Stage 8B/8C/9C/10C Broker Parity, Stage 12 Learning/MCP/Chat & AI Models Provider — merged with `origin/main` (`407089c3ffe`) — 27 November 2026
 
 Merged `origin/main` (`407089c3ffe`, PRs #2–#10 including Studio Technical Graph, Miro canvas, JSON Crack, Providers view, Get Ready, Startup screen) cleanly with `fxrazor/auto-open-and-stage3-4` (keeping `origin/main`'s `extensions/cloudforge/studio/**` untouched) and paired with Rust service `origin/main` `39e1453`:
