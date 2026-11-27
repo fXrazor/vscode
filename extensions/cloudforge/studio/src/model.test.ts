@@ -990,3 +990,22 @@ test('Miro sticky-note and shape text scaling fits bounds without overflow and s
 	assert.equal(Object.hasOwn(toAuto.present.items[0], 'fontSize'), false);
 	assert.equal(historyReducer(toAuto, { type: 'undo' }).present.items[0].fontSize, 64);
 });
+
+test('addConnectedItem preserves non-default dragged sourcePort with matching opposite target port in 1 undo step', () => {
+	const base: Architecture = {
+		name: 'PortDrop',
+		resources: [],
+		items: [{ id: 'a', kind: 'note', text: 'Top', width: 200, height: 120, positions: { visual: { x: 0, y: 0 }, technical: { x: 0, y: 0 } }, members: [] }],
+		connections: [],
+	};
+	const child: BoardItem = { id: 'b', kind: 'note', text: 'Below', width: 200, height: 120, positions: { visual: { x: 0, y: 200 }, technical: { x: 0, y: 200 } }, members: [] };
+	const next = historyReducer(createHistory(base), { type: 'addConnectedItem', source: 'a', sourcePort: 'bottom', item: child });
+	assert.equal(next.past.length, 1);
+	assert.equal(next.present.items.length, 2);
+	assert.equal(next.present.connections.length, 1);
+	assert.deepEqual(next.present.connections[0].source, elementEndpoint('a', 'bottom'));
+	assert.deepEqual(next.present.connections[0].target, elementEndpoint('b', 'top'));
+	const undone = historyReducer(next, { type: 'undo' });
+	assert.equal(undone.present.items.length, 1);
+	assert.equal(undone.present.connections.length, 0);
+});

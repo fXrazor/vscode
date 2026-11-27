@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 import { variableError, variableUses, type VariableDefinition } from './variables.ts';
 import { canConnect, canConnectEndpoints } from './designConnections.ts';
-import { elementEndpoint, endpointKey, normaliseArchitectureConnections, type ArchitectureInput, type DesignEndpoint } from './connectionEndpoints.ts';
+import { elementEndpoint, endpointKey, normaliseArchitectureConnections, type ArchitectureInput, type DesignEndpoint, type EndpointPort } from './connectionEndpoints.ts';
 export type { DesignEndpoint } from './connectionEndpoints.ts';
 import { applyCanvasCommand, canvasElements, type CanvasCommand } from './canvasOperations.ts';
 import { createRekeyer } from './resourceIdentity.ts';
@@ -158,7 +158,7 @@ export type Edit =
 	| { type: 'delete'; id: string }
 	| { type: 'addItem'; item: BoardItem }
 	/** Drop a connector on empty canvas: create the drawing there and link to it, as one undo step. */
-	| { type: 'addConnectedItem'; source: string; item: BoardItem }
+	| { type: 'addConnectedItem'; source: string; sourcePort?: EndpointPort; item: BoardItem }
 	| { type: 'updateItem'; id: string; patch: Partial<Pick<BoardItem, 'text' | 'width' | 'height' | 'fill' | 'fontSize' | 'bold' | 'shape' | 'strokeColor' | 'strokeWidth' | 'strokeStyle'>> }
 	| { type: 'moveItem'; id: string; mode: DesignMode; position: Position }
 	| { type: 'resizeItem'; id: string; mode: DesignMode; position: Position; width: number; height: number }
@@ -420,7 +420,12 @@ function editArchitecture(architecture: Architecture, action: Edit): Architectur
 			return { ...architecture, items: [...architecture.items, action.item] };
 		case 'addConnectedItem': {
 			if (architecture.items.some(item => item.id === action.item.id) || !canvasElements(architecture).some(element => element.id === action.source)) { return architecture; }
-			return editArchitecture({ ...architecture, items: [...architecture.items, action.item] }, { type: 'connect', source: action.source, target: action.item.id });
+			const withItem = { ...architecture, items: [...architecture.items, action.item] };
+			if (action.sourcePort && action.sourcePort !== 'output') {
+				const opposite: Record<EndpointPort, EndpointPort> = { output: 'input', input: 'output', top: 'bottom', bottom: 'top' };
+				return editArchitecture(withItem, { type: 'connectEndpoints', id: action.source + '-' + action.item.id + '-' + action.sourcePort, source: elementEndpoint(action.source, action.sourcePort), target: elementEndpoint(action.item.id, opposite[action.sourcePort]) });
+			}
+			return editArchitecture(withItem, { type: 'connect', source: action.source, target: action.item.id });
 		}
 		case 'updateItem':
 			if (architecture.items.find(item => item.id === action.id)?.canvasLocked) { return architecture; }

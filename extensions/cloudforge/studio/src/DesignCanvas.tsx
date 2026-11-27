@@ -12,13 +12,13 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, type Dispatch,
 import { canvasElements, connectedElementIds, expandGroups, resizeSelectionBoxes, sceneOrder, selectionFragment, stickyClusterFromText, type TextAppearance } from './canvasOperations.ts';
 import { applyUniformSpacing, layoutSelection, type Alignment } from './selectionGeometry.ts';
 import { CanvasActionMenu, SelectionControls, resizable, type SelectionAction } from './SelectionControls.tsx';
-import { ConnectedCopyHandles, DrawingRotateHandle, SelectionResizeHandle } from './SelectionResizeHandle.tsx';
+import { ConnectedCopyHandles, SelectionResizeHandle } from './SelectionResizeHandle.tsx';
 import { InkCapture } from './InkCapture.tsx';
 import { PenOptions } from './PenOptions.tsx';
 import type { InkStyle } from './ink.ts';
 import { ConnectorDropMenu } from './ConnectorDropMenu.tsx';
 import { droppedItem } from './connectorDrop.ts';
-import { elementEndpoint, endpointElementId, needsConnectionOverlay, pointEndpoint, type EndpointPort } from './connectionEndpoints.ts';
+import { elementEndpoint, endpointElementId, endpointPorts, needsConnectionOverlay, pointEndpoint, type EndpointPort } from './connectionEndpoints.ts';
 import { connectionPathBounds } from './connectionGeometry.ts';
 import { resizeBounds } from './resizeGeometry.ts';
 import { resourceIconSize } from './resourceGeometry.ts';
@@ -92,7 +92,7 @@ export const DesignCanvas = memo(function DesignCanvas({
 	const [hand, setHand] = useState(false);
 	const [pen, setPen] = useState(false);
 	const resizeBoxes = resizeSelectionBoxes(architecture, selectedIds, mode);
-	const [connectorDrop, setConnectorDrop] = useState<{ source: string; point: Position; left: number; top: number }>();
+	const [connectorDrop, setConnectorDrop] = useState<{ source: string; sourcePort?: EndpointPort; point: Position; left: number; top: number }>();
 	const [additiveSelection, setAdditiveSelection] = useState(false);
 	const [minimap, setMinimap] = useState(false);
 	const [zoom, setZoom] = useState(1);
@@ -592,13 +592,15 @@ export const DesignCanvas = memo(function DesignCanvas({
 				onConnectEnd={(event, state) => {
 					// A connector released on empty canvas offers to create the element it points at.
 					const client = 'changedTouches' in event ? event.changedTouches[0] : event; const area = bounds.current?.getBoundingClientRect();
+					const rawPort = state.fromHandle?.id;
+					const sourcePort = rawPort && endpointPorts.includes(rawPort as EndpointPort) && rawPort !== 'output' ? rawPort as EndpointPort : undefined;
 					// Holding Ctrl / Cmd drops a free end where the pointer is, even over another element (no snapping).
 					if (freeDrop.current && mode === 'visual' && state.fromNode && state.fromHandle?.type === 'source' && flow && client) {
-						const id = crypto.randomUUID(); dispatch({ type: 'connectEndpoints', id, source: elementEndpoint(state.fromNode.id), target: pointEndpoint(flow.screenToFlowPosition({ x: client.clientX, y: client.clientY })) });
+						const id = crypto.randomUUID(); dispatch({ type: 'connectEndpoints', id, source: elementEndpoint(state.fromNode.id, sourcePort), target: pointEndpoint(flow.screenToFlowPosition({ x: client.clientX, y: client.clientY })) });
 						onSelectionChange([]); setSelectedConnectionId(id); setShowConnections(true); return;
 					}
 					if (mode !== 'visual' || state.isValid || state.toNode || !state.fromNode || state.fromHandle?.type !== 'source' || !flow || !area || !(client && (event.target as Element | null)?.closest?.('.react-flow__pane'))) { return; }
-					setConnectorDrop({ source: state.fromNode.id, point: flow.screenToFlowPosition({ x: client.clientX, y: client.clientY }), left: Math.min(client.clientX - area.left + 8, area.width - 196), top: Math.min(client.clientY - area.top - 12, area.height - 236) });
+					setConnectorDrop({ source: state.fromNode.id, sourcePort, point: flow.screenToFlowPosition({ x: client.clientX, y: client.clientY }), left: Math.min(client.clientX - area.left + 8, area.width - 196), top: Math.min(client.clientY - area.top - 12, area.height - 236) });
 				}}
 				isValidConnection={connection => mode === 'visual' && !freeDrop.current && canConnect(architecture, connection.source, connection.target)}
 				minZoom={0.1} maxZoom={20}
@@ -642,19 +644,15 @@ export const DesignCanvas = memo(function DesignCanvas({
 					onSelectionChange([id]);
 					setShowConnections(true);
 				}}/>}
-				{mode === 'visual' && flow && !hand && !pen && !creatingConnection && selectedIds.length === 1 && (() => {
-					const item = architecture.items.find(candidate => candidate.id === selectedIds[0] && !candidate.canvasLocked && candidate.kind !== 'frame');
-					return item ? <DrawingRotateHandle id={item.id} rotation={item.rotation ?? 0} flow={flow} onRotate={angle => dispatch({ type: 'canvas', command: { kind: 'rotate', ids: [item.id], angle } })} /> : null;
-				})()}
 				{minimap && <MiniMap<CanvasNode> pannable zoomable nodeColor={node => node.type === 'board' && node.data.item.kind === 'frame' ? 'transparent' : '#8e79d9'} />}
 				{!creatingConnection && !selectedConnection && selectedIds.some(id=>canvasElements(architecture).some(item=>item.id===id)) && <SelectionAnchor ids={selectedIds.filter(id=>canvasElements(architecture).some(item=>item.id===id))} canvas={bounds}>{mode === 'visual' ? <SelectionControls architecture={architecture} ids={selectedIds} dispatch={dispatch} run={run} hasClipboard={hasClipboard} hasStyleClipboard={hasStyleClipboard} mode={mode} onInspect={onOpen} container={bounds.current}/> : <section className="selection-controls" aria-label="Graph inspection controls">{selectedIds.length === 1 && architecture.resources.some(resource => resource.id === selectedIds[0]) && <button onClick={() => onOpenDetails(selectedIds[0])}>Inspect resource</button>}<button onClick={() => run('fit')}>Focus selection</button><button onClick={() => run('clear')}>Clear selection</button></section>}</SelectionAnchor>}
 			</ReactFlow>
 			{selectedDependency && dependencyPick && mode === 'visual' && <DependencyTools architecture={architecture} dependency={selectedDependency} at={dependencyPick} dispatch={dispatch} onOpen={id => { setDependencyPick(undefined); onOpen(id); }} onClose={() => { setDependencyPick(undefined); bounds.current?.focus(); }}/>}
 			{connectorDrop && <ConnectorDropMenu at={connectorDrop} onClose={() => { setConnectorDrop(undefined); bounds.current?.focus(); }} onKeepLooseEnd={() => {
-				const id = crypto.randomUUID(); dispatch({ type: 'connectEndpoints', id, source: elementEndpoint(connectorDrop.source), target: pointEndpoint(connectorDrop.point) });
+				const id = crypto.randomUUID(); dispatch({ type: 'connectEndpoints', id, source: elementEndpoint(connectorDrop.source, connectorDrop.sourcePort), target: pointEndpoint(connectorDrop.point) });
 				setConnectorDrop(undefined); onSelectionChange([]); setSelectedConnectionId(id); setShowConnections(true); bounds.current?.focus();
 			}} onPick={choice => {
-				const id = crypto.randomUUID(); dispatch({ type: 'addConnectedItem', source: connectorDrop.source, item: droppedItem(choice, id, connectorDrop.point) });
+				const id = crypto.randomUUID(); dispatch({ type: 'addConnectedItem', source: connectorDrop.source, sourcePort: connectorDrop.sourcePort, item: droppedItem(choice, id, connectorDrop.point) });
 				setConnectorDrop(undefined); onSelectionChange([id]); bounds.current?.focus();
 			}}/>}
 			{pen && flow && <InkCapture flow={flow} zoom={zoom} ink={ink} onStroke={(position, size, path, ink) => { const id = crypto.randomUUID(); dispatch({ type: 'addItem', item: { id, kind: 'ink', text: '', path, strokeColor: ink.strokeColor, strokeWidth: ink.strokeWidth, positions: { visual: position, technical: position }, width: size.width, height: size.height, members: [] } }); }}/>}

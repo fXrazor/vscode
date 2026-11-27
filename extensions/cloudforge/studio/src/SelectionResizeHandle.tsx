@@ -4,9 +4,9 @@
  *--------------------------------------------------------------------------------------------*/
 import { useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { useInternalNodes, useViewport, ViewportPortal } from '@xyflow/react';
-import { LayoutGrid, Plus, RotateCw } from 'lucide-react';
+import { LayoutGrid, Plus } from 'lucide-react';
 import { detectSpacingLayout, dragScale, selectionUnitBoxes, type Bounds, type SelectionUnitBox, type SpacingHandle } from './selectionGeometry.ts';
-import { normaliseRotation, resizeAnchors, type ResizeAnchor } from './canvasOperations.ts';
+import { resizeAnchors, type ResizeAnchor } from './canvasOperations.ts';
 import { projectResize, type ResizeBox } from './resizeGeometry.ts';
 import type { Architecture, DesignMode, Position } from './model.ts';
 
@@ -164,7 +164,7 @@ export function SelectionResizeHandle({
 
 const quickCopyDirs = [
 	{ dir: 'right', label: 'Add connected copy to right (Ctrl+Right)', ox: 1, oy: 0.5, dx: 26, dy: 0 },
-	{ dir: 'bottom', dirKey: 'down', label: 'Add connected copy below (Ctrl+Down)', ox: 0.5, oy: 1, dx: 0, dy: 26 },
+	{ dir: 'bottom', dirKey: 'down', label: 'Add connected copy below (Ctrl+Down)', ox: 0.5, oy: 1, dx: 0, dy: 48 },
 	{ dir: 'left', label: 'Add connected copy to left (Ctrl+Left)', ox: 0, oy: 0.5, dx: -26, dy: 0 },
 ] as const;
 
@@ -195,83 +195,5 @@ export function ConnectedCopyHandles({ id, onSpawn }: { id: string; onSpawn: (di
 				<Plus size={11 / zoom} strokeWidth={2.5} aria-hidden="true" />
 			</button>;
 		})}
-	</ViewportPortal>;
-}
-
-/**
- * Miro-style bottom-left circular rotation handle for a single selected unlocked drawing.
- * Dragging previews the angle live (Shift snaps to 15° steps), Escape cancels, double-click resets to 0°,
- * and pointer release commits 1 atomic `rotate` Undo/Redo step.
- */
-export function DrawingRotateHandle({
-	id, rotation, flow, onRotate
-}: {
-	id: string;
-	rotation: number;
-	flow: { screenToFlowPosition: (point: Position) => Position };
-	onRotate: (angle: number) => void;
-}) {
-	const { zoom } = useViewport();
-	const nodes = useInternalNodes([id]);
-	const node = nodes[0];
-	const [preview, setPreview] = useState<number>();
-	const drag = useRef<{ cx: number; cy: number; startAngle: number; startRotation: number; moved: boolean }>(undefined);
-	if (!node || !node.measured.width || !node.measured.height) { return null; }
-	const x = node.internals.positionAbsolute.x;
-	const y = node.internals.positionAbsolute.y;
-	const w = node.measured.width;
-	const h = node.measured.height;
-	const cx = x + w / 2; const cy = y + h / 2;
-	const size = 22 / zoom;
-	const handleX = x - 18 / zoom;
-	const handleY = y + h + 18 / zoom;
-
-	const pointerAngle = (clientX: number, clientY: number, originX: number, originY: number) => {
-		const pt = flow.screenToFlowPosition({ x: clientX, y: clientY });
-		return Math.atan2(pt.y - originY, pt.x - originX) * 180 / Math.PI;
-	};
-	const computeAngle = (clientX: number, clientY: number, snap: boolean, state: { cx: number; cy: number; startAngle: number; startRotation: number }) => {
-		const raw = state.startRotation + (pointerAngle(clientX, clientY, state.cx, state.cy) - state.startAngle);
-		const value = snap ? Math.round(raw / 15) * 15 : Math.round(raw);
-		return normaliseRotation(value) ?? 0;
-	};
-	const cancel = () => { drag.current = undefined; setPreview(undefined); };
-
-	return <ViewportPortal>
-		{preview !== undefined && <div className="drawing-rotate-ghost" aria-hidden="true"
-			style={{ transform: `translate(${x}px, ${y}px) rotate(${preview}deg)`, width: w, height: h, borderWidth: 1.5 / zoom }} />}
-		<button type="button" className="drawing-rotate-handle nodrag nopan"
-			aria-label="Drag to rotate element"
-			title={`Rotation: ${Math.round(rotation)}° · Drag to rotate · Hold Shift for 15° steps · Double-click to reset to 0°`}
-			style={{ transform: `translate(${handleX - size / 2}px, ${handleY - size / 2}px)`, width: size, height: size, borderWidth: 1.5 / zoom }}
-			data-active={preview !== undefined || undefined}
-			onPointerDown={event => {
-				if (event.button !== 0 || drag.current) { return; }
-				event.preventDefault(); event.stopPropagation();
-				event.currentTarget.setPointerCapture(event.pointerId);
-				drag.current = { cx, cy, startAngle: pointerAngle(event.clientX, event.clientY, cx, cy), startRotation: rotation, moved: false };
-				setPreview(Math.round(rotation));
-			}}
-			onPointerMove={event => {
-				const state = drag.current; if (!state) { return; }
-				state.moved = true;
-				setPreview(computeAngle(event.clientX, event.clientY, event.shiftKey, state));
-			}}
-			onPointerUp={event => {
-				const state = drag.current; cancel();
-				if (!state || !state.moved) { return; }
-				const next = computeAngle(event.clientX, event.clientY, event.shiftKey, state);
-				if (next !== Math.round(state.startRotation)) { onRotate(next); }
-			}}
-			onPointerCancel={cancel}
-			onLostPointerCapture={cancel}
-			onDoubleClick={event => { event.preventDefault(); event.stopPropagation(); cancel(); if (rotation) { onRotate(0); } }}
-			onKeyDown={event => {
-				if (event.key === 'Escape' && drag.current) { event.preventDefault(); event.stopPropagation(); cancel(); return; }
-				if (event.key === '0' && rotation) { event.preventDefault(); event.stopPropagation(); onRotate(0); }
-			}}>
-			<RotateCw size={12 / zoom} strokeWidth={2.2} aria-hidden="true" />
-		</button>
-		{preview !== undefined && <div className="selection-spacing-badge" aria-live="polite" style={{ left: handleX, top: handleY + 20 / zoom, fontSize: 11 / zoom, padding: `${2 / zoom}px ${6 / zoom}px`, borderRadius: 4 / zoom }}>{preview}°</div>}
 	</ViewportPortal>;
 }

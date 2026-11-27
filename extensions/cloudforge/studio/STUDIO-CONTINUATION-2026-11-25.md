@@ -1,5 +1,11 @@
 # Studio continuation checkpoint — 25 November 2026
 
+## Studio Rotate-Handle Deduplication, Source-Port Drop Preservation, Circular Connector Wheel & Sticky-Note Presets — 27 November 2026
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `1b264e9658d`, owner Antigravity. Zero overlap with Claude branches (`2dm0k0`, `ksv8z9`) or Rust; no installer build touched.
+- **Scope:** removed duplicate `DrawingRotateHandle` in favour of Claude's `.rotate-handle` and cleared the bottom `+` dot below it (`src/DesignCanvas.tsx`, `src/SelectionResizeHandle.tsx`, `src/styles.css`); preserved dragged `sourcePort` on `Ctrl+drag`, `Keep loose end`, and `addConnectedItem` (`src/DesignCanvas.tsx`, `src/model.ts`, `src/model.test.ts`); fixed `24×34` oval connector rainbow colour wheel (`src/styles.css`); fixed `No fill` swatch state/yellow restore and added Miro `S`/`M`/`L`/`Square` sticky-note size presets (`src/ElementAppearance.tsx`).
+- **Fresh checks:** Studio `tsc --noEmit` **PASS**, **255/255** Studio tests (0 skipped), Studio `build` + `esbuild.webview.mts` **PASS**, real Windows Edge `whiteboard-controls-verify.mjs` **20/20 PASS**, `loose-connectors-verify.mjs` **16/16 PASS**, plus live Edge verification (`rotBottom: 623` < `downPlusTop: 633`, `Large 38px` vs `Small 19px`, `24×24` wheel, `preservedPort: "bottom"`, 0 browser errors).
+
 ## Non-Overlapping Appearance Popover, Aligned Controls & Shape-Aware Text Insets — 27 November 2026
 
 - **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `0448062741b`, owner Antigravity. Zero overlap with Claude branches (`2dm0k0`, `ksv8z9`) or Rust; no installer build touched.
