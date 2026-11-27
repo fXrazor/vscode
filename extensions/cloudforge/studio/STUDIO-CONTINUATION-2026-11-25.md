@@ -1,5 +1,9 @@
 # Studio continuation checkpoint — 25 November 2026
 
+## Main consolidation — 27 November 2026
+
+The guided list and map variable editor and shared provider import wizard are included in the desktop integration alongside the paired Get Ready fixes. The fresh consolidation checks passed **250 Studio tests**, **150 extension tests**, both TypeScript checks, the Studio build, and extension bundling. The previous standalone checkpoints below record their historical scope and QA. Use the [root handoff](../../../HANDOFF.md) for the current packaging and installed verification status.
+
 ## Native provider mirror verification — 27 November 2026
 
 Desktop baseline **`407089c3ffebedc129a3ea1e6aa1abfc448a77f2`**, tested in `codex/native-mirror-roundtrip` at `C:/Users/dalep/.codex/worktrees/guided-variable-values/CloudForge-Code`: **242/242 Studio tests**, **125/125 extension tests**, both TypeScript checks and Studio build passed. No Studio renderer or other product source changed. The owned staged desktop with pinned service `68cbe03e5425fa0d55db9cd7144a1178ef38fe77` now passes native empty-mirror import of the authentic AzureRM ZIP, inventory/digest/integrity, removal Cancel, explicit removal/reclaimed bytes and empty inventory. This closes those specific native first-import/final-removal gaps from the older continuation below. Main advanced during this run; later integrations are outside this proof. [Exact provenance and evidence](research/populated-mirror-verification.md#native-staged-application-roundtrip--27-november-2026).
