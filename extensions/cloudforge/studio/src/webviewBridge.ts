@@ -79,6 +79,15 @@ export interface HostViewState {
 	readonly sampleContext: unknown;
 	/** Technical Graph presentation and graph-only pins; never merged into nodePositions. */
 	readonly graph?: HostGraphViewState;
+	/** Per-resource icon choices, which Terraform does not record. The host keeps well-formed entries only. */
+	readonly appearance?: Readonly<Record<string, HostResourceAppearance>>;
+}
+
+export interface HostResourceAppearance {
+	readonly icon?: string;
+	readonly iconSize?: number;
+	readonly iconKind?: string;
+	readonly override?: { readonly provider: 'azure' | 'aws' | 'gcp'; readonly icon: string; readonly label: string };
 }
 
 export interface HostGraphViewState {

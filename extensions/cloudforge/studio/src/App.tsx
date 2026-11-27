@@ -28,7 +28,8 @@ import { estateArchitecture } from './estateFixture.ts';
 import { hubSpokeArchitecture } from './graphFixtures.ts';
 import { CodePanel } from './CodePanel.tsx';
 import { ModuleImport, type ModuleReference } from './ModuleImport.tsx';
-import { loadCatalogue, registerServiceTypes } from './catalogue.ts';
+import { loadCatalogue, registerServiceTypes, withCatalogueIcons } from './catalogue.ts';
+import { catalogueIconsSnapshot, subscribeCatalogueIcons } from './coreIcons.ts';
 import { ArchitectureOverview } from './ArchitectureOverview.tsx';
 import { VisualTopbar } from './VisualTopbar.tsx';
 import { ArrowLeft, Scan, PanelsTopLeft, PanelRightClose, Code2, ListTree, Boxes, Variable, AlertCircle, FileCode2 } from 'lucide-react';
@@ -158,6 +159,18 @@ export function Studio() {
 		const hydrated = hydrateResourceValues(base, graph, values.resources, values.variables);
 		if (hydrated !== base) { dispatch({ type: 'rebase', architecture: hydrated, base }); setHostBaseline(hydrated); hostBaselineRef.current = hydrated; }
 	}, [providerMetadataRevision]);
+	// Resources rebuilt from the Terraform graph only know their type. Load each provider's catalogue and give them
+	// their catalogue icon instead of the shared placeholder; like provider metadata, this never adds an Undo step.
+	const catalogueIconRevision = useSyncExternalStore(subscribeCatalogueIcons, catalogueIconsSnapshot);
+	const resourceProviders = [...new Set(architecture.resources.filter(resource => resource.catalogue).map(resource => resource.provider))].sort().join(',');
+	useEffect(() => { for (const provider of resourceProviders.split(',').filter(Boolean)) { void loadCatalogue(provider as Provider).catch(() => undefined); } }, [resourceProviders]);
+	useEffect(() => {
+		const fixed = withCatalogueIcons(history.present);
+		if (fixed === history.present) { return; }
+		dispatch({ type: 'rebase', architecture: fixed });
+		const base = hostBaselineRef.current;
+		if (base) { const fixedBase = withCatalogueIcons(base); if (fixedBase !== base) { setHostBaseline(fixedBase); hostBaselineRef.current = fixedBase; } }
+	}, [catalogueIconRevision, history.present]);
 	const selected = architecture.resources.find(resource => resource.id === selectedId);
 	const workspaceResource = architecture.resources.find(resource=>resource.id===workspaceResourceId);
 	const openDetails = useCallback((id:string)=>{setSelectedId(id);setWorkspaceResourceId(id);setWorkspaceOpen(true);},[]);

@@ -458,6 +458,46 @@ export interface CanvasViewState {
 	 * `nodePositions` so the graph can never move a resource in the Architecture design.
 	 */
 	readonly graph?: CanvasGraphViewState;
+	/** Per-resource icon choices (Library icon, Replace icon, icon size), which Terraform does not record. */
+	readonly appearance?: Readonly<Record<string, CanvasResourceAppearance>>;
+}
+
+export interface CanvasResourceAppearance {
+	readonly icon?: string;
+	readonly iconSize?: number;
+	readonly iconKind?: string;
+	readonly override?: { readonly provider: 'azure' | 'aws' | 'gcp'; readonly icon: string; readonly label: string };
+}
+
+const MAX_APPEARANCE_ENTRIES = 512;
+const isIconPath = (value: unknown): value is string => typeof value === 'string' && value.length <= 200 && /^[A-Za-z0-9_][A-Za-z0-9_./-]*\.svg$/.test(value) && !value.includes('..');
+
+/** Keeps only well-formed icon paths, sizes and kinds; unknown keys are dropped. */
+export function sanitizeResourceAppearance(value: unknown): Record<string, CanvasResourceAppearance> | undefined {
+	if (!isRecord(value)) {
+		return undefined;
+	}
+	const out: Record<string, CanvasResourceAppearance> = {};
+	let count = 0;
+	for (const [id, raw] of Object.entries(value)) {
+		if (count >= MAX_APPEARANCE_ENTRIES) {
+			break;
+		}
+		if (!isOpaqueId(id) || !isRecord(raw)) {
+			continue;
+		}
+		const icon = isIconPath(raw.icon) ? raw.icon : undefined;
+		const iconSize = typeof raw.iconSize === 'number' && Number.isFinite(raw.iconSize) && raw.iconSize >= 16 && raw.iconSize <= 256 ? Math.round(raw.iconSize) : undefined;
+		const iconKind = typeof raw.iconKind === 'string' && /^[A-Za-z]{1,32}$/.test(raw.iconKind) ? raw.iconKind : undefined;
+		const o = raw.override;
+		const label = isRecord(o) ? sanitizeShortText(o.label, 120) : undefined;
+		const override = isRecord(o) && (o.provider === 'azure' || o.provider === 'aws' || o.provider === 'gcp') && isIconPath(o.icon) && label ? { provider: o.provider as 'azure' | 'aws' | 'gcp', icon: o.icon, label } : undefined;
+		if (icon || iconSize || iconKind || override) {
+			out[id] = { ...(icon ? { icon } : {}), ...(iconSize ? { iconSize } : {}), ...(iconKind ? { iconKind } : {}), ...(override ? { override } : {}) };
+			count++;
+		}
+	}
+	return Object.keys(out).length ? out : undefined;
 }
 
 export interface CanvasGraphViewState {
@@ -945,6 +985,7 @@ export function sanitizeViewState(value: unknown): CanvasViewState {
 	}
 
 	const graph = sanitizeGraphViewState(value.graph);
+	const appearance = sanitizeResourceAppearance(value.appearance);
 	const nodePositions: Partial<Record<CanvasViewMode, Readonly<Record<string, CanvasPoint>>>> = {};
 	if (isRecord(value.nodePositions)) {
 		const visualPos = sanitizeNodePositionMap(value.nodePositions.visual);
@@ -1071,6 +1112,7 @@ export function sanitizeViewState(value: unknown): CanvasViewState {
 		checkpoints,
 		sampleContext,
 		...(graph ? { graph } : {}),
+		...(appearance ? { appearance } : {}),
 	};
 }
 

@@ -1,5 +1,5 @@
-import type { CatalogueEntry, Provider } from './model.ts';
-import { coreIcon } from './coreIcons.ts';
+import type { Architecture, CatalogueEntry, Provider } from './model.ts';
+import { coreIcon, registerCatalogueIcons } from './coreIcons.ts';
 
 export interface CatalogueSnapshot { provider: Provider; version: string; source: string; entries: CatalogueEntry[]; }
 const snapshots = new Map<Provider, Promise<CatalogueSnapshot>>();
@@ -11,11 +11,25 @@ export function loadCatalogue(provider: Provider): Promise<CatalogueSnapshot> {
   snapshot = fetch('./assets/catalogue/' + provider + '.json').then(async response => {
    if (!response.ok) { throw new Error('The provider catalogue could not be loaded.'); }
    const value = await response.json() as CatalogueSnapshot;
+   registerCatalogueIcons(value.entries);
    return { ...value, entries: value.entries.map(entry => ({ ...entry, icon: coreIcon(entry.type, entry.icon), providerVersion: value.version, providerSource: value.source })) };
   }).catch(error => { snapshots.delete(provider); throw error; });
   snapshots.set(provider, snapshot);
  }
  return snapshot;
+}
+
+/** Swap any placeholder icon for the type's catalogue icon once that catalogue has loaded. Returns the same object when nothing changes. */
+export function withCatalogueIcons(architecture: Architecture): Architecture {
+ let changed = false;
+ const resources = architecture.resources.map(resource => {
+  if (!resource.catalogue) { return resource; }
+  const icon = coreIcon(resource.catalogue.type, resource.catalogue.icon);
+  if (icon === resource.catalogue.icon) { return resource; }
+  changed = true;
+  return { ...resource, catalogue: { ...resource.catalogue, icon } };
+ });
+ return changed ? { ...architecture, resources } : architecture;
 }
 
 export const technologySections = ['Compute', 'Network', 'Storage', 'Database', 'Security & Identity', 'Integration', 'Monitoring', 'AI & ML', 'Analytics', 'Management', 'Other'];

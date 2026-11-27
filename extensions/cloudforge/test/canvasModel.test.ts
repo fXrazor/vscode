@@ -182,3 +182,19 @@ test('orientServiceEdgesForCanvas normalizes Rust dependent->prerequisite edges 
 		{ fromId: 'a', toId: 'b', kind: 'custom' },
 	]);
 });
+
+test('view state keeps well-formed resource icon choices and drops unsafe ones', () => {
+	const state = sanitizeViewState({
+		appearance: {
+			'vm-1': { icon: 'catalog-icons/azure/azure-virtual-machine.svg', iconSize: 64, iconKind: 'vm', override: { provider: 'aws', icon: 'catalog-icons/aws/aws-ec2.svg', label: 'EC2' } },
+			'bad-path': { icon: '../../secret.svg' },
+			'bad-url': { icon: 'https://example.com/x.svg' },
+			'bad-size': { iconSize: 9999 },
+			'bad-provider': { override: { provider: 'other', icon: 'x.svg', label: 'X' } },
+		},
+	});
+	assert.deepEqual(state.appearance, {
+		'vm-1': { icon: 'catalog-icons/azure/azure-virtual-machine.svg', iconSize: 64, iconKind: 'vm', override: { provider: 'aws', icon: 'catalog-icons/aws/aws-ec2.svg', label: 'EC2' } },
+	});
+	assert.equal(sanitizeViewState({}).appearance, undefined);
+});
