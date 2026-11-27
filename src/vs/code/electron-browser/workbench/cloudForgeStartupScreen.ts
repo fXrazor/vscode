@@ -161,6 +161,19 @@ export function showCloudForgeStartupScreen(options: ICloudForgeStartupScreenOpt
 	// The workbench (parts splash contribution) dispatches this once the main container lays out.
 	screen.addEventListener(CLOUDFORGE_STARTUP_DISMISS_EVENT, () => removeCloudForgeStartupScreen(), { once: true });
 
+	// Backstop: if that event is ever missed (an exception in the workbench, a renamed contribution), leave as
+	// soon as the workbench has rendered and painted, so the screen can never sit over a usable window.
+	const workbenchReady = () => !!document.querySelector('.monaco-workbench .part.editor');
+	const leaveWhenPainted = () => requestAnimationFrame(() => requestAnimationFrame(() => removeCloudForgeStartupScreen()));
+	const observer = new MutationObserver(() => {
+		if (workbenchReady()) {
+			observer.disconnect();
+			leaveWhenPainted();
+		}
+	});
+	observer.observe(document.body, { childList: true, subtree: true });
+	screen.addEventListener('cloudforge-removed', () => observer.disconnect(), { once: true });
+
 	return (next: string) => {
 		if (screen.isConnected && !screen.classList.contains('cf-slow')) {
 			status.textContent = next;
