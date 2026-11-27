@@ -1,5 +1,11 @@
 # Studio continuation checkpoint — 25 November 2026
 
+## Miro Sticky-Note / Shape Text Auto-Scaling & Circular Swatch Picker Fix — 27 November 2026
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `716a9dac689`, owner Antigravity. Zero overlap with Claude branches (`2dm0k0`, `ksv8z9`) or Rust; no installer build touched.
+- **Scope:** added shared Miro-style typography fitter (`src/drawingTextFit.ts`), live `ResizeObserver` + real-font binary search in `src/DrawingText.tsx`, `Auto` font-size default/reset for sticky notes (`src/ElementAppearance.tsx`, `src/canvasOperations.ts`), matching SVG `<clipPath>` export (`src/exportPresentation.ts`), exact `24×24` circular `.appearance-swatch` specificity fix (`src/styles.css`), `+` connected-copy handle spacing (`src/SelectionResizeHandle.tsx`), and unit tests (`src/model.test.ts`).
+- **Fresh checks:** Studio `tsc --noEmit` **PASS**, **251/251** Studio tests (0 skipped), Studio `build` + `esbuild.webview.mts` + `oxlint` + `hygiene` **PASS**, real Windows Edge `whiteboard-controls-verify.mjs` **20/20 PASS**, plus live Edge verification (`24×24` circle swatches, `Size: 64` fitted cleanly inside note at `26px`, Auto short `45px` vs long `15px`, resize `15px → 33px`, 0 browser errors).
+
 ## Main consolidation — 27 November 2026
 
 The guided list and map variable editor and shared provider import wizard are included in the desktop integration alongside the paired Get Ready fixes. The fresh consolidation checks passed **250 Studio tests**, **150 extension tests**, both TypeScript checks, the Studio build, and extension bundling. The previous standalone checkpoints below record their historical scope and QA. Use the [root handoff](../../../HANDOFF.md) for the current packaging and installed verification status.

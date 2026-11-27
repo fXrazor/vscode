@@ -163,9 +163,9 @@ export function SelectionResizeHandle({
 }
 
 const quickCopyDirs = [
-	{ dir: 'right', label: 'Add connected copy to right (Ctrl+Right)', ox: 1, oy: 0.5, dx: 22, dy: 0 },
-	{ dir: 'bottom', dirKey: 'down', label: 'Add connected copy below (Ctrl+Down)', ox: 0.5, oy: 1, dx: 0, dy: 22 },
-	{ dir: 'left', label: 'Add connected copy to left (Ctrl+Left)', ox: 0, oy: 0.5, dx: -22, dy: 0 },
+	{ dir: 'right', label: 'Add connected copy to right (Ctrl+Right)', ox: 1, oy: 0.5, dx: 26, dy: 0 },
+	{ dir: 'bottom', dirKey: 'down', label: 'Add connected copy below (Ctrl+Down)', ox: 0.5, oy: 1, dx: 0, dy: 26 },
+	{ dir: 'left', label: 'Add connected copy to left (Ctrl+Left)', ox: 0, oy: 0.5, dx: -26, dy: 0 },
 ] as const;
 
 /**

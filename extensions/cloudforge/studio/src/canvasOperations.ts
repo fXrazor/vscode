@@ -188,7 +188,10 @@ export function applyCanvasCommand(architecture: Architecture, command: CanvasCo
 			let changed = false;
 			const items = architecture.items.map(item => {
 				if (!editable.has(item.id) || Object.entries(patch).every(([key, value]) => item[key as keyof BoardItem] === value)) { return item; }
-				changed = true; return { ...item, ...patch };
+				changed = true;
+				const next = { ...item, ...patch };
+				if (Object.hasOwn(patch, 'fontSize') && patch.fontSize === undefined) { delete next.fontSize; }
+				return next;
 			});
 			return changed ? { ...architecture, items } : architecture;
 		}

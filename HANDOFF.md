@@ -1,5 +1,19 @@
 # CloudForge Code OSS handoff
 
+## Miro Sticky-Note / Shape Text Auto-Scaling & Circular Swatch Picker Fix — 27 November 2026
+
+- **Worktree / branch / owner:** `E:/Orca/CloudForge-Code/dace`, branch `fxrazor/continue-project-handoff-review`, atop `origin/main` `716a9dac689`, owner Antigravity. Zero overlap with unmerged Claude branches (`2dm0k0`, `ksv8z9`) or Rust; no installer build touched.
+- **Scope:**
+  - **Miro-style dynamic text scaling & containment for sticky notes and shapes** ([drawingTextFit.ts](extensions/cloudforge/studio/src/drawingTextFit.ts), [DrawingText.tsx](extensions/cloudforge/studio/src/DrawingText.tsx), [ElementAppearance.tsx](extensions/cloudforge/studio/src/ElementAppearance.tsx), [canvasOperations.ts](extensions/cloudforge/studio/src/canvasOperations.ts), [exportPresentation.ts](extensions/cloudforge/studio/src/exportPresentation.ts), [styles.css](extensions/cloudforge/studio/src/styles.css)):
+    - Added **Auto** font size as the default for sticky notes (selectable in `ElementAppearance` and restorable via `style({ fontSize: undefined })` in 1 atomic Undo/Redo step), matching Miro's dynamic scaling: short phrases render boldly up to a height-proportional cap, longer text scales down smoothly as you type, and resizing a sticky note or shape scales the fitted text live via `ResizeObserver` + real-font binary search in `DrawingText.tsx`.
+    - Fixed large explicit font sizes (e.g., `Size: 64`) overflowing outside sticky notes/shapes or tearing words mid-letter (`overflow-wrap: break-word` + `overflow: hidden` + bounded fit down to `8px` capped at the chosen `fontSize`, while standalone `text` boxes keep their exact explicit size).
+    - Shared `resolveDrawingTypography()` and SVG `<clipPath>` in `exportPresentation.ts` so SVG/PNG/PDF exports match live canvas scaling and never bleed past note/shape bounds.
+    - Covered with unit tests in [model.test.ts](extensions/cloudforge/studio/src/model.test.ts).
+  - **Circular fill colour swatches & `+` handle breathing room** ([styles.css](extensions/cloudforge/studio/src/styles.css), [SelectionResizeHandle.tsx](extensions/cloudforge/studio/src/SelectionResizeHandle.tsx)):
+    - Fixed `.appearance-swatch` oval distortion caused by `.context-popover button` specificity overriding `min-height: 30px; padding: 5px 8px` — swatches now render as exact `24×24` (`aspect-ratio: 1 / 1`) circles with crisp active ring.
+    - Nudged floating `+` connected-copy dots (`22px → 26px`) for cleaner separation from resize handles.
+- **Fresh verification (27 November 2026):** Studio `tsc --noEmit` **PASS**, **251/251** Studio unit tests PASS (0 skipped), Studio `build` + `esbuild.webview.mts` + `oxlint` + `hygiene` (`drawingTextFit.ts`) **PASS**, and real Windows Edge (`--channel=msedge`): `whiteboard-controls-verify.mjs` **20/20 PASS** + live dark-mode check confirming all 8 swatches are `24×24` circles, `Size: 64` fits cleanly inside sticky note (`26px`, 0 overflow, 0 mid-word split), Auto scales short `"API"` (`45px`) > long paragraph (`15px`), resizing larger grows text (`15px → 33px`), and 0 browser errors.
+
 ## Consolidated desktop and service changes — 27 November 2026
 
 The desktop main integration contains the verified **Get Ready** fixes, guided list and map variable inputs, and the shared provider ZIP import wizard with Back navigation. Desktop merges `23ec6f6d1d1` and `b4a32cfd034` retain both feature histories. The paired [Rust service fix](https://github.com/fXrazor/CloudForge/commit/aacef4f99318567571f52cc5fe9e769040c635f6) fixes package authentication in the managed Windows download process.
