@@ -1143,10 +1143,14 @@ export function parseCloudRegionsPayload(value: unknown): CanvasCloudRegionsPayl
 }
 
 export function parseDependencyReport(value: unknown): CanvasDependencyReport | undefined {
+	if (!isRecord(value)) {
+		return undefined;
+	}
+	// The service serializes EngineName as openTofu; keep the existing Studio spelling.
+	const engine = value.engine === 'openTofu' ? 'opentofu' : value.engine;
 	if (
-		!isRecord(value) ||
 		!isSha256(value.sourceRevision) ||
-		(value.engine !== 'opentofu' && value.engine !== 'terraform') ||
+		(engine !== 'opentofu' && engine !== 'terraform') ||
 		typeof value.engineInferred !== 'boolean' ||
 		!isRecord(value.lockFile) ||
 		!Array.isArray(value.providers)
@@ -1193,7 +1197,7 @@ export function parseDependencyReport(value: unknown): CanvasDependencyReport | 
 	const diagnosticCount = Array.isArray(value.diagnostics) ? value.diagnostics.length : 0;
 	return {
 		sourceRevision: value.sourceRevision,
-		engine: value.engine,
+		engine,
 		engineInferred: value.engineInferred,
 		lockState,
 		lockEntries: Array.isArray(value.lockFile.entries) ? value.lockFile.entries.filter((entry): entry is { address: string; version: string } => isRecord(entry) && isNonEmptyString(entry.address, 256) && /^[a-z0-9.-]+\/[a-z0-9_-]+\/[a-z0-9_-]+$/i.test(entry.address) && isNonEmptyString(entry.version, 128)).map(entry => ({ address: entry.address.toLowerCase(), version: entry.version })) : [],

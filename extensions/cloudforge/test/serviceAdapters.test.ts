@@ -308,6 +308,22 @@ test('Stage 6 cloud regions and dependency report adapters parse sanitized paylo
 	assert.equal(deps.diagnosticCount, 1);
 });
 
+test('dependency reports accept the service engine name for a new OpenTofu project', () => {
+	const reply = {
+		sourceRevision: 'a'.repeat(64),
+		engine: 'openTofu',
+		engineInferred: true,
+		lockFile: { state: 'absent' },
+		providers: [{ address: 'registry.opentofu.org/hashicorp/null', display: 'hashicorp/null', status: 'unlocked', combined: '= 3.2.4' }],
+	};
+	const report = parseDependencyReport(reply);
+	assert.equal(report?.engine, 'opentofu');
+	assert.equal(report.lockState, 'absent');
+	assert.equal(report.providers[0].address, 'registry.opentofu.org/hashicorp/null');
+	assert.equal(report.providers[0].constraint, '= 3.2.4');
+	assert.equal(parseDependencyReport({ ...reply, engine: 'other' }), undefined);
+});
+
 test('Stage 7 module inspection adapter and Webview requestModule validation sanitize inputs', () => {
 	assert.deepStrictEqual(parseWebviewMessage({ type: 'requestModule', modulePath: ['net', 'sub'] }), {
 		type: 'requestModule',
