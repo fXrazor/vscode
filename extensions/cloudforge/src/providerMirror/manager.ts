@@ -18,6 +18,7 @@ import {
 	window,
 	type QuickPickItem
 } from 'vscode';
+import { collectReviewedMirrorImport, isMirrorImportFieldValid, type MirrorImportField, type MirrorImportInput } from './importFlow';
 import {
 	buildCleanupQuickPickRows,
 	formatMirrorBytes,
@@ -67,12 +68,20 @@ function showGuidedQuickPick<T>(options: {
 	readonly items: readonly (ActionPickItem<T> | QuickPickItem)[];
 	readonly canGoBack?: boolean;
 	readonly initialSearch?: string;
+	readonly initialSelection?: T;
+	readonly step?: number;
+	readonly totalSteps?: number;
 }): Promise<T | typeof BACK_SENTINEL | undefined> {
 	return new Promise(resolve => {
 		const qp = window.createQuickPick<QuickPickItem>();
 		qp.title = options.title;
 		qp.placeholder = options.placeholder;
 		qp.items = [...options.items];
+		qp.step = options.step;
+		qp.totalSteps = options.totalSteps;
+		if (options.initialSelection !== undefined) {
+			qp.activeItems = qp.items.filter(item => (item as Partial<ActionPickItem<T>>).value === options.initialSelection);
+		}
 		qp.matchOnDescription = true;
 		qp.matchOnDetail = true;
 		if (options.initialSearch) {
@@ -396,92 +405,71 @@ export async function runGuidedMirrorCleanup(
 	return { mutated: false };
 }
 
-/**
- * Guided provider archive import with optional prefill from a missing readiness package
- * and explicit pre-picker identity/digest review.
- */
+/** InputBox permits native Back while retaining text typed before navigating away. */
+function showMirrorImportInput(field: MirrorImportField, value: string): Promise<MirrorImportInput> {
+	const definition = field === 'address'
+		? { step: 1, placeholder: 'registry.terraform.io/hashicorp/azurerm', prompt: l10n.t('Enter the full provider address.'), error: l10n.t('Enter a full provider address such as registry.terraform.io/hashicorp/azurerm.') }
+		: field === 'version'
+			? { step: 2, placeholder: '5.14.0', prompt: l10n.t('Enter the provider release version.'), error: l10n.t('Enter a provider release version such as 5.14.0.') }
+			: { step: 4, placeholder: '0123456789abcdef...', prompt: l10n.t('Supply a trusted 64-character SHA-256 digest; CloudForge verifies the chosen .zip archive against it.'), error: l10n.t('Enter the verified 64-character SHA-256 hex digest for the provider .zip archive.') };
+	return new Promise(resolve => {
+		const input = window.createInputBox();
+		input.title = l10n.t('Import Provider Archive');
+		input.step = definition.step;
+		input.totalSteps = 5;
+		input.value = value;
+		input.placeholder = definition.placeholder;
+		input.prompt = definition.prompt;
+		input.buttons = definition.step > 1 ? [QuickInputButtons.Back] : [];
+		let settled = false;
+		const finish = (result: MirrorImportInput) => {
+			if (settled) { return; }
+			settled = true;
+			input.dispose();
+			resolve(result);
+		};
+		input.onDidTriggerButton(button => {
+			if (button === QuickInputButtons.Back) { finish({ action: 'back', value: input.value }); }
+		});
+		input.onDidChangeValue(text => { input.validationMessage = isMirrorImportFieldValid(field, text) ? undefined : definition.error; });
+		input.onDidAccept(() => {
+			if (isMirrorImportFieldValid(field, input.value)) { finish({ action: 'next', value: input.value }); }
+			else { input.validationMessage = definition.error; }
+		});
+		input.onDidHide(() => finish(undefined));
+		input.show();
+	});
+}
+
+/** Guided native Back/Next navigation; importing still requires explicit pre-picker review. */
 export async function runGuidedMirrorImport(
 	host: OfflineMirrorHost,
 	prefill?: Partial<MirrorPackageKey>
 ): Promise<{ readonly mutated: boolean; readonly key?: MirrorPackageKey }> {
-	const address = await window.showInputBox({
-		title: l10n.t('Import Provider Archive (1/4): Provider Address'),
-		value: prefill?.address ?? 'registry.terraform.io/hashicorp/azurerm',
-		placeHolder: 'registry.terraform.io/hashicorp/azurerm',
-		validateInput: text => /^[a-z0-9.-]+\/[a-z0-9_-]+\/[a-z0-9_-]+$/i.test(text.trim())
-			? undefined
-			: l10n.t('Enter a full provider address such as registry.terraform.io/hashicorp/azurerm.'),
-	});
-	if (!address) {
-		return { mutated: false };
-	}
-	const version = await window.showInputBox({
-		title: l10n.t('Import Provider Archive (2/4): Version for {0}', address.trim()),
-		value: prefill?.version ?? '5.14.0',
-		placeHolder: '5.14.0',
-		validateInput: text => /^[A-Za-z0-9._+-]+$/.test(text.trim())
-			? undefined
-			: l10n.t('Enter a provider release version such as 5.14.0.'),
-	});
-	if (!version) {
-		return { mutated: false };
-	}
-
-	const preferredPlatform = prefill?.platform === 'linux_amd64' ? 'linux_amd64' : 'windows_amd64';
-	const platformItems: ActionPickItem<string>[] = preferredPlatform === 'linux_amd64'
-		? [
-			{ label: 'linux_amd64', description: l10n.t('CI / Linux offline mirror target (selected from readiness)'), value: 'linux_amd64' },
-			{ label: 'windows_amd64', description: l10n.t('Required for local Windows offline init & schema extraction'), value: 'windows_amd64' },
-		]
-		: [
-			{ label: 'windows_amd64', description: l10n.t('Required for local Windows offline init & schema extraction'), value: 'windows_amd64' },
-			{ label: 'linux_amd64', description: l10n.t('CI / Linux offline mirror target'), value: 'linux_amd64' },
-		];
-
-	const platform = await showGuidedQuickPick({
-		title: l10n.t('Import Provider Archive (3/4): Target Platform'),
-		placeholder: l10n.t('Choose target platform for {0} {1}', address.trim(), version.trim()),
-		items: platformItems,
-	});
-	if (!platform || platform === BACK_SENTINEL) {
-		return { mutated: false };
-	}
-
-	const expectedSha256 = await window.showInputBox({
-		title: l10n.t('Import Provider Archive (4/4): Expected Archive Digest (SHA-256)'),
-		prompt: l10n.t('Supply a trusted 64-character SHA-256 digest; CloudForge verifies the chosen .zip archive against it.'),
-		placeHolder: '0123456789abcdef...',
-		validateInput: text => /^[0-9a-fA-F]{64}$/.test(text.trim())
-			? undefined
-			: l10n.t('Enter the verified 64-character SHA-256 hex digest for the provider .zip archive.'),
-	});
-	if (!expectedSha256) {
-		return { mutated: false };
-	}
-
-	const normalizedKey: MirrorPackageKey = {
-		address: address.trim(),
-		version: version.trim(),
-		platform,
-	};
-	const digest = expectedSha256.trim().toLowerCase();
-
-	const reviewChoice = await showGuidedQuickPick<'import'>({
-		title: l10n.t('Review Expected Archive Identity & Digest'),
-		placeholder: l10n.t('Confirm package identity before opening the native .zip file picker'),
-		items: [
-			{
-				label: `$(archive) ${l10n.t('Choose Archive and Import…')}`,
-				description: formatMirrorPackageKey(normalizedKey),
-				detail: l10n.t('Expected archive digest: {0}', digest),
-				value: 'import',
-			},
-		],
-		canGoBack: false,
-	});
-	if (reviewChoice !== 'import') {
-		return { mutated: false };
-	}
+	const reviewed = await collectReviewedMirrorImport({
+		input: showMirrorImportInput,
+		platform: async selected => {
+			const result = await showGuidedQuickPick<'windows_amd64' | 'linux_amd64'>({
+				title: l10n.t('Import Provider Archive: Target Platform'), step: 3, totalSteps: 5,
+				placeholder: l10n.t('Choose the archive target platform'), canGoBack: true, initialSelection: selected,
+				items: [
+					{ label: 'windows_amd64', description: l10n.t('Required for local Windows offline init & schema extraction'), value: 'windows_amd64' },
+					{ label: 'linux_amd64', description: l10n.t('CI / Linux offline mirror target'), value: 'linux_amd64' },
+				],
+			});
+			return result === BACK_SENTINEL ? 'back' : result;
+		},
+		review: async identity => {
+			const result = await showGuidedQuickPick<'import'>({
+				title: l10n.t('Review Expected Archive Identity & Digest'), step: 5, totalSteps: 5,
+				placeholder: l10n.t('Confirm package identity before opening the native .zip file picker'), canGoBack: true,
+				items: [{ label: `$(archive) ${l10n.t('Choose Archive and Import…')}`, description: formatMirrorPackageKey(identity), detail: l10n.t('Expected archive digest: {0}', identity.expectedSha256), value: 'import' }],
+			});
+			return result === BACK_SENTINEL ? 'back' : result;
+		},
+	}, prefill);
+	if (!reviewed) { return { mutated: false }; }
+	const { expectedSha256: digest, ...normalizedKey } = reviewed;
 
 	const imported = await window.withProgress(
 		{
