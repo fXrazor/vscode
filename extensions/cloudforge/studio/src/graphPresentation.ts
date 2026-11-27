@@ -47,7 +47,8 @@ export type GraphPresentationAction =
 	| { type: 'clearPins' }
 	| { type: 'toggleExpanded'; id: string }
 	| { type: 'toggleCollapsed'; id: string }
-	| { type: 'restore'; state: Partial<GraphPresentation> };
+	| { type: 'restore'; state: Partial<GraphPresentation> }
+	| { type: 'rekey'; map: ReadonlyMap<string, string> };
 
 export function graphPresentationReducer(state: GraphPresentation, action: GraphPresentationAction): GraphPresentation {
 	switch (action.type) {
@@ -57,6 +58,12 @@ export function graphPresentationReducer(state: GraphPresentation, action: Graph
 		case 'clearPins': return { ...state, pins: {} };
 		case 'restore': return { ...defaultGraphPresentation, ...action.state, focus: undefined, spotlight: undefined };
 		case 'toggleCollapsed': return { ...state, collapsed: state.collapsed.includes(action.id) ? state.collapsed.filter(id => id !== action.id) : [...state.collapsed, action.id] };
+		case 'rekey': {
+			// Resource ids the service renumbered: graph pins and folds follow their resources.
+			const id = (value: string) => action.map.get(value) ?? value;
+			if (!Object.keys(state.pins).some(key => action.map.has(key)) && !state.expanded.some(key => action.map.has(key)) && !state.collapsed.some(key => action.map.has(key)) && !(state.focus && action.map.has(state.focus.id)) && !(state.spotlight && action.map.has(state.spotlight))) { return state; }
+			return { ...state, pins: Object.fromEntries(Object.entries(state.pins).map(([key, position]) => [id(key), position])), expanded: state.expanded.map(id), collapsed: state.collapsed.map(id), ...(state.focus ? { focus: { ...state.focus, id: id(state.focus.id) } } : {}), ...(state.spotlight ? { spotlight: id(state.spotlight) } : {}) };
+		}
 		case 'toggleExpanded': return { ...state, expanded: state.expanded.includes(action.id) ? state.expanded.filter(id => id !== action.id) : [...state.expanded, action.id] };
 	}
 }

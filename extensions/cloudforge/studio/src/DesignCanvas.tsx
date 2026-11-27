@@ -12,7 +12,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, type Dispatch,
 import { canvasElements, connectedElementIds, expandGroups, resizeSelectionBoxes, sceneOrder, selectionFragment, stickyClusterFromText, type TextAppearance } from './canvasOperations.ts';
 import { applyUniformSpacing, layoutSelection, type Alignment } from './selectionGeometry.ts';
 import { CanvasActionMenu, SelectionControls, resizable, type SelectionAction } from './SelectionControls.tsx';
-import { ConnectedCopyHandles, SelectionResizeHandle } from './SelectionResizeHandle.tsx';
+import { ConnectedCopyHandles, DrawingRotateHandle, SelectionResizeHandle } from './SelectionResizeHandle.tsx';
 import { InkCapture } from './InkCapture.tsx';
 import { PenOptions } from './PenOptions.tsx';
 import type { InkStyle } from './ink.ts';
@@ -642,6 +642,10 @@ export const DesignCanvas = memo(function DesignCanvas({
 					onSelectionChange([id]);
 					setShowConnections(true);
 				}}/>}
+				{mode === 'visual' && flow && !hand && !pen && !creatingConnection && selectedIds.length === 1 && (() => {
+					const item = architecture.items.find(candidate => candidate.id === selectedIds[0] && !candidate.canvasLocked && candidate.kind !== 'frame');
+					return item ? <DrawingRotateHandle id={item.id} rotation={item.rotation ?? 0} flow={flow} onRotate={angle => dispatch({ type: 'canvas', command: { kind: 'rotate', ids: [item.id], angle } })} /> : null;
+				})()}
 				{minimap && <MiniMap<CanvasNode> pannable zoomable nodeColor={node => node.type === 'board' && node.data.item.kind === 'frame' ? 'transparent' : '#8e79d9'} />}
 				{!creatingConnection && !selectedConnection && selectedIds.some(id=>canvasElements(architecture).some(item=>item.id===id)) && <SelectionAnchor ids={selectedIds.filter(id=>canvasElements(architecture).some(item=>item.id===id))} canvas={bounds}>{mode === 'visual' ? <SelectionControls architecture={architecture} ids={selectedIds} dispatch={dispatch} run={run} hasClipboard={hasClipboard} hasStyleClipboard={hasStyleClipboard} mode={mode} onInspect={onOpen} container={bounds.current}/> : <section className="selection-controls" aria-label="Graph inspection controls">{selectedIds.length === 1 && architecture.resources.some(resource => resource.id === selectedIds[0]) && <button onClick={() => onOpenDetails(selectedIds[0])}>Inspect resource</button>}<button onClick={() => run('fit')}>Focus selection</button><button onClick={() => run('clear')}>Clear selection</button></section>}</SelectionAnchor>}
 			</ReactFlow>

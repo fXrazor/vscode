@@ -98,7 +98,9 @@ function gridLayout(snapshot: TechnicalGraphSnapshot, nodes: readonly GraphNode[
 	const ordered = orderBands(lines.map(line => line.ids), edges);
 	lines.forEach((line, i) => { line.ids = centreHubs(ordered[i], snapshot); });
 	// Column widths from the widest line in each column.
-	const columnWidth = new Map(columnIds.map(column => [column, Math.max(m.width, ...lines.filter(line => line.column === column).map(line => line.ids.length * m.width + (line.ids.length - 1) * m.gapX))]));
+	// A scope column is also wide enough for its title (about 7.2px a character at 12.5px, capped), so titles never run into the next column.
+	const titleWidth = (column: string) => byScope ? Math.min(360, Math.ceil((column === '__unscoped' ? 18 : label(column).length) * 7.2) - 8) : 0;
+	const columnWidth = new Map(columnIds.map(column => [column, Math.max(m.width, titleWidth(column), ...lines.filter(line => line.column === column).map(line => line.ids.length * m.width + (line.ids.length - 1) * m.gapX))]));
 	const columnX = new Map<string, number>(); let x = m.gutter;
 	for (const column of columnIds) { columnX.set(column, x); x += columnWidth.get(column)! + m.columnGap; }
 	const totalWidth = x - m.columnGap - m.gutter;

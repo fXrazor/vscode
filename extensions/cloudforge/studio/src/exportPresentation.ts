@@ -9,6 +9,7 @@ import { sceneOrder } from './canvasOperations.ts';
 import { resourceIconSize } from './resourceGeometry.ts';
 import { resourceDefinition } from './fixture.ts';
 import { isResourceContainer, resourceDimensions } from './resourceHierarchy.ts';
+import { DRAWING_LINE_HEIGHT, drawingTextBox, resolveDrawingTypography } from './drawingTextFit.ts';
 
 const escape = (value: string) => value.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[character]!);
 
@@ -22,20 +23,11 @@ function drawingMarkup(item: BoardItem): string {
 		return `<g data-element="${escape(item.id)}" aria-label="Freehand drawing" transform="translate(${x},${y})${item.rotation ? ` rotate(${item.rotation} ${item.width / 2} ${item.height / 2})` : ''}" opacity="${item.opacity ?? 1}"><svg width="${item.width}" height="${item.height}" viewBox="0 0 100 100" preserveAspectRatio="none" overflow="visible"><path d="${path}" fill="none" stroke="${escape(item.strokeColor ?? inkDefaults.strokeColor)}" stroke-width="${width}" ${inkDash ? `stroke-dasharray="${inkDash}"` : ''} stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg></g>`;
 	}
 	const fill = item.fill ?? (item.kind === 'note' ? '#fff0b5' : item.kind === 'shape' ? '#eef2ff' : 'transparent');
-	const fontSize = item.fontSize ?? (item.kind === 'text' ? 20 : item.kind === 'frame' ? 12 : 16);
-	const insetX = item.kind === 'shape' ? item.width * 0.18 : item.kind === 'frame' ? 0 : 18;
-	const insetY = item.kind === 'shape' ? item.height * 0.18 : 18;
+	const { fontSize, lines } = resolveDrawingTypography(item);
+	const { insetX, insetY, width: boxWidth, height: boxHeight } = drawingTextBox(item);
 	const alignment = item.textAlign ?? (item.kind === 'shape' ? 'center' : 'left');
 	const vertical = item.verticalAlign ?? (item.kind === 'shape' ? 'middle' : 'top');
-	const contentWidth = Math.max(1, item.width - insetX * 2);
-	// SVG has no native wrapping. Approximate the browser line width and preserve explicit newlines.
-	const maxChars = Math.max(1, Math.floor(contentWidth / (fontSize * 0.58)));
-	const lines = item.text.split('\n').flatMap(line => {
-		const wrapped: string[] = []; let rest = line;
-		while (rest.length > maxChars) { const space = rest.lastIndexOf(' ', maxChars); const at = space > 0 ? space : maxChars; wrapped.push(rest.slice(0, at)); rest = rest.slice(at).trimStart(); }
-		return [...wrapped, rest];
-	});
-	const lineHeight = fontSize * 1.4; const blockHeight = lines.length * lineHeight;
+	const lineHeight = fontSize * DRAWING_LINE_HEIGHT; const blockHeight = lines.length * lineHeight;
 	const textX = alignment === 'center' ? item.width / 2 : alignment === 'right' ? item.width - insetX : insetX;
 	const textY = item.kind === 'frame' ? -12 : (vertical === 'middle' ? (item.height - blockHeight) / 2 : vertical === 'bottom' ? item.height - insetY - blockHeight : insetY) + fontSize;
 	const family = item.fontFamily === 'serif' ? 'Georgia, serif' : item.fontFamily === 'mono' ? 'Consolas, monospace' : 'Mona Sans, Segoe UI, sans-serif';
@@ -44,7 +36,10 @@ function drawingMarkup(item: BoardItem): string {
 	const strokeWidth = item.strokeWidth ?? (item.kind === 'shape' ? 1.5 : 1);
 	const dash = shapeStrokeDash(item.strokeStyle ?? (item.kind === 'frame' ? 'dashed' : 'solid'), strokeWidth);
 	const geometry = item.kind === 'shape' ? `<svg width="${item.width}" height="${item.height}" viewBox="0 0 100 100" preserveAspectRatio="none"><path d="${shapeDefinition(item.shape).path}" fill="${escape(fill)}" stroke="${border}" stroke-width="${strokeWidth}" ${dash ? `stroke-dasharray="${dash}"` : ''} stroke-linecap="round" vector-effect="non-scaling-stroke"/></svg>` : `<rect width="${item.width}" height="${item.height}" rx="${item.kind === 'frame' ? 8 : 0}" fill="${escape(fill)}" stroke="${item.kind === 'text' ? 'none' : border}" stroke-width="${strokeWidth}" ${dash ? `stroke-dasharray="${dash}"` : ''}/>`;
-	return `<g data-element="${escape(item.id)}" aria-label="${escape(item.text)}" transform="translate(${x},${y})${item.rotation ? ` rotate(${item.rotation} ${item.width / 2} ${item.height / 2})` : ''}" opacity="${item.opacity ?? 1}">${geometry}<text x="${textX}" y="${textY}" text-anchor="${alignment === 'center' ? 'middle' : alignment === 'right' ? 'end' : 'start'}" fill="${escape(colour)}" font-family="${family}" font-size="${fontSize}" font-weight="${item.bold ? 700 : 400}" font-style="${item.italic ? 'italic' : 'normal'}" text-decoration="${item.underline ? 'underline' : 'none'}">${lines.map((line, index) => `<tspan x="${textX}" dy="${index ? lineHeight : 0}">${escape(line)}</tspan>`).join('')}</text></g>`;
+	const clipId = item.kind === 'note' || item.kind === 'shape' ? 'clip-' + escape(item.id.replace(/[^a-zA-Z0-9_-]/g, '_')) : '';
+	const clipDef = clipId ? `<defs><clipPath id="${clipId}"><rect x="${insetX}" y="${insetY}" width="${boxWidth}" height="${boxHeight}"/></clipPath></defs>` : '';
+	const textEl = `<text x="${textX}" y="${textY}" text-anchor="${alignment === 'center' ? 'middle' : alignment === 'right' ? 'end' : 'start'}" fill="${escape(colour)}" font-family="${family}" font-size="${fontSize}" font-weight="${item.bold ? 700 : 400}" font-style="${item.italic ? 'italic' : 'normal'}" text-decoration="${item.underline ? 'underline' : 'none'}"${clipId ? ` clip-path="url(#${clipId})"` : ''}>${lines.map((line, index) => `<tspan x="${textX}" dy="${index ? lineHeight : 0}">${escape(line)}</tspan>`).join('')}</text>`;
+	return `<g data-element="${escape(item.id)}" aria-label="${escape(item.text)}" transform="translate(${x},${y})${item.rotation ? ` rotate(${item.rotation} ${item.width / 2} ${item.height / 2})` : ''}" opacity="${item.opacity ?? 1}">${clipDef}${geometry}${textEl}</g>`;
 }
 
 /** Export the presentation projection, independent of viewport, panels or active mode. */

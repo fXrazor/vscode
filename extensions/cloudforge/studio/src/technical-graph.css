@@ -37,7 +37,8 @@
 .tg-lane { border-top: 1px solid var(--tg-lane-line); background: linear-gradient(90deg, var(--tg-lane), transparent 78%); border-radius: 0; }
 .tg-lane span { position: absolute; left: 20px; top: 14px; font-size: 13px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
 .tg-lane-scope { background: none; border: 1px dashed var(--tg-lane-line); border-radius: 14px; }
-.tg-lane-scope span { left: 16px; top: 12px; text-transform: none; letter-spacing: 0; font-size: 12.5px; color: var(--text); }
+.tg-lane-scope span { left: 16px; right: 16px; top: 12px; text-transform: none; letter-spacing: 0; font-size: 12.5px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: auto; }
+.tg-lane-scope .tg-lane-type { font-size: inherit; color: var(--muted); font-weight: 500; }
 
 .tg-card { position: relative; width: 248px; overflow: visible; background: var(--node); border: 1px solid color-mix(in srgb, var(--tg-layer, var(--border)) 28%, var(--border)); border-radius: 10px; box-shadow: 0 1px 2px #1a1b2610, 0 4px 14px -8px #1a1b2626; color: var(--text); font-size: 12px; transition: opacity .18s ease, box-shadow .18s ease, border-color .18s ease; }
 .tg-card::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 4px; border-radius: 10px 0 0 10px; background: var(--tg-layer, var(--border)); }
@@ -218,7 +219,8 @@
 .technical-graph.is-compact-view .tg-edge { stroke-width: 2.5; }
 .tg-edge-label { font-size: 11.5px; padding: 3px 9px; }
 .technical-graph.is-compact-view .tg-lane-layer span { font-size: 17px; top: 12px; }
-.technical-graph.is-compact-view .tg-lane-scope span { font-size: 26px; }
+.technical-graph.is-compact-view .tg-lane-scope span { font-size: 22px; }
+.technical-graph.is-compact-view .tg-lane-scope .tg-lane-type { display: none; }
 
 /* Ghost inputs: var., local. and data. are read, not managed, so they are dashed and unfilled. */
 .tg-ghost { box-sizing: border-box; display: flex; flex-direction: column; justify-content: center; gap: 2px; padding: 6px 10px; border: 1.5px dashed var(--tg-edge-input); border-radius: 10px; background: color-mix(in srgb, var(--surface) 70%, transparent); color: var(--text); transition: opacity .15s; }
@@ -239,7 +241,7 @@
 .tg-chip-module { border: 1px dashed var(--tg-layer, var(--border)); font-family: var(--mono, Consolas, monospace); }
 
 /* Bundled (radial hierarchical edge bundling) view. */
-.tg-bundle { position: absolute; inset: 64px 0 52px 0; overflow: hidden; background: var(--canvas); cursor: grab; touch-action: none; }
+.tg-bundle { position: absolute; inset: 0; overflow: hidden; background: var(--canvas); cursor: grab; touch-action: none; }
 .tg-bundle:active { cursor: grabbing; }
 .tg-bundle > svg { width: 100%; height: 100%; transform-origin: 50% 50%; }
 .tg-bundle-group path:first-child { fill: none; stroke: var(--tg-layer); stroke-width: 6; stroke-linecap: round; opacity: .55; }
@@ -289,7 +291,7 @@
 .tg-card.is-compact .tg-tree-toggle { top: 50%; transform: translateY(-50%); height: 32px; min-width: 34px; border-radius: 16px; font-size: 15px; line-height: 30px; }
 
 /* Network (force-directed) view. */
-.tg-force { position: absolute; inset: 64px 0 52px 0; overflow: hidden; background: var(--canvas); touch-action: none; }
+.tg-force { position: absolute; inset: 0; overflow: hidden; background: var(--canvas); touch-action: none; }
 .tg-force > svg { width: 100%; height: 100%; cursor: grab; user-select: none; }
 .tg-force > svg:active { cursor: grabbing; }
 .tg-force-link { stroke: var(--tg-cat, var(--tg-edge-unclassified)); stroke-width: 1.6; opacity: .62; transition: opacity .15s, stroke-width .15s; }
@@ -381,6 +383,8 @@
 .tg-rail [data-tip]:hover::after, .tg-rail [data-tip]:focus-visible::after { content: attr(data-tip); position: absolute; left: calc(100% + 10px); top: 50%; transform: translateY(-50%); z-index: 30; width: max-content; max-width: 260px; padding: 5px 8px; border-radius: 6px; background: var(--text); color: var(--surface); font-size: 11.5px; font-weight: 500; line-height: 1.35; white-space: normal; text-align: left; pointer-events: none; box-shadow: 0 6px 18px -8px #0008; }
 .tg-rail .tg-segment [data-tip]:hover::after { left: calc(100% + 13px); }
 .tg-rail .tg-search:focus-within::after, .tg-rail .tg-view-menu[open] > summary::after { display: none; }
-.tg-spread-float { position: absolute; top: 14px; left: 66px; z-index: 8; }
-.tg-spread-float .tg-spread { font-size: 11.5px !important; gap: 6px !important; }
+/* The Network and Bundled canvases fill the whole graph area; the Spread dial floats in the same boxed style as the rail and legend. */
+.tg-spread-float { position: absolute; top: 14px; left: 66px; z-index: 8; display: inline-flex; align-items: center; height: 36px; padding: 0 12px; border-radius: 8px; background: color-mix(in srgb, var(--surface) 94%, transparent); border: 1px solid var(--border); box-shadow: 0 2px 8px -6px #0004; color: var(--muted); }
+.tg-spread-float .tg-spread { font-size: 11.5px !important; gap: 6px !important; font-weight: 600; }
+.tg-spread-float .tg-spread input[type="range"] { width: 110px; }
 .tg-spread-float .tg-spread output { font-size: 11px; }

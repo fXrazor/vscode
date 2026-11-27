@@ -649,3 +649,37 @@ test('terraformCode does not throw when a generic resource has a spaced setting 
 	const hcl = terraformCode(corrupted);
 	assert.match(hcl, /resource "azurerm_virtual_machine" "vm_1"/);
 });
+
+test('uncatalogued resources keep their Library icon through reload, and placeholders pick up the catalogue icon', async () => {
+	const { registerCatalogueIcons } = await import('./coreIcons.ts');
+	const { withCatalogueIcons } = await import('./catalogue.ts');
+	const snapshot: HostGraphSnapshot = {
+		workspaceId: 'ws-icons', architectureId: 'arch-icons', architectureName: 'Icons', sourceRevision: '7'.repeat(64), status: 'complete', edges: [], diagnostics: [],
+		nodes: [
+			{ id: 'vm-legacy', kind: 'resource', resourceType: 'azurerm_virtual_machine', name: 'vm_legacy', label: 'vm_legacy', hasSource: true },
+			{ id: 'aks', kind: 'resource', resourceType: 'azurerm_kubernetes_cluster', name: 'aks', label: 'aks', hasSource: true },
+		],
+	};
+	const first = projectGraphSnapshotToArchitecture(snapshot).architecture;
+	const vm = first.resources.find(resource => resource.id === 'vm-legacy')!;
+	// The Library placed it with its own icon; a reload must not reset it to the resource-group placeholder.
+	const placed = { ...first, resources: first.resources.map(resource => resource.id === vm.id ? { ...resource, catalogue: { ...resource.catalogue!, icon: 'catalog-icons/azure/azure-virtual-machine.svg' } } : resource) };
+	const reloaded = projectGraphSnapshotToArchitecture(snapshot, { previousArchitecture: placed }).architecture;
+	assert.equal(reloaded.resources.find(resource => resource.id === vm.id)?.catalogue?.icon, 'catalog-icons/azure/azure-virtual-machine.svg');
+	// A resource that only has the placeholder gets its catalogue icon once that catalogue has loaded.
+	const aks = reloaded.resources.find(resource => resource.id === 'aks')!;
+	if (aks.catalogue?.icon.endsWith('azure-resource-groups.svg')) {
+		registerCatalogueIcons([{ type: 'azurerm_kubernetes_cluster', icon: 'catalog-icons/azure/azure-kubernetes-services.svg' }]);
+		assert.equal(withCatalogueIcons(reloaded).resources.find(resource => resource.id === 'aks')?.catalogue?.icon, 'catalog-icons/azure/azure-kubernetes-services.svg');
+	}
+	assert.equal(withCatalogueIcons(withCatalogueIcons(reloaded)), withCatalogueIcons(reloaded), 'idempotent');
+
+	// Reopening the project (no previous model in memory) restores icon choices from the saved view state.
+	const chosen = { ...placed, resources: placed.resources.map(resource => resource.id === 'aks' ? { ...resource, iconSize: 72, iconOverride: { provider: 'azure' as const, icon: 'catalog-icons/azure/azure-container-instances.svg', label: 'Container instances' } } : resource) };
+	const viewState = buildHostViewState({ architecture: chosen, mode: 'visual', theme: 'dark', selectedId: '', focusedWorkspaceOpen: false, inspectorOpen: true, libraryOpen: true });
+	const reopened = projectGraphSnapshotToArchitecture(snapshot, { viewState }).architecture;
+	assert.equal(reopened.resources.find(resource => resource.id === vm.id)?.catalogue?.icon, 'catalog-icons/azure/azure-virtual-machine.svg');
+	const reopenedAks = reopened.resources.find(resource => resource.id === 'aks')!;
+	assert.equal(reopenedAks.iconSize, 72);
+	assert.deepEqual(reopenedAks.iconOverride, { provider: 'azure', icon: 'catalog-icons/azure/azure-container-instances.svg', label: 'Container instances' });
+});

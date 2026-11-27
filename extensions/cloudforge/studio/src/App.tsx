@@ -28,7 +28,8 @@ import { estateArchitecture } from './estateFixture.ts';
 import { hubSpokeArchitecture } from './graphFixtures.ts';
 import { CodePanel } from './CodePanel.tsx';
 import { ModuleImport, type ModuleReference } from './ModuleImport.tsx';
-import { loadCatalogue, registerServiceTypes } from './catalogue.ts';
+import { loadCatalogue, registerServiceTypes, withCatalogueIcons } from './catalogue.ts';
+import { catalogueIconsSnapshot, subscribeCatalogueIcons } from './coreIcons.ts';
 import { ArchitectureOverview } from './ArchitectureOverview.tsx';
 import { VisualTopbar } from './VisualTopbar.tsx';
 import { ArrowLeft, Scan, PanelsTopLeft, PanelRightClose, Code2, ListTree, Boxes, Variable, AlertCircle, FileCode2 } from 'lucide-react';
@@ -41,6 +42,7 @@ import { createHostBridge, type HostCloudRegionsPayload, type HostDependencyRepo
 import type { LiveSchemaMap } from './liveSchema.ts';
 import { parseSchemaPreview, type SchemaPreview } from './resourceDraft.ts';
 import { hydrateResourceValues, parseResourceValues, type FileResourceValues } from './resourceValues.ts';
+import { createRekeyer, snapshotIdMap, viewStateIdMap } from './resourceIdentity.ts';
 import { buildDraftSavePayload, buildHostViewState, changedFilePayloads, refreshPrevious, adoptSavedFiles, defaultTargetTfFile, projectGraphSnapshotToArchitecture, projectHostDiagnostics, sanitizeDraftTfFileName } from './serviceAdapter.ts';
 import { projectResourceFiles } from './terraformProjection.ts';
 import { DraftSaveDialog } from './DraftSaveDialog.tsx';
@@ -122,6 +124,8 @@ export function Studio() {
 	const [saveError, setSaveError] = useState<HostDraftSaveError | null>(null);
 	const [saving, setSaving] = useState(false);
 	const [saveAllOpen, setSaveAllOpen] = useState(false);
+	const keyboardSaveRef = useRef<() => void>(() => undefined);
+	const reportedDirtyRef = useRef(false);
 	const [saveAllFiles, setSaveAllFiles] = useState<readonly string[]>([]);
 	const [saveAllPreview, setSaveAllPreview] = useState<HostSaveAllPreview | null>(null);
 	const [saveAllError, setSaveAllError] = useState<HostDraftSaveError | null>(null);
@@ -158,6 +162,18 @@ export function Studio() {
 		const hydrated = hydrateResourceValues(base, graph, values.resources, values.variables);
 		if (hydrated !== base) { dispatch({ type: 'rebase', architecture: hydrated, base }); setHostBaseline(hydrated); hostBaselineRef.current = hydrated; }
 	}, [providerMetadataRevision]);
+	// Resources rebuilt from the Terraform graph only know their type. Load each provider's catalogue and give them
+	// their catalogue icon instead of the shared placeholder; like provider metadata, this never adds an Undo step.
+	const catalogueIconRevision = useSyncExternalStore(subscribeCatalogueIcons, catalogueIconsSnapshot);
+	const resourceProviders = [...new Set(architecture.resources.filter(resource => resource.catalogue).map(resource => resource.provider))].sort().join(',');
+	useEffect(() => { for (const provider of resourceProviders.split(',').filter(Boolean)) { void loadCatalogue(provider as Provider).catch(() => undefined); } }, [resourceProviders]);
+	useEffect(() => {
+		const fixed = withCatalogueIcons(history.present);
+		if (fixed === history.present) { return; }
+		dispatch({ type: 'rebase', architecture: fixed });
+		const base = hostBaselineRef.current;
+		if (base) { const fixedBase = withCatalogueIcons(base); if (fixedBase !== base) { setHostBaseline(fixedBase); hostBaselineRef.current = fixedBase; } }
+	}, [catalogueIconRevision, history.present]);
 	const selected = architecture.resources.find(resource => resource.id === selectedId);
 	const workspaceResource = architecture.resources.find(resource=>resource.id===workspaceResourceId);
 	const openDetails = useCallback((id:string)=>{setSelectedId(id);setWorkspaceResourceId(id);setWorkspaceOpen(true);},[]);
@@ -197,13 +213,23 @@ export function Studio() {
 					// are then rebased onto the refresh instead of being folded into the new baseline.
 					const saved = savedFilesRef.current;
 					savedFilesRef.current = null;
-					const previousBaseline = sameArch && hostBaselineRef.current
+					// The service numbers nodes by position, so match resources to the new snapshot by Terraform
+					// address and rename Studio ids before anything is compared by id.
+					const idMap = sameArch ? snapshotIdMap(incoming.graph.nodes, [architectureRef.current, saved?.state, hostBaselineRef.current]) : new Map<string, string>();
+					const rekey = createRekeyer(idMap);
+					const priorBaseline = sameArch && hostBaselineRef.current
 						? (saved ? adoptSavedFiles(hostBaselineRef.current, saved.state, saved.files) : hostBaselineRef.current)
 						: null;
+					const previousBaseline = rekey(priorBaseline);
 					const projected = projectGraphSnapshotToArchitecture(incoming.graph, {
-						previousArchitecture: sameArch ? refreshPrevious(previousBaseline, architectureRef.current) : undefined,
+						previousArchitecture: sameArch ? refreshPrevious(previousBaseline, rekey(architectureRef.current)) : undefined,
 						viewState: incoming.viewState,
 					});
+					if (idMap.size) {
+						const id = (value: string) => idMap.get(value) ?? value;
+						setSelectedIds(current => current.some(item => idMap.has(item)) ? current.map(id) : current);
+						setWorkspaceResourceId(current => current && id(current));
+					}
 					setHostSnapshot(incoming.graph);
 					hostGraphRef.current = incoming.graph;
 					setEnginePlanReport(null);
@@ -226,13 +252,18 @@ export function Studio() {
 					if (storedGraph) {
 						presentGraph({ type: 'restore', state: storedGraph });
 					}
+					// Stored graph pins carry the ids of their last save; follow them by address like the canvas does.
+					const graphIdMap = new Map([...viewStateIdMap(incoming.graph.nodes, incoming.viewState?.addresses), ...idMap]);
+					if (graphIdMap.size) {
+						presentGraph({ type: 'rekey', map: graphIdMap });
+					}
 					if (incoming.viewState?.viewports) {
 						viewport.current = { ...viewport.current, ...incoming.viewState.viewports };
 					}
-					dispatch(sameArch ? { type: 'rebase', architecture: projected.architecture, ...(previousBaseline ? { base: previousBaseline } : {}) } : { type: 'replace', architecture: projected.architecture });
+					dispatch(sameArch ? { type: 'rebase', architecture: projected.architecture, ...(priorBaseline ? { base: priorBaseline } : {}), ...(idMap.size ? { rekey: idMap } : {}) } : { type: 'replace', architecture: projected.architecture });
 					setHostBaseline(projected.architecture);
 					hostBaselineRef.current = projected.architecture;
-					if (sameArch && Object.keys(projected.idRemap).length > 0) {
+					if (sameArch && (idMap.size > 0 || Object.keys(projected.idRemap).length > 0)) {
 						const validIds = new Set([
 							...projected.architecture.resources.map(r => r.id),
 							...projected.architecture.items.map(i => i.id),
@@ -449,6 +480,9 @@ export function Studio() {
 				case 'focusModeChanged':
 					setFocusMode(incoming.active);
 					break;
+				case 'requestSave':
+					keyboardSaveRef.current();
+					break;
 			}
 			} catch (err) {
 				setSaving(false);
@@ -661,6 +695,30 @@ export function Studio() {
 		}
 		openDraftSave(payloads[0]?.fileName);
 	}, [hostBridge, architecture, hostSnapshot, hostBaseline, requestSaveAll, openDraftSave]);
+
+	/** Ctrl+S / Cmd+S from VS Code: the same as the Save button, or a note when the files already match. */
+	keyboardSaveRef.current = () => {
+		if (!changedFilePayloads(architecture, hostSnapshot, hostBaseline).length) {
+			setMessage('Nothing to save: the Terraform files already match the canvas.');
+			return;
+		}
+		openSave();
+	};
+
+	// Tell VS Code whether the canvas has Terraform changes the files don't have yet, so its tab shows a dot.
+	useEffect(() => {
+		if (!hostBridge.isHosted) {
+			return;
+		}
+		const timer = setTimeout(() => {
+			const dirty = changedFilePayloads(architecture, hostSnapshot, hostBaseline).length > 0;
+			if (dirty !== reportedDirtyRef.current) {
+				reportedDirtyRef.current = dirty;
+				hostBridge.post({ type: 'dirtyState', dirty });
+			}
+		}, 400);
+		return () => clearTimeout(timer);
+	}, [hostBridge, architecture, hostSnapshot, hostBaseline]);
 
 	const applySaveAll = useCallback(() => {
 		if (!hostBridge.isHosted || !saveAllPreview) {

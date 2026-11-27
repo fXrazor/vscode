@@ -23,6 +23,7 @@ import { bindingKey, variableBindingIssue, variablePreview, type FieldTarget } f
 import { inheritedDependencies } from './resourceHierarchy.ts';
 import { resourceIconSize } from './resourceGeometry.ts';
 import { alignmentGuides } from './alignmentGuides.ts';
+import { resolveDrawingTypography } from './drawingTextFit.ts';
 import { inheritedReferences, resourcePlacement, resourceDimensions, resourceDescendants } from './resourceHierarchy.ts';
 import { architectureDiagnostics } from './diagnostics.ts';
 import { projectTerraform } from './terraformProjection.ts';
@@ -948,4 +949,37 @@ test('Miro paste-lines-as-sticky-notes cluster and Select Connected traverse sub
 	};
 	assert.deepEqual(connectedElementIds(linked, ['p-1']).sort(), ['p-1', 'p-2', 'p-3']);
 	assert.deepEqual(connectedElementIds(linked, ['p-4']), ['p-4']);
+});
+
+test('Miro sticky-note and shape text scaling fits bounds without overflow and supports Auto reset', () => {
+	// Sticky note with explicit 64px font on a 220x130 card scales down so "Double-click" never splits mid-word or spills out
+	const oversized = resolveDrawingTypography({ kind: 'note', text: 'Double-click to add text', fontSize: 64, width: 220, height: 130 });
+	assert.ok(oversized.fontSize < 64 && oversized.fontSize >= 14, `expected fitted size < 64, got ${oversized.fontSize}`);
+	assert.ok(oversized.lines.some(line => line.includes('Double-click')), 'word stays intact rather than splitting mid-word');
+
+	// Short word in Auto mode scales larger than a long paragraph in the same sticky note
+	const shortAuto = resolveDrawingTypography({ kind: 'note', text: 'API', width: 220, height: 130 });
+	const longAuto = resolveDrawingTypography({ kind: 'note', text: 'Validate ingress certificates, rotate managed identities, and archive audit logs every 90 days.', width: 220, height: 130 });
+	assert.ok(shortAuto.fontSize > longAuto.fontSize, `short (${shortAuto.fontSize}) should scale larger than long (${longAuto.fontSize})`);
+
+	// Enlarging the sticky note allows text to grow back toward its requested size
+	const largerBox = resolveDrawingTypography({ kind: 'note', text: 'Double-click to add text', fontSize: 64, width: 520, height: 320 });
+	assert.ok(largerBox.fontSize > oversized.fontSize, 'larger box grows fitted font size');
+
+	// Standalone text boxes keep their explicit font size
+	const heading = resolveDrawingTypography({ kind: 'text', text: 'Architecture Title', fontSize: 64, width: 220, height: 130 });
+	assert.equal(heading.fontSize, 64);
+
+	// Setting fontSize back to undefined returns a sticky note to Auto mode in 1 atomic Undo step
+	const base: Architecture = {
+		name: 'AutoNote',
+		resources: [],
+		items: [{ id: 'n1', kind: 'note', text: 'Hello', fontSize: 64, width: 220, height: 130, positions: { visual: { x: 0, y: 0 }, technical: { x: 0, y: 0 } }, members: [] }],
+		connections: [],
+	};
+	const toAuto = historyReducer(createHistory(base), { type: 'canvas', command: { kind: 'style', ids: ['n1'], patch: { fontSize: undefined } } });
+	assert.equal(toAuto.past.length, 1);
+	assert.equal(toAuto.present.items[0].fontSize, undefined);
+	assert.equal(Object.hasOwn(toAuto.present.items[0], 'fontSize'), false);
+	assert.equal(historyReducer(toAuto, { type: 'undo' }).present.items[0].fontSize, 64);
 });

@@ -90,6 +90,7 @@ import {
 import {
 	confirmAndEvictMirrorPackage,
 	runGuidedMirrorCleanup,
+	runGuidedMirrorImport,
 	runOfflineProviderMirrorManager,
 	runVerifiedMirrorIntegrityCheck,
 	type OfflineMirrorHost
@@ -1704,6 +1705,12 @@ export function activate(context: ExtensionContext): void {
 			}
 		}
 	});
+	// Ctrl+S / Cmd+S in the Studio tab saves canvas changes to the .tf files, the same as its Save button.
+	context.subscriptions.push(commands.registerCommand('cloudforge.saveStudio', async () => {
+		if (!canvas.requestSave()) {
+			await commands.executeCommand('workbench.action.files.save');
+		}
+	}));
 	context.subscriptions.push(commands.registerCommand('cloudforge.validateArchitecture', () => {
 		const graph = provider.getGraph();
 		if (!graph) {
@@ -2639,79 +2646,11 @@ export function activate(context: ExtensionContext): void {
 				suggestedPlatform = firstMissing.platform;
 			}
 		}
-		const address = await window.showInputBox({
-			title: l10n.t('Provider Address (hostname/namespace/type)'),
-			value: suggestedAddress,
-			placeHolder: 'registry.terraform.io/hashicorp/azurerm',
-			validateInput: text => {
-				const parts = text.trim().split('/');
-				return parts.length === 3 && parts.every(p => /^[A-Za-z0-9._+-]+$/.test(p) && p !== '.' && p !== '..')
-					? undefined
-					: l10n.t('Enter a full 3-segment provider address such as registry.terraform.io/hashicorp/azurerm.');
-			},
+		await runGuidedMirrorImport(offlineMirrorHost, {
+			address: suggestedAddress,
+			version: suggestedVersion,
+			platform: suggestedPlatform,
 		});
-		if (!address) {
-			return;
-		}
-		const version = await window.showInputBox({
-			title: l10n.t('Provider Version for {0}', address.trim()),
-			value: suggestedVersion,
-			placeHolder: '5.14.0',
-			validateInput: text => /^[A-Za-z0-9._+-]+$/.test(text.trim()) ? undefined : l10n.t('Enter a provider release version such as 5.14.0.'),
-		});
-		if (!version) {
-			return;
-		}
-		const platformPick = await window.showQuickPick(
-			[
-				{ label: 'windows_amd64', description: l10n.t('Required for local Windows offline init & schema extraction') },
-				{ label: 'linux_amd64', description: l10n.t('CI / Linux offline mirror target') },
-			],
-			{
-				title: l10n.t('Target Platform for {0} {1}', address.trim(), version.trim()),
-				placeHolder: suggestedPlatform,
-			}
-		);
-		if (!platformPick) {
-			return;
-		}
-		const expectedSha256 = await window.showInputBox({
-			title: l10n.t('Expected SHA-256 Digest (64 hex characters)'),
-			placeHolder: '0123456789abcdef...',
-			validateInput: text => /^[0-9a-fA-F]{64}$/.test(text.trim())
-				? undefined
-				: l10n.t('Enter the verified 64-character SHA-256 hex digest for the provider .zip archive.'),
-		});
-		if (!expectedSha256) {
-			return;
-		}
-		const imported = await window.withProgress(
-			{
-				location: ProgressLocation.Notification,
-				title: l10n.t('Verifying and importing {0} {1} ({2}) into local mirror…', address.trim(), version.trim(), platformPick.label),
-				cancellable: false,
-			},
-			() => callService<unknown>('importMirrorPackage', {
-				address: address.trim(),
-				version: version.trim(),
-				platform: platformPick.label,
-				expectedSha256: expectedSha256.trim().toLowerCase(),
-			})
-		);
-		if (!imported.ok) {
-			if (imported.error.code !== 'CANCELLED') {
-				showServiceError(imported.error);
-			}
-			return;
-		}
-		const currentGraph = provider.getGraph();
-		if (currentGraph) {
-			canvas.updateIfOpen(toCanvasSnapshot(currentGraph, currentArchitectureName));
-		}
-		void providersView.refresh();
-		void window.showInformationMessage(
-			l10n.t('Verified and imported {0} {1} ({2}) into the local offline provider mirror.', address.trim(), version.trim(), platformPick.label)
-		);
 	}));
 	const offlineMirrorHost: OfflineMirrorHost = {
 		callService,

@@ -79,6 +79,17 @@ export interface HostViewState {
 	readonly sampleContext: unknown;
 	/** Technical Graph presentation and graph-only pins; never merged into nodePositions. */
 	readonly graph?: HostGraphViewState;
+	/** Per-resource icon choices, which Terraform does not record. The host keeps well-formed entries only. */
+	readonly appearance?: Readonly<Record<string, HostResourceAppearance>>;
+	/** Resource id → Terraform address when this state was written, so renumbered ids can be followed. */
+	readonly addresses?: Readonly<Record<string, string>>;
+}
+
+export interface HostResourceAppearance {
+	readonly icon?: string;
+	readonly iconSize?: number;
+	readonly iconKind?: string;
+	readonly override?: { readonly provider: 'azure' | 'aws' | 'gcp'; readonly icon: string; readonly label: string };
 }
 
 export interface HostGraphViewState {
@@ -423,12 +434,14 @@ export type HostInboundMessage =
 	| { readonly type: 'openTemplates' }
 	| { readonly type: 'exportResult'; readonly ok: boolean; readonly message: string }
 	| { readonly type: 'applyBundleLayout'; readonly architecture: unknown }
-	| { readonly type: 'focusModeChanged'; readonly active: boolean };
+	| { readonly type: 'focusModeChanged'; readonly active: boolean }
+	| { readonly type: 'requestSave' };
 
 export type HostOutboundMessage =
 	| { readonly type: 'ready' }
 	| { readonly type: 'selectNode'; readonly nodeId: string | null }
 	| { readonly type: 'openSource'; readonly nodeId: string }
+	| { readonly type: 'dirtyState'; readonly dirty: boolean }
 	| { readonly type: 'renderResourceDraft'; readonly resourceId: string; readonly draft: ResourceDraft }
 	| { readonly type: 'openSourceLocation'; readonly sourceRevision: string; readonly fileName: string; readonly line?: number; readonly column?: number }
 	| { readonly type: 'refresh' }

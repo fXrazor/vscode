@@ -5,7 +5,7 @@
 import { useLayoutEffect, useRef, useState, type Dispatch, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
 import { useInternalNodes, useViewport, ViewportPortal } from '@xyflow/react';
 import type { Action, Architecture, DesignConnection, DesignEndpoint, DesignMode, Position } from './model.ts';
-import { connectionElementIds, elementEndpoint, endpointPorts, type EndpointPort, endpointElementId, needsConnectionOverlay, pointEndpoint } from './connectionEndpoints.ts';
+import { connectionElementIds, elementEndpoint, endpointPorts, type EndpointPort, endpointElementId, needsConnectionOverlay, pointEndpoint, projectPerimeterAnchor } from './connectionEndpoints.ts';
 import { canConnectEndpoints, connectableElements, connectionAnchor } from './designConnections.ts';
 import { connectionDash, connectionPath } from './connectionGeometry.ts';
 import { ConnectionTools } from './ConnectionTools.tsx';
@@ -47,7 +47,7 @@ export function ConnectionOverlays({ architecture, mode, selectedId, showLabels,
 		const drawing = architecture.items.find(item => item.id === endpoint.elementId);
 		const port = endpoint.port ?? (side === 'source' ? 'output' : 'input');
 		const handle = [...node.internals.handleBounds?.source ?? [], ...node.internals.handleBounds?.target ?? []].find(handle => handle.id === port);
-		if (handle && !drawing?.rotation) {
+		if (handle && !drawing?.rotation && !endpoint.anchor) {
 			return { x: node.internals.positionAbsolute.x + handle.x + handle.width / 2, y: node.internals.positionAbsolute.y + handle.y + handle.height / 2 };
 		}
 		const element = drawing ?? architecture.resources.find(item => item.id === endpoint.elementId);
@@ -67,10 +67,27 @@ export function ConnectionOverlays({ architecture, mode, selectedId, showLabels,
 		// Empty infrastructure container space is still canvas, not an invisible connection target.
 		if (target && (!node?.querySelector('.resource-container') || hit?.closest('.resource-container-heading, .react-flow__handle'))) {
 			const port = hit?.closest<HTMLElement>('.react-flow__handle')?.dataset.handleid;
-			endpoint = elementEndpoint(target.id, endpointPorts.includes(port as EndpointPort) ? port as EndpointPort : side === 'source' ? 'output' : 'input');
+			if (port && endpointPorts.includes(port as EndpointPort)) {
+				endpoint = elementEndpoint(target.id, port as EndpointPort);
+			} else {
+				const drawing = architecture.items.find(item => item.id === target.id);
+				const rect = node?.getBoundingClientRect();
+				const topLeft = rect ? flow.screenToFlowPosition({ x: rect.left, y: rect.top }) : drawing?.positions[mode];
+				const bottomRight = rect ? flow.screenToFlowPosition({ x: rect.right, y: rect.bottom }) : undefined;
+				const box = drawing
+					? { x: drawing.positions[mode].x, y: drawing.positions[mode].y, width: drawing.width, height: drawing.height }
+					: topLeft && bottomRight ? { x: topLeft.x, y: topLeft.y, width: Math.max(1, bottomRight.x - topLeft.x), height: Math.max(1, bottomRight.y - topLeft.y) } : undefined;
+				if (box) {
+					const projected = projectPerimeterAnchor(box, position, drawing?.rotation ?? 0);
+					endpoint = elementEndpoint(target.id, projected.port, projected.anchor);
+				} else {
+					endpoint = elementEndpoint(target.id, side === 'source' ? 'output' : 'input');
+				}
+			}
 		}
 		const valid = !!selected && canConnectEndpoints(architecture, side === 'source' ? endpoint : selected.source, side === 'target' ? endpoint : selected.target, selected.id);
-		return { side, endpoint, valid, label: !valid ? 'Cannot connect here' : endpoint.kind === 'point' ? keys.free ? 'Free point · snapping off' : keys.straight ? 'Straight · 45° steps' : 'Loose point · hold Ctrl to place freely' : 'Attach to ' + target!.label };
+		const perimeterNote = endpoint.kind === 'element' && endpoint.anchor ? ' (perimeter)' : '';
+		return { side, endpoint, valid, label: !valid ? 'Cannot connect here' : endpoint.kind === 'point' ? keys.free ? 'Free point · snapping off' : keys.straight ? 'Straight · 45° steps' : 'Loose point · hold Ctrl to place freely' : 'Attach to ' + target!.label + perimeterNote };
 	}
 
 	const cancel = () => { drag.current = undefined; setPreview(undefined); };

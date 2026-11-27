@@ -16,7 +16,9 @@
  * - Never copies architecture data into a second store or fabricates unverified validation claims.
  */
 
+import { nodeAddress, resourceAddresses } from './resourceIdentity.ts';
 import { getDef } from './cloudlab-core/catalog/index.ts';
+import { coreIcon } from './coreIcons.ts';
 import type { Architecture, DesignConnection, Position, Provider, Resource, ResourceBlock, ResourceKind } from './model.ts';
 import { elementEndpoint, endpointExists, endpointKey } from './connectionEndpoints.ts';
 import type { Diagnostic } from './diagnostics.ts';
@@ -32,6 +34,7 @@ import type {
 	HostValidationRun,
 	HostViewport,
 	HostGraphViewState,
+	HostResourceAppearance,
 	HostViewState,
 } from './webviewBridge.ts';
 
@@ -141,7 +144,8 @@ function createResourceFromNode(node: HostNodeSummary, fallbackPosition: Positio
 			label: friendlyLabelForType(node.resourceType),
 			service: def?.service ?? friendlyLabelForType(node.resourceType),
 			category: def?.category ?? 'Other',
-			icon: defaultIconFor(provider, node.resourceType),
+			// Keep the icon the resource already had (from the Library or Replace icon) instead of a type default.
+			icon: preserved?.catalogue?.type === node.resourceType && preserved.catalogue.icon && !preserved.catalogue.icon.endsWith('azure-resource-groups.svg') ? preserved.catalogue.icon : coreIcon(node.resourceType, defaultIconFor(provider, node.resourceType)),
 			fields: (def?.attributes ?? [])
 				.filter(attr => attr.type !== 'block' && ['string', 'number', 'bool'].includes(attr.type))
 				.map(attr => ({
@@ -525,16 +529,27 @@ export function projectGraphSnapshotToArchitecture(
 	}
 
 	const viewPositions = options.viewState?.nodePositions?.visual ?? options.viewState?.nodePositions?.technical ?? {};
+	// Saved view state is keyed by the ids resources had when it was written; with its addresses, follow each
+	// resource to its current id and never hand one resource's position to the block that now has its old id.
+	const savedAddresses = options.viewState?.addresses;
+	const savedIdByAddress = new Map(Object.entries(savedAddresses ?? {}).map(([id, address]) => [address, id]));
+	const savedId = (node: HostNodeSummary): string | undefined => {
+		if (!savedAddresses) { return node.id; }
+		const address = nodeAddress(node);
+		const match = address ? savedIdByAddress.get(address) : undefined;
+		return match ?? (savedAddresses[node.id] === undefined ? node.id : undefined);
+	};
 	const hasSourceById: Record<string, boolean> = {};
 	const preservedIds = new Set<string>();
 
 	const resources: Resource[] = snapshot.nodes.map((node, index) => {
 		hasSourceById[node.id] = node.hasSource;
 		const previous = matchedPrevious.get(node.id);
-		// Only reuse persisted viewState coordinates by opaque ID on initial load or when no
-		// different previous resource previously occupied that opaque slot.
-		const canUseViewPos = !previous && (!options.previousArchitecture || !previousById.has(node.id));
-		const savedPos = canUseViewPos ? viewPositions[node.id] : undefined;
+		const viewId = savedId(node);
+		// Only reuse persisted viewState coordinates when either addresses verify the resource
+		// identity or no different previous resource previously occupied that opaque slot.
+		const canUseViewPos = !previous && viewId !== undefined && (!!savedAddresses || !options.previousArchitecture || !previousById.has(viewId));
+		const savedPos = canUseViewPos ? viewPositions[viewId] : undefined;
 		if (previous || savedPos) {
 			preservedIds.add(node.id);
 		}
@@ -548,7 +563,8 @@ export function projectGraphSnapshotToArchitecture(
 		if (!previous && savedPos) {
 			resource.positions = { visual: { ...savedPos }, technical: { ...savedPos } };
 		}
-		return resource;
+		const look = !previous && viewId !== undefined ? options.viewState?.appearance?.[viewId] : undefined;
+		return look ? withAppearance(resource, look) : resource;
 	});
 
 	const byId = new Map(resources.map(resource => [resource.id, resource]));
@@ -983,6 +999,33 @@ export function changedFilePayloads(
  * Serialize Studio's presentation state (mode, theme, selection, inspector, viewports, and
  * node positions) into the canonical `CanvasViewState` contract persisted by `CloudForgeCanvasPanel`.
  */
+/** Icon choices Terraform does not record (the Library icon, Replace icon, icon size), keyed by resource id. */
+function appearance(architecture: Architecture): Record<string, HostResourceAppearance> | undefined {
+	const out: Record<string, HostResourceAppearance> = {};
+	for (const resource of architecture.resources.slice(0, 512)) {
+		const icon = resource.catalogue?.icon && !resource.catalogue.icon.endsWith('azure-resource-groups.svg') ? resource.catalogue.icon : undefined;
+		const entry: HostResourceAppearance = {
+			...(icon ? { icon } : {}),
+			...(resource.iconSize ? { iconSize: resource.iconSize } : {}),
+			...(resource.iconKind ? { iconKind: resource.iconKind } : {}),
+			...(resource.iconOverride ? { override: { ...resource.iconOverride } } : {}),
+		};
+		if (Object.keys(entry).length) { out[resource.id] = entry; }
+	}
+	return Object.keys(out).length ? out : undefined;
+}
+
+/** Re-applies saved icon choices to a resource rebuilt from the Terraform graph. */
+function withAppearance(resource: Resource, look: HostResourceAppearance): Resource {
+	return {
+		...resource,
+		...(look.icon && resource.catalogue ? { catalogue: { ...resource.catalogue, icon: look.icon } } : {}),
+		...(look.iconSize ? { iconSize: look.iconSize } : {}),
+		...(look.iconKind && Object.hasOwn(resourceTypes, look.iconKind) ? { iconKind: look.iconKind as ResourceKind } : {}),
+		...(look.override ? { iconOverride: { ...look.override } } : {}),
+	};
+}
+
 export function buildHostViewState(params: {
 	readonly architecture: Architecture;
 	readonly mode: 'visual' | 'technical';
@@ -1041,6 +1084,8 @@ export function buildHostViewState(params: {
 		checkpoints: [],
 		sampleContext: null,
 		...(params.graph ? { graph: params.graph } : {}),
+		...(appearance(params.architecture) ? { appearance: appearance(params.architecture) } : {}),
+		addresses: resourceAddresses(params.architecture),
 	};
 }
 
