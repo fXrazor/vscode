@@ -198,3 +198,17 @@ test('view state keeps well-formed resource icon choices and drops unsafe ones',
 	});
 	assert.equal(sanitizeViewState({}).appearance, undefined);
 });
+
+test('view state keeps resource addresses so renumbered node ids can be followed', () => {
+	const state = sanitizeViewState({
+		addresses: {
+			'node-1': 'azurerm_resource_group.rg',
+			'node-2': 'module.network',
+			'node-3': 'not an address',
+			'node-4': 'azurerm_vm.${evil}',
+			'node-5': 42,
+		},
+	});
+	assert.deepEqual(state.addresses, { 'node-1': 'azurerm_resource_group.rg', 'node-2': 'module.network' });
+	assert.equal(sanitizeViewState({}).addresses, undefined);
+});

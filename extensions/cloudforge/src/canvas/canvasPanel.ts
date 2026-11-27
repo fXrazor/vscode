@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { randomBytes } from 'node:crypto';
-import { l10n, Uri, ViewColumn, window, workspace, type Disposable, type ExtensionContext, type Webview, type WebviewPanel } from 'vscode';
+import { commands, l10n, Uri, ViewColumn, window, workspace, type Disposable, type ExtensionContext, type Webview, type WebviewPanel } from 'vscode';
 import { buildStudioUnavailableHtml, buildStudioWebviewHtml } from './canvasEngine';
 import {
 	defaultCanvasViewState,
@@ -152,6 +152,7 @@ export interface CanvasPanelHost {
 export class CloudForgeCanvasPanel implements Disposable {
 	private panel: WebviewPanel | undefined;
 	private ready = false;
+	private dirty = false;
 	private readonly pendingBundleLayouts = new Map<string, unknown>();
 	private showSequence = 0;
 	private graph: CanvasGraphSnapshot | undefined;
@@ -187,7 +188,32 @@ export class CloudForgeCanvasPanel implements Disposable {
 	}
 
 	private panelTitle(graph: CanvasGraphSnapshot | undefined): string {
-		return graph ? l10n.t('CloudForge: {0}', graph.architectureName) : l10n.t('CloudForge Canvas');
+		const title = graph ? l10n.t('CloudForge: {0}', graph.architectureName) : l10n.t('CloudForge Canvas');
+		// Like an editor tab, a dot marks canvas changes not yet saved to the Terraform files.
+		return this.dirty ? '\u25CF ' + title : title;
+	}
+
+	private setDirty(dirty: boolean): void {
+		if (this.dirty === dirty) {
+			return;
+		}
+		this.dirty = dirty;
+		void commands.executeCommand('setContext', 'cloudforge.studioDirty', dirty);
+		if (this.panel) {
+			this.panel.title = this.panelTitle(this.graph);
+		}
+	}
+
+	/**
+	 * Ctrl+S / Cmd+S while the canvas tab is active. Returns false when there is no ready canvas, so the
+	 * caller can fall back to the editor's own save.
+	 */
+	requestSave(): boolean {
+		if (!this.panel || !this.ready) {
+			return false;
+		}
+		this.post({ type: 'requestSave' });
+		return true;
 	}
 
 	/** Opens or reveals the Architecture Canvas editor tab and shows the current graph. */
@@ -379,6 +405,7 @@ export class CloudForgeCanvasPanel implements Disposable {
 				this.panel = undefined;
 				this.ready = false;
 				this.pendingValidation = undefined;
+				this.setDirty(false);
 				this.pendingSelectNodeId = undefined;
 				this.pendingOpenExport = false;
 				this.pendingOpenTemplates = false;
@@ -462,6 +489,9 @@ export class CloudForgeCanvasPanel implements Disposable {
 				return;
 			case 'selectNode':
 				this.host.onSelectNode(message.nodeId);
+				return;
+			case 'dirtyState':
+				this.setDirty(message.dirty);
 				return;
 			case 'viewState':
 				if (this.graph) {

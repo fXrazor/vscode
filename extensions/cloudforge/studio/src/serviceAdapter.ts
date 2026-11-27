@@ -16,6 +16,7 @@
  * - Never copies architecture data into a second store or fabricates unverified validation claims.
  */
 
+import { nodeAddress, resourceAddresses } from './resourceIdentity.ts';
 import { getDef } from './cloudlab-core/catalog/index.ts';
 import { coreIcon } from './coreIcons.ts';
 import type { Architecture, DesignConnection, Position, Provider, Resource, ResourceBlock, ResourceKind } from './model.ts';
@@ -356,13 +357,24 @@ export function projectGraphSnapshotToArchitecture(
 	const previousById = new Map((options.previousArchitecture?.resources ?? []).map(resource => [resource.id, resource]));
 	const previousConnectionsById = new Map((options.previousArchitecture?.connections ?? []).map(connection => [connection.id, connection]));
 	const viewPositions = options.viewState?.nodePositions?.visual ?? options.viewState?.nodePositions?.technical ?? {};
+	// Saved view state is keyed by the ids resources had when it was written; with its addresses, follow each
+	// resource to its current id and never hand one resource's position to the block that now has its old id.
+	const savedAddresses = options.viewState?.addresses;
+	const savedIdByAddress = new Map(Object.entries(savedAddresses ?? {}).map(([id, address]) => [address, id]));
+	const savedId = (node: HostNodeSummary): string | undefined => {
+		if (!savedAddresses) { return node.id; }
+		const address = nodeAddress(node);
+		const match = address ? savedIdByAddress.get(address) : undefined;
+		return match ?? (savedAddresses[node.id] === undefined ? node.id : undefined);
+	};
 	const hasSourceById: Record<string, boolean> = {};
 	const preservedIds = new Set<string>();
 
 	const resources: Resource[] = snapshot.nodes.map((node, index) => {
 		hasSourceById[node.id] = node.hasSource;
 		const previous = previousById.get(node.id);
-		const savedPos = viewPositions[node.id];
+		const viewId = savedId(node);
+		const savedPos = viewId !== undefined ? viewPositions[viewId] : undefined;
 		if (previous || savedPos) {
 			preservedIds.add(node.id);
 		}
@@ -373,7 +385,7 @@ export function projectGraphSnapshotToArchitecture(
 		if (!previous && savedPos) {
 			resource.positions = { visual: { ...savedPos }, technical: { ...savedPos } };
 		}
-		const look = !previous ? options.viewState?.appearance?.[node.id] : undefined;
+		const look = !previous && viewId !== undefined ? options.viewState?.appearance?.[viewId] : undefined;
 		return look ? withAppearance(resource, look) : resource;
 	});
 
@@ -860,6 +872,7 @@ export function buildHostViewState(params: {
 		sampleContext: null,
 		...(params.graph ? { graph: params.graph } : {}),
 		...(appearance(params.architecture) ? { appearance: appearance(params.architecture) } : {}),
+		addresses: resourceAddresses(params.architecture),
 	};
 }
 

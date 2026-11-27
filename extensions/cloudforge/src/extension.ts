@@ -1695,6 +1695,12 @@ export function activate(context: ExtensionContext): void {
 			}
 		}
 	});
+	// Ctrl+S / Cmd+S in the Studio tab saves canvas changes to the .tf files, the same as its Save button.
+	context.subscriptions.push(commands.registerCommand('cloudforge.saveStudio', async () => {
+		if (!canvas.requestSave()) {
+			await commands.executeCommand('workbench.action.files.save');
+		}
+	}));
 	context.subscriptions.push(commands.registerCommand('cloudforge.validateArchitecture', () => {
 		const graph = provider.getGraph();
 		if (!graph) {

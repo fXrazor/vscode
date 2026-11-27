@@ -460,6 +460,8 @@ export interface CanvasViewState {
 	readonly graph?: CanvasGraphViewState;
 	/** Per-resource icon choices (Library icon, Replace icon, icon size), which Terraform does not record. */
 	readonly appearance?: Readonly<Record<string, CanvasResourceAppearance>>;
+	/** Resource id → Terraform address when the state was written, so the Studio can follow renumbered node ids. */
+	readonly addresses?: Readonly<Record<string, string>>;
 }
 
 export interface CanvasResourceAppearance {
@@ -473,6 +475,27 @@ const MAX_APPEARANCE_ENTRIES = 512;
 const isIconPath = (value: unknown): value is string => typeof value === 'string' && value.length <= 200 && /^[A-Za-z0-9_][A-Za-z0-9_./-]*\.svg$/.test(value) && !value.includes('..');
 
 /** Keeps only well-formed icon paths, sizes and kinds; unknown keys are dropped. */
+const TERRAFORM_ADDRESS = /^(?:module\.[A-Za-z_][A-Za-z0-9_-]{0,127}|[A-Za-z][A-Za-z0-9_]{0,127}\.[A-Za-z_][A-Za-z0-9_-]{0,127})$/;
+
+/** At most 512 `id → type.name` / `module.name` pairs; anything else is dropped. */
+export function sanitizeResourceAddresses(value: unknown): Record<string, string> | undefined {
+	if (!isRecord(value)) {
+		return undefined;
+	}
+	const result: Record<string, string> = {};
+	let count = 0;
+	for (const [id, address] of Object.entries(value)) {
+		if (count >= 512) {
+			break;
+		}
+		if (isOpaqueId(id) && typeof address === 'string' && TERRAFORM_ADDRESS.test(address)) {
+			result[id] = address;
+			count++;
+		}
+	}
+	return count ? result : undefined;
+}
+
 export function sanitizeResourceAppearance(value: unknown): Record<string, CanvasResourceAppearance> | undefined {
 	if (!isRecord(value)) {
 		return undefined;
@@ -711,6 +734,10 @@ export type ExtensionToWebviewMessage =
 		readonly active: boolean;
 	}
 	| {
+		/** Ctrl+S / Cmd+S while the Studio has focus: save the canvas changes to the Terraform files. */
+		readonly type: 'requestSave';
+	}
+	| {
 		/** Canvas model from an imported project bundle, laid over the new architecture once. */
 		readonly type: 'applyBundleLayout';
 		readonly architecture: unknown;
@@ -724,6 +751,7 @@ export type WebviewToExtensionMessage =
 	| { readonly type: 'openSourceLocation'; readonly sourceRevision: string; readonly fileName: string; readonly line?: number; readonly column?: number }
 	| { readonly type: 'refresh' }
 	| { readonly type: 'toggleFocusMode'; readonly active?: boolean }
+	| { readonly type: 'dirtyState'; readonly dirty: boolean }
 	| { readonly type: 'viewState'; readonly state: CanvasViewState }
 	| { readonly type: 'requestValidation'; readonly scope: 'architecture' | 'resource'; readonly nodeId?: string }
 	| { readonly type: 'cancelValidation' }
@@ -986,6 +1014,7 @@ export function sanitizeViewState(value: unknown): CanvasViewState {
 
 	const graph = sanitizeGraphViewState(value.graph);
 	const appearance = sanitizeResourceAppearance(value.appearance);
+	const addresses = sanitizeResourceAddresses(value.addresses);
 	const nodePositions: Partial<Record<CanvasViewMode, Readonly<Record<string, CanvasPoint>>>> = {};
 	if (isRecord(value.nodePositions)) {
 		const visualPos = sanitizeNodePositionMap(value.nodePositions.visual);
@@ -1113,6 +1142,7 @@ export function sanitizeViewState(value: unknown): CanvasViewState {
 		sampleContext,
 		...(graph ? { graph } : {}),
 		...(appearance ? { appearance } : {}),
+		...(addresses ? { addresses } : {}),
 	};
 }
 
@@ -1171,6 +1201,8 @@ export function parseWebviewMessage(value: unknown): WebviewToExtensionMessage |
 		}
 		case 'viewState':
 			return isRecord(value.state) ? { type: 'viewState', state: sanitizeViewState(value.state) } : undefined;
+		case 'dirtyState':
+			return typeof value.dirty === 'boolean' ? { type: 'dirtyState', dirty: value.dirty } : undefined;
 		case 'requestValidation': {
 			if (value.scope !== 'architecture' && value.scope !== 'resource') {
 				return undefined;
