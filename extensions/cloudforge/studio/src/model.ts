@@ -7,7 +7,8 @@ import { canConnect, canConnectEndpoints } from './designConnections.ts';
 import { elementEndpoint, endpointKey, normaliseArchitectureConnections, type ArchitectureInput, type DesignEndpoint } from './connectionEndpoints.ts';
 export type { DesignEndpoint } from './connectionEndpoints.ts';
 import { applyCanvasCommand, canvasElements, type CanvasCommand } from './canvasOperations.ts';
-import { bindingKey, acceptsResourceRefs, acceptsVariable, canBindField, fieldDefinition, fieldTargetPath, findResourceBlock, pruneBlockBindings, pruneBlockResourceRefs, type FieldTarget, type ResourceRefBinding, type ResourceRefEntry, type VariableBinding, type ListEntry } from './fieldBindings.ts';
+import { createRekeyer } from './resourceIdentity.ts';
+import { bindingKey, acceptsResourceRefs, attachesHeldReference, acceptsVariable, canBindField, fieldDefinition, fieldTargetPath, findResourceBlock, pruneBlockBindings, pruneBlockResourceRefs, type FieldTarget, type ResourceRefBinding, type ResourceRefEntry, type VariableBinding, type ListEntry } from './fieldBindings.ts';
 import { fitResourceContainers, isResourceContainer, reparentResource, resourcePlacement, visualResourcePlacement, terraformIdentifier } from './resourceHierarchy.ts';
 import type { ShapeId } from './shapes.ts';
 import { rebaseHistory } from './historyRebase.ts';
@@ -171,7 +172,7 @@ export type Edit =
 
 export type Action = Edit | { type: 'undo' } | { type: 'redo' } | { type: 'replace'; architecture: Architecture }
 	/** A live refresh of the same architecture: keeps undo/redo, rebased onto the refreshed state. */
-	| { type: 'rebase'; architecture: Architecture; base?: Architecture };
+	| { type: 'rebase'; architecture: Architecture; base?: Architecture; rekey?: ReadonlyMap<string, string> };
 
 export function createHistory(architecture: ArchitectureInput): History {
 	return { past: [], present: normaliseArchitectureConnections(architecture), future: [] };
@@ -229,6 +230,7 @@ function editArchitecture(architecture: Architecture, action: Edit): Architectur
 			const definition = fieldDefinition(resource, target);
 			if (refs && !acceptsResourceRefs(architecture, resource, refs, definition)) { return architecture; }
 			const key = bindingKey(target);
+			if (refs && attachesHeldReference(architecture, resource, refs, resource.resourceRefs?.[key]?.refs, definition)) { return architecture; }
 			const resourceRefs = { ...resource.resourceRefs };
 			const fieldBindings = { ...resource.fieldBindings };
 			if (JSON.stringify(resourceRefs[key]?.refs ?? null) === JSON.stringify(refs ?? null) && (!refs || !fieldBindings[key])) { return architecture; }
@@ -262,6 +264,7 @@ function editArchitecture(architecture: Architecture, action: Edit): Architectur
 				if (items.some(entry => entry.kind === 'variable' && !architecture.variables?.some(variable => variable.id === entry.variableId))) { return architecture; }
 				const refs = items.flatMap(entry => entry.kind === 'ref' ? [{ resourceId: entry.resourceId, attribute: entry.attribute }] : []);
 				if (refs.length && !acceptsResourceRefs(architecture, resource, refs, definition)) { return architecture; }
+				if (attachesHeldReference(architecture, resource, refs, resourceRefs[key]?.refs, definition)) { return architecture; }
 				const next = { refs, items: structuredClone(items) };
 				if (JSON.stringify(resourceRefs[key] ?? null) === JSON.stringify(next) && !fieldBindings[key]) { return architecture; }
 				resourceRefs[key] = next; delete fieldBindings[key];
@@ -452,7 +455,10 @@ export function historyReducer(history: History, action: Action): History {
 		return createHistory(action.architecture);
 	}
 	if (action.type === 'rebase') {
-		return rebaseHistory(history, normaliseArchitectureConnections(action.architecture), action.base && normaliseArchitectureConnections(action.base));
+		// Ids the service renumbered are renamed through the whole history first, so undo stays on the right resource.
+		const rekey = createRekeyer(action.rekey ?? new Map());
+		const renamed = action.rekey?.size ? { ...history, past: history.past.map(rekey), present: rekey(history.present), future: history.future.map(rekey) } : history;
+		return rebaseHistory(renamed, normaliseArchitectureConnections(action.architecture), action.base && normaliseArchitectureConnections(rekey(action.base)));
 	}
 	if (action.type === 'undo') {
 		const previous = history.past.at(-1);

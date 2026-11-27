@@ -16,7 +16,7 @@ import type { FileBlockValues, FileResourceValues } from './resourceValues.ts';
 import { resourceDefinition } from './fixture.ts';
 import { infrastructureLayers, resourceIntelligence, type InfrastructureLayer, type RelationshipCategory } from './providerKnowledge.ts';
 import { documentedHubSpokes, infrastructureRelationships, type InfrastructureRelationship } from './infrastructureRelationships.ts';
-import { resourceAddress, resourceAncestors, terraformIdentifier } from './resourceHierarchy.ts';
+import { resourceAddress, terraformIdentifier } from './resourceHierarchy.ts';
 import {
 	detectTechnicalGraphPatterns,
 	summarizeGraphBoundaries,
@@ -205,6 +205,19 @@ export function extractSourceEdgeEvidence(
 	return matches;
 }
 
+/**
+ * Ownership chain, nearest first. The configured parent wins; a resource read from Terraform files usually has
+ * none, so its containment from references (resource_group_name, virtual_network_name, subnet_id …), which the
+ * canvas already uses for nesting, stands in. Names and proximity are never used.
+ */
+function ownershipAncestors(byId: ReadonlyMap<string, Resource>, resource: Resource): Resource[] {
+	const result: Resource[] = []; const seen = new Set([resource.id]);
+	const parentOf = (item: Resource) => item.parentId ?? (typeof item.visualParentId === 'string' ? item.visualParentId : undefined);
+	let parent = parentOf(resource);
+	while (parent && !seen.has(parent)) { seen.add(parent); const item = byId.get(parent); if (!item) { break; } result.push(item); parent = parentOf(item); }
+	return result;
+}
+
 /** Build the detached, frozen graph snapshot. Pure: never mutates or retains the architecture. */
 export function projectTechnicalGraph(architecture: Architecture, fileValues?: readonly FileResourceValues[]): TechnicalGraphSnapshot {
 	const relationships: InfrastructureRelationship[] = infrastructureRelationships(architecture);
@@ -242,7 +255,7 @@ export function projectTechnicalGraph(architecture: Architecture, fileValues?: r
 	const nodes: GraphNode[] = architecture.resources.map(resource => {
 		const definition = resourceDefinition(resource);
 		const profile = resourceIntelligence(definition.type);
-		const chain = resourceAncestors(architecture, resource).filter(isScopeResource).map(item => item.id).reverse();
+		const chain = ownershipAncestors(byId, resource).filter(isScopeResource).map(item => item.id).reverse();
 		const ports: GraphPort[] = edges.filter(edge => edge.target === resource.id && !edge.membership).flatMap(edge => {
 			const fields = [...new Set(edge.evidence.map(item => item.field))];
 			return fields.map(field => ({ id: portId(resource.id, field, edge.source), field, peer: edge.source, peerLabel: labelOf(edge.source), category: edge.category, edgeId: edge.id }));

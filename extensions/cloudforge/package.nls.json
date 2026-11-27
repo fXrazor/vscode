@@ -28,6 +28,7 @@
 	"command.cloneRepositoryAgain": "Clone Again",
 	"command.openCanvas": "Open Architecture Canvas",
 	"command.toggleCanvasFocusMode": "Toggle Canvas Focus Mode",
+	"command.saveStudio": "Save Studio Changes to Terraform Files",
 	"command.validateArchitecture": "Validate Architecture",
 	"command.runEnginePlan": "Preview Local Plan (OpenTofu / Terraform)",
 	"command.cancelValidation": "Cancel Validation Run",

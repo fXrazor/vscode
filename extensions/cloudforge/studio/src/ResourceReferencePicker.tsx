@@ -73,8 +73,10 @@ export function ResourceReferencePicker({ name, definition, candidates, selected
 					const meta = resourceDefinition(candidate.resource);
 					const key = `${candidate.resource.id}:${candidate.attribute}`;
 					const active = selectedKeys.has(key);
-					return <button type="button" key={key} className="resource-ref-picker-item" aria-label={'Reference ' + candidate.expression} aria-pressed={active} onClick={() => toggle(candidate)}>
-						<span><img src={'./assets/' + meta.icon} alt="" /><strong>{candidate.resource.label || candidate.resource.name}</strong><small>.{candidate.attribute}</small>{active && <Check size={13} className="resource-ref-check" />}</span>
+					const held = !active && candidate.inUseBy;
+					const heldBy = held ? (held.label || held.name) : '';
+					return <button type="button" key={key} className={'resource-ref-picker-item' + (held ? ' is-in-use' : '')} aria-label={'Reference ' + candidate.expression + (held ? ', already attached to ' + heldBy : '')} aria-pressed={active} disabled={!!held} title={held ? 'Already attached to ' + heldBy + '. Remove it there first.' : undefined} onClick={() => toggle(candidate)}>
+						<span><img src={'./assets/' + meta.icon} alt="" /><strong>{candidate.resource.label || candidate.resource.name}</strong>{held ? <small className="resource-ref-in-use">In use by {heldBy}</small> : <small>.{candidate.attribute}</small>}{active && <Check size={13} className="resource-ref-check" />}</span>
 						<span><code>{candidate.expression}</code></span>
 					</button>;
 				})}</div>

@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 import type { Architecture, Resource, ResourceBlock } from './model.ts';
 import { withInferredReferenceTypes } from './referenceInference.ts';
+import { exclusiveReferenceHolder } from './exclusiveReferences.ts';
 import { isExpr, type Value } from './cloudlab-core/model.ts';
 import { isObjectValue, isSensitiveProperty, variableValueAt, type VariableDefinition } from './variables.ts';
 import { getDef, type AttrDef } from './cloudlab-core/catalog/index.ts';
@@ -26,7 +27,8 @@ export function listEntryExpression(entry: ListEntry, architecture?: Architectur
 	const source = architecture?.resources.find(item => item.id === entry.resourceId);
 	return source ? resourceAddress(source) + '.' + entry.attribute : 'Missing resource';
 }
-export type ResourceRefCandidate = { resource: Resource; attribute: string; expression: string };
+/** `inUseBy` is set when the target is already attached exclusively elsewhere (a NIC on another VM): it is shown but cannot be picked. */
+export type ResourceRefCandidate = { resource: Resource; attribute: string; expression: string; inUseBy?: Resource };
 export const fieldAliases: Record<string, string> = {
 	'Address space': 'address_space', 'Address prefix': 'address_prefixes', SKU: 'sku.name', Capacity: 'sku.capacity',
 	'Node count': 'default_node_pool.node_count', 'VM size': 'default_node_pool.vm_size', 'Private cluster': 'private_cluster_enabled',
@@ -180,11 +182,15 @@ export function eligibleReferenceTargets(architecture: Architecture, resource: R
 			if (!referenceableAttribute(candidateType, attribute, definition, liveSchemas)) { return false; }
 			return !wouldCreateReferenceCycle(architecture, resource.id, candidate.id);
 		})
-		.map(candidate => ({
-			resource: candidate,
-			attribute,
-			expression: resourceAddress(candidate) + '.' + attribute,
-		}));
+		.map(candidate => {
+			const inUseBy = exclusiveReferenceHolder(architecture, resource, definition.name, candidate);
+			return {
+				resource: candidate,
+				attribute,
+				expression: resourceAddress(candidate) + '.' + attribute,
+				...(inUseBy ? { inUseBy } : {}),
+			};
+		});
 }
 
 /**
@@ -208,6 +214,19 @@ export function acceptsResourceRefs(architecture: Architecture, resource: Resour
 		if (!eligible.some(candidate => candidate.resource.id === entry.resourceId && candidate.attribute === entry.attribute)) { return false; }
 	}
 	return true;
+}
+
+/**
+ * Whether `refs` newly attaches a target that another resource already holds exclusively (a second VM taking a NIC).
+ * Entries already in `previous` are left alone, so a conflict read from a file is reported, never silently dropped.
+ */
+export function attachesHeldReference(architecture: Architecture, resource: Resource, refs: readonly ResourceRefEntry[], previous: readonly ResourceRefEntry[] | undefined, definition?: AttrDef): boolean {
+	if (!definition) { return false; }
+	return refs.some(entry => {
+		if (previous?.some(item => item.resourceId === entry.resourceId && item.attribute === entry.attribute)) { return false; }
+		const target = architecture.resources.find(item => item.id === entry.resourceId);
+		return !!target && !!exclusiveReferenceHolder(architecture, resource, definition.name, target);
+	});
 }
 
 export function resourceRefBindingIssue(binding: ResourceRefBinding | undefined, architecture: Architecture | undefined, resource: Resource, definition?: AttrDef): string | undefined {
@@ -236,6 +255,10 @@ export function resourceRefBindingIssue(binding: ResourceRefBinding | undefined,
 		}
 		if (!referenceableAttribute(targetType, entry.attribute, definition)) {
 			return 'The referenced attribute is not exported by this resource.';
+		}
+		const holder = exclusiveReferenceHolder(architecture, resource, definition.name, target);
+		if (holder) {
+			return (target.label || target.name) + ' is already attached to ' + (holder.label || holder.name) + '. Choose another one or remove it there first.';
 		}
 	}
 	return undefined;

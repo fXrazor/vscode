@@ -428,6 +428,12 @@
 				"icon": "$(screen-full)"
 			},
 			{
+				"command": "cloudforge.saveStudio",
+				"title": "%command.saveStudio%",
+				"category": "%displayName%",
+				"icon": "$(save)"
+			},
+			{
 				"command": "cloudforge.validateArchitecture",
 				"title": "%command.validateArchitecture%",
 				"category": "%displayName%",
@@ -684,6 +690,12 @@
 			}
 		],
 		"keybindings": [
+			{
+				"command": "cloudforge.saveStudio",
+				"key": "ctrl+s",
+				"mac": "cmd+s",
+				"when": "activeWebviewPanelId == 'cloudforge.architectureCanvas'"
+			},
 			{
 				"command": "cloudforge.toggleCanvasFocusMode",
 				"key": "ctrl+alt+f",

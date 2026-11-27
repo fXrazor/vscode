@@ -656,3 +656,9 @@ test('Stage 10 mirror package, readiness, offline init adapters and webview prot
 	assert.deepEqual(parseWebviewMessage({ type: 'requestEngineInitOffline', engine: 'terraform' }), { type: 'requestEngineInitOffline', engine: 'terraform' });
 	assert.equal(parseWebviewMessage({ type: 'requestEngineInitOffline', engine: 'bash' }), undefined);
 });
+
+test('the Studio reports unsaved canvas changes so the tab can show a dot', () => {
+	assert.deepEqual(parseWebviewMessage({ type: 'dirtyState', dirty: true }), { type: 'dirtyState', dirty: true });
+	assert.deepEqual(parseWebviewMessage({ type: 'dirtyState', dirty: false }), { type: 'dirtyState', dirty: false });
+	assert.equal(parseWebviewMessage({ type: 'dirtyState', dirty: 'yes' }), undefined);
+});

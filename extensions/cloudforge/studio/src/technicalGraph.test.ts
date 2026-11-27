@@ -500,3 +500,27 @@ test('bundledGraphSvg exports radial hierarchical edge-bundling layout with colo
 	assert.match(svg, /<g data-id="vnet-hub" transform="rotate\([^)]+\) translate\([^)]+\)[^"]*" opacity="0\.22">/, 'outside leaf softens to 0.22');
 	assert.ok(svg.includes('opacity="0.08"'), 'outside bundled curves soften to 0.08');
 });
+
+test('a scope column is wide enough for its title, so titles never run into the next column', () => {
+	const architecture = hubSpokeArchitecture();
+	const long = 'azurerm_resource_group.a_very_long_resource_group_name_for_testing';
+	const renamed = { ...architecture, resources: architecture.resources.map(resource => resource.id === 'rg-hub' ? { ...resource, label: long } : resource) };
+	const scopes = layout(renamed, { layout: 'scopes' }).result;
+	const column = scopes.columns.find(item => item.label === long)!;
+	assert.ok(column, 'the long title is a column');
+	assert.ok(column.width >= long.length * 7.2 + 32 - 8 - 1, 'column ' + column.width + ' fits the title');
+	const sorted = [...scopes.columns].sort((a, b) => a.x - b.x);
+	for (let i = 1; i < sorted.length; i++) { assert.ok(sorted[i - 1].x + sorted[i - 1].width <= sorted[i].x, 'columns do not overlap'); }
+});
+
+test('resources read from files, with containment but no configured parent, still form a tree', () => {
+	const architecture = hubSpokeArchitecture();
+	// Files give containment from references (the canvas nesting), not a configured parent.
+	const fromFiles = { ...architecture, resources: architecture.resources.map(resource => resource.parentId ? { ...resource, parentId: undefined, visualParentId: resource.parentId } : resource) };
+	const configured = layout(architecture, { layout: 'tree' }).result;
+	const read = layout(fromFiles, { layout: 'tree' }).result;
+	assert.ok(read.positions['rg-hub'].x < read.positions['vnet-hub'].x && read.positions['vnet-hub'].x < read.positions['snet-fw'].x, 'rg → vnet → subnet branches out');
+	assert.deepEqual(read.positions, configured.positions);
+	const scopes = layout(fromFiles, { layout: 'scopes' }).result;
+	assert.deepEqual(scopes.columns.map(column => column.label).sort(), ['rg-connectivity', 'rg-platform']);
+});
