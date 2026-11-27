@@ -92,18 +92,18 @@ try {
 			await layoutTo('scopes'); assert.ok(await noOverlap() > 100);
 			await page.getByLabel('Spotlight scope').selectOption('rg-prod'); await page.waitForTimeout(500);
 			{ const outside = await page.locator('.tg-card.is-outside').count(); const inside = await page.locator('.tg-card:not(.is-outside)').count(); assert.ok(outside > 80 && inside >= 20 && inside < 40, inside + ' in, ' + outside + ' out'); }
-			assert.equal(await page.locator('.tg-card.is-outside').first().evaluate(el => getComputedStyle(el).filter), 'none', 'scope spotlight keeps card colour (no grayscale filter)');
+			assert.match(await page.locator('.tg-card.is-outside').first().evaluate(el => getComputedStyle(el).filter), /grayscale/, 'scope spotlight greys out cards outside the scope');
 			await layoutTo('force'); await page.waitForTimeout(800);
 			assert.equal(await page.locator('.tg-force-node').count(), estate.resources.length);
 			assert.ok(await page.locator('.tg-force-node:not(.is-outside)').count() < 40 && await page.locator('.tg-force-hull.is-lit').count() === 1);
-			assert.equal(await page.locator('.tg-force-node.is-outside').first().evaluate(el => getComputedStyle(el).filter), 'none', 'scope spotlight keeps Network node colour (no grayscale filter)');
+			assert.match(await page.locator('.tg-force-node.is-outside').first().evaluate(el => getComputedStyle(el).filter), /grayscale/, 'scope spotlight greys out Network nodes outside the scope');
 			await page.locator('.tg-scope-pick button').click(); await page.waitForTimeout(400);
 			assert.equal(await page.locator('.tg-force-node.is-outside').count(), 0);
 			{ const hulls = await page.locator('.tg-force-hull path').evaluateAll(paths => paths.map(path => { const box = path.getBBox(); return { x: box.x, y: box.y, w: box.width, h: box.height }; }));
 				assert.ok(hulls.length >= 9, hulls.length + ' hulls');
 				const centre = box => ({ x: box.x + box.w / 2, y: box.y + box.h / 2, r: Math.min(box.w, box.h) / 2 });
 				for (const [i, a] of hulls.entries()) { for (const b of hulls.slice(i + 1)) { const p = centre(a); const q = centre(b); assert.ok(Math.hypot(p.x - q.x, p.y - q.y) > (p.r + q.r) * 0.9, 'scope outlines overlap'); } } }
-			assert.deepEqual(await exported(), estate); pass('large multi-cloud estate: scope spotlight dims the rest without losing colour and network scopes sit apart without project changes');
+			assert.deepEqual(await exported(), estate); pass('large multi-cloud estate: scope spotlight greys out the rest and network scopes sit apart without project changes');
 			await page.goto(withSample('hub-spoke')); if (theme === 'dark') { await page.getByLabel('Toggle light or dark theme').click(); }
 			await page.getByLabel('Toggle resource library', { exact: true }).click();
 			await page.getByRole('button', { name: 'Configuration', exact: true }).click(); await page.locator('main.technical-graph').waitFor();

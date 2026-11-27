@@ -48,11 +48,10 @@ export const forceSettings = { radius: 22, linkDistance: 110, charge: -460, labe
 
 /**
  * Node radius from the lines drawn to it. 'all' counts every line, including resource-group
- * membership, so a resource group holding many resources stands out as a hub. 'dependents'
+ * membership, so a resource group holding twenty resources is the biggest node. 'dependents'
  * counts resources that reference this one (edge source = the referenced resource), 'dependencies'
- * the resources it references. A gradual convex curve (`(d / max(maxDegree, 6))^1.35`) keeps
- * 0- and 1-connection leaves compact while making each additional connection step up smoothly
- * and preventing tiny graphs from inflating a 1-link node into a hub.
+ * the resources it references. Logarithmic growth relative to the busiest node keeps mid-sized
+ * hubs visibly bigger than leaves even beside a large resource group; the busiest node is exactly sizeBy % bigger than a node with no lines.
  */
 export function nodeRadii(nodes: readonly Pick<GraphNode, 'id'>[], edges: readonly Pick<GraphEdge, 'source' | 'target' | 'membership'>[], sizeBy: number, count: NetworkOptions['sizeCount'] = 'all'): Record<string, number> {
 	const degree = new Map(nodes.map(node => [node.id, 0]));
@@ -64,13 +63,8 @@ export function nodeRadii(nodes: readonly Pick<GraphNode, 'id'>[], edges: readon
 		if (count !== 'dependencies') { bump(edge.source); }
 		if (count !== 'dependents') { bump(edge.target); }
 	}
-	const max = Math.max(1, ...degree.values());
-	const scaleMax = Math.max(max, 6);
-	const growth = Math.max(0, Math.min(300, sizeBy)) / 100;
-	return Object.fromEntries([...degree].map(([id, d]) => {
-		const ratio = d <= 0 ? 0 : Math.pow(d / scaleMax, 1.35);
-		return [id, Math.round(forceSettings.radius * (1 + growth * ratio) * 10) / 10];
-	}));
+	const max = Math.max(1, ...degree.values()); const growth = Math.max(0, Math.min(300, sizeBy)) / 100;
+	return Object.fromEntries([...degree].map(([id, d]) => [id, Math.round(forceSettings.radius * (1 + growth * Math.log1p(d) / Math.log1p(max)) * 10) / 10]));
 }
 
 /** Deterministic phyllotaxis start, like d3-force, so the same project always settles the same way. */

@@ -306,7 +306,7 @@
 .tg-force-node:hover .tg-force-halo, .tg-force-node.is-related .tg-force-halo { stroke: color-mix(in srgb, var(--tg-layer) 35%, transparent); }
 .tg-force-node.is-selected .tg-force-halo, .tg-force-node.is-focus .tg-force-halo { stroke: var(--accent); stroke-width: 3; }
 .tg-force-exposed { fill: none; stroke: var(--danger); stroke-width: 1.5; stroke-dasharray: 3 3; }
-.tg-force-label { font-size: 11px; font-weight: 550; fill: var(--text); paint-order: stroke; stroke: var(--canvas); stroke-width: 4px; stroke-linejoin: round; pointer-events: none; }
+.tg-force-label { font-size: 11.5px; font-weight: 600; fill: var(--text); paint-order: stroke; stroke: var(--canvas); stroke-width: 4px; stroke-linejoin: round; pointer-events: none; }
 .tg-force-node.is-dim { opacity: .22; }
 .tg-force-node.is-unmatched { opacity: .18; }
 .tg-force-issue circle { fill: var(--warning); stroke: var(--node); stroke-width: 2; }
@@ -324,7 +324,7 @@
 .tg-force-hull path { fill: color-mix(in srgb, var(--tg-layer, var(--tg-edge-ownership)) 7%, transparent); stroke: color-mix(in srgb, var(--tg-layer, var(--tg-edge-ownership)) 32%, transparent); stroke-width: 1.2; stroke-dasharray: 4 5; transition: opacity .15s; }
 .tg-force-hull text { font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; fill: color-mix(in srgb, var(--tg-layer, var(--muted)) 70%, var(--muted)); paint-order: stroke; stroke: var(--canvas); stroke-width: 4px; pointer-events: none; }
 .tg-force-hull.is-dim { opacity: .3; }
-.tg-force-node.is-hub .tg-force-disc { filter: drop-shadow(0 4px 10px #1a1b2630); }
+.tg-force-node.is-hub .tg-force-disc { stroke-width: 3.2; filter: drop-shadow(0 4px 10px #1a1b2630); }
 .tg-force-node.is-hub .tg-force-label { font-weight: 700; }
 .tg-force-link.is-flow { stroke-dasharray: 7 5; animation: tg-force-flow .9s linear infinite; }
 @keyframes tg-force-flow { to { stroke-dashoffset: -24; } }
@@ -341,12 +341,12 @@
 @media (max-width: 1360px) { .tg-spread input[type="range"] { width: 76px; } }
 @media (max-width: 1180px) { .tg-spread input[type="range"] { width: 60px; } .tg-spread output { display: none; } }
 
-/* Scope spotlight: everything outside the chosen scope dims softly while keeping icon and ring colour. */
-.tg-card.is-outside { opacity: .22; }
+/* Scope spotlight: everything outside the chosen scope greys out in every layout. */
+.tg-card.is-outside { opacity: .22; filter: grayscale(1); }
 .react-flow__edge.is-outside { opacity: .12; }
-.tg-bundle-leaf.is-outside, .tg-force-node.is-outside { opacity: .22; }
-.tg-bundle-path.is-outside, .tg-force-link.is-outside { opacity: .08; }
-.tg-force-hull.is-outside { opacity: .3; }
+.tg-bundle-leaf.is-outside, .tg-force-node.is-outside { opacity: .16; filter: grayscale(1); }
+.tg-bundle-path.is-outside, .tg-force-link.is-outside { opacity: .05; }
+.tg-force-hull.is-outside { opacity: .25; filter: grayscale(1); }
 .tg-force-hull.is-lit path { stroke-width: 2; stroke-dasharray: none; fill: color-mix(in srgb, var(--accent) 7%, transparent); stroke: color-mix(in srgb, var(--accent) 55%, transparent); }
 .tg-force-hull text.is-clickable { cursor: pointer; pointer-events: auto; }
 .tg-force-hull text.is-clickable:hover { fill: var(--accent); text-decoration: underline; }
