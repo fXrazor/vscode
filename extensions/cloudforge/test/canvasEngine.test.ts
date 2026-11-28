@@ -42,3 +42,13 @@ test('parseWebviewMessage validates toggleFocusMode intents and rejects invalid 
 	assert.deepEqual(parseWebviewMessage({ type: 'toggleFocusMode', active: false }), { type: 'toggleFocusMode', active: false });
 	assert.equal(parseWebviewMessage({ type: 'toggleFocusMode', active: 'yes' }), undefined);
 });
+
+test('parseWebviewMessage strictly allowlists runHostAction intents', () => {
+	assert.deepEqual(parseWebviewMessage({ type: 'runHostAction', action: 'formatArchitecture' }), { type: 'runHostAction', action: 'formatArchitecture' });
+	assert.deepEqual(parseWebviewMessage({ type: 'runHostAction', action: 'exportPortableBundle' }), { type: 'runHostAction', action: 'exportPortableBundle' });
+	assert.deepEqual(parseWebviewMessage({ type: 'runHostAction', action: 'upgradeProvider' }), { type: 'runHostAction', action: 'upgradeProvider' });
+	assert.equal(parseWebviewMessage({ type: 'runHostAction', action: 'workbench.action.terminal.new' }), undefined);
+	assert.equal(parseWebviewMessage({ type: 'runHostAction', action: '' }), undefined);
+	assert.equal(parseWebviewMessage({ type: 'runHostAction' }), undefined);
+	assert.equal(parseWebviewMessage({ type: 'runHostAction', action: 42 }), undefined);
+});

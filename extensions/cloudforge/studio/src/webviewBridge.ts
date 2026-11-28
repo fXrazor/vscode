@@ -437,6 +437,8 @@ export type HostInboundMessage =
 	| { readonly type: 'focusModeChanged'; readonly active: boolean }
 	| { readonly type: 'requestSave' };
 
+export type HostCanvasAction = 'formatArchitecture' | 'exportPortableBundle' | 'upgradeProvider';
+
 export type HostOutboundMessage =
 	| { readonly type: 'ready' }
 	| { readonly type: 'selectNode'; readonly nodeId: string | null }
@@ -458,7 +460,8 @@ export type HostOutboundMessage =
 	| { readonly type: 'requestEngineValidate'; readonly engine?: 'openTofu' | 'terraform' }
 	| { readonly type: 'requestEnginePlan'; readonly engine?: 'openTofu' | 'terraform' }
 	| { readonly type: 'requestEngineInitOffline'; readonly engine?: 'openTofu' | 'terraform' }
-	| { readonly type: 'exportArtifact'; readonly format: 'svg' | 'png' | 'markdown' | 'bundle'; readonly suggestedFileName: string; readonly content: string; readonly encoding: 'utf8' | 'base64' };
+	| { readonly type: 'exportArtifact'; readonly format: 'svg' | 'png' | 'markdown' | 'bundle'; readonly suggestedFileName: string; readonly content: string; readonly encoding: 'utf8' | 'base64' }
+	| { readonly type: 'runHostAction'; readonly action: HostCanvasAction };
 
 interface VsCodeWebviewApi {
 	postMessage(message: unknown): void;

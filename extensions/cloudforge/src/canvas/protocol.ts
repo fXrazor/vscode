@@ -743,6 +743,8 @@ export type ExtensionToWebviewMessage =
 		readonly architecture: unknown;
 	};
 
+export type CanvasHostAction = 'formatArchitecture' | 'exportPortableBundle' | 'upgradeProvider';
+
 export type WebviewToExtensionMessage =
 	| { readonly type: 'ready' }
 	| { readonly type: 'selectNode'; readonly nodeId: string | null }
@@ -770,7 +772,8 @@ export type WebviewToExtensionMessage =
 	| { readonly type: 'requestEnginePlan'; readonly engine?: 'openTofu' | 'terraform' }
 	| { readonly type: 'requestEngineInitOffline'; readonly engine?: 'openTofu' | 'terraform' }
 	| { readonly type: 'exportArtifact'; readonly format: ExportFormat; readonly suggestedFileName: string; readonly content: string; readonly encoding: 'utf8' | 'base64' }
-	| { readonly type: 'useTemplateAsArchitecture'; readonly templateId: string };
+	| { readonly type: 'useTemplateAsArchitecture'; readonly templateId: string }
+	| { readonly type: 'runHostAction'; readonly action: CanvasHostAction };
 
 const MAX_COLLAPSED_GROUPS = 256;
 const MAX_DRAFT_SAVE_CHARS = 512 * 1024;
@@ -1378,6 +1381,15 @@ export function parseWebviewMessage(value: unknown): WebviewToExtensionMessage |
 		}
 		case 'useTemplateAsArchitecture':
 			return isOpaqueId(value.templateId) ? { type: 'useTemplateAsArchitecture', templateId: value.templateId } : undefined;
+		case 'runHostAction':
+			if (
+				value.action !== 'formatArchitecture'
+				&& value.action !== 'exportPortableBundle'
+				&& value.action !== 'upgradeProvider'
+			) {
+				return undefined;
+			}
+			return { type: 'runHostAction', action: value.action };
 		default:
 			return undefined;
 	}

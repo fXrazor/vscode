@@ -21,6 +21,7 @@ import {
 	type CanvasEngineValidateReport,
 	type CanvasExportAuditReport,
 	type CanvasGraphSnapshot,
+	type CanvasHostAction,
 	type CanvasModuleInspection,
 	type CanvasNotice,
 	type CanvasOfflineMirrorReadiness,
@@ -140,6 +141,7 @@ export interface CanvasPanelHost {
 		encoding: 'utf8' | 'base64'
 	): Promise<{ readonly ok: boolean; readonly message: string }>;
 	onUseTemplateAsArchitecture?(templateId: string): Promise<void>;
+	onRunHostAction?(action: CanvasHostAction): Promise<void>;
 	onToggleFocusMode?(active?: boolean): Promise<boolean>;
 	isFocusModeActive?(): boolean;
 }
@@ -825,6 +827,10 @@ export class CloudForgeCanvasPanel implements Disposable {
 			}
 			case 'useTemplateAsArchitecture': {
 				await this.host.onUseTemplateAsArchitecture?.(message.templateId);
+				return;
+			}
+			case 'runHostAction': {
+				await this.host.onRunHostAction?.(message.action);
 				return;
 			}
 			case 'renderResourceDraft': {

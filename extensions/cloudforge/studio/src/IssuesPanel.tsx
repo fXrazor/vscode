@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 import { useMemo } from 'react';
-import { CircleCheck, TriangleAlert, CircleAlert, ChevronRight, ShieldCheck, Terminal, FileCode2, Crosshair, RotateCw, FileDiff, HardDriveDownload } from 'lucide-react';
+import { CircleCheck, TriangleAlert, CircleAlert, ChevronRight, ShieldCheck, Terminal, FileCode2, Crosshair, RotateCw, FileDiff, HardDriveDownload, Sparkles, ArrowUpCircle, Package } from 'lucide-react';
 import type { Architecture } from './model.ts';
 import { isStaleDiagnostic, type Diagnostic } from './diagnostics.ts';
 import type { HostDependencyReport, HostEngineInitOfflineReport, HostEnginePlanReport, HostEngineValidateReport, HostExportAuditReport, HostOfflineMirrorReadiness, HostValidationRun } from './webviewBridge.ts';
@@ -29,6 +29,9 @@ export interface IssuesHostContext {
 	readonly onOpenLocation?: (finding: Diagnostic) => void;
 	readonly onRunEnginePlan?: () => void;
 	readonly onRunEngineInitOffline?: () => void;
+	readonly onFormatArchitecture?: () => void;
+	readonly onExportPortableBundle?: () => void;
+	readonly onUpgradeProvider?: () => void;
 }
 
 const sourceBadgeLabel: Record<NonNullable<Diagnostic['source']>, string> = {
@@ -67,6 +70,7 @@ export function IssuesPanel({architecture,findings,onReveal,host}:{architecture:
 			{host.onRunValidation && <button type="button" className="quiet-button" disabled={hostBusy || !host.hasWorkspace} title={host.hasWorkspace ? 'Run Rust service validation' : 'Open an architecture in CloudForge Project to validate'} onClick={host.onRunValidation}><ShieldCheck size={14} /><span>{host.validating ? 'Validating…' : 'Validate'}</span></button>}
 			{host.availableEngine && host.onRunEngineValidate && <button type="button" className="quiet-button" disabled={hostBusy || !host.hasWorkspace} title={host.hasWorkspace ? 'Run CLI validate -json' : 'Open an architecture in CloudForge Project to validate'} onClick={host.onRunEngineValidate}><Terminal size={14} /><span>{host.availableEngine === 'openTofu' ? 'OpenTofu' : 'Terraform'} validate</span></button>}
 			{host.availableEngine && host.onRunEnginePlan && <button type="button" className="quiet-button" disabled={hostBusy || !host.hasWorkspace} title={host.hasWorkspace ? 'Run strictly local, credential-free CLI plan (-refresh=false)' : 'Open an architecture in CloudForge Project to plan'} onClick={host.onRunEnginePlan}><FileDiff size={14} /><span>{host.planning ? 'Planning…' : (host.availableEngine === 'openTofu' ? 'OpenTofu' : 'Terraform') + ' plan'}</span></button>}
+			{host.availableEngine && host.onFormatArchitecture && <button type="button" className="quiet-button" disabled={hostBusy || !host.hasWorkspace} title={host.hasWorkspace ? 'Format architecture .tf files with ' + (host.availableEngine === 'openTofu' ? 'OpenTofu' : 'Terraform') + ' fmt' : 'Open an architecture in CloudForge Project to format'} onClick={host.onFormatArchitecture}><Sparkles size={14} /><span>Format</span></button>}
 		</div>}
 		{host?.isHosted && host.enginePlanReport && (
 			<details className="workspace-readiness-card" open>
@@ -160,6 +164,22 @@ export function IssuesPanel({architecture,findings,onReveal,host}:{architecture:
 								<p className="field-help">
 									{(host.engineInitReport.engine === 'openTofu' ? 'OpenTofu ' : 'Terraform ') + host.engineInitReport.engineVersion} offline init: <strong>{host.engineInitReport.status}</strong> ({host.engineInitReport.durationMs} ms) — {host.engineInitReport.summary}
 								</p>
+							)}
+						</div>
+					)}
+					{(host.onUpgradeProvider || host.onExportPortableBundle) && (
+						<div className="issues-host-actions">
+							{host.onUpgradeProvider && (host.dependencyReport?.providers.length ?? 0) > 0 && (
+								<button type="button" className="quiet-button" disabled={hostBusy || !host.hasWorkspace} title="Preview and safely upgrade a Terraform provider constraint" onClick={host.onUpgradeProvider}>
+									<ArrowUpCircle size={14} />
+									<span>Upgrade provider…</span>
+								</button>
+							)}
+							{host.onExportPortableBundle && (
+								<button type="button" className="quiet-button" disabled={hostBusy || !host.hasWorkspace} title="Export a portable, reproducible Terraform/OpenTofu zip bundle" onClick={host.onExportPortableBundle}>
+									<Package size={14} />
+									<span>Portable bundle…</span>
+								</button>
 							)}
 						</div>
 					)}

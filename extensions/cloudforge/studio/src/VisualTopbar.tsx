@@ -18,6 +18,7 @@ export interface TopbarHostProps {
 	readonly onSaveDraft: () => void;
 	readonly onToggleFocusMode?: () => void;
 	readonly onExportArtifact?: (format: 'svg' | 'png') => void;
+	readonly onExportPortableBundle?: () => void;
 }
 
 export function VisualTopbar({ mode, onMode, architecture, name, onRename, onTechnical, onExport, onExportBundle, onImportBundle, onToggleLibrary, onToggleInspector, revisions, onUndo, onRedo, canRedo, theme, onTheme, libraryOpen, inspectorOpen, errors, warnings, onIssues, host }: {
@@ -59,9 +60,10 @@ export function VisualTopbar({ mode, onMode, architecture, name, onRename, onTec
    </div>
    <button aria-label="Toggle light or dark theme" onClick={onTheme}>{theme === 'dark' ? <Sun /> : <Moon />}</button>
    <details className="shell-export"><summary aria-label="Export architecture"><Download /><span>Export</span></summary><div>
+    {host?.isHosted && host.sourceRevision && host.onExportPortableBundle && <button title="Export a portable, reproducible Terraform/OpenTofu zip bundle via the CloudForge service" onClick={event => { closeMenus(event.currentTarget); host.onExportPortableBundle?.(); }}>Portable Terraform bundle…</button>}
     {onExportBundle && <button title="Terraform, canvas layout, drawings, variables and diagram in one portable .zip" onClick={event => { closeMenus(event.currentTarget); onExportBundle(); }}>Project bundle (.zip)</button>}
     {onImportBundle && <button title="Open a CloudForge project bundle (.cloudforge.zip)" onClick={event => { closeMenus(event.currentTarget); bundleInput.current?.click(); }}>Import project bundle…</button>}
-    {(onExportBundle || onImportBundle) && <hr aria-hidden="true" />}
+    {(onExportBundle || onImportBundle || (host?.isHosted && host.sourceRevision && host.onExportPortableBundle)) && <hr aria-hidden="true" />}
     <button onClick={onExport}>Graph JSON</button>
     <button onClick={() => { if (host?.onExportArtifact) { host.onExportArtifact('svg'); } else { void exportPresentation(architecture, 'svg'); } }}>SVG image</button>
     <button onClick={() => { if (host?.onExportArtifact) { host.onExportArtifact('png'); } else { void exportPresentation(architecture, 'png'); } }}>PNG image</button>
@@ -77,6 +79,7 @@ export function VisualTopbar({ mode, onMode, architecture, name, onRename, onTec
    <button aria-expanded={libraryOpen} onClick={onToggleLibrary}>{libraryOpen?'Hide':'Show'} resource library</button><button aria-expanded={inspectorOpen} onClick={onToggleInspector}>{inspectorOpen?'Hide':'Show'} resource inspector</button><button onClick={onIssues}>Local checks · {errors} errors · {warnings} warnings</button>
    <button onClick={() => onMode('visual')}>Architecture view</button><button onClick={onTechnical}>Configuration view</button>
    <button onClick={onTheme}>Switch to {theme === 'dark' ? 'light' : 'dark'} theme</button>
+   {host?.isHosted && host.sourceRevision && host.onExportPortableBundle && <button onClick={host.onExportPortableBundle}>Export portable Terraform bundle…</button>}
    {onExportBundle && <button onClick={onExportBundle}>Export project bundle (.zip)</button>}{onImportBundle && <button onClick={() => bundleInput.current?.click()}>Import project bundle…</button>}
    <button onClick={onExport}>Export graph JSON</button><button onClick={() => { if (host?.onExportArtifact) { host.onExportArtifact('svg'); } else { void exportPresentation(architecture, 'svg'); } }}>Export SVG</button>
    <button onClick={() => { if (host?.onExportArtifact) { host.onExportArtifact('png'); } else { void exportPresentation(architecture, 'png'); } }}>Export PNG</button><button onClick={() => { void exportPresentation(architecture, 'pdf'); }}>Print / Save PDF</button>

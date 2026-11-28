@@ -606,6 +606,27 @@ export function Studio() {
 		hostBridge.post(availableEngine ? { type: 'requestEngineInitOffline', engine: availableEngine } : { type: 'requestEngineInitOffline' });
 	}, [hostBridge, availableEngine]);
 
+	const runHostFormatArchitecture = useCallback(() => {
+		if (!hostBridge.isHosted) {
+			return;
+		}
+		hostBridge.post({ type: 'runHostAction', action: 'formatArchitecture' });
+	}, [hostBridge]);
+
+	const runHostExportPortableBundle = useCallback(() => {
+		if (!hostBridge.isHosted) {
+			return;
+		}
+		hostBridge.post({ type: 'runHostAction', action: 'exportPortableBundle' });
+	}, [hostBridge]);
+
+	const runHostUpgradeProvider = useCallback(() => {
+		if (!hostBridge.isHosted) {
+			return;
+		}
+		hostBridge.post({ type: 'runHostAction', action: 'upgradeProvider' });
+	}, [hostBridge]);
+
 	const openDraftSave = useCallback((requestedFileName?: string) => {
 		if (!hostBridge.isHosted) {
 			return;
@@ -970,6 +991,7 @@ export function Studio() {
 					onSaveDraft: openSave,
 					onToggleFocusMode: () => hostBridge.post({ type: 'toggleFocusMode' }),
 					onExportArtifact: exportHostArtifact,
+					onExportPortableBundle: runHostExportPortableBundle,
 				} : undefined} />
 			<div className="studio-body">
 				<ResourceCatalogue architecture={architecture} liveSchemas={liveSchemas} onAdd={addResource} onAddCatalogue={addCatalogueResource} onTemplate={addTemplate} search={search} onSearch={setSearch} onImportModule={() => setModuleImportOpen(true)}
@@ -1018,7 +1040,7 @@ export function Studio() {
 						<div className="form-action-row"><span className="form-action-spacer" />{hostBridge.isHosted && hasSourceById[selected.id] && <button aria-label="Open Terraform source" title="Open Terraform source in editor" onClick={() => hostBridge.post({ type: 'openSource', nodeId: selected.id })}><FileCode2 /></button>}<button aria-label="Open focused resource workspace" title="Open focused resource workspace" onClick={() => openDetails(selected.id)}><PanelsTopLeft /></button><button aria-label="Focus selected resource" title="Focus selected resource" onClick={() => { void flow?.fitView({ nodes: [{ id: selected.id }], padding: 0.5, maxZoom: 1.5 }); }}><Scan /></button></div>
      </>}
      <div className={'inspector-content'+(detailTab==='code'&&inspectorCategory==='resources'?' inspector-content-code':'')}>
-     {detailTab === 'issues' ? <IssuesPanel architecture={architecture} findings={findings} onReveal={revealIssue} host={hostBridge.isHosted ? { isHosted: true, hasWorkspace: !!hostSnapshot, sourceRevision: hostSnapshot?.sourceRevision, validationRun, engineReport, enginePlanReport, dependencyReport, exportAuditReport, offlineMirrorReadiness, engineInitReport, availableEngine, validating, planning, initializingOffline, onRunValidation: runHostValidation, onRunEngineValidate: runHostEngineValidate, onOpenLocation: openIssueLocation, onRunEnginePlan: runHostEnginePlan, onRunEngineInitOffline: runHostEngineInitOffline } : undefined}/> : inspectorCategory === 'variables' ? null : <>
+     {detailTab === 'issues' ? <IssuesPanel architecture={architecture} findings={findings} onReveal={revealIssue} host={hostBridge.isHosted ? { isHosted: true, hasWorkspace: !!hostSnapshot, sourceRevision: hostSnapshot?.sourceRevision, validationRun, engineReport, enginePlanReport, dependencyReport, exportAuditReport, offlineMirrorReadiness, engineInitReport, availableEngine, validating, planning, initializingOffline, onRunValidation: runHostValidation, onRunEngineValidate: runHostEngineValidate, onOpenLocation: openIssueLocation, onRunEnginePlan: runHostEnginePlan, onRunEngineInitOffline: runHostEngineInitOffline, onFormatArchitecture: runHostFormatArchitecture, onExportPortableBundle: runHostExportPortableBundle, onUpgradeProvider: runHostUpgradeProvider } : undefined}/> : inspectorCategory === 'variables' ? null : <>
 
 					{detailTab === 'code' && !selected ? null : overview ? (
 						<ArchitectureOverview architecture={architecture} onSelect={id => { setSelectedId(id); setOverview(false); setDetailTab('form'); }} />
