@@ -723,7 +723,7 @@ export class ProjectController implements Disposable {
 		});
 		switch (picked?.choice) {
 			case 'blank': await this.createArchitecture(); break;
-			case 'template': this.graph.openTemplates?.(); break;
+			case 'template': await commands.executeCommand('cloudforge.openTemplateLibrary'); break;
 			case 'folder': await commands.executeCommand('cloudforge.importRepository'); break;
 			case 'clone': await this.cloneRepository(); break;
 			case 'bundle': await this.createArchitectureFromBundle(); break;
@@ -795,6 +795,37 @@ export class ProjectController implements Disposable {
 				void commands.executeCommand('cloudforge.providers.focus');
 			}
 		});
+	}
+
+	/**
+	 * Template Library: creates architectures/<name>/ from a template's files through the same
+	 * create-new `createArchitecture` publish (it never writes into an existing folder), then opens
+	 * the canvas. Nothing is run; Get Ready is offered as the next step.
+	 */
+	async createArchitectureFromTemplateFiles(name: string, files: readonly { readonly fileName: string; readonly contents: string }[]): Promise<boolean> {
+		const project = this.project;
+		if (!project || !this.projectFolder()) {
+			void window.showInformationMessage(l10n.t('Open a CloudForge project before creating an architecture from a template.'));
+			return false;
+		}
+		const created = await this.createArchitectureInService(project.workspaceId, name, files);
+		if (!created) {
+			return false;
+		}
+		await this.graph.openCanvas?.(false);
+		const ready = l10n.t('Get Ready');
+		const providers = l10n.t('Check Providers');
+		void window.showInformationMessage(
+			l10n.t('Created {0} from a template. Nothing was run. Get Ready downloads its providers, then runs init and plan offline.', name),
+			ready, providers
+		).then(choice => {
+			if (choice === ready) {
+				void commands.executeCommand('cloudforge.getReady');
+			} else if (choice === providers) {
+				void commands.executeCommand('cloudforge.providers.focus');
+			}
+		});
+		return true;
 	}
 
 	/** Creates a new local architecture under architectures/<name>/ initialized from a curated offline template. */

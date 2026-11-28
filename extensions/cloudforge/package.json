@@ -475,6 +475,36 @@
 				"command": "cloudforge.revealStateResource",
 				"title": "%command.revealStateResource%",
 				"category": "%displayName%"
+			},
+			{
+				"command": "cloudforge.templates.refresh",
+				"title": "%command.templates.refresh%",
+				"category": "CloudForge",
+				"icon": "$(refresh)"
+			},
+			{
+				"command": "cloudforge.templates.importFile",
+				"title": "%command.templates.importFile%",
+				"category": "CloudForge",
+				"icon": "$(cloud-download)"
+			},
+			{
+				"command": "cloudforge.templates.openTemplate",
+				"title": "%command.templates.openTemplate%",
+				"category": "CloudForge",
+				"icon": "$(preview)"
+			},
+			{
+				"command": "cloudforge.templates.createArchitecture",
+				"title": "%command.templates.createArchitecture%",
+				"category": "CloudForge",
+				"icon": "$(add)"
+			},
+			{
+				"command": "cloudforge.templates.remove",
+				"title": "%command.templates.remove%",
+				"category": "CloudForge",
+				"icon": "$(trash)"
 			}
 		],
 		"keybindings": [
@@ -539,6 +569,12 @@
 				{
 					"id": "cloudforge.connections",
 					"name": "%view.connections%"
+				}
+			],
+			"cloudforge-templates": [
+				{
+					"id": "cloudforge.templates",
+					"name": "%view.templates%"
 				}
 			]
 		},
@@ -668,6 +704,18 @@
 				},
 				{
 					"command": "cloudforge.providers.changeVersion",
+					"when": "false"
+				},
+				{
+					"command": "cloudforge.templates.openTemplate",
+					"when": "false"
+				},
+				{
+					"command": "cloudforge.templates.remove",
+					"when": "false"
+				},
+				{
+					"command": "cloudforge.templates.createArchitecture",
 					"when": "false"
 				}
 			],
@@ -806,6 +854,21 @@
 					"command": "cloudforge.providers.importArchive",
 					"when": "view == cloudforge.providers",
 					"group": "2_mirror@3"
+				},
+				{
+					"command": "cloudforge.openTemplateLibrary",
+					"when": "view == cloudforge.templates",
+					"group": "navigation@0"
+				},
+				{
+					"command": "cloudforge.templates.importFile",
+					"when": "view == cloudforge.templates",
+					"group": "navigation@1"
+				},
+				{
+					"command": "cloudforge.templates.refresh",
+					"when": "view == cloudforge.templates",
+					"group": "navigation@2"
 				}
 			],
 			"view/item/context": [
@@ -963,6 +1026,26 @@
 					"command": "cloudforge.providers.changeVersion",
 					"when": "view == cloudforge.providers && viewItem =~ /^providerProject.*\\.registry/",
 					"group": "inline@3"
+				},
+				{
+					"command": "cloudforge.templates.createArchitecture",
+					"when": "view == cloudforge.templates && viewItem =~ /^cloudforge\\.template/",
+					"group": "inline@1"
+				},
+				{
+					"command": "cloudforge.templates.openTemplate",
+					"when": "view == cloudforge.templates && viewItem =~ /^cloudforge\\.template/",
+					"group": "1_open@1"
+				},
+				{
+					"command": "cloudforge.templates.createArchitecture",
+					"when": "view == cloudforge.templates && viewItem =~ /^cloudforge\\.template/",
+					"group": "1_open@2"
+				},
+				{
+					"command": "cloudforge.templates.remove",
+					"when": "view == cloudforge.templates && viewItem == cloudforge.template.local",
+					"group": "9_remove@1"
 				}
 			],
 			"editor/context": [
@@ -989,6 +1072,11 @@
 					"id": "cloudforge-providers",
 					"title": "%viewContainer.providers%",
 					"icon": "resources/providers-activity.svg"
+				},
+				{
+					"id": "cloudforge-templates",
+					"title": "%viewContainer.templates%",
+					"icon": "resources/templates-activity.svg"
 				}
 			]
 		}

@@ -29,6 +29,8 @@ import {
 	type TreeView
 } from 'vscode';
 import { activateProjects } from './project/index';
+import { activateTemplates } from './templates/index';
+import { isValidArchitectureName } from './importSelections';
 import { StartupSequence } from './startup/startupSequence';
 import { showStartupStatus } from './startup/startupStatus';
 import { registerTerraformEditorProviders } from './editor/providers';
@@ -2049,10 +2051,6 @@ export function activate(context: ExtensionContext): void {
 		}
 		canvas.openExport(toCanvasSnapshot(graph, currentArchitectureName));
 	}));
-	context.subscriptions.push(commands.registerCommand('cloudforge.openTemplateLibrary', () => {
-		const graph = provider.getGraph();
-		canvas.openTemplates(graph ? toCanvasSnapshot(graph, currentArchitectureName) : undefined);
-	}));
 	context.subscriptions.push(commands.registerCommand('cloudforge.importProviderSchema', async () => {
 		const inspected = await callService<unknown>('inspectCatalogueSchemaFile', {});
 		if (!inspected.ok) {
@@ -2815,8 +2813,8 @@ export function activate(context: ExtensionContext): void {
 			}
 		},
 		openTemplates() {
-			const graph = provider.getGraph();
-			canvas.openTemplates(graph ? toCanvasSnapshot(graph, currentArchitectureName) : undefined);
+			// Add Architecture › From a template opens the Template Library (spec Phase 3, task 9).
+			void commands.executeCommand('cloudforge.openTemplateLibrary');
 		},
 		seedBundleLayout(architectureId, architecture) {
 			canvas.seedBundleLayout(architectureId, architecture);
@@ -2826,6 +2824,24 @@ export function activate(context: ExtensionContext): void {
 	// Stage 11: the CloudForge side panel (Project Status, Terraform State, Cloud Connections).
 	const projectChanged = new EventEmitter<void>();
 	context.subscriptions.push(projectChanged, projectControllerRef.current.onDidChange(() => projectChanged.fire()));
+
+	// Template Library: the Templates view, the library page and create-from-template.
+	const templatesController = projectControllerRef.current;
+	activateTemplates(context, {
+		callService,
+		project: () => {
+			const project = templatesController.current;
+			return project ? {
+				workspaceId: project.workspaceId,
+				name: project.displayName,
+				architectures: project.architectures.map(item => ({ architectureId: item.architectureId, displayName: item.displayName })),
+				...(templatesController.activeArchitectureId ? { activeArchitectureId: templatesController.activeArchitectureId } : {}),
+			} : undefined;
+		},
+		onDidChangeProject: projectChanged.event,
+		createArchitecture: (name, files) => templatesController.createArchitectureFromTemplateFiles(name, files),
+		isValidArchitectureName,
+	});
 	activateSidePanel(context, {
 		callService,
 		getGraph: () => provider.getGraph(),

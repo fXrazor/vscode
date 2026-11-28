@@ -49,7 +49,7 @@
 	"command.verifyMirrorIntegrity": "Verify Local Provider Mirror Integrity",
 	"command.planMirrorCleanup": "Plan Local Mirror Quota Cleanup…",
 	"command.initArchitectureOffline": "Initialize Architecture Offline from Mirror",
-	"command.openTemplateLibrary": "Browse Template Library…",
+	"command.openTemplateLibrary": "Open Template Library",
 	"view.projects": "CloudForge Project",
 	"view.projects.welcome": "Clone a repository into a CloudForge project:\n[GitHub](command:cloudforge.cloneRepository?%5B%22github%22%5D)\n[GitLab](command:cloudforge.cloneRepository?%5B%22gitlab%22%5D)\n[Bitbucket](command:cloudforge.cloneRepository?%5B%22bitbucket%22%5D)\n[Any Git URL](command:cloudforge.cloneRepository?%5B%22url%22%5D)\nOr [create a project](command:cloudforge.createProject).",
 	"view.projects.emptyProject": "This project has no architectures yet.\n[Add Architecture](command:cloudforge.addArchitecture)\nStart blank or from a template, bring a folder or repo, clone one, or open a .cloudforge.zip bundle.",
@@ -83,5 +83,12 @@
 	"command.providers.refreshVersions": "Refresh Versions from Registry",
 	"command.providers.changeVersion": "Download Another Version…",
 	"command.addArchitecture": "Add Architecture…",
-	"command.addArchitectureFromBundle": "Add Architecture from Project Bundle…"
+	"command.addArchitectureFromBundle": "Add Architecture from Project Bundle…",
+	"viewContainer.templates": "Templates",
+	"view.templates": "Templates",
+	"command.templates.refresh": "Refresh Templates",
+	"command.templates.importFile": "Import Template File…",
+	"command.templates.openTemplate": "Open Template",
+	"command.templates.createArchitecture": "Create Architecture from Template…",
+	"command.templates.remove": "Remove from My Library…"
 }
