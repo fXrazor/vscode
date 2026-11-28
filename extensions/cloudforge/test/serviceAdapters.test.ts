@@ -264,7 +264,8 @@ test('Stage 5 guarded save parsers and Webview protocol validation enforce stric
 	assert.ok(applied);
 	assert.equal(applied.bytesWritten, 128);
 
-	assert.match(draftSaveErrorMessage('SCOPE_DENIED').message, /read-only/i);
+	assert.match(draftSaveErrorMessage('SCOPE_DENIED').message, /Reopen the architecture/);
+	assert.doesNotMatch(draftSaveErrorMessage('SCOPE_DENIED').message, /imported repositor/i);
 	assert.match(draftSaveErrorMessage('STALE_SOURCE').message, /Refresh/i);
 });
 
@@ -617,6 +618,34 @@ test('Stage 9B guarded local engine plan adapters sanitize planned/failed respon
 	assert.equal(failed.status, 'failed');
 	assert.equal(failed.diagnostics.length, 1);
 	assert.equal(parseEnginePlanReport({ status: 'unknown' }), undefined);
+	assert.ok(!formatEnginePlanReportText(failed, 'Hub').includes('Cloud:'));
+	assert.ok(formatEnginePlanReportText(failed, 'Hub').includes('credential-free'));
+});
+
+test('Stage 11E plan reports carry at most three unique linked cloud targets', () => {
+	const base = {
+		sourceRevision: 'c'.repeat(64), engine: 'terraform', engineVersion: '1.15.8', engineInferred: false, status: 'planned', errored: false, durationMs: 9,
+		summary: { create: 0, update: 0, replace: 0, delete: 0, read: 0, noOp: 0, total: 0 }, resourceChanges: [], outputChanges: [], diagnostics: [], truncated: false,
+	};
+	const report = parseEnginePlanReport({
+		...base,
+		cloudTargets: [
+			{ provider: 'azure', signedInAs: 'dev@contoso.example', targetName: 'Platform Dev' },
+			{ provider: 'azure', signedInAs: 'duplicate' },
+			{ provider: 'oracle' },
+			{ provider: 'aws', signedInAs: 'x'.repeat(500) },
+		],
+	});
+	assert.ok(report);
+	assert.deepStrictEqual(report.cloudTargets, [
+		{ provider: 'azure', signedInAs: 'dev@contoso.example', targetName: 'Platform Dev' },
+		{ provider: 'aws' },
+	]);
+	const text = formatEnginePlanReportText(report, 'Hub');
+	assert.ok(text.includes('with linked cloud accounts, read-only'));
+	assert.ok(text.includes('Cloud: Azure · Platform Dev · signed in as dev@contoso.example'));
+	assert.ok(text.includes('Cloud: AWS'));
+	assert.equal(parseEnginePlanReport(base)?.cloudTargets, undefined);
 });
 
 test('Stage 10 mirror package, readiness, offline init adapters and webview protocol enforce bounds', () => {
@@ -671,6 +700,15 @@ test('Stage 10 mirror package, readiness, offline init adapters and webview prot
 	assert.deepEqual(parseWebviewMessage({ type: 'requestEngineInitOffline' }), { type: 'requestEngineInitOffline' });
 	assert.deepEqual(parseWebviewMessage({ type: 'requestEngineInitOffline', engine: 'terraform' }), { type: 'requestEngineInitOffline', engine: 'terraform' });
 	assert.equal(parseWebviewMessage({ type: 'requestEngineInitOffline', engine: 'bash' }), undefined);
+});
+
+test('start-screen buttons parse to fixed actions only', () => {
+	assert.deepEqual(parseWebviewMessage({ type: 'startAction', action: 'createProject' }), { type: 'startAction', action: 'createProject' });
+	assert.deepEqual(parseWebviewMessage({ type: 'startAction', action: 'openArchitecture', architectureId: 'arch-1' }), { type: 'startAction', action: 'openArchitecture', architectureId: 'arch-1' });
+	assert.equal(parseWebviewMessage({ type: 'startAction', action: 'openArchitecture' }), undefined);
+	assert.equal(parseWebviewMessage({ type: 'startAction', action: 'createProject', architectureId: 'arch-1' }), undefined);
+	assert.equal(parseWebviewMessage({ type: 'startAction', action: 'workbench.action.terminal.new' }), undefined);
+	assert.equal(parseWebviewMessage({ type: 'startAction', action: 'openArchitecture', architectureId: 'a\u0000b' }), undefined);
 });
 
 test('the Studio reports unsaved canvas changes so the tab can show a dot', () => {

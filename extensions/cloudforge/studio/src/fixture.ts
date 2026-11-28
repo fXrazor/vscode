@@ -5,6 +5,7 @@
 import { elementEndpoint } from './connectionEndpoints.ts';
 import { coreIcon } from './coreIcons.ts';
 import type { Architecture, Resource, ResourceKind, Provider } from './model.ts';
+import { catalogueIconFor } from './catalogue.ts';
 
 export const resourceTypes: Record<ResourceKind, {
 	label: string;
@@ -62,7 +63,11 @@ const alternateResources: Record<Exclude<Provider, 'azure'>, Record<ResourceKind
 
 export function resourceDefinition(resource: Pick<Resource, 'kind' | 'provider'> & Partial<Pick<Resource, 'catalogue'>>) {
 	const base = resourceTypes[resource.kind];
- if (resource.catalogue) { return { ...base, ...resource.catalogue, icon: coreIcon(resource.catalogue.type, resource.catalogue.icon), description: resource.catalogue.label, defaults: {} }; }
+ if (resource.catalogue) {
+		// A projected type with no known icon yet shows the palette icon once its catalogue has loaded.
+		const icon = resource.catalogue.iconMatch === 'fallback' ? catalogueIconFor(resource.catalogue.type) ?? coreIcon(resource.catalogue.type, resource.catalogue.icon) : coreIcon(resource.catalogue.type, resource.catalogue.icon);
+		return { ...base, ...resource.catalogue, icon, description: resource.catalogue.label, defaults: {} };
+	}
 	if (resource.provider === 'azure') { return base; }
 	const [label, type, icon] = alternateResources[resource.provider][resource.kind];
 	return { ...base, label, type, icon, description: label + ' in ' + providerNames[resource.provider] + '.', defaults: {} };
@@ -84,6 +89,11 @@ function resource(id: string, kind: ResourceKind, name: string, x: number, y: nu
 		blocks: [],
 		positions: { visual: { x, y }, technical: { x, y } }
 	};
+}
+
+/** The empty canvas shown inside CloudForge until an architecture opens (never the sample below). */
+export function blankArchitecture(): Architecture {
+	return { name: 'Untitled architecture', variables: [], resources: [], items: [], connections: [] };
 }
 
 export function sampleArchitecture(): Architecture {

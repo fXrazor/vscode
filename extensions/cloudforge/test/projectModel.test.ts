@@ -8,7 +8,9 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { test } from 'node:test';
 import {
+	describeImportCopies,
 	findingSummary,
+	parseImportCopies,
 	parseCreatedProject,
 	parseGitInstall,
 	parseInspection,
@@ -203,4 +205,27 @@ test('selectDefaultArchitecture prefers remembered available architecture and sk
 		unimportedFolders: [],
 	})!;
 	assert.equal(selectDefaultArchitecture(empty), undefined);
+});
+
+test('import copies report what was copied, left behind and missing', () => {
+	const reports = parseImportCopies({
+		copies: [
+			{
+				architectureId: 'workspace-1-architecture-3', copiedFiles: 4,
+				skipped: [{ path: 'terraform.tfstate', reason: 'state' }, { path: 'prod.tfvars', reason: 'tfvars' }, { path: '.terraform', reason: 'hidden' }, { path: 'x', reason: 'bogus' }],
+				outsideModuleSources: ['main.tf', 'bad\u0000name'],
+			},
+			{ architectureId: 'a\u0000b', copiedFiles: 1 },
+			{ architectureId: 'workspace-1-architecture-4', copiedFiles: -1 },
+		],
+	});
+	assert.deepStrictEqual(reports, [{
+		architectureId: 'workspace-1-architecture-3', copiedFiles: 4,
+		skippedReasons: ['state', 'tfvars', 'hidden'], outsideModuleSources: ['main.tf'],
+	}]);
+	const outcome = describeImportCopies(reports);
+	assert.equal(outcome.info, 'Copied 4 files into the project. State files stayed in the repository and were not copied. .tfvars files were left out.');
+	assert.match(outcome.warning ?? '', /Module sources in main\.tf point outside the copied folder/);
+	assert.deepStrictEqual(parseImportCopies({}), []);
+	assert.deepStrictEqual(describeImportCopies([{ architectureId: 'a', copiedFiles: 1, skippedReasons: [], outsideModuleSources: [] }]), { info: 'Copied 1 file into the project.' });
 });

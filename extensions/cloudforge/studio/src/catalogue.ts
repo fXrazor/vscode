@@ -4,6 +4,24 @@ import { coreIcon, registerCatalogueIcons } from './coreIcons.ts';
 export interface CatalogueSnapshot { provider: Provider; version: string; source: string; entries: CatalogueEntry[]; }
 const snapshots = new Map<Provider, Promise<CatalogueSnapshot>>();
 
+/** Palette icon of every resource type in the provider catalogues loaded so far. */
+const iconByType = new Map<string, string>();
+const iconListeners = new Set<() => void>();
+let iconVersion = 0;
+
+/** Records the palette icons of a loaded catalogue so canvas nodes projected from Terraform show the same icon. */
+export function recordCatalogueIcons(entries: readonly Pick<CatalogueEntry, 'type' | 'icon'>[]) {
+ let changed = false;
+ for (const entry of entries) {
+  if (typeof entry.type === 'string' && typeof entry.icon === 'string' && entry.icon && iconByType.get(entry.type) !== entry.icon) { iconByType.set(entry.type, entry.icon); changed = true; }
+ }
+ if (changed) { iconVersion++; for (const listener of iconListeners) { listener(); } }
+}
+/** The palette icon for a resource type, once its provider catalogue has loaded. */
+export function catalogueIconFor(type: string): string | undefined { return iconByType.get(type); }
+export function subscribeCatalogueIcons(listener: () => void) { iconListeners.add(listener); return () => { iconListeners.delete(listener); }; }
+export function catalogueIconsVersion() { return iconVersion; }
+
 /** Provider snapshots load independently, without bundling thousands of definitions into startup JS. */
 export function loadCatalogue(provider: Provider): Promise<CatalogueSnapshot> {
  let snapshot = snapshots.get(provider);
@@ -12,7 +30,9 @@ export function loadCatalogue(provider: Provider): Promise<CatalogueSnapshot> {
    if (!response.ok) { throw new Error('The provider catalogue could not be loaded.'); }
    const value = await response.json() as CatalogueSnapshot;
    registerCatalogueIcons(value.entries);
-   return { ...value, entries: value.entries.map(entry => ({ ...entry, icon: coreIcon(entry.type, entry.icon), providerVersion: value.version, providerSource: value.source })) };
+   const loaded = { ...value, entries: value.entries.map(entry => ({ ...entry, icon: coreIcon(entry.type, entry.icon), providerVersion: value.version, providerSource: value.source })) };
+   recordCatalogueIcons(loaded.entries);
+   return loaded;
   }).catch(error => { snapshots.delete(provider); throw error; });
   snapshots.set(provider, snapshot);
  }

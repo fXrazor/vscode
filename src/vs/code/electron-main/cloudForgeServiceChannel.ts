@@ -40,7 +40,7 @@ const cloudForgeMethods: ReadonlySet<string> = new Set<CloudForgeServiceMethod>(
 	'previewDraftSave', 'applyDraftSave', 'previewFocusedSave', 'applyFocusedSave',
 	'previewFocusedSaveBatch', 'applyFocusedSaveBatch',
 	'inspectDependencies', 'readResourceValues', 'listCloudRegions', 'readModule',
-	'summarizeState', 'listCloudConnections', 'setCloudConnection', 'storeCloudKey', 'removeCloudConnection', 'checkCloudSignIn',
+	'summarizeState', 'listCloudConnections', 'setCloudConnection', 'storeCloudKey', 'removeCloudConnection', 'checkCloudSignIn', 'listCloudAccounts',
 	'diffCatalogueSnapshots', 'auditExportReadiness', 'exportPortableBundle',
 	'previewProviderUpgrade', 'applyProviderUpgrade', 'recoverUpgradeJournal',
 	'detectEngines', 'runEngineValidate', 'runEnginePlan', 'runEngineFmt',
@@ -56,7 +56,8 @@ const cloudForgeMethods: ReadonlySet<string> = new Set<CloudForgeServiceMethod>(
 /** The service allows `installGit` 10 minutes; the broker waits a little longer for its reply. */
 const installGitTimeoutMs = 11 * 60 * 1000;
 /** Stage 9B `runEnginePlan` allows 60 s for `plan` + 30 s for `show -json`; the broker waits 120 s. */
-const enginePlanTimeoutMs = 2 * 60 * 1000;
+// A cloud plan first runs up to three 25 s sign-in checks, then plan (60 s) and show (30 s).
+const enginePlanTimeoutMs = 3 * 60 * 1000;
 /** Stage 10 `runEngineInitOffline` allows 120 s; the broker waits 125 s. */
 const engineInitOfflineTimeoutMs = 125 * 1000;
 /** Stage 10 `extractProviderSchemaFromMirror` allows 120 s init + 120 s schema; the broker waits 245 s. */
@@ -310,7 +311,16 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 			return { workspaceId: value.workspaceId, workspaceFolderIndex: index };
 		}
 		case 'importRepository': {
-			if (!hasOnlyKeys(value, ['workspaceId', 'inspectionId', 'selections', 'remote']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.inspectionId)) {
+			if (!hasOnlyKeys(value, ['workspaceId', 'inspectionId', 'selections', 'remote', 'mode', 'includeTfvars']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.inspectionId)) {
+				return undefined;
+			}
+			// `copy` copies the roots into the project; `link` (or no mode) records a link.
+			const mode = value.mode;
+			if (mode !== undefined && mode !== 'copy' && mode !== 'link') {
+				return undefined;
+			}
+			const includeTfvars = value.includeTfvars;
+			if (includeTfvars !== undefined && (typeof includeTfvars !== 'boolean' || (includeTfvars && mode !== 'copy'))) {
 				return undefined;
 			}
 			if (!Array.isArray(value.selections) || value.selections.length === 0 || value.selections.length > maxSelections) {
@@ -331,7 +341,9 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 				workspaceId: value.workspaceId,
 				inspectionId: value.inspectionId,
 				selections,
-				...(remote === undefined ? {} : { remote })
+				...(remote === undefined ? {} : { remote }),
+				...(mode === undefined ? {} : { mode }),
+				...(includeTfvars ? { includeTfvars: true } : {})
 			};
 		}
 		case 'removeRepository': {
@@ -636,7 +648,8 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 		case 'listCloudConnections':
 			return hasOnlyKeys(value, ['workspaceId']) && isOpaqueId(value.workspaceId) ? { workspaceId: value.workspaceId } : undefined;
 		case 'checkCloudSignIn':
-			// Read-only: the service runs the provider CLI's identity command, never a caller-supplied one.
+		case 'listCloudAccounts':
+			// Read-only: the service runs the provider CLI's fixed identity or listing command, never a caller-supplied one.
 			return hasOnlyKeys(value, ['workspaceId', 'provider']) && isOpaqueId(value.workspaceId) && cloudProviders.has(value.provider as string)
 				? { workspaceId: value.workspaceId, provider: value.provider }
 				: undefined;
@@ -747,7 +760,15 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 		case 'auditExportReadiness':
 		case 'runEngineValidate':
 		case 'runEnginePlan': {
-			if (!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'expectedSourceRevision', 'engine']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId)) {
+			// Only a plan may name linked cloud connections; Rust checks each one's sign-in first.
+			const allowed = method === 'runEnginePlan'
+				? ['workspaceId', 'architectureId', 'expectedSourceRevision', 'engine', 'cloudProviders']
+				: ['workspaceId', 'architectureId', 'expectedSourceRevision', 'engine'];
+			if (!hasOnlyKeys(value, allowed) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId)) {
+				return undefined;
+			}
+			const providers = value.cloudProviders;
+			if (providers !== undefined && (!Array.isArray(providers) || providers.length > 3 || new Set(providers).size !== providers.length || !providers.every(provider => typeof provider === 'string' && cloudProviders.has(provider)))) {
 				return undefined;
 			}
 			if (value.expectedSourceRevision !== undefined && (typeof value.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(value.expectedSourceRevision))) {
@@ -760,7 +781,8 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 				workspaceId: value.workspaceId,
 				architectureId: value.architectureId,
 				...(value.expectedSourceRevision === undefined ? {} : { expectedSourceRevision: value.expectedSourceRevision }),
-				...(value.engine === undefined ? {} : { engine: value.engine })
+				...(value.engine === undefined ? {} : { engine: value.engine }),
+				...(Array.isArray(providers) && providers.length > 0 ? { cloudProviders: [...providers] } : {})
 			};
 		}
 		case 'runEngineInitOffline': {

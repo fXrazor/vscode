@@ -4,11 +4,12 @@ Covers everything built in both repos on 25 November 2026 (updated for three-way
 
 ## 0. Build and automated checks (Windows)
 
-- [ ] Rust: in a checkout of the branch, from `service/`, with a **fresh** `CARGO_TARGET_DIR` (a stale one gives bogus `hcl-edit` E0599 errors), run `cargo test`. Expect everything to pass, including the `focused_save` (14) and `resource_values` (1) unit tests and, in `tests/draft_save.rs`, `focused_save_rewrites_only_changed_values_and_keeps_comments`, `read_resource_values_returns_file_values_without_secrets` and `focused_batch_saves_several_files_under_one_token`. `tests/stage11_state_connections.rs` (it writes and then deletes one generic credential in your Credential Manager, and runs `az account show` once if the Azure CLI is installed). `fixtures.rs` expects 22 Stage 2 fixtures, including `create-architecture-adopt-root-files`. `tests/stdio.rs` now expects the 2 MiB request limit.
+- [ ] Rust: in a checkout of the branch (now including Stage 11D `listCloudAccounts`), from `service/`, with a **fresh** `CARGO_TARGET_DIR` (a stale one gives bogus `hcl-edit` E0599 errors), run `cargo test`. Expect everything to pass, including the `focused_save` (14) and `resource_values` (1) unit tests and, in `tests/draft_save.rs`, `focused_save_rewrites_only_changed_values_and_keeps_comments`, `read_resource_values_returns_file_values_without_secrets` and `focused_batch_saves_several_files_under_one_token`. `tests/stage11_state_connections.rs` (it writes and then deletes one generic credential in your Credential Manager, and runs `az account show` once if the Azure CLI is installed). `fixtures.rs` expects 22 Stage 2 fixtures, including `create-architecture-adopt-root-files`. `tests/stdio.rs` now expects the 2 MiB request limit.
+- [ ] Rust: `cargo test --test import_copy` passes (import as a copy, `.tfvars` choice, saving into a linked root, offline init still refused there).
 - [ ] Rust: `node docs/protocol/fixtures/check-fixtures.mjs` reports the fixtures consistent.
 - [ ] Code OSS: build with the new service binary staged, then run the electron-main test `src/vs/code/test/electron-main/cloudForgeServiceChannel.test.ts`.
 - [ ] Code OSS: full type-check (`npm run compile` or the usual watch build). This covers `cloudForgeService.contribution.ts`, which couldn't be checked in the cloud.
-- [ ] Studio: `pnpm check` and tests (139 expected after merging main) in `extensions/cloudforge/studio`; extension tests (96 expected).
+- [ ] Studio: `pnpm check` and tests (258 expected after the 28 Nov merge with main) in `extensions/cloudforge/studio`; extension tests (170 expected).
 
 Use a test project with at least two architectures and one `.tf` file that has comments, a `tags = local.tags` line, a `lifecycle` block and a `dynamic` block.
 
@@ -112,6 +113,15 @@ Use a test project with at least two architectures and one `.tf` file that has c
 - [ ] Close and reopen the project, including after renaming or moving its folder: the links are still there.
 - [ ] The Azure, AWS and Google rows no longer say "not found" when the CLI is installed in its usual place (it used to always say so).
 
+## 10a. Link by picking an account (Stage 11D)
+
+- [ ] After `az login`, run **Link Cloud Account → Azure**. A list of your enabled subscriptions appears by name, with the last four characters of the subscription and tenant IDs, the CLI default marked, and "Enter details manually…" at the bottom. Picking one asks only for the optional service principal and label (pre-filled with the subscription name), then links it. No GUID typing.
+- [ ] Relink Azure: the current subscription is first and marked "linked now".
+- [ ] After `az logout`, linking says there are no signed-in accounts and drops into the manual prompts.
+- [ ] AWS: your profiles from `aws configure list-profiles` appear, `default` first. Google: your active projects appear by name with their IDs.
+- [ ] With the CLI uninstalled: "is not installed, so enter the details by hand", then the manual prompts.
+- [ ] The picker never shows your email or account name, and nothing new appears in the project folder.
+
 ## 10b. Check cloud sign-in
 
 - [ ] With `az login` done and Azure linked to the same tenant and subscription, click the check icon on the Azure row (or "Check sign-in" in the Project Status tab). The row spins, then shows "Signed in" with a green tick; the tooltip shows "Signed in as d…@yourdomain · <subscription name>". The full email, tenant and subscription IDs never appear.
@@ -123,6 +133,59 @@ Use a test project with at least two architectures and one `.tf` file that has c
 - [ ] Task Manager shows no `az`, `python`, `aws` or `gcloud` process left after a check.
 - [ ] Linking a provider offers "Check Sign-In" in the confirmation. Changing the link, storing a key or switching project clears the old result.
 
+## 10c. Starting fresh (start screen and new projects)
+
+- [ ] Open a window with no folder, then run **CloudForge: Open Canvas** (or open the canvas from the side panel). The canvas is blank with a card saying "Start designing your infrastructure" and two buttons, **New project** and **Open project folder**. The "Production network" sample never appears, and the top bar says "No architecture open".
+- [ ] Click **New project**, give it a name and pick a parent folder. The window reopens on the project, and without any more questions it shows a blank canvas for an architecture named after the project. `architectures/<project name>/main.tf` exists with only the comment line.
+- [ ] Drag a resource group and a virtual network from the library and save. Both land in that `main.tf`; no second file named after the architecture appears.
+- [ ] Open a project that has architectures but none open (or close the open one). The card shows the project name, **New blank architecture**, the architectures you can open (the last one used first) and, when there are more than eight, **All architectures (N)**. Each button does what it says.
+- [ ] Open an existing project with no architectures: the card says the project has none yet, and **New blank architecture** asks for a name and opens it.
+- [ ] In the browser preview (outside CloudForge) the sample still loads, as before.
+
+## 10d. Icons and places survive a save
+
+- [ ] In an architecture, drag from the library a virtual machine (`azurerm_virtual_machine`), a virtual network peering and a type the canvas has no built-in shape for. Move them somewhere distinctive, draw a line between two of them and group two. Save.
+- [ ] After the save each keeps its own icon (the VM keeps the VM icon, the peering keeps the virtual network icon), its place on the canvas, the drawn line, the group and the selection. Nothing shows the resource group icon unless it is a resource group.
+- [ ] Add a new resource **above** the others in the `.tf` file by hand and save the file. The canvas adds it without moving or swapping the existing ones.
+- [ ] Rename a resource block in the `.tf` file (same type, new name) and save. It stays where it was on the canvas.
+- [ ] Reopen CloudForge on a project saved with the older build: any resource that showed the resource group icon by mistake now shows a neutral icon for a moment, then its proper icon.
+
+## 10e. Service icons in the side panel
+
+- [ ] Open an Azure architecture. In the CloudForge side panel's **Graph** view (and Explorer's CloudForge Graph), each resource row shows the same service icon as the canvas: virtual network, subnet, virtual machine, resource group and so on. Modules show a package icon; types with no catalogue icon show the plain class icon.
+- [ ] The first time, rows may show the plain icon for a moment, then switch to the service icons without the view reloading or losing its expanded rows.
+- [ ] Connections under a resource show an in or out arrow, and diagnostics show red, yellow or blue icons by severity.
+- [ ] **Terraform State → Resources in state** rows show the same service icons.
+- [ ] Do the same with an AWS and a Google architecture.
+
+## 10f. Plan with linked cloud accounts (Stage 11E)
+
+- [ ] Link Azure to the project (side panel) and sign in with `az login` to the linked subscription. Open an Azure architecture and run **Run Local Plan**. The progress says "Running local plan", and the **CloudForge Plan** output says "with linked cloud accounts, read-only" and a line "Cloud: Azure · <subscription> · signed in as <you>". A provider block with no credentials of its own now gets past provider configuration.
+- [ ] Sign in to a different subscription than the link (`az account set`), then run the plan again. It stops before running, with **Check Sign-In** and **Plan Without Cloud**. Check Sign-In opens the side panel's check for Azure; Plan Without Cloud runs the old credential-free plan.
+- [ ] Turn off **Settings → CloudForge → Plan: Use Linked Cloud Accounts**. The plan runs credential-free again, and the output says "credential-free".
+- [ ] An architecture with only AWS resources and only Azure linked runs credential-free (only providers the graph uses and that are linked are passed).
+- [ ] Nothing in the Plan output, notifications or logs shows a key, token or secret.
+
+## 10g. Saving after CloudForge reconnects
+
+- [ ] Open an architecture on the canvas and make a change without saving. Reconnect the project (close and reopen the folder in the same window, or run **CloudForge: Open Project** again) while the canvas stays open. Save from the canvas. The preview and save work without reopening, and the canvas shows the new revision.
+- [ ] If the save still can't find the architecture (for example it was renamed), the message says "This canvas lost its link to the open project… Reopen the architecture", not "Imported repositories are read-only".
+
+## 10h. Importing Terraform: copy or link
+
+Use a repository folder (added to the window) with `main.tf`, a `README.md`, a `prod.tfvars`, a `terraform.tfstate`, a `.terraform` folder, a `modules/net/main.tf` used as `source = "./modules/net"`, and one module with `source = "../shared"`.
+
+- [ ] **Import Terraform from Folder…** first asks **Copy into project** (marked Recommended) or **Link in place**.
+- [ ] Copy: because of `prod.tfvars` it asks whether to copy `.tfvars` files; leave them out. After naming, a notice says how many files were copied and that state files stayed in the repository; a warning names `main.tf` for the module source outside the copy.
+- [ ] `architectures/<name>/` holds `main.tf`, `README.md`, `.terraform.lock.hcl` (if present) and `modules/net/main.tf`, and no `prod.tfvars`, `terraform.tfstate` or `.terraform`. The repository folder is unchanged.
+- [ ] The copy opens on the canvas; save a change and check only the copy changes.
+- [ ] Import the same root again as a copy with a different name and **Copy .tfvars files too**: the new copy has `prod.tfvars`.
+- [ ] Link in place: save a change from the canvas. The preview shows the diff, the notice says it was saved into the linked repository, and Source Control shows the changed `.tf` file in the repository. `.git`, `.terraform` and state are untouched.
+- [ ] On the linked architecture, offline init (Stage 10) still says it runs only on project architectures.
+
 ## 8. Known gaps (not bugs)
 
 - Moving a resource between files works only through Save all (both files in one save); the single-file save still keeps the old block.
+- The schema check appears in the inspector's Code tab, not in the focused workspace's code pane.
+- The save dialog doesn't yet show the repository path for a linked architecture, and links have no read-only switch yet.
+- Validate, plan and other canvas actions don't yet reconnect a stale canvas the way saves do; reopen the architecture if they report it isn't active.

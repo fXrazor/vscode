@@ -351,6 +351,14 @@ export interface CanvasEnginePlanReport {
 	readonly outputChanges: readonly CanvasEnginePlanOutputChange[];
 	readonly diagnostics: readonly CanvasEngineValidateDiagnostic[];
 	readonly truncated: boolean;
+	/** Linked cloud accounts the plan ran with, confirmed by a sign-in check (masked); empty when credential-free. */
+	readonly cloudTargets?: readonly CanvasPlanCloudTarget[];
+}
+
+export interface CanvasPlanCloudTarget {
+	readonly provider: 'azure' | 'aws' | 'google';
+	readonly signedInAs?: string;
+	readonly targetName?: string;
 }
 
 export interface CanvasMirrorPackageKey {
@@ -609,6 +617,8 @@ export type ExtensionToWebviewMessage =
 	| {
 		readonly type: 'empty';
 		readonly message: string;
+		/** What the start screen offers when no architecture is open. */
+		readonly start?: CanvasStartContext;
 	}
 	| {
 		readonly type: 'runValidation';
@@ -773,7 +783,20 @@ export type WebviewToExtensionMessage =
 	| { readonly type: 'requestEngineInitOffline'; readonly engine?: 'openTofu' | 'terraform' }
 	| { readonly type: 'exportArtifact'; readonly format: ExportFormat; readonly suggestedFileName: string; readonly content: string; readonly encoding: 'utf8' | 'base64' }
 	| { readonly type: 'useTemplateAsArchitecture'; readonly templateId: string }
+	| { readonly type: 'startAction'; readonly action: CanvasStartAction; readonly architectureId?: string }
 	| { readonly type: 'runHostAction'; readonly action: CanvasHostAction };
+
+/** Start-screen buttons; each maps to one fixed CloudForge or workbench command in the host. */
+export type CanvasStartAction = 'createProject' | 'openProject' | 'createArchitecture' | 'switchArchitecture' | 'openArchitecture';
+const START_ACTIONS: ReadonlySet<string> = new Set<CanvasStartAction>(['createProject', 'openProject', 'createArchitecture', 'switchArchitecture', 'openArchitecture']);
+
+/** The canvas start screen: whether a project is open and which architectures it can open. */
+export interface CanvasStartContext {
+	readonly projectOpen: boolean;
+	readonly projectName?: string;
+	readonly architectures: readonly { readonly architectureId: string; readonly name: string }[];
+	readonly moreArchitectures: number;
+}
 
 const MAX_COLLAPSED_GROUPS = 256;
 const MAX_DRAFT_SAVE_CHARS = 512 * 1024;
@@ -1381,6 +1404,15 @@ export function parseWebviewMessage(value: unknown): WebviewToExtensionMessage |
 		}
 		case 'useTemplateAsArchitecture':
 			return isOpaqueId(value.templateId) ? { type: 'useTemplateAsArchitecture', templateId: value.templateId } : undefined;
+		case 'startAction': {
+			if (typeof value.action !== 'string' || !START_ACTIONS.has(value.action)) {
+				return undefined;
+			}
+			if (value.action === 'openArchitecture') {
+				return isOpaqueId(value.architectureId) ? { type: 'startAction', action: 'openArchitecture', architectureId: value.architectureId } : undefined;
+			}
+			return value.architectureId === undefined ? { type: 'startAction', action: value.action as CanvasStartAction } : undefined;
+		}
 		case 'runHostAction':
 			if (
 				value.action !== 'formatArchitecture'

@@ -140,6 +140,8 @@ suite('CloudForgeServiceChannel', () => {
 			validateCloudForgeServiceParams('inspectRepository', { workspaceId, workspaceFolderIndex: 2 }),
 			validateCloudForgeServiceParams('importRepository', { workspaceId, inspectionId: `${workspaceId}-inspection-1`, selections }),
 			validateCloudForgeServiceParams('importRepository', { workspaceId, inspectionId: `${workspaceId}-inspection-1`, selections, remote: 'https://github.com/contoso/infra.git' }),
+			validateCloudForgeServiceParams('importRepository', { workspaceId, inspectionId: `${workspaceId}-inspection-1`, selections, mode: 'copy', includeTfvars: true }),
+			validateCloudForgeServiceParams('importRepository', { workspaceId, inspectionId: `${workspaceId}-inspection-1`, selections, mode: 'link', includeTfvars: false }),
 			validateCloudForgeServiceParams('removeRepository', { workspaceId, repositoryId: `${workspaceId}-repository-1` }),
 		], [
 			{ name: 'Contoso Platform' },
@@ -151,6 +153,8 @@ suite('CloudForgeServiceChannel', () => {
 			{ workspaceId, workspaceFolderIndex: 2 },
 			{ workspaceId, inspectionId: `${workspaceId}-inspection-1`, selections },
 			{ workspaceId, inspectionId: `${workspaceId}-inspection-1`, selections, remote: 'https://github.com/contoso/infra.git' },
+			{ workspaceId, inspectionId: `${workspaceId}-inspection-1`, selections, mode: 'copy', includeTfvars: true },
+			{ workspaceId, inspectionId: `${workspaceId}-inspection-1`, selections, mode: 'link' },
 			{ workspaceId, repositoryId: `${workspaceId}-repository-1` },
 		]);
 	});
@@ -179,6 +183,10 @@ suite('CloudForgeServiceChannel', () => {
 			['importRepository', { workspaceId, inspectionId, selections: [selection], remote: 'https://example.com/\nrepo' }],
 			['importRepository', { workspaceId, inspectionId, selections: [selection], remote: 'x'.repeat(2049) }],
 			['importRepository', { workspaceId, inspectionId, selections: [selection], folderPath: 'C:\\repo' }],
+			['importRepository', { workspaceId, inspectionId, selections: [selection], mode: 'move' }],
+			['importRepository', { workspaceId, inspectionId, selections: [selection], includeTfvars: true }],
+			['importRepository', { workspaceId, inspectionId, selections: [selection], mode: 'link', includeTfvars: true }],
+			['importRepository', { workspaceId, inspectionId, selections: [selection], mode: 'copy', includeTfvars: 'yes' }],
 			['removeRepository', { workspaceId }],
 			['createWorkspaceFile', { workspaceId, projectPath: 'C:\\Projects\\Contoso' }],
 		];
@@ -355,7 +363,7 @@ suite('CloudForgeServiceChannel', () => {
 				{ method: 'createWorkspaceFile', params: { workspaceId } },
 				{ method: 'removeRepository', params: { workspaceId, repositoryId: `${workspaceId}-repository-1` } },
 				{ method: 'installGit', params: {}, timeoutMs: 11 * 60 * 1000 },
-				{ method: 'runEnginePlan', params: { workspaceId, architectureId: `${workspaceId}-architecture-1`, engine: 'openTofu' }, timeoutMs: 2 * 60 * 1000 },
+				{ method: 'runEnginePlan', params: { workspaceId, architectureId: `${workspaceId}-architecture-1`, engine: 'openTofu' }, timeoutMs: 3 * 60 * 1000 },
 			]
 		});
 		await broker.stop();
@@ -448,6 +456,8 @@ suite('CloudForgeServiceChannel', () => {
 		assert.deepStrictEqual(validateCloudForgeServiceParams('checkCloudSignIn', { workspaceId, provider: 'azure' }), { workspaceId, provider: 'azure' });
 		assert.strictEqual(validateCloudForgeServiceParams('checkCloudSignIn', { workspaceId, provider: 'azure', command: 'az login' }), undefined);
 		assert.strictEqual(validateCloudForgeServiceParams('checkCloudSignIn', { workspaceId, provider: 'oracle' }), undefined);
+		assert.deepStrictEqual(validateCloudForgeServiceParams('listCloudAccounts', { workspaceId, provider: 'google' }), { workspaceId, provider: 'google' });
+		assert.strictEqual(validateCloudForgeServiceParams('listCloudAccounts', { workspaceId, provider: 'aws', args: ['sts'] }), undefined);
 		assert.strictEqual(validateCloudForgeServiceParams('readResourceValues', { workspaceId, architectureId: `${workspaceId}-architecture-1`, rootPath: 'C:\\Windows' }), undefined);
 		assert.ok(validateCloudForgeServiceParams('inspectDependencies', { workspaceId, architectureId: `${workspaceId}-architecture-1`, expectedSourceRevision: sha256, engine: 'opentofu' }));
 		assert.strictEqual(validateCloudForgeServiceParams('inspectDependencies', { workspaceId, architectureId: `${workspaceId}-architecture-1`, engine: 'pulumi' }), undefined);
@@ -575,6 +585,19 @@ suite('CloudForgeServiceChannel', () => {
 			architectureId: 'workspace-1-architecture-1',
 			engine: 'cmd'
 		}), undefined);
+		assert.deepStrictEqual(validateCloudForgeServiceParams('runEnginePlan', {
+			workspaceId: 'workspace-1',
+			architectureId: 'workspace-1-architecture-1',
+			cloudProviders: ['azure']
+		}), {
+			workspaceId: 'workspace-1',
+			architectureId: 'workspace-1-architecture-1',
+			cloudProviders: ['azure']
+		});
+		for (const cloudProviders of [['oracle'], ['azure', 'azure'], 'azure', ['azure', 'aws', 'google', 'azure']]) {
+			assert.strictEqual(validateCloudForgeServiceParams('runEnginePlan', { workspaceId: 'workspace-1', architectureId: 'workspace-1-architecture-1', cloudProviders }), undefined);
+		}
+		assert.strictEqual(validateCloudForgeServiceParams('runEngineValidate', { workspaceId: 'workspace-1', architectureId: 'workspace-1-architecture-1', cloudProviders: ['azure'] }), undefined);
 		assert.strictEqual(validateCloudForgeServiceParams('runEnginePlan', {
 			workspaceId: 'workspace-1',
 			architectureId: 'workspace-1-architecture-1',

@@ -26,7 +26,9 @@ import { ensureGit, repositoryRemote } from './git';
 import {
 	buildArchitectureSwitchItems,
 	cloneUrlPrefix,
+	describeImportCopies,
 	isPathComponent,
+	parseImportCopies,
 	parseCreatedProject,
 	parseInspection,
 	parseProjectResult,
@@ -51,6 +53,8 @@ const IGNORED_ROOT_TERRAFORM_KEY = 'cloudforge.ignoredRootTerraform';
 const LAST_ARCHITECTURE_NAME_KEY = 'cloudforge.lastArchitectureName';
 const PENDING_CLONE_KEY = 'cloudforge.pendingClone';
 const PENDING_CLONE_LIFETIME_MS = 15 * 60 * 1000;
+/** A project this window just created; the reopened window gives it a first blank architecture. */
+const PENDING_NEW_PROJECT_KEY = 'cloudforge.pendingNewProject';
 const WORKSPACE_FOLDER_ADD_TIMEOUT_MS = 5000;
 
 /** Shows an architecture's graph in the Stage 1 graph view and Architecture Canvas. */
@@ -66,6 +70,11 @@ export interface GraphHost {
 
 interface PendingClone {
 	readonly provider: CloneProvider;
+	readonly createdAt: number;
+}
+
+interface PendingNewProject {
+	readonly workspaceFile: string;
 	readonly createdAt: number;
 }
 
@@ -153,9 +162,12 @@ export class ProjectController implements Disposable {
 			}
 			return;
 		}
-		const project = this.accept(result.value);
+		let project = this.accept(result.value);
 		if (!project) {
 			return;
+		}
+		if (await this.startNewProject(project)) {
+			project = this.project ?? project;
 		}
 		if (!this.hasAutoOpenedArchitecture) {
 			const lastName = this.context.workspaceState.get<string>(LAST_ARCHITECTURE_NAME_KEY);
@@ -391,10 +403,41 @@ export class ProjectController implements Disposable {
 				l10n.t('{0} reached the CloudForge inspection limit, so only the first {1} Terraform root(s) are shown.', inspection.displayName, inspection.terraformRoots.length)
 			);
 		}
-		const choices = inspection.terraformRoots.filter(root => !root.imported);
-		if (choices.length === 0) {
-			void window.showInformationMessage(l10n.t('Every Terraform root in {0} is already imported.', inspection.displayName));
+		// Copy is the default (Dale's choice, 2026-11-25): the project owns the files, like a
+		// Brainboard import. Link keeps the files in the repository and saves write there.
+		const copyItem = {
+			label: l10n.t('$(files) Copy into project'),
+			description: l10n.t('Recommended'),
+			detail: l10n.t('Copies the .tf files, notes, lock file and local modules into this project. Canvas saves change the copy, not the repository. State files are never copied.'),
+			mode: 'copy' as const,
+		};
+		const linkItem = {
+			label: l10n.t('$(link) Link in place'),
+			detail: l10n.t('Reads the files where they are. Canvas saves write into the repository\'s .tf files after a preview, and you commit the changes.'),
+			mode: 'link' as const,
+		};
+		const how = await window.showQuickPick([copyItem, linkItem], {
+			title: l10n.t('Import Terraform from {0}', inspection.displayName),
+			placeHolder: l10n.t('How should CloudForge bring this Terraform in?'),
+		});
+		if (!how) {
 			return;
+		}
+		const mode = how.mode;
+		const choices = mode === 'copy' ? inspection.terraformRoots : inspection.terraformRoots.filter(root => !root.imported);
+		if (choices.length === 0) {
+			void window.showInformationMessage(l10n.t('Every Terraform root in {0} is already linked. Choose Copy into project to make an editable copy.', inspection.displayName));
+			return;
+		}
+		let includeTfvars = false;
+		if (mode === 'copy' && inspection.findings.some(finding => finding.code === 'TFVARS_FILE')) {
+			const leaveOut = { label: l10n.t('Leave .tfvars files out'), description: l10n.t('Recommended'), include: false };
+			const include = { label: l10n.t('Copy .tfvars files too'), detail: l10n.t('They often hold secrets. Copy them only if they hold none.'), include: true };
+			const vars = await window.showQuickPick([leaveOut, include], { title: l10n.t('Variable files'), placeHolder: l10n.t('{0} has .tfvars files', inspection.displayName) });
+			if (!vars) {
+				return;
+			}
+			includeTfvars = vars.include;
 		}
 		const picked = await window.showQuickPick(
 			choices.map(root => ({ label: root.rootPath.length ? root.rootPath.join('/') : inspection.displayName, description: root.displayName, picked: choices.length === 1, root })),
@@ -435,15 +478,24 @@ export class ProjectController implements Disposable {
 			void window.showErrorMessage(invalid);
 			return;
 		}
-		const rawRemote = await repositoryRemote(folder.uri);
+		const rawRemote = mode === 'link' ? await repositoryRemote(folder.uri) : undefined;
 		const remote = rawRemote ? sanitizeRemoteUrl(rawRemote) : undefined;
 		const imported = await callProjectService('importRepository', {
 			workspaceId: project.workspaceId,
 			inspectionId: inspection.inspectionId,
 			selections,
+			mode,
+			...(includeTfvars ? { includeTfvars } : {}),
 			...(remote ? { remote } : {})
 		});
 		const updated = this.handleProjectChange(imported);
+		if (updated && imported.ok && mode === 'copy') {
+			const outcome = describeImportCopies(parseImportCopies(imported.value));
+			void window.showInformationMessage(outcome.info);
+			if (outcome.warning) {
+				void window.showWarningMessage(outcome.warning);
+			}
+		}
 		const first = updated?.importedArchitectureIds[0];
 		if (updated && first) {
 			const architecture = updated.architectures.find(item => item.architectureId === first);
@@ -616,7 +668,43 @@ export class ProjectController implements Disposable {
 		if (forceNewWindow === undefined) {
 			return false;
 		}
+		const pending: PendingNewProject = { workspaceFile: created.workspaceFile, createdAt: Date.now() };
+		await this.context.globalState.update(PENDING_NEW_PROJECT_KEY, pending);
 		await commands.executeCommand('vscode.openFolder', Uri.parse(created.workspaceFile), { forceNewWindow });
+		return true;
+	}
+
+	/**
+	 * A project created a moment ago opens straight onto a blank canvas: CloudForge makes its first
+	 * architecture (named after the project, with the service's empty starter `main.tf`) and opens
+	 * it, so there is nothing to set up before drawing. Returns true when it created one.
+	 */
+	private async startNewProject(project: ProjectResult): Promise<boolean> {
+		const pending = this.context.globalState.get<PendingNewProject>(PENDING_NEW_PROJECT_KEY);
+		const workspaceFile = workspace.workspaceFile;
+		if (!pending || typeof pending.workspaceFile !== 'string' || !workspaceFile) {
+			return false;
+		}
+		let pendingPath: string;
+		try {
+			pendingPath = Uri.parse(pending.workspaceFile).fsPath.toLowerCase();
+		} catch {
+			pendingPath = '';
+		}
+		if (pendingPath !== workspaceFile.fsPath.toLowerCase()) {
+			// Another window's project; leave the note for it unless it has expired.
+			if (Date.now() - pending.createdAt >= PENDING_CLONE_LIFETIME_MS) {
+				await this.context.globalState.update(PENDING_NEW_PROJECT_KEY, undefined);
+			}
+			return false;
+		}
+		await this.context.globalState.update(PENDING_NEW_PROJECT_KEY, undefined);
+		if (Date.now() - pending.createdAt >= PENDING_CLONE_LIFETIME_MS || project.architectures.length > 0) {
+			return false;
+		}
+		const name = isValidArchitectureName(project.displayName) ? project.displayName : 'main';
+		this.hasAutoOpenedArchitecture = true;
+		await this.createArchitectureInService(project.workspaceId, name);
 		return true;
 	}
 

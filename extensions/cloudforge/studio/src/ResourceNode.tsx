@@ -6,7 +6,7 @@ import { resourceGraphic } from './resourceGraphic.ts';
 import { shapeDefinition, shapeStrokeDash } from './shapes.ts';
 import { inkDefaults } from './ink.ts';
 import { DrawingText } from './DrawingText.tsx';
-import { memo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { memo, useEffect, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from 'react';
 import { dragRotation, drawingResizeVisible } from './rotation.ts';
 import { LockKeyhole, TriangleAlert, Variable } from 'lucide-react';
 import { Handle, Position, NodeResizer, type Node, type NodeProps } from '@xyflow/react';
@@ -15,6 +15,7 @@ import type { Diagnostic } from './diagnostics.ts';
 import { isResourceContainer } from './resourceHierarchy.ts';
 import type { Dispatch } from 'react';
 import { resourceDefinition } from './fixture.ts';
+import { catalogueIconsVersion, loadCatalogue, subscribeCatalogueIcons } from './catalogue.ts';
 import { iconSizeLimits } from './resourceGeometry.ts';
 import type { VariableDefinition } from './variables.ts';
 import { isSensitiveProperty } from './variables.ts';
@@ -27,6 +28,14 @@ export type BoardNodeType = Node<{ item: BoardItem; mode: DesignMode; dispatch: 
 export type CanvasNode = ResourceNodeType | BoardNodeType;
 
 export const ResourceNode = memo(function ResourceNode({ data, selected }: NodeProps<ResourceNodeType>) {
+	// Re-render when a provider catalogue loads, so a projected type swaps its neutral icon for the palette one.
+	useSyncExternalStore(subscribeCatalogueIcons, catalogueIconsVersion);
+	const needsCatalogueIcon = data.resource.catalogue?.iconMatch === 'fallback';
+	useEffect(() => {
+		if (needsCatalogueIcon) {
+			loadCatalogue(data.resource.provider).catch(() => undefined);
+		}
+	}, [needsCatalogueIcon, data.resource.provider]);
 	const metadata = resourceDefinition(data.resource);
 	const graphic = resourceGraphic(data.resource);
 	const technical = data.mode === 'technical';

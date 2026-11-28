@@ -18,6 +18,7 @@
 
 import { nodeAddress, resourceAddresses } from './resourceIdentity.ts';
 import { getDef } from './cloudlab-core/catalog/index.ts';
+import { catalogueIconFor } from './catalogue.ts';
 import { coreIcon } from './coreIcons.ts';
 import type { Architecture, DesignConnection, Position, Provider, Resource, ResourceBlock, ResourceKind } from './model.ts';
 import { elementEndpoint, endpointExists, endpointKey } from './connectionEndpoints.ts';
@@ -97,25 +98,32 @@ export function inferProvider(resourceType: string | null): Provider {
 	return 'azure';
 }
 
-function defaultIconFor(provider: Provider, resourceType: string | null): string {
+/**
+ * Neutral icons for types no loaded catalogue knows yet. They are marked `iconMatch: 'fallback'` so the
+ * node swaps in the palette icon as soon as the provider catalogue loads (never the resource group icon,
+ * which made virtual machines and peerings look like resource groups after a save).
+ */
+export const FALLBACK_ICONS: Readonly<Record<Provider, string>> = {
+	azure: 'catalog-icons/azure/azure-all-resources.svg',
+	aws: 'catalog-icons/aws/aws-management-console.svg',
+	gcp: 'catalog-icons/gcp/gcp-cloud-generic.svg',
+};
+
+function normaliseIconPath(icon: string): string {
+	const fileName = icon.replace(/^\/?icons\//, '');
+	return fileName.includes('/') && !fileName.startsWith('catalog-icons/') ? 'catalog-icons/' + fileName : fileName;
+}
+
+function defaultIconFor(provider: Provider, resourceType: string | null): { readonly icon: string; readonly fallback: boolean } {
 	const def = resourceType ? getDef(resourceType) : undefined;
 	if (def?.icon) {
-		const fileName = def.icon.replace(/^\/?icons\//, '');
-		if (fileName.startsWith('catalog-icons/')) {
-			return fileName;
-		}
-		if (fileName.includes('/')) {
-			return 'catalog-icons/' + fileName;
-		}
-		return fileName;
+		return { icon: normaliseIconPath(def.icon), fallback: false };
 	}
-	if (provider === 'aws') {
-		return 'aws-vpc.svg';
+	const palette = resourceType ? catalogueIconFor(resourceType) : undefined;
+	if (palette) {
+		return { icon: palette, fallback: false };
 	}
-	if (provider === 'gcp') {
-		return 'gcp-project.svg';
-	}
-	return 'azure-resource-groups.svg';
+	return { icon: FALLBACK_ICONS[provider], fallback: true };
 }
 
 function friendlyLabelForType(resourceType: string): string {
@@ -138,14 +146,24 @@ function createResourceFromNode(node: HostNodeSummary, fallbackPosition: Positio
 		? 'module'
 		: (node.resourceType && KNOWN_TYPE_TO_KIND[node.resourceType]) || 'generic';
 	const def = node.resourceType ? getDef(node.resourceType) : undefined;
-	const catalogue = !isModule && mappedKind === 'generic' && node.resourceType
-		? {
+	const icon = node.resourceType ? defaultIconFor(provider, node.resourceType) : undefined;
+	// A resource placed from the palette keeps the palette's entry (icon, label, fields) across saves.
+	const preservedCatalogue = preserved?.catalogue && preserved.catalogue.type === node.resourceType && preserved.catalogue.iconMatch !== 'fallback'
+		? structuredClone(preserved.catalogue)
+		: undefined;
+	// Keep the icon the resource already had (from the Library or Replace icon) instead of a type default.
+	const keptIcon = preserved?.catalogue?.type === node.resourceType && preserved.catalogue.icon && !preserved.catalogue.icon.endsWith('azure-resource-groups.svg') && preserved.catalogue.icon !== FALLBACK_ICONS[provider]
+		? preserved.catalogue.icon
+		: undefined;
+	const catalogueIcon = keptIcon ?? (node.resourceType && icon ? coreIcon(node.resourceType, icon.icon) : undefined);
+	const catalogue = !isModule && mappedKind === 'generic' && node.resourceType && icon && catalogueIcon
+		? preservedCatalogue ?? {
 			type: node.resourceType,
 			label: friendlyLabelForType(node.resourceType),
 			service: def?.service ?? friendlyLabelForType(node.resourceType),
 			category: def?.category ?? 'Other',
-			// Keep the icon the resource already had (from the Library or Replace icon) instead of a type default.
-			icon: preserved?.catalogue?.type === node.resourceType && preserved.catalogue.icon && !preserved.catalogue.icon.endsWith('azure-resource-groups.svg') ? preserved.catalogue.icon : coreIcon(node.resourceType, defaultIconFor(provider, node.resourceType)),
+			icon: catalogueIcon,
+			...(icon.fallback && catalogueIcon === icon.icon ? { iconMatch: 'fallback' } : {}),
 			fields: (def?.attributes ?? [])
 				.filter(attr => attr.type !== 'block' && ['string', 'number', 'bool'].includes(attr.type))
 				.map(attr => ({
@@ -836,7 +854,9 @@ export function defaultTargetTfFile(architecture: Architecture, selectedResource
 	if (explicitFiles.length > 0) {
 		return explicitFiles[0];
 	}
-	return sanitizeDraftTfFileName(architecture.name);
+	// Every new architecture starts with a `main.tf` (the service's starter or a template), so the
+	// first resources go there rather than into a second file named after the architecture.
+	return 'main.tf';
 }
 
 /** Generate a guarded `.tf` draft payload scoped to the corresponding project `.tf` file. */

@@ -39,6 +39,7 @@
 	"command.explainResource": "Explain Resource…",
 	"command.revealNodeInCanvas": "Reveal Resource in Canvas",
 	"config.editor.codeLens": "Show inline CloudForge Canvas and resource actions above Terraform blocks.",
+	"config.plan.useLinkedCloudAccounts": "Run Plan with the project's linked cloud accounts (after checking each one's sign-in) when the architecture uses that cloud. Turn off to always plan credential-free.",
 	"config.startup.preload": "After the window opens, load provider schemas and check this architecture's providers in the background so Studio forms and Get Ready are instant. Progress shows in the status bar.",
 	"config.projects.openInNewWindow": "Controls whether opening or creating a CloudForge project while another folder is open uses a new window, replaces the current window, or asks.",
 	"command.importProviderSchema": "Import Provider Schema Snapshot…",

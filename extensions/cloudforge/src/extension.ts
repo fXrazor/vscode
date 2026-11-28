@@ -17,6 +17,8 @@ import {
 	ProgressLocation,
 	Range,
 	StatusBarAlignment,
+	ThemeColor,
+	ThemeIcon,
 	TreeItem,
 	TreeItemCollapsibleState,
 	Uri,
@@ -29,6 +31,8 @@ import {
 	type TreeView
 } from 'vscode';
 import { activateProjects } from './project/index';
+import { ResourceIconIndex } from './resourceIcons';
+import { buildStartScreenContext } from './project/model';
 import { StartupSequence } from './startup/startupSequence';
 import { showStartupStatus } from './startup/startupStatus';
 import { registerTerraformEditorProviders } from './editor/providers';
@@ -71,6 +75,7 @@ import { isValidTfFileName, type CanvasCatalogueSnapshot, type CanvasCatalogueTy
 import { lookupBundledSchema, type FormSchema } from './canvas/schemaForm';
 import { findTemplateById } from './canvas/templateLibrary';
 import { activateSidePanel } from './sidePanel/sidePanel';
+import { parseCloudConnections, planCloudProviders, type CloudProvider } from './sidePanel/model';
 import { activateLearning } from './learning/learningPanel';
 import {
 	draftSaveErrorMessage,
@@ -209,7 +214,15 @@ class DiagnosticTreeItem {
 class CloudForgeGraphProvider implements TreeDataProvider<GraphTreeItem> {
 	private readonly changeEmitter = new EventEmitter<GraphTreeItem | undefined>();
 	readonly onDidChangeTreeData: Event<GraphTreeItem | undefined> = this.changeEmitter.event;
+	/** Fires only when the graph itself changes (not when icons finish loading). */
+	private readonly graphEmitter = new EventEmitter<void>();
+	readonly onDidChangeGraph: Event<void> = this.graphEmitter.event;
 	private graph: ArchitectureGraph | undefined;
+	private readonly iconSubscription: { dispose(): unknown } | undefined;
+
+	constructor(private readonly icons?: ResourceIconIndex) {
+		this.iconSubscription = icons?.onDidChange(() => this.changeEmitter.fire(undefined));
+	}
 	private nodeById = new Map<string, GraphNode>();
 	private connectedNodeIds = new Set<string>();
 
@@ -222,6 +235,7 @@ class CloudForgeGraphProvider implements TreeDataProvider<GraphTreeItem> {
 			this.connectedNodeIds.add(edge.toId);
 		}
 		this.changeEmitter.fire(undefined);
+		this.graphEmitter.fire();
 	}
 
 	getGraph(): ArchitectureGraph | undefined {
@@ -250,17 +264,27 @@ class CloudForgeGraphProvider implements TreeDataProvider<GraphTreeItem> {
 				? `${element.node.kind}: ${element.node.name}\n${sourceLabel}`
 				: `${element.node.kind}: ${element.node.name}`;
 			item.contextValue = 'cloudForgeResource';
+			// The cloud service icon the canvas shows for this type, once the provider catalogue has loaded.
+			item.iconPath = this.icons?.iconFor(element.node.resourceType)
+				?? new ThemeIcon(element.node.kind === 'module' ? 'package' : element.node.kind === 'data' ? 'symbol-interface' : 'symbol-class');
 			return item;
 		}
 		if (element.type === 'connection') {
 			const item = new TreeItem(element.label, TreeItemCollapsibleState.None);
 			item.description = element.direction;
 			item.contextValue = 'cloudForgeConnection';
+			item.iconPath = new ThemeIcon(element.direction === l10n.t('incoming') ? 'arrow-small-left' : 'arrow-small-right');
 			return item;
 		}
 		const item = new TreeItem(element.diagnostic.message, TreeItemCollapsibleState.None);
 		item.description = element.diagnostic.code + ' · ' + element.diagnostic.severity;
 		item.contextValue = 'cloudForgeDiagnostic';
+		const severity = element.diagnostic.severity.toLowerCase();
+		item.iconPath = severity === 'error'
+			? new ThemeIcon('error', new ThemeColor('problemsErrorIcon.foreground'))
+			: severity === 'warning'
+				? new ThemeIcon('warning', new ThemeColor('problemsWarningIcon.foreground'))
+				: new ThemeIcon('info', new ThemeColor('problemsInfoIcon.foreground'));
 		return item;
 	}
 
@@ -298,7 +322,9 @@ class CloudForgeGraphProvider implements TreeDataProvider<GraphTreeItem> {
 	}
 
 	dispose(): void {
+		this.iconSubscription?.dispose();
 		this.changeEmitter.dispose();
+		this.graphEmitter.dispose();
 	}
 }
 
@@ -602,7 +628,9 @@ function toCanvasSnapshot(graph: ArchitectureGraph, architectureName: string): C
 }
 
 export function activate(context: ExtensionContext): void {
-	const provider = new CloudForgeGraphProvider();
+	const resourceIcons = new ResourceIconIndex(context.extensionUri);
+	context.subscriptions.push(resourceIcons);
+	const provider = new CloudForgeGraphProvider(resourceIcons);
 	const treeView = window.createTreeView('cloudforge.resources', { treeDataProvider: provider });
 	// The same graph also shows in the CloudForge side panel; Explorer keeps its copy.
 	const panelTreeView = window.createTreeView('cloudforge.panel.resources', { treeDataProvider: provider });
@@ -617,6 +645,48 @@ export function activate(context: ExtensionContext): void {
 	let currentArchitectureName = l10n.t('Architecture');
 	const projectControllerRef: { current?: ReturnType<typeof activateProjects> } = {};
 	const terraformProvidersRef: { current?: ReturnType<typeof registerTerraformEditorProviders> } = {};
+
+	interface WritableTarget { readonly workspaceId: string; readonly architectureId: string }
+	type WritableCall = (target: WritableTarget) => Promise<ServiceResult<unknown>>;
+
+	/**
+	 * The service mints new workspace and architecture ids each time CloudForge connects to a
+	 * project, so a canvas opened before a reconnect holds ids it no longer grants and every save
+	 * fails with SCOPE_DENIED. Map the canvas to the same architecture in the open project (local
+	 * or linked), select it, and let the caller retry.
+	 */
+	async function recoverWritableTarget(stale: WritableTarget): Promise<WritableTarget | undefined> {
+		const project = projectControllerRef.current?.current;
+		if (!project) {
+			return undefined;
+		}
+		const matches = project.workspaceId === stale.workspaceId
+			? project.architectures.filter(item => item.architectureId === stale.architectureId)
+			: project.architectures.filter(item => item.displayName === currentArchitectureName);
+		if (matches.length !== 1) {
+			return undefined;
+		}
+		const target = { workspaceId: project.workspaceId, architectureId: matches[0].architectureId };
+		const selected = await callService<unknown>('selectArchitecture', { ...target });
+		return selected.ok ? target : undefined;
+	}
+
+	/** True when the architecture's files live in a linked repository rather than the project. */
+	function isLinkedArchitecture(target: WritableTarget): boolean {
+		const project = projectControllerRef.current?.current;
+		return project?.workspaceId === target.workspaceId
+			&& project.architectures.some(item => item.architectureId === target.architectureId && item.source === 'repository');
+	}
+
+	/** Runs a save call, retrying once against the recovered target after a SCOPE_DENIED. */
+	async function callWritable(target: WritableTarget, call: WritableCall): Promise<{ readonly result: ServiceResult<unknown>; readonly target: WritableTarget }> {
+		const result = await call(target);
+		if (result.ok || result.error.code !== 'SCOPE_DENIED') {
+			return { result, target };
+		}
+		const recovered = await recoverWritableTarget(target);
+		return recovered ? { result: await call(recovered), target: recovered } : { result, target };
+	}
 
 	function toVsSeverity(raw: string): DiagnosticSeverity {
 		const lower = raw.toLowerCase();
@@ -872,15 +942,25 @@ export function activate(context: ExtensionContext): void {
 		workspaceId: string,
 		architectureId: string,
 		sourceRevision: string,
-		engine?: 'openTofu' | 'terraform'
+		engine?: 'openTofu' | 'terraform',
+		cloud: 'linked' | 'off' = 'linked'
 	) {
+		const cloudProviders = cloud === 'linked' ? await linkedPlanProviders(workspaceId) : [];
 		const result = await callService<unknown>('runEnginePlan', {
 			workspaceId,
 			architectureId,
 			expectedSourceRevision: sourceRevision,
 			...(engine ? { engine } : {}),
+			...(cloudProviders.length ? { cloudProviders } : {}),
 		});
 		if (!result.ok) {
+			if (result.error.code === 'INVALID_STATE' && cloudProviders.length) {
+				return {
+					ok: false as const,
+					cloudProviders,
+					message: l10n.t('A linked cloud account is not signed in as its link expects, so the plan did not run. Check the sign-in, or plan without cloud access.'),
+				};
+			}
 			const message = result.error.code === 'STALE_SOURCE'
 				? l10n.t('The Terraform source changed on disk. Refresh the graph before running a local plan.')
 				: result.error.code === 'WORKSPACE_UNAVAILABLE'
@@ -896,6 +976,24 @@ export function activate(context: ExtensionContext): void {
 		}
 		syncProblems(provider.getGraph(), report);
 		return { ok: true as const, report };
+	}
+
+	/**
+	 * Cloud providers to plan with: those the open graph uses that are linked to this project,
+	 * unless the user turned linked accounts off for plans. The service checks each sign-in
+	 * against its link before any CLI sees credentials.
+	 */
+	async function linkedPlanProviders(workspaceId: string): Promise<CloudProvider[]> {
+		if (!workspace.getConfiguration('cloudforge').get<boolean>('plan.useLinkedCloudAccounts', true)) {
+			return [];
+		}
+		const resourceTypes = provider.getGraph()?.nodes.map(node => node.resourceType) ?? [];
+		if (!resourceTypes.some(type => type)) {
+			return [];
+		}
+		const listed = await callService<unknown>('listCloudConnections', { workspaceId });
+		const connections = listed.ok ? parseCloudConnections(listed.value) : undefined;
+		return connections ? planCloudProviders(resourceTypes, connections) : [];
 	}
 
 	async function checkArchitectureOfflineMirrorReadiness(
@@ -932,7 +1030,7 @@ export function activate(context: ExtensionContext): void {
 			const message = result.error.code === 'STALE_SOURCE'
 				? l10n.t('The Terraform source changed on disk. Refresh the graph before running offline init.')
 				: result.error.code === 'SCOPE_DENIED'
-					? l10n.t('Offline init is only allowed on writable project architectures, not read-only imported repositories.')
+					? l10n.t('Offline init runs only on project architectures, not on linked repositories, so it never changes a repository\'s lock file or provider cache.')
 					: result.error.code === 'SCHEMA_UNAVAILABLE'
 						? l10n.t('One or more locked providers are missing or unverified in the local offline mirror.')
 						: result.error.code === 'WORKSPACE_UNAVAILABLE'
@@ -960,16 +1058,29 @@ export function activate(context: ExtensionContext): void {
 		}
 	}
 
-	async function runAndPresentLocalPlan(graph: ArchitectureGraph): Promise<void> {
+	async function runAndPresentLocalPlan(graph: ArchitectureGraph, cloud: 'linked' | 'off' = 'linked'): Promise<void> {
 		const outcome = await window.withProgress(
 			{
 				location: ProgressLocation.Notification,
-				title: l10n.t('CloudForge: Running credential-free local plan for {0}…', currentArchitectureName),
+				title: cloud === 'linked'
+					? l10n.t('CloudForge: Running local plan for {0}…', currentArchitectureName)
+					: l10n.t('CloudForge: Running credential-free local plan for {0}…', currentArchitectureName),
 				cancellable: false,
 			},
-			() => runArchitectureEnginePlan(graph.workspaceId, graph.architectureId, graph.sourceRevision)
+			() => runArchitectureEnginePlan(graph.workspaceId, graph.architectureId, graph.sourceRevision, undefined, cloud)
 		);
 		if (!outcome.ok) {
+			if ('cloudProviders' in outcome && outcome.cloudProviders?.length) {
+				const check = l10n.t('Check Sign-In');
+				const withoutCloud = l10n.t('Plan Without Cloud');
+				const picked = await window.showErrorMessage(outcome.message, check, withoutCloud);
+				if (picked === check) {
+					await commands.executeCommand('cloudforge.checkCloudSignIn', outcome.cloudProviders[0]);
+				} else if (picked === withoutCloud) {
+					await runAndPresentLocalPlan(graph, 'off');
+				}
+				return;
+			}
 			void window.showErrorMessage(outcome.message);
 			return;
 		}
@@ -1307,15 +1418,15 @@ export function activate(context: ExtensionContext): void {
 			// Focused save first: the service folds the canvas draft into the file on disk and keeps
 			// comments and fields the canvas does not show. If the file on disk does not parse, fall
 			// back to the whole-file preview so the user can still save.
-			const params = { workspaceId, architectureId, expectedSourceRevision, fileName, contents };
-			let result = await callService<unknown>('previewFocusedSave', {
-				...params,
+			const focused = await callWritable({ workspaceId, architectureId }, target => callService<unknown>('previewFocusedSave', {
+				...target, expectedSourceRevision, fileName, contents,
 				...(removeAddresses?.length ? { removeAddresses: [...removeAddresses] } : {}),
 				...(renames?.length ? { renames: renames.map(({ from, to }) => ({ from, to })) } : {}),
 				...(baseContents !== undefined ? { baseContents } : {}),
-			});
+			}));
+			let result = focused.result;
 			if (!result.ok && (result.error.code === 'UNSUPPORTED_FORMAT' || result.error.code === 'INVALID_PARAMS')) {
-				result = await callService<unknown>('previewDraftSave', params);
+				result = await callService<unknown>('previewDraftSave', { ...focused.target, expectedSourceRevision, fileName, contents });
 			}
 			if (!result.ok) {
 				return { ok: false, error: draftSaveErrorMessage(result.error.code) };
@@ -1331,9 +1442,10 @@ export function activate(context: ExtensionContext): void {
 			// A focused preview holds the merged text in the service; only the token goes back.
 			const focused = focusedSaveToken !== undefined && focusedSaveToken === previewToken;
 			focusedSaveToken = undefined;
-			const result = focused
-				? await callService<unknown>('applyFocusedSave', { workspaceId, architectureId, expectedSourceRevision, fileName, previewToken })
-				: await callService<unknown>('applyDraftSave', { workspaceId, architectureId, expectedSourceRevision, fileName, contents, previewToken });
+			const call = await callWritable({ workspaceId, architectureId }, target => focused
+				? callService<unknown>('applyFocusedSave', { ...target, expectedSourceRevision, fileName, previewToken })
+				: callService<unknown>('applyDraftSave', { ...target, expectedSourceRevision, fileName, contents, previewToken }));
+			const result = call.result;
 			if (!result.ok) {
 				return { ok: false, error: draftSaveErrorMessage(result.error.code) };
 			}
@@ -1344,7 +1456,7 @@ export function activate(context: ExtensionContext): void {
 			// Re-read the architecture so both the native CloudForge Graph tree and Canvas reflect
 			// the newly saved file and updated sourceRevision. Return the refreshed snapshot so the
 			// canvas posts `draftSaveApplied` before projecting the new revision.
-			const refreshed = await showGraph(provider, treeView, workspaceId, architectureId);
+			const refreshed = await showGraph(provider, treeView, call.target.workspaceId, call.target.architectureId);
 			if (refreshed) {
 				updateStatusBar(refreshed);
 				syncProblems(refreshed);
@@ -1354,15 +1466,17 @@ export function activate(context: ExtensionContext): void {
 					refreshedGraph: toCanvasSnapshot(refreshed, currentArchitectureName),
 					notice: {
 						kind: 'info' as const,
-						message: l10n.t('Saved {0} ({1} bytes) and refreshed architecture to revision {2}.', applied.fileName, applied.bytesWritten, applied.newSourceRevision.slice(0, 8)),
+						message: isLinkedArchitecture(call.target)
+							? l10n.t('Saved {0} ({1} bytes) into the linked repository, revision {2}. Review and commit it in Source Control.', applied.fileName, applied.bytesWritten, applied.newSourceRevision.slice(0, 8))
+							: l10n.t('Saved {0} ({1} bytes) and refreshed architecture to revision {2}.', applied.fileName, applied.bytesWritten, applied.newSourceRevision.slice(0, 8)),
 					},
 				};
 			}
 			return { ok: true, applied };
 		},
 		async onPreviewSaveAll(workspaceId, architectureId, expectedSourceRevision, files) {
-			const result = await callService<unknown>('previewFocusedSaveBatch', {
-				workspaceId, architectureId, expectedSourceRevision,
+			const call = await callWritable({ workspaceId, architectureId }, target => callService<unknown>('previewFocusedSaveBatch', {
+				...target, expectedSourceRevision,
 				files: files.map(file => ({
 					fileName: file.fileName,
 					contents: file.contents,
@@ -1370,7 +1484,8 @@ export function activate(context: ExtensionContext): void {
 					...(file.renames?.length ? { renames: file.renames.map(({ from, to }) => ({ from, to })) } : {}),
 					...(file.baseContents !== undefined ? { baseContents: file.baseContents } : {}),
 				})),
-			});
+			}));
+			const result = call.result;
 			if (!result.ok) {
 				return { ok: false, error: draftSaveErrorMessage(result.error.code) };
 			}
@@ -1379,7 +1494,8 @@ export function activate(context: ExtensionContext): void {
 		},
 		async onApplySaveAll(workspaceId, architectureId, expectedSourceRevision, previewToken) {
 			// The merged text of every file stays in the service; only the token goes back.
-			const result = await callService<unknown>('applyFocusedSaveBatch', { workspaceId, architectureId, expectedSourceRevision, previewToken });
+			const call = await callWritable({ workspaceId, architectureId }, target => callService<unknown>('applyFocusedSaveBatch', { ...target, expectedSourceRevision, previewToken }));
+			const result = call.result;
 			if (!result.ok) {
 				return { ok: false, error: draftSaveErrorMessage(result.error.code) };
 			}
@@ -1387,7 +1503,7 @@ export function activate(context: ExtensionContext): void {
 			if (!applied) {
 				return { ok: false, error: draftSaveErrorMessage('SERVICE_ERROR') };
 			}
-			const refreshed = await showGraph(provider, treeView, workspaceId, architectureId);
+			const refreshed = await showGraph(provider, treeView, call.target.workspaceId, call.target.architectureId);
 			if (refreshed) {
 				updateStatusBar(refreshed);
 				syncProblems(refreshed);
@@ -1397,7 +1513,9 @@ export function activate(context: ExtensionContext): void {
 					refreshedGraph: toCanvasSnapshot(refreshed, currentArchitectureName),
 					notice: {
 						kind: 'info' as const,
-						message: l10n.t('Saved {0} files and refreshed architecture to revision {1}.', applied.files.length, applied.newSourceRevision.slice(0, 8)),
+						message: isLinkedArchitecture(call.target)
+							? l10n.t('Saved {0} files into the linked repository, revision {1}. Review and commit them in Source Control.', applied.files.length, applied.newSourceRevision.slice(0, 8))
+							: l10n.t('Saved {0} files and refreshed architecture to revision {1}.', applied.files.length, applied.newSourceRevision.slice(0, 8)),
 					},
 				};
 			}
@@ -1486,6 +1604,32 @@ export function activate(context: ExtensionContext): void {
 				return;
 			}
 			await projectControllerRef.current?.createArchitectureFromTemplate(template.defaultArchName, template.starterMainTf);
+		},
+		startContext() {
+			const controller = projectControllerRef.current;
+			return buildStartScreenContext(controller?.current, controller?.activeArchitectureId);
+		},
+		async onStartAction(action, architectureId) {
+			// Each button maps to one fixed command; the webview never names a command itself.
+			switch (action) {
+				case 'createProject':
+					await commands.executeCommand('cloudforge.createProject');
+					return;
+				case 'openProject':
+					await commands.executeCommand('workbench.action.files.openFolder');
+					return;
+				case 'createArchitecture':
+					await commands.executeCommand('cloudforge.createArchitecture');
+					return;
+				case 'switchArchitecture':
+					await commands.executeCommand('cloudforge.switchArchitecture');
+					return;
+				case 'openArchitecture':
+					if (architectureId && projectControllerRef.current?.current?.architectures.some(item => item.architectureId === architectureId)) {
+						await projectControllerRef.current.openArchitecture(architectureId);
+					}
+					return;
+			}
 		},
 		async onRunHostAction(action) {
 			switch (action) {
@@ -3169,11 +3313,16 @@ export function activate(context: ExtensionContext): void {
 
 	// Stage 11: the CloudForge side panel (Project Status, Terraform State, Cloud Connections).
 	const projectChanged = new EventEmitter<void>();
-	context.subscriptions.push(projectChanged, projectControllerRef.current.onDidChange(() => projectChanged.fire()));
+	context.subscriptions.push(projectChanged, projectControllerRef.current.onDidChange(() => {
+		projectChanged.fire();
+		canvas.refreshStartScreen();
+	}));
 	activateSidePanel(context, {
 		callService,
 		getGraph: () => provider.getGraph(),
-		onDidChangeGraph: provider.onDidChangeTreeData,
+		onDidChangeGraph: provider.onDidChangeGraph,
+		resourceIcon: type => resourceIcons.iconFor(type),
+		onDidChangeResourceIcons: resourceIcons.onDidChange,
 		architectureName: () => provider.getGraph() ? currentArchitectureName : undefined,
 		projectName: () => projectControllerRef.current?.current?.displayName,
 		projectWorkspaceId: () => projectControllerRef.current?.current?.workspaceId,

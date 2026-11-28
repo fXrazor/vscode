@@ -15,7 +15,8 @@ import {
 	createHistory, historyReducer, type Resource, type BoardItem, type DesignMode,
 	type Position, type Provider, type ResourceKind, type CatalogueEntry, type Architecture, type Action
 } from './model.ts';
-import { providerRegions, resourceDefinition, sampleArchitecture } from './fixture.ts';
+import { blankArchitecture, providerRegions, resourceDefinition, sampleArchitecture } from './fixture.ts';
+import { StartScreen } from './StartScreen.tsx';
 import type { CanvasNode } from './ResourceNode.tsx';
 import type { DesignEdgeType } from './DesignEdge.tsx';
 import { ResourceFields } from './ResourceFields.tsx';
@@ -38,7 +39,7 @@ import { architectureDiagnostics, type Diagnostic } from './diagnostics.ts';
 import { IssuesPanel, focusResourceField } from './IssuesPanel.tsx';
 import { visualResourcePlacement } from './resourceHierarchy.ts';
 import { workflowTemplate } from './workflowTemplate.ts';
-import { createHostBridge, type HostCloudRegionsPayload, type HostDependencyReport, type HostDetectedEngine, type HostDraftSaveError, type HostDraftSavePreview, type HostEngineInitOfflineReport, type HostEnginePlanReport, type HostEngineValidateReport, type HostSaveAllPreview, type HostExportAuditReport, type HostGraphSnapshot, type HostModuleInspection, type HostNotice, type HostOfflineMirrorReadiness, type HostValidationRun } from './webviewBridge.ts';
+import { createHostBridge, type HostCloudRegionsPayload, type HostDependencyReport, type HostDetectedEngine, type HostDraftSaveError, type HostDraftSavePreview, type HostEngineInitOfflineReport, type HostEnginePlanReport, type HostEngineValidateReport, type HostSaveAllPreview, type HostExportAuditReport, type HostGraphSnapshot, type HostModuleInspection, type HostNotice, type HostOfflineMirrorReadiness, type HostStartContext, type HostValidationRun } from './webviewBridge.ts';
 import type { LiveSchemaMap } from './liveSchema.ts';
 import { parseSchemaPreview, type SchemaPreview } from './resourceDraft.ts';
 import { hydrateResourceValues, parseResourceValues, type FileResourceValues } from './resourceValues.ts';
@@ -61,7 +62,7 @@ function detectInitialTheme(isHosted: boolean): 'light' | 'dark' {
 
 export function Studio() {
 	const hostBridge = useMemo(() => createHostBridge(), []);
-	const [history, dispatch] = useReducer(historyReducer, undefined, () => createHistory(previewSample()));
+	const [history, dispatch] = useReducer(historyReducer, undefined, () => createHistory(hostBridge.isHosted ? blankArchitecture() : previewSample()));
 	// Graph presentation (lens, layout, pins, expansion) is never part of architecture history.
 	const [graphPresentation, presentGraph] = useReducer(graphPresentationReducer, defaultGraphPresentation);
 	const [ink, setInk] = useState(() => normaliseInkStyle({}));
@@ -91,6 +92,7 @@ export function Studio() {
 	const [pendingField,setPendingField]=useState<Diagnostic>();
 	const [message, setMessage] = useState(hostBridge.isHosted ? 'Connecting to CloudForge workspace…' : 'Sample architecture loaded');
 	const [hostSnapshot, setHostSnapshot] = useState<HostGraphSnapshot | null>(null);
+	const [startContext, setStartContext] = useState<HostStartContext | null>(null);
 	/** The architecture last loaded from the service; the draft is modified when the present differs from it. */
 	const [hostBaseline, setHostBaseline] = useState<Architecture | null>(null);
 	const hostBaselineRef = useRef<Architecture | null>(null);
@@ -200,6 +202,7 @@ export function Studio() {
 			try {
 			switch (incoming.type) {
 				case 'graph': {
+					setStartContext(null);
 					sourceValuesRef.current = undefined;
 					setSourceValues(undefined);
 					setModuleInspections({});
@@ -280,7 +283,11 @@ export function Studio() {
 						});
 					} else if (incoming.viewState?.selectedId && projected.architecture.resources.some(r => r.id === incoming.viewState?.selectedId)) {
 						setSelectedId(incoming.viewState.selectedId);
+					} else {
+						// A resource saved for the first time continues under the service's node id.
+						setSelectedIds(current => current.map(id => projected.idRemap[id] ?? id));
 					}
+					setWorkspaceResourceId(current => projected.idRemap[current] ?? current);
 					setMessage('Loaded ' + incoming.graph.architectureName + ' · rev ' + incoming.graph.sourceRevision.slice(0, 8));
 					break;
 				}
@@ -300,7 +307,20 @@ export function Studio() {
 					}
 					break;
 				case 'empty':
-					setMessage(incoming.message);
+					setMessage(incoming.start ? '' : incoming.message);
+					if (incoming.start) {
+						// Nothing is open: clear the last architecture and offer to start one.
+						hostArchitectureIdRef.current = null;
+						hostGraphRef.current = null;
+						hostBaselineRef.current = null;
+						savedFilesRef.current = null;
+						setHostSnapshot(null);
+						setHostBaseline(null);
+						setHasSourceById({});
+						setSelectedIds([]);
+						dispatch({ type: 'replace', architecture: blankArchitecture() });
+						setStartContext(incoming.start);
+					}
 					break;
 				case 'catalogueTypes':
 					registerServiceTypes(incoming.types);
@@ -1018,6 +1038,7 @@ export function Studio() {
        onAddCatalogue={(type, provider, position, parentId) => {
         void loadCatalogue(provider).then(snapshot => { const entry = snapshot.entries.find(entry => entry.type === type); if (entry) { addCatalogueResource(entry,provider,position,parentId); } }).catch(() => setMessage('Unable to load the provider catalogue.'));
        }} />}
+						{startContext && <StartScreen context={startContext} onAction={(action, architectureId) => hostBridge.post({ type: 'startAction', action, ...(architectureId ? { architectureId } : {}) })} />}
 					</div>
 				</div>
 				<aside id="resource-inspector" className="inspector" aria-label="Resource inspector" hidden={!inspectorOpen}>

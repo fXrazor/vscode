@@ -57,7 +57,7 @@ export type CloudForgeServiceMethod =
 	| 'startValidationRun' | 'pollValidationRun' | 'cancelValidationRun'
 	| 'previewDraftSave' | 'applyDraftSave' | 'previewFocusedSave' | 'applyFocusedSave' | 'readResourceValues'
 	| 'previewFocusedSaveBatch' | 'applyFocusedSaveBatch'
-	| 'summarizeState' | 'listCloudConnections' | 'setCloudConnection' | 'storeCloudKey' | 'removeCloudConnection' | 'checkCloudSignIn'
+	| 'summarizeState' | 'listCloudConnections' | 'setCloudConnection' | 'storeCloudKey' | 'removeCloudConnection' | 'checkCloudSignIn' | 'listCloudAccounts'
 	| 'inspectDependencies' | 'listCloudRegions' | 'readModule'
 	| 'diffCatalogueSnapshots' | 'auditExportReadiness' | 'exportPortableBundle'
 	| 'previewProviderUpgrade' | 'applyProviderUpgrade' | 'recoverUpgradeJournal'

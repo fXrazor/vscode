@@ -10,13 +10,13 @@
 
 import { randomBytes } from 'node:crypto';
 import {
-	commands, EventEmitter, l10n, ThemeColor, ThemeIcon, TreeItem, TreeItemCollapsibleState, ViewColumn, window, workspace,
+	commands, EventEmitter, l10n, ProgressLocation, QuickPickItemKind, ThemeColor, ThemeIcon, TreeItem, TreeItemCollapsibleState, Uri, ViewColumn, window, workspace,
 	type Disposable, type Event, type ExtensionContext, type TreeDataProvider, type WebviewPanel,
 } from 'vscode';
 import {
-	buildStatusHtml, CLOUD_PROVIDERS, describeConnection, describeSignInCheck, describeState, parseCloudConnections, parseSignInCheck, parseStateSummary, parseStatusPageMessage,
+	buildStatusHtml, cloudAccountPickItems, CLOUD_PROVIDERS, describeConnection, describeSignInCheck, describeState, parseCloudAccountList, parseCloudConnections, parseSignInCheck, parseStateSummary, parseStatusPageMessage,
 	providerLabel, providersInUse, signInLabel, stateDrift,
-	type CloudConnection, type CloudProvider, type SignInCheck, type StateSummary,
+	type CloudAccount, type CloudConnection, type CloudProvider, type SignInCheck, type StateSummary,
 } from './model';
 
 type ServiceResult<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: { readonly code: string } };
@@ -46,6 +46,9 @@ export interface SidePanelHost {
 	projectWorkspaceId(): string | undefined;
 	readonly onDidChangeProject: Event<void>;
 	openNodeSource(graph: SidePanelGraph, nodeId: string): Promise<unknown>;
+	/** The cloud service icon for a Terraform resource type, when its catalogue has loaded. */
+	resourceIcon?(resourceType: string): Uri | undefined;
+	readonly onDidChangeResourceIcons?: Event<void>;
 }
 
 const GUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
@@ -175,12 +178,14 @@ interface PanelNode {
 	readonly children?: () => PanelNode[];
 }
 
-function leaf(id: string, label: string, options: { description?: string; icon?: string; color?: string; tooltip?: string; command?: TreeItem['command']; contextValue?: string } = {}): PanelNode {
+function leaf(id: string, label: string, options: { description?: string; icon?: string; iconUri?: Uri; color?: string; tooltip?: string; command?: TreeItem['command']; contextValue?: string } = {}): PanelNode {
 	const item = new TreeItem(label, TreeItemCollapsibleState.None);
 	item.id = id;
 	item.description = options.description;
 	item.tooltip = options.tooltip ?? (options.description ? `${label} · ${options.description}` : label);
-	if (options.icon) {
+	if (options.iconUri) {
+		item.iconPath = options.iconUri;
+	} else if (options.icon) {
 		item.iconPath = new ThemeIcon(options.icon, options.color ? new ThemeColor(options.color) : undefined);
 	}
 	item.command = options.command;
@@ -205,6 +210,11 @@ class PanelTree implements TreeDataProvider<PanelNode>, Disposable {
 
 	constructor(data: SidePanelData, private readonly roots: () => PanelNode[]) {
 		this.subscription = data.onDidChange(() => this.changeEmitter.fire(undefined));
+	}
+
+	/** Redraws the rows without reloading anything (for example once resource icons have loaded). */
+	redraw(): void {
+		this.changeEmitter.fire(undefined);
 	}
 
 	getTreeItem(node: PanelNode): TreeItem {
@@ -329,6 +339,7 @@ export function activateSidePanel(context: ExtensionContext, host: SidePanelHost
 				return leaf(`state.resource.${resource.address}`, resource.address, {
 					description: resource.instances === 1 ? resource.provider : `${resource.instances} instances · ${resource.provider}`,
 					icon: resource.mode === 'data' ? 'symbol-interface' : 'symbol-class',
+					iconUri: host.resourceIcon?.(resource.type),
 					command: node ? { command: 'cloudforge.revealStateResource', title: l10n.t('Open Source'), arguments: [node.id] } : undefined,
 				});
 			}), { description: String(local.resources.length) + (local.truncated ? '+' : '') }),
@@ -423,6 +434,40 @@ export function activateSidePanel(context: ExtensionContext, host: SidePanelHost
 			},
 		}).then(value => value?.trim());
 
+	/**
+	 * Offers what the signed-in CLI can use (Azure subscriptions, AWS profiles, Google projects) as a
+	 * pick list. Returns the account, 'manual' to type the details, or undefined when cancelled.
+	 */
+	const pickAccount = async (workspaceId: string, provider: CloudProvider, title: string, current: Readonly<Record<string, string>>): Promise<CloudAccount | 'manual' | undefined> => {
+		const listed = await window.withProgress(
+			{ location: ProgressLocation.Window, title: l10n.t('Asking {0} for your accounts…', providerLabel(provider)) },
+			() => host.callService<unknown>('listCloudAccounts', { workspaceId, provider }));
+		const list = listed.ok ? parseCloudAccountList(listed.value) : undefined;
+		if (!list || list.accounts.length === 0) {
+			const tool = data.connections?.find(item => item.provider === provider)?.signIn ?? providerLabel(provider);
+			const reason = !list || list.status === 'failed' || list.status === 'timedOut'
+				? l10n.t('{0} could not list your accounts, so enter the details by hand.', tool)
+				: list.status === 'cliMissing'
+					? l10n.t('{0} is not installed, so enter the details by hand.', tool)
+					: l10n.t('{0} has no signed-in accounts to pick from. Sign in with it to pick next time, or enter the details by hand.', tool);
+			void window.showInformationMessage(reason);
+			return 'manual';
+		}
+		type Row = { label: string; description?: string; kind?: QuickPickItemKind; account?: CloudAccount; manual?: boolean };
+		const rows: Row[] = [
+			...cloudAccountPickItems(list, current),
+			{ label: '', kind: QuickPickItemKind.Separator },
+			{ label: l10n.t('$(edit) Enter details manually…'), manual: true },
+		];
+		const picked = await window.showQuickPick(rows, {
+			title,
+			placeHolder: provider === 'azure' ? l10n.t('Pick the subscription this project deploys to') : provider === 'aws' ? l10n.t('Pick the AWS CLI profile') : l10n.t('Pick the Google Cloud project'),
+			matchOnDescription: true,
+			ignoreFocusOut: true,
+		});
+		return !picked ? undefined : picked.manual ? 'manual' : picked.account;
+	};
+
 	const linkConnection = async (value?: unknown) => {
 		const workspaceId = data.workspaceId();
 		if (!workspaceId) {
@@ -436,10 +481,22 @@ export function activateSidePanel(context: ExtensionContext, host: SidePanelHost
 		const existing = data.connections?.find(connection => connection.provider === provider)?.binding ?? {};
 		const title = l10n.t('Link {0} to this project', providerLabel(provider));
 		let binding: Record<string, string> | undefined;
+		const account = await pickAccount(workspaceId, provider, title, existing);
+		if (!account) {
+			return;
+		}
+		const picked = account === 'manual' ? undefined : account;
 		if (provider === 'azure') {
-			const cloud = await window.showQuickPick(['AzureCloud', 'AzureUSGovernment', 'AzureChinaCloud'], { title, placeHolder: l10n.t('Azure cloud (sign in first with az login)') });
-			const tenantId = cloud && await ask(title, l10n.t('Tenant ID (from az account show)'), { validate: id => GUID.test(id), invalid: l10n.t('Enter a GUID.') });
-			const subscriptionId = tenantId && await ask(title, l10n.t('Subscription ID'), { validate: id => GUID.test(id), invalid: l10n.t('Enter a GUID.') });
+			let cloud: string | undefined;
+			let tenantId: string | undefined;
+			let subscriptionId: string | undefined;
+			if (picked?.provider === 'azure') {
+				({ cloud, tenantId, subscriptionId } = picked);
+			} else {
+				cloud = await window.showQuickPick(['AzureCloud', 'AzureUSGovernment', 'AzureChinaCloud'], { title, placeHolder: l10n.t('Azure cloud (sign in first with az login)') });
+				tenantId = cloud && await ask(title, l10n.t('Tenant ID (from az account show)'), { validate: id => GUID.test(id), invalid: l10n.t('Enter a GUID.') });
+				subscriptionId = tenantId && await ask(title, l10n.t('Subscription ID'), { validate: id => GUID.test(id), invalid: l10n.t('Enter a GUID.') });
+			}
 			if (!cloud || !tenantId || !subscriptionId) {
 				return;
 			}
@@ -447,13 +504,15 @@ export function activateSidePanel(context: ExtensionContext, host: SidePanelHost
 			if (clientId === undefined) {
 				return;
 			}
-			const label = await ask(title, l10n.t('Label (optional, for example Production)'), { value: existing.label, optional: true });
+			const label = await ask(title, l10n.t('Label (optional, for example Production)'), { value: existing.label ?? (picked?.provider === 'azure' ? picked.name.slice(0, 128) : undefined), optional: true });
 			if (label === undefined) {
 				return;
 			}
 			binding = { cloud, tenantId, subscriptionId, ...(clientId ? { clientId } : {}), ...(label ? { label } : {}) };
 		} else if (provider === 'aws') {
-			const profile = await ask(title, l10n.t('AWS CLI profile (from aws configure or aws configure sso)'), { value: existing.profile ?? 'default', validate: name => /^[A-Za-z0-9_.-]{1,64}$/.test(name) });
+			const profile = picked?.provider === 'aws'
+				? picked.profile
+				: await ask(title, l10n.t('AWS CLI profile (from aws configure or aws configure sso)'), { value: existing.profile ?? 'default', validate: name => /^[A-Za-z0-9_.-]{1,64}$/.test(name) });
 			const region = profile && await ask(title, l10n.t('Default region (optional, for example eu-west-2)'), { value: existing.region, optional: true, validate: name => /^[a-z0-9-]{2,32}$/.test(name) });
 			if (!profile || region === undefined) {
 				return;
@@ -464,7 +523,9 @@ export function activateSidePanel(context: ExtensionContext, host: SidePanelHost
 			}
 			binding = { profile, ...(region ? { region } : {}), ...(label ? { label } : {}) };
 		} else {
-			const projectId = await ask(title, l10n.t('Google Cloud project ID (sign in first with gcloud auth application-default login)'), { value: existing.projectId, validate: id => /^[a-z][a-z0-9-]{4,28}[a-z0-9]$/.test(id), invalid: l10n.t('Use the project ID, not its name.') });
+			const projectId = picked?.provider === 'google'
+				? picked.projectId
+				: await ask(title, l10n.t('Google Cloud project ID (sign in first with gcloud auth application-default login)'), { value: existing.projectId, validate: id => /^[a-z][a-z0-9-]{4,28}[a-z0-9]$/.test(id), invalid: l10n.t('Use the project ID, not its name.') });
 			const configuration = projectId && await ask(title, l10n.t('gcloud configuration (optional)'), { value: existing.configuration, optional: true, validate: name => /^[A-Za-z0-9_-]{1,64}$/.test(name) });
 			const region = configuration !== undefined && projectId ? await ask(title, l10n.t('Default region (optional, for example europe-west2)'), { value: existing.region, optional: true, validate: name => /^[a-z0-9-]{2,32}$/.test(name) }) : undefined;
 			if (!projectId || configuration === undefined || region === undefined) {
@@ -634,6 +695,7 @@ export function activateSidePanel(context: ExtensionContext, host: SidePanelHost
 		data.onDidChange(renderStatusPanel),
 		host.onDidChangeGraph(scheduleRefresh),
 		host.onDidChangeProject(scheduleRefresh),
+		...(host.onDidChangeResourceIcons ? [host.onDidChangeResourceIcons(() => stateTree.redraw())] : []),
 		{ dispose: () => clearTimeout(timer) },
 		{ dispose: () => statusPanel?.dispose() },
 		commands.registerCommand('cloudforge.openProjectStatus', openStatus),

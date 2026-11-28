@@ -8,12 +8,14 @@ import { createHistory, historyReducer } from './model.ts';
 import { liveSchemaAttributes, liveSchemaBlocks, liveSchemaOutputs, type HostFormSchema } from './liveSchema.ts';
 import { additionalBlocks, editableFields } from './formDefinition.ts';
 import { architectureDiagnostics, isStaleDiagnostic } from './diagnostics.ts';
-import { sourceChanges, buildDraftSavePayload, changedFilePayloads, refreshPrevious, adoptSavedFiles, buildHostViewState, defaultTargetTfFile, projectGraphSnapshotToArchitecture, projectHostDiagnostics, resolveProviderRegions } from './serviceAdapter.ts';
+import { sourceChanges, buildDraftSavePayload, changedFilePayloads, refreshPrevious, adoptSavedFiles, buildHostViewState, defaultTargetTfFile, FALLBACK_ICONS, projectGraphSnapshotToArchitecture, projectHostDiagnostics, resolveProviderRegions } from './serviceAdapter.ts';
 import { projectResourceFiles, terraformCode, terraformCode as codeFor } from './terraformProjection.ts';
 import { describeMerge } from './draftSaveMerge.ts';
 import { buildResourceDraft, parseSchemaPreview } from './resourceDraft.ts';
 import { hydrateResourceValues, parseResourceValues } from './resourceValues.ts';
-import { sampleArchitecture as schemaSample } from './fixture.ts';
+import { resourceDefinition, sampleArchitecture as schemaSample } from './fixture.ts';
+import { recordCatalogueIcons } from './catalogue.ts';
+import type { Architecture } from './model.ts';
 import { explicitResourceReferences, inheritedDependencies } from './resourceHierarchy.ts';
 import type { HostCloudRegionsPayload, HostEngineValidateReport, HostGraphSnapshot, HostValidationRun } from './webviewBridge.ts';
 
@@ -170,7 +172,7 @@ test('source summaries suggest visual nesting, preserve reference evidence witho
 
 	// Guarded draft save payload produces valid `.tf` filename + generated HCL.
 	const payload = buildDraftSavePayload(refreshed.architecture);
-	assert.equal(payload.fileName, 'azure-landing-zone.tf');
+	assert.equal(payload.fileName, 'main.tf');
 	assert.match(payload.contents, /resource "azurerm_linux_virtual_machine" "vm_app"/);
 });
 
@@ -682,4 +684,92 @@ test('uncatalogued resources keep their Library icon through reload, and placeho
 	const reopenedAks = reopened.resources.find(resource => resource.id === 'aks')!;
 	assert.equal(reopenedAks.iconSize, 72);
 	assert.deepEqual(reopenedAks.iconOverride, { provider: 'azure', icon: 'catalog-icons/azure/azure-container-instances.svg', label: 'Container instances' });
+});
+
+test('a resource placed from the palette keeps its icon, place and links after its first save', () => {
+	const vmIcon = 'catalog-icons/azure/azure-virtual-machine.svg';
+	const previous: Architecture = {
+		name: 'Hub',
+		resources: [
+			{ id: 'canvas-rg', kind: 'group', provider: 'azure', name: 'hub_rg', terraformName: 'hub_rg', region: 'UK South', settings: {}, blocks: [], positions: { visual: { x: 40, y: 40 }, technical: { x: 40, y: 40 } } },
+			{
+				id: 'canvas-vm', kind: 'generic', provider: 'azure', name: 'vm_1', terraformName: 'vm_1', region: 'UK South', settings: {}, blocks: [], iconKind: 'compute', iconSize: 64,
+				catalogue: { type: 'azurerm_virtual_machine', label: 'Virtual Machine', service: 'Compute', category: 'Compute', icon: vmIcon, fields: [], iconMatch: 'type' },
+				positions: { visual: { x: 900, y: 300 }, technical: { x: 900, y: 300 } },
+			},
+		],
+		items: [],
+		connections: [{ id: 'drawn-1', source: { kind: 'element', elementId: 'canvas-vm' }, target: { kind: 'element', elementId: 'canvas-rg' } }],
+		groups: [{ id: 'g1', label: 'Pair', members: ['canvas-vm', 'canvas-rg'] }],
+	};
+	const snapshot: HostGraphSnapshot = {
+		workspaceId: 'ws-1', architectureId: 'arch-1', architectureName: 'Hub', sourceRevision: '2'.repeat(64), status: 'complete',
+		nodes: [
+			{ id: 'node-1', kind: 'resource', resourceType: 'azurerm_resource_group', name: 'hub_rg', label: 'hub_rg', hasSource: true },
+			{ id: 'node-2', kind: 'resource', resourceType: 'azurerm_virtual_network_peering', name: 'peer_1', label: 'peer_1', hasSource: true },
+			{ id: 'node-3', kind: 'resource', resourceType: 'azurerm_virtual_machine', name: 'vm_1', label: 'vm_1', hasSource: true },
+		],
+		edges: [],
+		diagnostics: [],
+	};
+	const projected = projectGraphSnapshotToArchitecture(snapshot, { previousArchitecture: previous });
+	const byId = new Map(projected.architecture.resources.map(resource => [resource.id, resource]));
+	assert.deepEqual(projected.idRemap, { 'canvas-rg': 'node-1', 'canvas-vm': 'node-3' });
+	const vm = byId.get('node-3');
+	assert.equal(vm?.catalogue?.icon, vmIcon);
+	assert.equal(vm?.iconKind, 'compute');
+	assert.equal(vm?.iconSize, 64);
+	assert.deepEqual(vm?.positions.visual, { x: 900, y: 300 });
+	const drawn = projected.architecture.connections.find(connection => connection.id === 'drawn-1');
+	assert.deepEqual(drawn?.source, { kind: 'element', elementId: 'node-3' });
+	assert.deepEqual(drawn?.target, { kind: 'element', elementId: 'node-1' });
+	assert.deepEqual(projected.architecture.groups?.[0]?.members, ['node-3', 'node-1']);
+
+	// A type no loaded catalogue knows yet gets a neutral icon, never the resource group one,
+	// and shows the palette icon once the provider catalogue has loaded.
+	const peering = byId.get('node-2')!;
+	assert.equal(peering.catalogue?.iconMatch, 'fallback');
+	assert.notEqual(peering.catalogue?.icon, 'azure-resource-groups.svg');
+	assert.equal(peering.catalogue?.icon, FALLBACK_ICONS.azure);
+	recordCatalogueIcons([{ type: 'azurerm_virtual_network_peering', icon: 'catalog-icons/azure/azure-virtual-networks.svg' }]);
+	assert.equal(resourceDefinition(peering).icon, 'catalog-icons/azure/azure-virtual-networks.svg');
+});
+
+test('node ids that shift after a save do not swap one resource for another', () => {
+	const at = (x: number, y: number) => ({ visual: { x, y }, technical: { x, y } });
+	const previous: Architecture = {
+		name: 'Net',
+		resources: [
+			{ id: 'node-1', kind: 'network', provider: 'azure', name: 'core', terraformName: 'core', region: 'UK South', settings: {}, blocks: [], positions: at(10, 10) },
+			{ id: 'node-2', kind: 'subnet', provider: 'azure', name: 'app', terraformName: 'app', region: 'UK South', settings: {}, blocks: [], positions: at(500, 500) },
+		],
+		items: [],
+		connections: [],
+	};
+	const snapshot: HostGraphSnapshot = {
+		workspaceId: 'ws-1', architectureId: 'arch-1', architectureName: 'Net', sourceRevision: '3'.repeat(64), status: 'complete',
+		nodes: [
+			{ id: 'node-1', kind: 'resource', resourceType: 'azurerm_resource_group', name: 'added', label: 'added', hasSource: true },
+			{ id: 'node-2', kind: 'resource', resourceType: 'azurerm_virtual_network', name: 'core', label: 'core', hasSource: true },
+			{ id: 'node-3', kind: 'resource', resourceType: 'azurerm_subnet', name: 'app', label: 'app', hasSource: true },
+		],
+		edges: [],
+		diagnostics: [],
+	};
+	const projected = projectGraphSnapshotToArchitecture(snapshot, { previousArchitecture: previous });
+	const byId = new Map(projected.architecture.resources.map(resource => [resource.id, resource]));
+	assert.equal(byId.get('node-1')?.kind, 'group');
+	assert.deepEqual(byId.get('node-2')?.positions.visual, { x: 10, y: 10 });
+	assert.deepEqual(byId.get('node-3')?.positions.visual, { x: 500, y: 500 });
+
+	// A block renamed in the file keeps its place: same id, same type, new name.
+	const renamed = projectGraphSnapshotToArchitecture({
+		...snapshot,
+		nodes: [{ id: 'node-1', kind: 'resource', resourceType: 'azurerm_virtual_network', name: 'core_renamed', label: 'core_renamed', hasSource: true }],
+	}, { previousArchitecture: previous });
+	assert.deepEqual(renamed.architecture.resources[0]?.positions.visual, { x: 10, y: 10 });
+});
+
+test('the first resources of a new architecture go into main.tf, not a file named after it', () => {
+	assert.equal(defaultTargetTfFile({ name: 'projectone', resources: [], items: [], connections: [] }), 'main.tf');
 });

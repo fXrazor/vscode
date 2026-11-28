@@ -403,6 +403,31 @@ export function buildArchitectureSwitchItems(
 	});
 }
 
+/** What the canvas start screen offers when no architecture is open. */
+export interface StartScreenContext {
+	readonly projectOpen: boolean;
+	readonly projectName?: string;
+	readonly architectures: readonly { readonly architectureId: string; readonly name: string }[];
+	readonly moreArchitectures: number;
+}
+
+/**
+ * The start screen's view of the window: no project (offer to create or open one), or the
+ * project's openable architectures, the last one opened first, at most `limit` of them.
+ */
+export function buildStartScreenContext(project: ProjectResult | undefined, activeArchitectureId?: string, limit = 8): StartScreenContext {
+	if (!project) {
+		return { projectOpen: false, architectures: [], moreArchitectures: 0 };
+	}
+	const available = buildArchitectureSwitchItems(project, activeArchitectureId).filter(item => item.available);
+	return {
+		projectOpen: true,
+		projectName: project.displayName,
+		architectures: available.slice(0, limit).map(item => ({ architectureId: item.architectureId, name: item.displayName })),
+		moreArchitectures: Math.max(0, available.length - limit),
+	};
+}
+
 /** Describes a finding's kind without ever showing a value. */
 export function findingDescription(code: FindingCode): string {
 	switch (code) {
@@ -441,4 +466,55 @@ export function selectDefaultArchitecture(project: ProjectResult, lastArchitectu
 		}
 	}
 	return available[0];
+}
+
+/** What `importRepository` with `mode: 'copy'` reports for one copied root. */
+export interface ImportCopyReport {
+	readonly architectureId: string;
+	readonly copiedFiles: number;
+	/** Reasons the service left entries behind: state, tfvars, hidden, notTerraform, link, tooDeep. */
+	readonly skippedReasons: readonly string[];
+	readonly outsideModuleSources: readonly string[];
+}
+
+const COPY_SKIP_REASONS = ['state', 'tfvars', 'hidden', 'notTerraform', 'link', 'tooDeep'];
+
+export function parseImportCopies(value: unknown): ImportCopyReport[] {
+	if (!isRecord(value) || !Array.isArray(value.copies)) {
+		return [];
+	}
+	const reports: ImportCopyReport[] = [];
+	for (const item of value.copies.slice(0, MAX_ITEMS)) {
+		if (!isRecord(item) || !isOpaqueId(item.architectureId) || typeof item.copiedFiles !== 'number' || !Number.isInteger(item.copiedFiles) || item.copiedFiles < 0) {
+			continue;
+		}
+		const reasons = new Set<string>();
+		for (const skipped of Array.isArray(item.skipped) ? item.skipped.slice(0, 64) : []) {
+			if (isRecord(skipped) && typeof skipped.reason === 'string' && COPY_SKIP_REASONS.includes(skipped.reason)) {
+				reasons.add(skipped.reason);
+			}
+		}
+		const outside = (Array.isArray(item.outsideModuleSources) ? item.outsideModuleSources.slice(0, 32) : [])
+			.filter((path): path is string => typeof path === 'string' && path.length > 0 && path.length <= 512 && !/[\u0000-\u001f]/.test(path));
+		reports.push({ architectureId: item.architectureId, copiedFiles: item.copiedFiles, skippedReasons: [...reasons], outsideModuleSources: outside });
+	}
+	return reports;
+}
+
+/** One line per notable outcome of an import copy, for a notification. */
+export function describeImportCopies(reports: readonly ImportCopyReport[]): { readonly info: string; readonly warning?: string } {
+	const files = reports.reduce((sum, report) => sum + report.copiedFiles, 0);
+	const reasons = new Set(reports.flatMap(report => report.skippedReasons));
+	const notes: string[] = [];
+	if (reasons.has('state')) {
+		notes.push('State files stayed in the repository and were not copied.');
+	}
+	if (reasons.has('tfvars')) {
+		notes.push('.tfvars files were left out.');
+	}
+	const info = `Copied ${files} file${files === 1 ? '' : 's'} into the project.${notes.length ? ` ${notes.join(' ')}` : ''}`;
+	const outside = reports.flatMap(report => report.outsideModuleSources);
+	return outside.length
+		? { info, warning: `Module sources in ${outside.slice(0, 3).join(', ')}${outside.length > 3 ? ` and ${outside.length - 3} more` : ''} point outside the copied folder, so those modules are missing. Copy them into the architecture or use a registry or Git source.` }
+		: { info };
 }

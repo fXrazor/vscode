@@ -8,6 +8,7 @@ import { test } from 'node:test';
 import { isValidArchitectureName } from '../src/importSelections.ts';
 import {
 	buildArchitectureSwitchItems,
+	buildStartScreenContext,
 	isSafeFolderName,
 	normalizeFsPathForMatch,
 	parseProjectResult,
@@ -113,6 +114,35 @@ test('workspacePresets define valid built-in zero-core-patch layout descriptors'
 	const focus = findWorkspacePreset('canvas-focus');
 	assert.equal(focus.focusMode, true);
 	assert.equal(focus.showPrimarySidebar, false);
+});
+
+test('buildStartScreenContext offers a new project when none is open, and openable architectures when one is', () => {
+	assert.deepEqual(buildStartScreenContext(undefined), { projectOpen: false, architectures: [], moreArchitectures: 0 });
+	const project = parseProjectResult({
+		workspaceId: 'w1',
+		kind: 'project',
+		displayName: 'Platform',
+		hasWorkspaceFile: true,
+		repositories: [
+			{ repositoryId: 'r-ok', displayName: 'core-infra', location: 'project', status: 'available', workspaceFolderIndex: 1 },
+			{ repositoryId: 'r-missing', displayName: 'archived', location: 'external', status: 'missing' },
+		],
+		architectures: [
+			{ architectureId: 'a-missing', displayName: 'Archive', source: 'repository', repositoryId: 'r-missing' },
+			{ architectureId: 'a-spoke', displayName: 'Spoke', source: 'repository', repositoryId: 'r-ok' },
+			{ architectureId: 'a-local', displayName: 'Sandbox', source: 'local' },
+			{ architectureId: 'a-hub', displayName: 'Hub', source: 'local' },
+		],
+		unimportedFolders: [],
+	})!;
+	const context = buildStartScreenContext(project, 'a-spoke', 2);
+	assert.equal(context.projectOpen, true);
+	assert.equal(context.projectName, 'Platform');
+	// The last opened comes first, unavailable ones are left out, and the rest are counted.
+	assert.deepEqual(context.architectures, [{ architectureId: 'a-spoke', name: 'Spoke' }, { architectureId: 'a-hub', name: 'Hub' }]);
+	assert.equal(context.moreArchitectures, 1);
+	const empty = parseProjectResult({ workspaceId: 'w2', kind: 'project', displayName: 'Fresh', hasWorkspaceFile: true, repositories: [], architectures: [], unimportedFolders: [] })!;
+	assert.deepEqual(buildStartScreenContext(empty), { projectOpen: true, projectName: 'Fresh', architectures: [], moreArchitectures: 0 });
 });
 
 test('multi-window project helpers resolve preferences and single .code-workspace entries cleanly', () => {

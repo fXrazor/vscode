@@ -13,6 +13,8 @@ import {
 	type CanvasCatalogueSnapshot,
 	type CanvasCatalogueTypes,
 	type CanvasSchemaPreview,
+	type CanvasStartAction,
+	type CanvasStartContext,
 	type CanvasCloudRegionsPayload,
 	type CanvasDependencyReport,
 	type CanvasDetectedEngine,
@@ -141,6 +143,10 @@ export interface CanvasPanelHost {
 		encoding: 'utf8' | 'base64'
 	): Promise<{ readonly ok: boolean; readonly message: string }>;
 	onUseTemplateAsArchitecture?(templateId: string): Promise<void>;
+	/** What the start screen shows when no architecture is open (project name and openable architectures). */
+	startContext?(): CanvasStartContext | undefined;
+	/** Runs one start-screen button through its fixed command. */
+	onStartAction?(action: CanvasStartAction, architectureId?: string): Promise<void>;
 	onRunHostAction?(action: CanvasHostAction): Promise<void>;
 	onToggleFocusMode?(active?: boolean): Promise<boolean>;
 	isFocusModeActive?(): boolean;
@@ -258,6 +264,13 @@ export class CloudForgeCanvasPanel implements Disposable {
 		}
 		this.panel.title = this.panelTitle(graph);
 		if (this.ready) {
+			this.postCurrentState();
+		}
+	}
+
+	/** Re-posts the start screen after the project or its architectures change while nothing is open. */
+	refreshStartScreen(): void {
+		if (this.panel && this.ready && !this.graph) {
 			this.postCurrentState();
 		}
 	}
@@ -829,6 +842,10 @@ export class CloudForgeCanvasPanel implements Disposable {
 				await this.host.onUseTemplateAsArchitecture?.(message.templateId);
 				return;
 			}
+			case 'startAction': {
+				await this.host.onStartAction?.(message.action, message.architectureId);
+				return;
+			}
 			case 'runHostAction': {
 				await this.host.onRunHostAction?.(message.action);
 				return;
@@ -901,6 +918,7 @@ export class CloudForgeCanvasPanel implements Disposable {
 			this.post({
 				type: 'empty',
 				message: l10n.t('Select an architecture in CloudForge Project or run CloudForge: Open Workspace to inspect its infrastructure graph.'),
+				start: this.host.startContext?.() ?? { projectOpen: false, architectures: [], moreArchitectures: 0 },
 			});
 			return;
 		}
