@@ -1631,6 +1631,19 @@ export function activate(context: ExtensionContext): void {
 					return;
 			}
 		},
+		async onRunHostAction(action) {
+			switch (action) {
+				case 'formatArchitecture':
+					await commands.executeCommand('cloudforge.formatArchitecture');
+					return;
+				case 'exportPortableBundle':
+					await commands.executeCommand('cloudforge.exportPortableBundle');
+					return;
+				case 'upgradeProvider':
+					await commands.executeCommand('cloudforge.upgradeProvider');
+					return;
+			}
+		},
 		onToggleFocusMode: setCanvasFocusMode,
 		isFocusModeActive: () => focusModeActive,
 	});
@@ -2612,6 +2625,43 @@ export function activate(context: ExtensionContext): void {
 		const result = await callService<unknown>('listProviderVersions', { address, ...(refresh ? { refresh: true } : {}) });
 		return result.ok ? parseProviderVersions(result.value) : undefined;
 	});
+	const checkedUpgradeRecovery = new Set<string>();
+	const checkInterruptedUpgradeJournal = (graph: ArchitectureGraph | undefined): void => {
+		if (!graph) {
+			return;
+		}
+		const key = `${graph.workspaceId}:${graph.architectureId}`;
+		if (checkedUpgradeRecovery.has(key)) {
+			return;
+		}
+		checkedUpgradeRecovery.add(key);
+		void (async () => {
+			const result = await callService<unknown>('recoverUpgradeJournal', {
+				workspaceId: graph.workspaceId,
+				architectureId: graph.architectureId,
+			});
+			if (!result.ok) {
+				return;
+			}
+			const recovery = parseUpgradeJournalRecovery(result.value);
+			if (!recovery?.recovered) {
+				return;
+			}
+			const current = provider.getGraph();
+			if (current?.workspaceId === graph.workspaceId && current.architectureId === graph.architectureId) {
+				const refreshed = await showGraph(provider, treeView, graph.workspaceId, graph.architectureId);
+				if (refreshed) {
+					updateStatusBar(refreshed);
+					syncProblems(refreshed);
+					canvas.updateIfOpen(toCanvasSnapshot(refreshed, currentArchitectureName));
+				}
+			}
+			void providersView.refresh();
+			void window.showInformationMessage(
+				l10n.t('Recovered an interrupted provider upgrade for {0} and restored {1} file(s): {2}.', currentArchitectureName, recovery.restoredFiles.length, recovery.restoredFiles.join(', '))
+			);
+		})();
+	};
 	const providersTree = window.createTreeView('cloudforge.providers', { treeDataProvider: providersView, showCollapseAll: true });
 	context.subscriptions.push(
 		providersTree,
@@ -2621,7 +2671,10 @@ export function activate(context: ExtensionContext): void {
 				? { value: model.attentionCount, tooltip: l10n.t('{0} providers need attention in this architecture', model.attentionCount) }
 				: undefined;
 		}),
-		provider.onDidChangeTreeData(() => { void providersView.refresh(); }),
+		provider.onDidChangeTreeData(() => {
+			void providersView.refresh();
+			checkInterruptedUpgradeJournal(provider.getGraph());
+		}),
 		commands.registerCommand('cloudforge.providers.refresh', () => { providersView.refreshVersions(); return providersView.refresh(); }),
 		commands.registerCommand('cloudforge.providers.extractSchema', async (node?: ProvidersNode) => {
 			const target = node?.type === 'project' || node?.type === 'version' ? node.row : undefined;

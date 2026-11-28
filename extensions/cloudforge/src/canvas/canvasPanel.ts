@@ -23,6 +23,7 @@ import {
 	type CanvasEngineValidateReport,
 	type CanvasExportAuditReport,
 	type CanvasGraphSnapshot,
+	type CanvasHostAction,
 	type CanvasModuleInspection,
 	type CanvasNotice,
 	type CanvasOfflineMirrorReadiness,
@@ -146,6 +147,7 @@ export interface CanvasPanelHost {
 	startContext?(): CanvasStartContext | undefined;
 	/** Runs one start-screen button through its fixed command. */
 	onStartAction?(action: CanvasStartAction, architectureId?: string): Promise<void>;
+	onRunHostAction?(action: CanvasHostAction): Promise<void>;
 	onToggleFocusMode?(active?: boolean): Promise<boolean>;
 	isFocusModeActive?(): boolean;
 }
@@ -842,6 +844,10 @@ export class CloudForgeCanvasPanel implements Disposable {
 			}
 			case 'startAction': {
 				await this.host.onStartAction?.(message.action, message.architectureId);
+				return;
+			}
+			case 'runHostAction': {
+				await this.host.onRunHostAction?.(message.action);
 				return;
 			}
 			case 'renderResourceDraft': {

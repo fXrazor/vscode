@@ -753,6 +753,8 @@ export type ExtensionToWebviewMessage =
 		readonly architecture: unknown;
 	};
 
+export type CanvasHostAction = 'formatArchitecture' | 'exportPortableBundle' | 'upgradeProvider';
+
 export type WebviewToExtensionMessage =
 	| { readonly type: 'ready' }
 	| { readonly type: 'selectNode'; readonly nodeId: string | null }
@@ -781,7 +783,8 @@ export type WebviewToExtensionMessage =
 	| { readonly type: 'requestEngineInitOffline'; readonly engine?: 'openTofu' | 'terraform' }
 	| { readonly type: 'exportArtifact'; readonly format: ExportFormat; readonly suggestedFileName: string; readonly content: string; readonly encoding: 'utf8' | 'base64' }
 	| { readonly type: 'useTemplateAsArchitecture'; readonly templateId: string }
-	| { readonly type: 'startAction'; readonly action: CanvasStartAction; readonly architectureId?: string };
+	| { readonly type: 'startAction'; readonly action: CanvasStartAction; readonly architectureId?: string }
+	| { readonly type: 'runHostAction'; readonly action: CanvasHostAction };
 
 /** Start-screen buttons; each maps to one fixed CloudForge or workbench command in the host. */
 export type CanvasStartAction = 'createProject' | 'openProject' | 'createArchitecture' | 'switchArchitecture' | 'openArchitecture';
@@ -1410,6 +1413,15 @@ export function parseWebviewMessage(value: unknown): WebviewToExtensionMessage |
 			}
 			return value.architectureId === undefined ? { type: 'startAction', action: value.action as CanvasStartAction } : undefined;
 		}
+		case 'runHostAction':
+			if (
+				value.action !== 'formatArchitecture'
+				&& value.action !== 'exportPortableBundle'
+				&& value.action !== 'upgradeProvider'
+			) {
+				return undefined;
+			}
+			return { type: 'runHostAction', action: value.action };
 		default:
 			return undefined;
 	}
