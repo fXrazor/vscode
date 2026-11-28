@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { randomBytes } from 'node:crypto';
-import { l10n, Uri, ViewColumn, window, workspace, type Disposable, type ExtensionContext, type Webview, type WebviewPanel } from 'vscode';
+import { commands, l10n, Uri, ViewColumn, window, workspace, type Disposable, type ExtensionContext, type Webview, type WebviewPanel } from 'vscode';
 import { buildStudioUnavailableHtml, buildStudioWebviewHtml } from './canvasEngine';
 import {
 	defaultCanvasViewState,
@@ -73,7 +73,7 @@ export interface CanvasPanelHost {
 		fileName: string,
 		contents: string,
 		previewToken: string
-	): Promise<{ readonly ok: true; readonly applied: DraftSaveApplyResult } | { readonly ok: false; readonly error: DraftSaveError }>;
+	): Promise<{ readonly ok: true; readonly applied: DraftSaveApplyResult; readonly refreshedGraph?: CanvasGraphSnapshot; readonly notice?: CanvasNotice } | { readonly ok: false; readonly error: DraftSaveError }>;
 	/** Merges several canvas files into the files on disk under one token (`previewFocusedSaveBatch`). */
 	onPreviewSaveAll?(
 		workspaceId: string,
@@ -86,7 +86,7 @@ export interface CanvasPanelHost {
 		architectureId: string,
 		expectedSourceRevision: string,
 		previewToken: string
-	): Promise<{ readonly ok: true; readonly applied: SaveAllApplyResult } | { readonly ok: false; readonly error: DraftSaveError }>;
+	): Promise<{ readonly ok: true; readonly applied: SaveAllApplyResult; readonly refreshedGraph?: CanvasGraphSnapshot; readonly notice?: CanvasNotice } | { readonly ok: false; readonly error: DraftSaveError }>;
 	onLoadCatalogueSnapshots?(): Promise<readonly CanvasCatalogueSnapshot[]>;
 	/** Resource types of the newest imported snapshot per palette provider. */
 	onLoadCatalogueTypes?(): Promise<readonly CanvasCatalogueTypes[]>;
@@ -158,8 +158,12 @@ export interface CanvasPanelHost {
 export class CloudForgeCanvasPanel implements Disposable {
 	private panel: WebviewPanel | undefined;
 	private ready = false;
+	private dirty = false;
+	private readonly pendingBundleLayouts = new Map<string, unknown>();
 	private showSequence = 0;
 	private graph: CanvasGraphSnapshot | undefined;
+	private readonly schemaRequests = new Map<string, number>();
+	private readonly draftRequests = new Map<string, number>();
 	private notice: CanvasNotice | null = null;
 	private pendingValidation: { readonly scope: 'architecture' | 'resource'; readonly nodeId?: string } | undefined;
 	private pendingSelectNodeId: string | undefined;
@@ -190,7 +194,32 @@ export class CloudForgeCanvasPanel implements Disposable {
 	}
 
 	private panelTitle(graph: CanvasGraphSnapshot | undefined): string {
-		return graph ? l10n.t('CloudForge: {0}', graph.architectureName) : l10n.t('CloudForge Canvas');
+		const title = graph ? l10n.t('CloudForge: {0}', graph.architectureName) : l10n.t('CloudForge Canvas');
+		// Like an editor tab, a dot marks canvas changes not yet saved to the Terraform files.
+		return this.dirty ? '\u25CF ' + title : title;
+	}
+
+	private setDirty(dirty: boolean): void {
+		if (this.dirty === dirty) {
+			return;
+		}
+		this.dirty = dirty;
+		void commands.executeCommand('setContext', 'cloudforge.studioDirty', dirty);
+		if (this.panel) {
+			this.panel.title = this.panelTitle(this.graph);
+		}
+	}
+
+	/**
+	 * Ctrl+S / Cmd+S while the canvas tab is active. Returns false when there is no ready canvas, so the
+	 * caller can fall back to the editor's own save.
+	 */
+	requestSave(): boolean {
+		if (!this.panel || !this.ready) {
+			return false;
+		}
+		this.post({ type: 'requestSave' });
+		return true;
 	}
 
 	/** Opens or reveals the Architecture Canvas editor tab and shows the current graph. */
@@ -222,7 +251,7 @@ export class CloudForgeCanvasPanel implements Disposable {
 					this.post({ type: 'catalogueTypes', types });
 				}
 			}
-		});
+		}).catch(() => { });
 	}
 
 	updateIfOpen(graph: CanvasGraphSnapshot | undefined): void {
@@ -316,6 +345,25 @@ export class CloudForgeCanvasPanel implements Disposable {
 		}
 	}
 
+	/**
+	 * Queues a bundle's canvas model for one architecture. It is sent with that architecture's next
+	 * graph (or straight away when it is already showing), then dropped.
+	 */
+	seedBundleLayout(architectureId: string, architecture: unknown): void {
+		this.pendingBundleLayouts.set(architectureId, architecture);
+		if (this.ready && this.graph?.architectureId === architectureId) {
+			this.flushBundleLayout(architectureId);
+		}
+	}
+
+	private flushBundleLayout(architectureId: string): void {
+		const layout = this.pendingBundleLayouts.get(architectureId);
+		if (layout !== undefined) {
+			this.pendingBundleLayouts.delete(architectureId);
+			this.post({ type: 'applyBundleLayout', architecture: layout });
+		}
+	}
+
 	/** Opens the Offline Multi-Cloud Template Library Gallery inside the Architecture Canvas. */
 	openTemplates(graph: CanvasGraphSnapshot | undefined): void {
 		if (!this.panel) {
@@ -370,6 +418,7 @@ export class CloudForgeCanvasPanel implements Disposable {
 				this.panel = undefined;
 				this.ready = false;
 				this.pendingValidation = undefined;
+				this.setDirty(false);
 				this.pendingSelectNodeId = undefined;
 				this.pendingOpenExport = false;
 				this.pendingOpenTemplates = false;
@@ -380,6 +429,21 @@ export class CloudForgeCanvasPanel implements Disposable {
 			}
 		});
 		return panel;
+	}
+
+	private isSameGraph(graph: CanvasGraphSnapshot): boolean {
+		return this.panel !== undefined
+			&& this.ready
+			&& this.graph?.workspaceId === graph.workspaceId
+			&& this.graph?.architectureId === graph.architectureId
+			&& this.graph?.sourceRevision === graph.sourceRevision;
+	}
+
+	private isSameArchitecture(graph: CanvasGraphSnapshot): boolean {
+		return this.panel !== undefined
+			&& this.ready
+			&& this.graph?.workspaceId === graph.workspaceId
+			&& this.graph?.architectureId === graph.architectureId;
 	}
 
 	private async handleMessage(raw: unknown): Promise<void> {
@@ -402,7 +466,7 @@ export class CloudForgeCanvasPanel implements Disposable {
 						if (this.ready && snapshots.length > 0) {
 							this.post({ type: 'catalogueSnapshots', snapshots });
 						}
-					});
+					}).catch(() => { });
 				}
 				if (this.host.onLoadCatalogueTypes) {
 					void this.host.onLoadCatalogueTypes().then(list => {
@@ -411,7 +475,7 @@ export class CloudForgeCanvasPanel implements Disposable {
 								this.post({ type: 'catalogueTypes', types });
 							}
 						}
-					});
+					}).catch(() => { });
 				}
 				if (this.host.onLoadCloudRegions) {
 					for (const provider of ['azure', 'aws', 'google'] as const) {
@@ -419,7 +483,7 @@ export class CloudForgeCanvasPanel implements Disposable {
 							if (this.ready && data && data.regions.length > 0) {
 								this.post({ type: 'cloudRegions', data });
 							}
-						});
+						}).catch(() => { });
 					}
 				}
 				if (this.host.onDetectEngines) {
@@ -427,7 +491,7 @@ export class CloudForgeCanvasPanel implements Disposable {
 						if (this.ready) {
 							this.post({ type: 'detectedEngines', engines });
 						}
-					});
+					}).catch(() => { });
 				}
 				if (this.pendingValidation) {
 					const pending = this.pendingValidation;
@@ -445,6 +509,9 @@ export class CloudForgeCanvasPanel implements Disposable {
 				return;
 			case 'selectNode':
 				this.host.onSelectNode(message.nodeId);
+				return;
+			case 'dirtyState':
+				this.setDirty(message.dirty);
 				return;
 			case 'viewState':
 				if (this.graph) {
@@ -475,10 +542,13 @@ export class CloudForgeCanvasPanel implements Disposable {
 					return;
 				}
 				const outcome = await this.host.onRequestValidation(graph, message.scope, message.nodeId, run => {
-					if (this.panel && this.ready) {
+					if (this.isSameGraph(graph)) {
 						this.post({ type: 'validationRunUpdate', run });
 					}
 				});
+				if (!this.isSameGraph(graph)) {
+					return;
+				}
 				if (outcome.errorCode === 'STALE_SOURCE') {
 					this.setNotice({
 						kind: 'stale',
@@ -516,6 +586,9 @@ export class CloudForgeCanvasPanel implements Disposable {
 					message.renames,
 					message.baseContents
 				);
+				if (!this.isSameGraph(graph)) {
+					return;
+				}
 				if (!result.ok && result.error.code === 'STALE_SOURCE') {
 					this.setNotice({
 						kind: 'stale',
@@ -542,13 +615,30 @@ export class CloudForgeCanvasPanel implements Disposable {
 					message.contents,
 					message.previewToken
 				);
-				if (!result.ok && result.error.code === 'STALE_SOURCE') {
-					this.setNotice({
-						kind: 'stale',
-						message: l10n.t('The Terraform source changed on disk. Refresh the graph before applying changes.'),
-					});
+				if (!this.isSameArchitecture(graph)) {
+					return;
 				}
-				this.post({ type: 'draftSaveApplied', result });
+				if (!result.ok) {
+					if (result.error.code === 'STALE_SOURCE') {
+						this.setNotice({
+							kind: 'stale',
+							message: l10n.t('The Terraform source changed on disk. Refresh the graph before applying changes.'),
+						});
+					}
+					this.post({ type: 'draftSaveApplied', result });
+					return;
+				}
+				// Post draftSaveApplied before pushing the refreshed graph so Studio closes the
+				// save dialog and records the saved files before projecting the new sourceRevision.
+				this.post({ type: 'draftSaveApplied', result: { ok: true, applied: result.applied } });
+				if (result.refreshedGraph) {
+					this.updateIfOpen(result.refreshedGraph);
+					if (result.notice) {
+						this.setNotice(result.notice);
+					}
+				} else {
+					await this.host.onRefresh(graph.workspaceId, graph.architectureId);
+				}
 				return;
 			}
 			case 'requestSaveAllPreview': {
@@ -561,6 +651,9 @@ export class CloudForgeCanvasPanel implements Disposable {
 					return;
 				}
 				const result = await this.host.onPreviewSaveAll(graph.workspaceId, graph.architectureId, graph.sourceRevision, message.files);
+				if (!this.isSameGraph(graph)) {
+					return;
+				}
 				if (!result.ok && result.error.code === 'STALE_SOURCE') {
 					this.setNotice({
 						kind: 'stale',
@@ -580,22 +673,43 @@ export class CloudForgeCanvasPanel implements Disposable {
 					return;
 				}
 				const result = await this.host.onApplySaveAll(graph.workspaceId, graph.architectureId, graph.sourceRevision, message.previewToken);
-				if (!result.ok && result.error.code === 'STALE_SOURCE') {
-					this.setNotice({
-						kind: 'stale',
-						message: l10n.t('The Terraform source changed on disk. Refresh the graph before applying changes.'),
-					});
+				if (!this.isSameArchitecture(graph)) {
+					return;
 				}
-				this.post({ type: 'saveAllApplied', result });
+				if (!result.ok) {
+					if (result.error.code === 'STALE_SOURCE') {
+						this.setNotice({
+							kind: 'stale',
+							message: l10n.t('The Terraform source changed on disk. Refresh the graph before applying changes.'),
+						});
+					}
+					this.post({ type: 'saveAllApplied', result });
+					return;
+				}
+				// Post saveAllApplied before pushing the refreshed graph so Studio closes the
+				// save dialog and records the saved files before projecting the new sourceRevision.
+				this.post({ type: 'saveAllApplied', result: { ok: true, applied: result.applied } });
+				if (result.refreshedGraph) {
+					this.updateIfOpen(result.refreshedGraph);
+					if (result.notice) {
+						this.setNotice(result.notice);
+					}
+				} else {
+					await this.host.onRefresh(graph.workspaceId, graph.architectureId);
+				}
 				return;
 			}
 			case 'requestSchema': {
+				const graph = this.graph;
+				const key = message.kind + ':' + message.typeName;
+				const request = (this.schemaRequests.get(key) ?? 0) + 1;
+				this.schemaRequests.set(key, request);
 				if (!this.host.onLoadResourceSchema) {
 					this.post({ type: 'liveSchema', typeName: message.typeName, schema: null });
 					return;
 				}
 				const schema = await this.host.onLoadResourceSchema(message.kind, message.typeName);
-				if (this.panel && this.ready) {
+				if (this.panel && this.ready && this.graph === graph && this.schemaRequests.get(key) === request) {
 					this.post({ type: 'liveSchema', typeName: message.typeName, schema });
 				}
 				return;
@@ -612,7 +726,7 @@ export class CloudForgeCanvasPanel implements Disposable {
 					return;
 				}
 				const outcome = await this.host.onReadModule(graph.workspaceId, graph.architectureId, graph.sourceRevision, message.modulePath);
-				if (this.panel && this.ready) {
+				if (this.isSameGraph(graph)) {
 					if (outcome.ok) {
 						this.post({ type: 'moduleInspection', modulePath: message.modulePath, inspection: outcome.inspection });
 					} else {
@@ -634,7 +748,7 @@ export class CloudForgeCanvasPanel implements Disposable {
 					graph.architectureId,
 					graph.sourceRevision
 				);
-				if (this.panel && this.ready) {
+				if (this.isSameGraph(graph)) {
 					if (outcome.ok) {
 						this.post({ type: 'schemaDiffReport', report: outcome.report });
 					} else {
@@ -655,7 +769,7 @@ export class CloudForgeCanvasPanel implements Disposable {
 					graph.sourceRevision,
 					message.engine
 				);
-				if (this.panel && this.ready) {
+				if (this.isSameGraph(graph)) {
 					if (outcome.ok) {
 						this.post({ type: 'engineValidateReport', report: outcome.report });
 					} else {
@@ -676,7 +790,7 @@ export class CloudForgeCanvasPanel implements Disposable {
 					graph.sourceRevision,
 					message.engine
 				);
-				if (this.panel && this.ready) {
+				if (this.isSameGraph(graph)) {
 					if (outcome.ok) {
 						this.post({ type: 'enginePlanReport', report: outcome.report });
 					} else {
@@ -697,7 +811,7 @@ export class CloudForgeCanvasPanel implements Disposable {
 					graph.sourceRevision,
 					message.engine
 				);
-				if (this.panel && this.ready) {
+				if (this.isSameGraph(graph)) {
 					if (outcome.ok) {
 						this.post({ type: 'engineInitOfflineReport', report: outcome.report });
 					} else {
@@ -731,8 +845,11 @@ export class CloudForgeCanvasPanel implements Disposable {
 				return;
 			}
 			case 'renderResourceDraft': {
+				const graph = this.graph;
+				const request = (this.draftRequests.get(message.resourceId) ?? 0) + 1;
+				this.draftRequests.set(message.resourceId, request);
 				const preview = this.host.onRenderResourceDraft ? await this.host.onRenderResourceDraft(message.resourceId, message.draft) : null;
-				if (this.panel && this.ready) {
+				if (this.panel && this.ready && this.graph === graph && this.draftRequests.get(message.resourceId) === request) {
 					this.post({ type: 'resourceDraftRendered', resourceId: message.resourceId, preview });
 				}
 				return;
@@ -814,37 +931,38 @@ export class CloudForgeCanvasPanel implements Disposable {
 			viewState,
 			notice: this.notice,
 		});
+		this.flushBundleLayout(this.graph.architectureId);
 		if (this.host.onReadResourceValues) {
 			const snapshot = this.graph;
 			void this.host.onReadResourceValues(snapshot.workspaceId, snapshot.architectureId, snapshot.sourceRevision).then(values => {
-				if (values !== undefined && this.ready && this.graph?.architectureId === snapshot.architectureId && this.graph?.sourceRevision === snapshot.sourceRevision) {
+				if (values !== undefined && this.isSameGraph(snapshot)) {
 					this.post({ type: 'resourceValues', sourceRevision: snapshot.sourceRevision, values });
 				}
-			});
+			}).catch(() => { });
 		}
 		if (this.host.onInspectDependencies) {
 			const snapshot = this.graph;
 			void this.host.onInspectDependencies(snapshot.workspaceId, snapshot.architectureId, snapshot.sourceRevision).then(report => {
-				if (this.ready && this.graph?.workspaceId === snapshot.workspaceId && this.graph?.architectureId === snapshot.architectureId && this.graph?.sourceRevision === snapshot.sourceRevision) {
+				if (this.isSameGraph(snapshot)) {
 					this.post({ type: 'dependencyReport', report: report ?? null });
 				}
-			});
+			}).catch(() => { });
 		}
 		if (this.host.onAuditExportReadiness) {
 			const snapshot = this.graph;
 			void this.host.onAuditExportReadiness(snapshot.workspaceId, snapshot.architectureId, snapshot.sourceRevision).then(report => {
-				if (this.ready && this.graph?.workspaceId === snapshot.workspaceId && this.graph?.architectureId === snapshot.architectureId && this.graph?.sourceRevision === snapshot.sourceRevision) {
+				if (this.isSameGraph(snapshot)) {
 					this.post({ type: 'exportAuditReport', report: report ?? null });
 				}
-			});
+			}).catch(() => { });
 		}
 		if (this.host.onCheckOfflineMirrorReadiness) {
 			const snapshot = this.graph;
 			void this.host.onCheckOfflineMirrorReadiness(snapshot.workspaceId, snapshot.architectureId, snapshot.sourceRevision).then(report => {
-				if (this.ready && this.graph?.workspaceId === snapshot.workspaceId && this.graph?.architectureId === snapshot.architectureId && this.graph?.sourceRevision === snapshot.sourceRevision) {
+				if (this.isSameGraph(snapshot)) {
 					this.post({ type: 'offlineMirrorReadiness', report: report ?? null });
 				}
-			});
+			}).catch(() => { });
 		}
 	}
 
@@ -887,8 +1005,10 @@ export class CloudForgeCanvasPanel implements Disposable {
 	}
 
 	dispose(): void {
+		this.showSequence++;
 		this.panel?.dispose();
 		this.panel = undefined;
+		this.ready = false;
 		for (const item of this.disposables) {
 			item.dispose();
 		}

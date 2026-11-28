@@ -1,6 +1,6 @@
 {
   "source": "Z:\\CLOUDLAB FORGE 3.0\\apps\\web\\lib",
-  "purpose": "Read-only computed Terraform projection and bounded parsing in the standalone preview; no second editable Project store",
+  "purpose": "Computed Terraform projection, bounded parsing and lazy provider form metadata; one canonical Studio Architecture and semantic undo history",
   "files": [
     {
       "file": "terraform.ts",
@@ -16,11 +16,15 @@
     },
     {
       "file": "catalog/index.ts",
-      "sha256": "cf68477979cd35b70804507008d710dfcc19f3e84ef2b55922e818cf326f644f"
+      "sha256": "cf68477979cd35b70804507008d710dfcc19f3e84ef2b55922e818cf326f644f",
+      "adaptedSha256": "9f18c5e8c948fd611945d4199cc994334197e4fd2ab4f4466b1a49a2afea124d",
+      "adaptation": "Lazy documentation catalogue and imported schema field registration; preserve curated topology rules and synchronize form/HCL types"
     },
     {
       "file": "catalog/types.ts",
-      "sha256": "b717ffe075cfecf834c17018c1d68849e619e59882e775cbf4094fb4fcb0a49a"
+      "sha256": "b717ffe075cfecf834c17018c1d68849e619e59882e775cbf4094fb4fcb0a49a",
+      "adaptedSha256": "a16b0c101a85a0a58a820fd7ff06a9ae179fc09e0c3de1a9e81005420ec52717",
+      "adaptation": "Add JSON literal field type for imported dynamic schemas; original source hash retained"
     },
     {
       "file": "catalog/azure.ts",

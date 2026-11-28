@@ -59,10 +59,15 @@ export type CloudForgeServiceMethod =
 	| 'previewFocusedSaveBatch' | 'applyFocusedSaveBatch'
 	| 'summarizeState' | 'listCloudConnections' | 'setCloudConnection' | 'storeCloudKey' | 'removeCloudConnection' | 'checkCloudSignIn' | 'listCloudAccounts'
 	| 'inspectDependencies' | 'listCloudRegions' | 'readModule'
-	| 'diffCatalogueSnapshots' | 'auditExportReadiness'
-	| 'detectEngines' | 'runEngineValidate' | 'runEnginePlan'
+	| 'diffCatalogueSnapshots' | 'auditExportReadiness' | 'exportPortableBundle'
+	| 'previewProviderUpgrade' | 'applyProviderUpgrade' | 'recoverUpgradeJournal'
+	| 'detectEngines' | 'runEngineValidate' | 'runEnginePlan' | 'runEngineFmt'
 	| 'listMirrorPackages' | 'checkOfflineMirrorReadiness' | 'runEngineInitOffline' | 'extractProviderSchemaFromMirror'
-	| 'importMirrorPackage' | 'evictMirrorPackage' | 'verifyMirrorIntegrity' | 'planMirrorCleanup';
+	| 'importMirrorPackage' | 'listProviderVersions' | 'downloadProviderPackage' | 'evictMirrorPackage' | 'verifyMirrorIntegrity' | 'planMirrorCleanup'
+	| 'selectTerraformSkills' | 'listBuiltinSkills' | 'getTopologyBlueprint'
+	| 'getLearningRecord' | 'saveLearningRecord' | 'submitProposal' | 'reviewProposal'
+	| 'issueMcpGrant' | 'listMcpGrants' | 'revokeMcpGrant'
+	| 'listTemplates' | 'getTemplateDetails' | 'checkTemplateCompatibility' | 'listTemplateSources' | 'importTemplatePackageFile' | 'removeCachedTemplate';
 
 export class CloudForgeServiceError extends Error {
 	constructor(readonly code: string, readonly kind?: string) {
@@ -237,6 +242,7 @@ export function safeServiceError(error: unknown): CloudForgeServiceError {
 		case -32009: return new CloudForgeServiceError('CONSENT_REQUIRED', 'CONSENT_REQUIRED');
 		case -32010: return new CloudForgeServiceError('ALREADY_EXISTS', 'ALREADY_EXISTS');
 		case -32011: return new CloudForgeServiceError('SCHEMA_UNAVAILABLE', 'SCHEMA_UNAVAILABLE');
+		case -32012: return new CloudForgeServiceError('REGISTRY_UNAVAILABLE', 'REGISTRY_UNAVAILABLE');
 		case -32602: return kind === 'INVALID_PARAMS' ? new CloudForgeServiceError('INVALID_PARAMS', kind) : new CloudForgeServiceError('SERVICE_ERROR', kind);
 		default: return new CloudForgeServiceError('SERVICE_ERROR', kind);
 	}

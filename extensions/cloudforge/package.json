@@ -5,6 +5,7 @@
 	"version": "0.0.1",
 	"publisher": "cloudforge",
 	"license": "MIT",
+	"icon": "resources/cloudforge-icon.png",
 	"engines": {
 		"vscode": "^1.74.0"
 	},
@@ -56,10 +57,226 @@
 					"type": "boolean",
 					"default": true,
 					"description": "%config.plan.useLinkedCloudAccounts%"
+				},
+				"cloudforge.ai.autoDiscoverLocal": {
+					"type": "boolean",
+					"default": true,
+					"description": "%config.ai.autoDiscoverLocal%"
+				},
+				"cloudforge.ai.providers": {
+					"type": "array",
+					"default": [],
+					"description": "%config.ai.providers%",
+					"items": {
+						"type": "object",
+						"required": [
+							"id",
+							"name",
+							"baseUrl"
+						],
+						"properties": {
+							"id": {
+								"type": "string",
+								"description": "Unique lowercase provider identifier (e.g. ollama, lmstudio, openai, vllm-local)."
+							},
+							"name": {
+								"type": "string",
+								"description": "Display name shown in CloudForge and VS Code model picker."
+							},
+							"baseUrl": {
+								"type": "string",
+								"description": "HTTPS endpoint URL or loopback http://127.0.0.1 / http://localhost URL for local models."
+							},
+							"apiFormat": {
+								"type": "string",
+								"enum": [
+									"openai",
+									"anthropic"
+								],
+								"default": "openai"
+							},
+							"authKind": {
+								"type": "string",
+								"enum": [
+									"none",
+									"apiKey",
+									"githubOAuth"
+								],
+								"default": "apiKey",
+								"description": "API keys are stored encrypted in OS SecretStorage — never put keys in settings.json."
+							},
+							"enabled": {
+								"type": "boolean",
+								"default": true
+							}
+						}
+					}
+				},
+				"cloudforge.ai.customModels": {
+					"type": "array",
+					"default": [],
+					"description": "%config.ai.customModels%",
+					"items": {
+						"type": "object",
+						"required": [
+							"id"
+						],
+						"properties": {
+							"id": {
+								"type": "string",
+								"description": "Model ID sent to the API (e.g. qwen2.5-coder:14b, llama-3.3-70b)."
+							},
+							"name": {
+								"type": "string",
+								"description": "Friendly display name shown in the Chat / Agent View model picker."
+							},
+							"providerId": {
+								"type": "string",
+								"default": "custom",
+								"description": "Matching provider ID (ollama, lmstudio, openai, anthropic, gemini, openrouter, or custom)."
+							},
+							"baseUrl": {
+								"type": "string",
+								"description": "Optional endpoint override (https:// or local loopback http://127.0.0.1 / localhost)."
+							},
+							"apiFormat": {
+								"type": "string",
+								"enum": [
+									"openai",
+									"anthropic"
+								],
+								"default": "openai"
+							},
+							"authKind": {
+								"type": "string",
+								"enum": [
+									"none",
+									"apiKey",
+									"githubOAuth"
+								]
+							},
+							"maxInputTokens": {
+								"type": "integer",
+								"default": 65536
+							},
+							"maxOutputTokens": {
+								"type": "integer",
+								"default": 8192
+							},
+							"toolCalling": {
+								"type": "boolean",
+								"default": true
+							}
+						}
+					}
+				},
+				"cloudforge.startup.preload": {
+					"type": "boolean",
+					"default": true,
+					"description": "%config.startup.preload%"
+				},
+				"cloudforge.projects.openInNewWindow": {
+					"type": "string",
+					"enum": [
+						"ask",
+						"newWindow",
+						"currentWindow"
+					],
+					"default": "ask",
+					"description": "%config.projects.openInNewWindow%"
 				}
 			}
 		},
 		"commands": [
+			{
+				"command": "cloudforge.providers.refresh",
+				"title": "%command.providers.refresh%",
+				"category": "CloudForge",
+				"icon": "$(refresh)"
+			},
+			{
+				"command": "cloudforge.providers.download",
+				"title": "%command.providers.download%",
+				"category": "CloudForge",
+				"icon": "$(cloud-download)"
+			},
+			{
+				"command": "cloudforge.providers.extractSchema",
+				"title": "%command.providers.extractSchema%",
+				"category": "CloudForge",
+				"icon": "$(symbol-structure)"
+			},
+			{
+				"command": "cloudforge.providers.remove",
+				"title": "%command.providers.remove%",
+				"category": "CloudForge",
+				"icon": "$(trash)"
+			},
+			{
+				"command": "cloudforge.providers.openRegistry",
+				"title": "%command.providers.openRegistry%",
+				"category": "CloudForge",
+				"icon": "$(link-external)"
+			},
+			{
+				"command": "cloudforge.providers.verify",
+				"title": "%command.providers.verify%",
+				"category": "CloudForge",
+				"icon": "$(verified)"
+			},
+			{
+				"command": "cloudforge.providers.initOffline",
+				"title": "%command.providers.initOffline%",
+				"category": "CloudForge",
+				"icon": "$(play)"
+			},
+			{
+				"command": "cloudforge.providers.importSchemaFile",
+				"title": "%command.providers.importSchemaFile%",
+				"category": "CloudForge",
+				"icon": "$(file-add)"
+			},
+			{
+				"command": "cloudforge.providers.importArchive",
+				"title": "%command.providers.importArchive%",
+				"category": "CloudForge",
+				"icon": "$(file-zip)"
+			},
+			{
+				"command": "cloudforge.showStartupLog",
+				"title": "%command.showStartupLog%",
+				"category": "CloudForge"
+			},
+			{
+				"command": "cloudforge.getReady",
+				"title": "%command.getReady%",
+				"category": "CloudForge",
+				"icon": "$(rocket)"
+			},
+			{
+				"command": "cloudforge.providers.downloadMissing",
+				"title": "%command.providers.downloadMissing%",
+				"category": "CloudForge",
+				"icon": "$(cloud-download)"
+			},
+			{
+				"command": "cloudforge.providers.browseOther",
+				"title": "%command.providers.browseOther%",
+				"category": "CloudForge",
+				"icon": "$(add)"
+			},
+			{
+				"command": "cloudforge.providers.refreshVersions",
+				"title": "%command.providers.refreshVersions%",
+				"category": "CloudForge",
+				"icon": "$(refresh)"
+			},
+			{
+				"command": "cloudforge.providers.changeVersion",
+				"title": "%command.providers.changeVersion%",
+				"category": "CloudForge",
+				"icon": "$(versions)"
+			},
 			{
 				"command": "cloudforge.showProofStatus",
 				"title": "%command.showProofStatus%",
@@ -81,6 +298,24 @@
 				"title": "%command.createProject%",
 				"category": "%displayName%",
 				"icon": "$(new-folder)"
+			},
+			{
+				"command": "cloudforge.openProjectInNewWindow",
+				"title": "%command.openProjectInNewWindow%",
+				"category": "%displayName%",
+				"icon": "$(window)"
+			},
+			{
+				"command": "cloudforge.addArchitecture",
+				"title": "%command.addArchitecture%",
+				"category": "%displayName%",
+				"icon": "$(add)"
+			},
+			{
+				"command": "cloudforge.addArchitectureFromBundle",
+				"title": "%command.addArchitectureFromBundle%",
+				"category": "%displayName%",
+				"icon": "$(package)"
 			},
 			{
 				"command": "cloudforge.createArchitecture",
@@ -199,6 +434,12 @@
 				"icon": "$(screen-full)"
 			},
 			{
+				"command": "cloudforge.saveStudio",
+				"title": "%command.saveStudio%",
+				"category": "%displayName%",
+				"icon": "$(save)"
+			},
+			{
 				"command": "cloudforge.validateArchitecture",
 				"title": "%command.validateArchitecture%",
 				"category": "%displayName%",
@@ -257,6 +498,12 @@
 				"title": "%command.importProviderSchema%",
 				"category": "%displayName%",
 				"icon": "$(cloud-upload)"
+			},
+			{
+				"command": "cloudforge.manageOfflineMirror",
+				"title": "%command.manageOfflineMirror%",
+				"category": "%displayName%",
+				"icon": "$(package)"
 			},
 			{
 				"command": "cloudforge.extractMirrorSchema",
@@ -352,9 +599,133 @@
 				"command": "cloudforge.revealStateResource",
 				"title": "%command.revealStateResource%",
 				"category": "%displayName%"
+			},
+			{
+				"command": "cloudforge.openLearningStudio",
+				"title": "%command.openLearningStudio%",
+				"category": "%displayName%",
+				"icon": "$(mortar-board)"
+			},
+			{
+				"command": "cloudforge.refreshLearning",
+				"title": "%command.refreshLearning%",
+				"category": "%displayName%",
+				"icon": "$(refresh)"
+			},
+			{
+				"command": "cloudforge.copyMcpConfig",
+				"title": "%command.copyMcpConfig%",
+				"category": "%displayName%",
+				"icon": "$(plug)"
+			},
+			{
+				"command": "cloudforge.revokeMcpGrants",
+				"title": "%command.revokeMcpGrants%",
+				"category": "%displayName%",
+				"icon": "$(debug-disconnect)"
+			},
+			{
+				"command": "cloudforge.addResourceNote",
+				"title": "%command.addResourceNote%",
+				"category": "%displayName%",
+				"icon": "$(note)"
+			},
+			{
+				"command": "cloudforge.exportStudyGuide",
+				"title": "%command.exportStudyGuide%",
+				"category": "%displayName%",
+				"icon": "$(markdown)"
+			},
+			{
+				"command": "cloudforge.configureAiProviders",
+				"title": "%command.configureAiProviders%",
+				"category": "%displayName%",
+				"icon": "$(sparkle)"
+			},
+			{
+				"command": "cloudforge.scanLocalModels",
+				"title": "%command.scanLocalModels%",
+				"category": "%displayName%",
+				"icon": "$(search)"
+			},
+			{
+				"command": "cloudforge.addCustomModel",
+				"title": "%command.addCustomModel%",
+				"category": "%displayName%",
+				"icon": "$(add)"
+			},
+			{
+				"command": "cloudforge.formatArchitecture",
+				"title": "%command.formatArchitecture%",
+				"category": "%displayName%",
+				"icon": "$(symbol-ruler)"
+			},
+			{
+				"command": "cloudforge.exportPortableBundle",
+				"title": "%command.exportPortableBundle%",
+				"category": "%displayName%",
+				"icon": "$(package)"
+			},
+			{
+				"command": "cloudforge.upgradeProvider",
+				"title": "%command.upgradeProvider%",
+				"category": "%displayName%",
+				"icon": "$(arrow-up)"
+			},
+			{
+				"command": "cloudforge.recoverProviderUpgrade",
+				"title": "%command.recoverProviderUpgrade%",
+				"category": "%displayName%",
+				"icon": "$(history)"
+			}
+		],
+		"languageModelChatProviders": [
+			{
+				"vendor": "cloudforge",
+				"displayName": "%lm.provider%",
+				"icon": "$(sparkle)"
+			}
+		],
+		"mcpServerDefinitionProviders": [
+			{
+				"id": "cloudforge.mcp",
+				"label": "%mcp.provider%"
+			}
+		],
+		"chatParticipants": [
+			{
+				"id": "cloudforge.assistant",
+				"name": "cloudforge",
+				"fullName": "CloudForge",
+				"description": "%chat.description%",
+				"isSticky": true,
+				"commands": [
+					{
+						"name": "topology",
+						"description": "%chat.command.topology%"
+					},
+					{
+						"name": "skills",
+						"description": "%chat.command.skills%"
+					},
+					{
+						"name": "explain",
+						"description": "%chat.command.explain%"
+					},
+					{
+						"name": "proposals",
+						"description": "%chat.command.proposals%"
+					}
+				]
 			}
 		],
 		"keybindings": [
+			{
+				"command": "cloudforge.saveStudio",
+				"key": "ctrl+s",
+				"mac": "cmd+s",
+				"when": "activeWebviewPanelId == 'cloudforge.architectureCanvas'"
+			},
 			{
 				"command": "cloudforge.toggleCanvasFocusMode",
 				"key": "ctrl+alt+f",
@@ -388,6 +759,12 @@
 					"name": "%view.resources%"
 				}
 			],
+			"cloudforge-providers": [
+				{
+					"id": "cloudforge.providers",
+					"name": "%view.providers%"
+				}
+			],
 			"cloudforge": [
 				{
 					"id": "cloudforge.status",
@@ -410,6 +787,10 @@
 				{
 					"id": "cloudforge.connections",
 					"name": "%view.connections%"
+				},
+				{
+					"id": "cloudforge.learn",
+					"name": "%view.learn%"
 				}
 			]
 		},
@@ -516,6 +897,30 @@
 				{
 					"command": "cloudforge.resetIgnoredImports",
 					"when": "cloudforge.projectOpen"
+				},
+				{
+					"command": "cloudforge.providers.extractSchema",
+					"when": "false"
+				},
+				{
+					"command": "cloudforge.providers.remove",
+					"when": "false"
+				},
+				{
+					"command": "cloudforge.providers.openRegistry",
+					"when": "false"
+				},
+				{
+					"command": "cloudforge.providers.importArchive",
+					"when": "false"
+				},
+				{
+					"command": "cloudforge.providers.refreshVersions",
+					"when": "false"
+				},
+				{
+					"command": "cloudforge.providers.changeVersion",
+					"when": "false"
 				}
 			],
 			"view/title": [
@@ -530,7 +935,7 @@
 					"group": "navigation@0"
 				},
 				{
-					"command": "cloudforge.createArchitecture",
+					"command": "cloudforge.addArchitecture",
 					"when": "view =~ /^cloudforge\\.(panel\\.)?projects$/ && cloudforge.projectOpen",
 					"group": "navigation@1"
 				},
@@ -550,19 +955,24 @@
 					"group": "navigation@4"
 				},
 				{
-					"command": "cloudforge.applyWorkspacePreset",
+					"command": "cloudforge.openProjectInNewWindow",
 					"when": "view =~ /^cloudforge\\.(panel\\.)?projects$/",
 					"group": "project@0"
 				},
 				{
+					"command": "cloudforge.applyWorkspacePreset",
+					"when": "view =~ /^cloudforge\\.(panel\\.)?projects$/",
+					"group": "project@1"
+				},
+				{
 					"command": "cloudforge.resetIgnoredImports",
 					"when": "view =~ /^cloudforge\\.(panel\\.)?projects$/ && cloudforge.projectOpen",
-					"group": "project@1"
+					"group": "project@2"
 				},
 				{
 					"command": "cloudforge.forgetProjectAccess",
 					"when": "view =~ /^cloudforge\\.(panel\\.)?projects$/ && cloudforge.projectOpen",
-					"group": "project@2"
+					"group": "project@3"
 				},
 				{
 					"command": "cloudforge.openCanvas",
@@ -600,6 +1010,21 @@
 					"group": "1_tools@3"
 				},
 				{
+					"command": "cloudforge.exportPortableBundle",
+					"when": "view =~ /^cloudforge\\.(panel\\.)?resources$/",
+					"group": "1_tools@4"
+				},
+				{
+					"command": "cloudforge.formatArchitecture",
+					"when": "view =~ /^cloudforge\\.(panel\\.)?resources$/",
+					"group": "1_tools@5"
+				},
+				{
+					"command": "cloudforge.upgradeProvider",
+					"when": "view =~ /^cloudforge\\.(panel\\.)?resources$/",
+					"group": "1_tools@6"
+				},
+				{
 					"command": "cloudforge.openProjectStatus",
 					"when": "view == cloudforge.status",
 					"group": "navigation@1"
@@ -613,6 +1038,71 @@
 					"command": "cloudforge.linkCloudConnection",
 					"when": "view == cloudforge.connections",
 					"group": "navigation@1"
+				},
+				{
+					"command": "cloudforge.openLearningStudio",
+					"when": "view == cloudforge.learn",
+					"group": "navigation@1"
+				},
+				{
+					"command": "cloudforge.copyMcpConfig",
+					"when": "view == cloudforge.learn",
+					"group": "navigation@2"
+				},
+				{
+					"command": "cloudforge.exportStudyGuide",
+					"when": "view == cloudforge.learn",
+					"group": "navigation@3"
+				},
+				{
+					"command": "cloudforge.refreshLearning",
+					"when": "view == cloudforge.learn",
+					"group": "navigation@9"
+				},
+				{
+					"command": "cloudforge.getReady",
+					"when": "view == cloudforge.providers && cloudforge.projectOpen",
+					"group": "navigation@0"
+				},
+				{
+					"command": "cloudforge.providers.download",
+					"when": "view == cloudforge.providers",
+					"group": "navigation@1"
+				},
+				{
+					"command": "cloudforge.providers.refresh",
+					"when": "view == cloudforge.providers",
+					"group": "navigation@2"
+				},
+				{
+					"command": "cloudforge.providers.verify",
+					"when": "view == cloudforge.providers",
+					"group": "2_mirror@1"
+				},
+				{
+					"command": "cloudforge.providers.importSchemaFile",
+					"when": "view == cloudforge.providers",
+					"group": "2_mirror@2"
+				},
+				{
+					"command": "cloudforge.providers.initOffline",
+					"when": "view == cloudforge.providers",
+					"group": "3_engine@1"
+				},
+				{
+					"command": "cloudforge.upgradeProvider",
+					"when": "view == cloudforge.providers && cloudforge.projectOpen",
+					"group": "3_engine@2"
+				},
+				{
+					"command": "cloudforge.recoverProviderUpgrade",
+					"when": "view == cloudforge.providers && cloudforge.projectOpen",
+					"group": "3_engine@3"
+				},
+				{
+					"command": "cloudforge.providers.importArchive",
+					"when": "view == cloudforge.providers",
+					"group": "2_mirror@3"
 				}
 			],
 			"view/item/context": [
@@ -700,6 +1190,81 @@
 					"command": "cloudforge.explainResource",
 					"when": "view =~ /^cloudforge\\.(panel\\.)?resources$/ && viewItem == cloudForgeResource",
 					"group": "inline@1"
+				},
+				{
+					"command": "cloudforge.providers.extractSchema",
+					"when": "view == cloudforge.providers && viewItem =~ /\\.extractSchema/",
+					"group": "inline@1"
+				},
+				{
+					"command": "cloudforge.providers.download",
+					"when": "view == cloudforge.providers && viewItem =~ /^providerProject\\.download/",
+					"group": "inline@1"
+				},
+				{
+					"command": "cloudforge.providers.download",
+					"when": "view == cloudforge.providers && viewItem =~ /^providerInstalled/",
+					"group": "inline@1"
+				},
+				{
+					"command": "cloudforge.providers.openRegistry",
+					"when": "view == cloudforge.providers && viewItem =~ /\\.registry/",
+					"group": "inline@9"
+				},
+				{
+					"command": "cloudforge.providers.remove",
+					"when": "view == cloudforge.providers && viewItem =~ /^providerVersion\\.removable/",
+					"group": "inline@5"
+				},
+				{
+					"command": "cloudforge.getReady",
+					"when": "view == cloudforge.providers && viewItem == providersSectionProject",
+					"group": "inline@0"
+				},
+				{
+					"command": "cloudforge.providers.initOffline",
+					"when": "view == cloudforge.providers && viewItem == providersSectionProject",
+					"group": "inline@2"
+				},
+				{
+					"command": "cloudforge.providers.downloadMissing",
+					"when": "view == cloudforge.providers && viewItem == providersSectionProject",
+					"group": "inline@1"
+				},
+				{
+					"command": "cloudforge.providers.importArchive",
+					"when": "view == cloudforge.providers && viewItem =~ /^providerProject\\.download/",
+					"group": "1_more@1"
+				},
+				{
+					"command": "cloudforge.providers.download",
+					"when": "view == cloudforge.providers && viewItem =~ /^providerBrowseVersion\\.download/",
+					"group": "inline@1"
+				},
+				{
+					"command": "cloudforge.providers.download",
+					"when": "view == cloudforge.providers && viewItem =~ /^providerBrowse\\./",
+					"group": "inline@1"
+				},
+				{
+					"command": "cloudforge.providers.refreshVersions",
+					"when": "view == cloudforge.providers && viewItem =~ /^providerBrowse\\./",
+					"group": "inline@2"
+				},
+				{
+					"command": "cloudforge.providers.browseOther",
+					"when": "view == cloudforge.providers && viewItem == providersSectionBrowse",
+					"group": "inline@1"
+				},
+				{
+					"command": "cloudforge.providers.changeVersion",
+					"when": "view == cloudforge.providers && viewItem =~ /^providerProject.*\\.registry/",
+					"group": "inline@3"
+				},
+				{
+					"command": "cloudforge.upgradeProvider",
+					"when": "view == cloudforge.providers && viewItem =~ /^providerProject.*\\.registry/",
+					"group": "1_more@2"
 				}
 			],
 			"editor/context": [
@@ -712,6 +1277,16 @@
 					"command": "cloudforge.explainResource",
 					"when": "resourceLangId == terraform || resourceLangId == hcl",
 					"group": "cloudforge@2"
+				},
+				{
+					"command": "cloudforge.addResourceNote",
+					"when": "resourceLangId == terraform || resourceLangId == hcl",
+					"group": "cloudforge@3"
+				},
+				{
+					"command": "cloudforge.formatArchitecture",
+					"when": "resourceLangId == terraform || resourceLangId == hcl",
+					"group": "cloudforge@4"
 				}
 			]
 		},
@@ -721,6 +1296,11 @@
 					"id": "cloudforge",
 					"title": "%viewContainer.cloudforge%",
 					"icon": "resources/cloudforge-activity.svg"
+				},
+				{
+					"id": "cloudforge-providers",
+					"title": "%viewContainer.providers%",
+					"icon": "resources/providers-activity.svg"
 				}
 			]
 		}

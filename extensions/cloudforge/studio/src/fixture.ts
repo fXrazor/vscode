@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 import { elementEndpoint } from './connectionEndpoints.ts';
+import { coreIcon } from './coreIcons.ts';
 import type { Architecture, Resource, ResourceKind, Provider } from './model.ts';
 import { catalogueIconFor } from './catalogue.ts';
 
@@ -64,7 +65,7 @@ export function resourceDefinition(resource: Pick<Resource, 'kind' | 'provider'>
 	const base = resourceTypes[resource.kind];
  if (resource.catalogue) {
 		// A projected type with no known icon yet shows the palette icon once its catalogue has loaded.
-		const icon = resource.catalogue.iconMatch === 'fallback' ? catalogueIconFor(resource.catalogue.type) ?? resource.catalogue.icon : resource.catalogue.icon;
+		const icon = resource.catalogue.iconMatch === 'fallback' ? catalogueIconFor(resource.catalogue.type) ?? coreIcon(resource.catalogue.type, resource.catalogue.icon) : coreIcon(resource.catalogue.type, resource.catalogue.icon);
 		return { ...base, ...resource.catalogue, icon, description: resource.catalogue.label, defaults: {} };
 	}
 	if (resource.provider === 'azure') { return base; }

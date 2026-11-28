@@ -6,7 +6,7 @@ import type { Architecture, Resource } from './model.ts';
 import { checkDraft } from './model.ts';
 import { resourceDefinition } from './fixture.ts';
 import { editableFields, fieldIssue, resourceFormIssues } from './formDefinition.ts';
-import { bindingKey, fieldTargetPath } from './fieldBindings.ts';
+import { bindingKey, fieldTargetPath, hasRefBinding } from './fieldBindings.ts';
 import { getDef } from './cloudlab-core/catalog/index.ts';
 import { inheritedReference, resourceAncestors, resourcePlacement } from './resourceHierarchy.ts';
 import type { LiveSchemaMap } from './liveSchema.ts';
@@ -51,7 +51,7 @@ export function architectureDiagnostics(architecture:Architecture, liveSchemas?:
 			if(field.name==='name'){continue;}
 			const setting=Object.keys(resource.settings).find(name=>fieldTargetPath(resource,{kind:'setting',name}).join('.')===field.name);
 			const target=field.name==='location'||field.name==='region'?{kind:'region' as const}:{kind:'setting' as const,name:setting??field.name};
-			if(inheritedReference(architecture,resource,[field.name])||resource.fieldBindings?.[bindingKey(target)]||resource.resourceRefs?.[bindingKey(target)]?.refs.length){continue;}
+			if(inheritedReference(architecture,resource,[field.name])||resource.fieldBindings?.[bindingKey(target)]||hasRefBinding(resource.resourceRefs?.[bindingKey(target)])){continue;}
 			let value=target.kind==='region'?resource.region:resource.settings[setting??field.name]??'';
 			if(!resource.catalogue&&field.type==='list'&&value&&!value.startsWith('[')){value=JSON.stringify([value]);}
 			if(field.type==='bool'&&['Enabled','Disabled'].includes(value)){value=value==='Enabled'?'true':'false';}

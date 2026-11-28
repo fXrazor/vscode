@@ -1,1 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18h10.5a4 4 0 0 0 .6-7.95A6 6 0 0 0 6.6 9.2 4.5 4.5 0 0 0 7 18z"/><path d="M10 14.5l2-3 2 3"/><path d="M12 11.5V16"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 375.625 375.625">
+  <title>CloudForge</title>
+  <g id="forge-mark" fill="currentColor" transform="translate(-54.1875 -93.4375)">
+    <polygon id="top" points="132,131 389,131 370.5,217 199,217 180.5,303 95,303"/>
+    <polygon id="middle" points="232.5,260 318.5,260 300,345.5 214,345.5"/>
+    <polygon id="bottom" points="128.5,345.5 214,345.5 195.5,431.5 110,431.5"/>
+  </g>
+</svg>

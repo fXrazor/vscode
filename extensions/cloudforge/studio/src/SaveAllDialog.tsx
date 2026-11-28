@@ -6,7 +6,7 @@
 import { useEffect, useRef } from 'react';
 import { FileCode2, Save, ShieldCheck, TriangleAlert, X } from 'lucide-react';
 import type { HostDraftSaveError, HostSaveAllPreview } from './webviewBridge.ts';
-import { describeMerge } from './draftSaveMerge.ts';
+import { describeMerge, describeSaveFinding } from './draftSaveMerge.ts';
 
 export interface SaveAllDialogProps {
 	readonly open: boolean;
@@ -29,20 +29,33 @@ export interface SaveAllDialogProps {
  */
 export function SaveAllDialog({ open, fileNames, busy, preview, error, onRefreshPreview, onReviewFile, onApply, onClose }: SaveAllDialogProps) {
 	const dialog = useRef<HTMLDialogElement>(null);
+	const backdropPress = useRef(false);
 
 	useEffect(() => {
 		const element = dialog.current;
 		if (!open) {
-			element?.close();
+			if (element?.open) {
+				element.close();
+			}
 			return;
 		}
 		const previous = document.activeElement as HTMLElement | null;
-		element?.showModal();
+		backdropPress.current = false;
+		if (element && !element.open) {
+			element.showModal();
+		}
 		return () => {
-			element?.close();
+			if (element?.open) {
+				element.close();
+			}
 			previous?.focus();
 		};
 	}, [open]);
+
+	function outsideDialog(x: number, y: number) {
+		const bounds = dialog.current?.getBoundingClientRect();
+		return !!bounds && (x < bounds.left || x > bounds.right || y < bounds.top || y > bounds.bottom);
+	}
 
 	const changed = preview?.files.filter(file => file.changed) ?? [];
 	const findings = preview?.files.reduce((count, file) => count + file.findings.length, 0) ?? 0;
@@ -56,11 +69,24 @@ export function SaveAllDialog({ open, fileNames, busy, preview, error, onRefresh
 				event.preventDefault();
 				onClose();
 			}}
+			onPointerDown={event => {
+				backdropPress.current = event.button === 0 && event.target === event.currentTarget && outsideDialog(event.clientX, event.clientY);
+			}}
+			onPointerUp={event => {
+				const dismiss = backdropPress.current && event.target === event.currentTarget && outsideDialog(event.clientX, event.clientY);
+				backdropPress.current = false;
+				if (dismiss) {
+					onClose();
+				}
+			}}
+			onPointerCancel={() => {
+				backdropPress.current = false;
+			}}
 		>
 			<header className="draft-save-header">
 				<div>
 					<h2 id="save-all-title">Save canvas changes</h2>
-					<p>{fileNames.length} Terraform files changed on the canvas. Each is merged into the file on disk; comments and fields the canvas does not show are kept.</p>
+					<p>{fileNames.length} Terraform file{fileNames.length === 1 ? '' : 's'} changed on the canvas. Each is merged into the file on disk; comments and fields the canvas does not show are kept.</p>
 				</div>
 				<button type="button" className="quiet-button" aria-label="Close save preview" onClick={onClose}>
 					<X size={16} />
@@ -80,8 +106,8 @@ export function SaveAllDialog({ open, fileNames, busy, preview, error, onRefresh
 				{preview && (
 					<>
 						<div className="draft-save-metrics">
-							<span><ShieldCheck size={14} /> {changed.length} of {preview.files.length} files change</span>
-							{findings > 0 && <span><TriangleAlert size={14} /> {findings} finding(s)</span>}
+							<span><ShieldCheck size={14} /> {changed.length} of {preview.files.length} file{preview.files.length === 1 ? '' : 's'} will change</span>
+							{findings > 0 && <span><TriangleAlert size={14} /> {findings} {findings === 1 ? 'finding' : 'findings'}</span>}
 							<code>rev {preview.sourceRevision.slice(0, 8)}</code>
 						</div>
 						<ul className="save-all-files" aria-label="Files this save writes">
@@ -103,7 +129,7 @@ export function SaveAllDialog({ open, fileNames, busy, preview, error, onRefresh
 											{file.findings.map((finding, index) => (
 												<li key={`${finding.code}-${index}`}>
 													<TriangleAlert size={13} />
-													<span><code>{finding.code}</code> {finding.file}{finding.line ? `:${finding.line}` : ''}</span>
+													<span><strong>{describeSaveFinding(finding.code)}</strong> · <code>{finding.file}{finding.line ? `:${finding.line}` : ''}</code></span>
 												</li>
 											))}
 										</ul>

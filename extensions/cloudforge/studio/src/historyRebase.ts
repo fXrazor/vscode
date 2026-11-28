@@ -2,8 +2,10 @@
  *  Rebase semantic undo history onto a refreshed architecture.
  *--------------------------------------------------------------------------------------------*/
 
-import type { Architecture } from './model.ts';
+import type { Architecture, DesignConnection, Resource } from './model.ts';
 import { endpointExists } from './connectionEndpoints.ts';
+import { resourceDefinition } from './fixture.ts';
+import { terraformIdentifier } from './resourceHierarchy.ts';
 
 /**
  * Snapshot-based history cannot simply survive a live refresh: undoing would restore a stale
@@ -107,30 +109,198 @@ function isPlainRecord(value: unknown): boolean {
 
 const RESOURCE_NESTED = new Set(['settings', 'fieldBindings']);
 
+function resourceTypeKey(resource: Resource): string {
+	return `${resource.provider}:${resource.kind}:${resourceDefinition(resource).type}`;
+}
+
+function resourceIdentityKey(resource: Resource): string {
+	const name = terraformIdentifier(resource);
+	return resource.kind === 'module'
+		? `module:${name}`
+		: `resource:${resourceDefinition(resource).type}.${name}`;
+}
+
+function sameResourceType(a: Resource, b: Resource): boolean {
+	return resourceTypeKey(a) === resourceTypeKey(b);
+}
+
+/**
+ * Detect opaque Rust node ID shifts between `from` and `to` (for example when saving a new
+ * resource shifts `node-5` -> `node-6` in BTreeMap order). Matches resources that keep the same
+ * canonical Terraform address (`type.name` / `module.name`) under a new opaque ID.
+ */
+function buildIdentityIdRemap(from: readonly Resource[], to: readonly Resource[]): Map<string, string> {
+	const remap = new Map<string, string>();
+	const toByIdentity = new Map<string, Resource[]>();
+	for (const resource of to) {
+		const key = resourceIdentityKey(resource);
+		const list = toByIdentity.get(key) ?? [];
+		list.push(resource);
+		toByIdentity.set(key, list);
+	}
+	const claimedToIds = new Set<string>();
+	for (const resource of from) {
+		const candidates = toByIdentity.get(resourceIdentityKey(resource)) ?? [];
+		const match = candidates.find(candidate => !claimedToIds.has(candidate.id) && candidate.id === resource.id)
+			?? candidates.find(candidate => !claimedToIds.has(candidate.id));
+		if (match) {
+			claimedToIds.add(match.id);
+			if (match.id !== resource.id) {
+				remap.set(resource.id, match.id);
+			}
+		}
+	}
+	return remap;
+}
+
+function remapEndpointForRebase(endpoint: DesignConnection['source'], idRemap: ReadonlyMap<string, string>): DesignConnection['source'] {
+	if (endpoint.kind === 'element') {
+		const nextId = idRemap.get(endpoint.elementId);
+		return nextId ? { ...endpoint, elementId: nextId } : endpoint;
+	}
+	return endpoint;
+}
+
+function remapArchitectureIds(architecture: Architecture, idRemap: ReadonlyMap<string, string>): Architecture {
+	if (idRemap.size === 0) {
+		return architecture;
+	}
+	const mapId = (id: string) => idRemap.get(id) ?? id;
+	const resources = architecture.resources.map(resource => {
+		const nextId = mapId(resource.id);
+		const nextParentId = resource.parentId ? mapId(resource.parentId) : undefined;
+		const nextVisualParentId = typeof resource.visualParentId === 'string' ? mapId(resource.visualParentId) : resource.visualParentId;
+		const nextResourceRefs = resource.resourceRefs
+			? Object.fromEntries(Object.entries(resource.resourceRefs).map(([key, binding]) => [
+				key,
+				{
+					refs: binding.refs.map(entry => ({ ...entry, resourceId: mapId(entry.resourceId) })),
+					...(binding.items ? { items: binding.items.map(item => item.kind === 'ref' ? { ...item, resourceId: mapId(item.resourceId) } : item) } : {}),
+				},
+			]))
+			: undefined;
+		return {
+			...resource,
+			id: nextId,
+			...(nextParentId !== undefined ? { parentId: nextParentId } : {}),
+			...(resource.visualParentId !== undefined ? { visualParentId: nextVisualParentId } : {}),
+			...(nextResourceRefs ? { resourceRefs: nextResourceRefs } : {}),
+		};
+	});
+	const items = architecture.items.map(item => item.members.length > 0
+		? { ...item, members: [...new Set(item.members.map(mapId))] }
+		: item
+	);
+	const connections = architecture.connections.map(connection => {
+		const source = remapEndpointForRebase(connection.source, idRemap);
+		const target = remapEndpointForRebase(connection.target, idRemap);
+		let id = connection.id;
+		if (id.includes('->')) {
+			const [fromOld, toOld] = id.split('->');
+			if (fromOld && toOld) {
+				id = `${mapId(fromOld)}->${mapId(toOld)}`;
+			}
+		}
+		return { ...connection, id, source, target };
+	});
+	const groups = architecture.groups?.map(group => ({ ...group, members: [...new Set(group.members.map(mapId))] }));
+	const layerOrder = architecture.layerOrder ? [...new Set(architecture.layerOrder.map(mapId))] : undefined;
+	return {
+		...architecture,
+		resources,
+		items,
+		connections,
+		...(groups ? { groups } : {}),
+		...(layerOrder ? { layerOrder } : {}),
+	};
+}
+
+function hasParentCycle(byId: ReadonlyMap<string, Resource>, startId: string, readParent: (r: Resource) => string | undefined): boolean {
+	const seen = new Set<string>([startId]);
+	let current = readParent(byId.get(startId)!);
+	while (current) {
+		if (seen.has(current)) {
+			return true;
+		}
+		seen.add(current);
+		const parent = byId.get(current);
+		if (!parent) {
+			return false;
+		}
+		current = readParent(parent);
+	}
+	return false;
+}
+
 /** Three-way merge of one history snapshot. Exported for tests. */
 export function rebaseSnapshot(snapshot: Architecture, base: Architecture, incoming: Architecture): Architecture {
-	const resources = mergeKeyed(snapshot.resources, base.resources, incoming.resources, (mine, before, after) => mergeRecord(mine, before, after, RESOURCE_NESTED));
+	// If Rust shifted opaque node IDs between `base` and `incoming`, align `snapshot` and `base`
+	// to the new IDs before merging so edits follow each resource instead of colliding across types.
+	const idRemap = buildIdentityIdRemap(base.resources, incoming.resources);
+	// Also align any canvas-only resources in `snapshot` that just became saved nodes in `incoming`.
+	const snapshotRemap = new Map(idRemap);
+	const extraRemap = buildIdentityIdRemap(snapshot.resources, incoming.resources);
+	for (const [oldId, newId] of extraRemap) {
+		if (!snapshotRemap.has(oldId)) {
+			snapshotRemap.set(oldId, newId);
+		}
+	}
+	const alignedSnapshot = remapArchitectureIds(snapshot, snapshotRemap);
+	const alignedBase = remapArchitectureIds(base, idRemap);
+
+	const resources = mergeKeyed(
+		alignedSnapshot.resources,
+		alignedBase.resources,
+		incoming.resources,
+		(mine, before, after) => sameResourceType(mine, after) && sameResourceType(before, after)
+			? mergeRecord(mine, before, after, RESOURCE_NESTED)
+			: structuredClone(after)
+	);
 	const resourceIds = new Set(resources.map(resource => resource.id));
-	const items = mergeKeyed(snapshot.items, base.items, incoming.items);
+	const sanitizedResources = resources.map(resource =>
+		(resource.parentId && !resourceIds.has(resource.parentId) || typeof resource.visualParentId === 'string' && !resourceIds.has(resource.visualParentId))
+			? {
+				...resource,
+				parentId: resource.parentId && resourceIds.has(resource.parentId) ? resource.parentId : undefined,
+				visualParentId: typeof resource.visualParentId === 'string' && !resourceIds.has(resource.visualParentId) ? undefined : resource.visualParentId,
+			}
+			: resource
+	);
+	// Break any parent or visual-parent cycle so layout and Terraform generation always terminate.
+	const byId = new Map(sanitizedResources.map(resource => [resource.id, resource]));
+	for (let index = 0; index < sanitizedResources.length; index++) {
+		let resource = sanitizedResources[index];
+		if (resource.parentId && hasParentCycle(byId, resource.id, r => r.parentId)) {
+			resource = { ...resource, parentId: undefined };
+			sanitizedResources[index] = resource;
+			byId.set(resource.id, resource);
+		}
+		if (typeof resource.visualParentId === 'string' && hasParentCycle(byId, resource.id, r => r.visualParentId === undefined ? r.parentId : r.visualParentId ?? undefined)) {
+			resource = { ...resource, visualParentId: undefined };
+			sanitizedResources[index] = resource;
+			byId.set(resource.id, resource);
+		}
+	}
+	const items = mergeKeyed(alignedSnapshot.items, alignedBase.items, incoming.items);
 	const endpointIds = new Set([...resourceIds, ...items.map(item => item.id)]);
 	const merged: Architecture = {
-		...snapshot,
-		name: mergeValue(snapshot.name, base.name, incoming.name),
-		resources: resources.map(resource => (resource.parentId && !resourceIds.has(resource.parentId) || resource.visualParentId && !resourceIds.has(resource.visualParentId)) ? { ...resource, parentId: resource.parentId && resourceIds.has(resource.parentId) ? resource.parentId : undefined, visualParentId: resource.visualParentId && !resourceIds.has(resource.visualParentId) ? undefined : resource.visualParentId } : resource),
+		...alignedSnapshot,
+		name: mergeValue(alignedSnapshot.name, alignedBase.name, incoming.name),
+		resources: sanitizedResources,
 		items,
-		connections: mergeKeyed(snapshot.connections, base.connections, incoming.connections)
+		connections: mergeKeyed(alignedSnapshot.connections, alignedBase.connections, incoming.connections)
 			.filter(connection => endpointExists(connection.source, endpointIds) && endpointExists(connection.target, endpointIds)),
 	};
-	if (snapshot.variables || incoming.variables) {
-		merged.variables = mergeKeyed(snapshot.variables, base.variables, incoming.variables);
+	if (alignedSnapshot.variables || incoming.variables) {
+		merged.variables = mergeKeyed(alignedSnapshot.variables, alignedBase.variables, incoming.variables);
 	}
-	const groups = mergeKeyed(snapshot.groups, base.groups, incoming.groups)
+	const groups = mergeKeyed(alignedSnapshot.groups, alignedBase.groups, incoming.groups)
 		.map(group => ({ ...group, members: group.members.filter(id => endpointIds.has(id)) }))
 		.filter(group => group.members.length > 1);
-	if (groups.length || snapshot.groups) {
+	if (groups.length || alignedSnapshot.groups) {
 		merged.groups = groups;
 	}
-	const layerOrder = mergeValue(snapshot.layerOrder, base.layerOrder, incoming.layerOrder);
+	const layerOrder = mergeValue(alignedSnapshot.layerOrder, alignedBase.layerOrder, incoming.layerOrder);
 	if (layerOrder) {
 		merged.layerOrder = layerOrder.filter(id => endpointIds.has(id));
 	} else {

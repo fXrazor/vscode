@@ -1,17 +1,23 @@
 {
   "azure": {
     "version": "5.14.0",
-    "entries": 1110,
-    "indexSha256": "16afa8f762e0ccd973026eb02c51a3c12faa4804a921ecd5cf8e8ab7de06915b"
+    "entries": 1109,
+    "indexSha256": "c67fa4e68a91cb4b9aa87ec9aed25e5fcd6877e08129f6686c5731385ddedcc9",
+    "schemaSha256": "9c6bc63fa88b2a62871f499e081b1cf71488d0d39f969e76c1bc5b7811d31d9f",
+    "documentationDeclaredVersion": "5.14.0"
   },
   "aws": {
-    "version": "6.73.1",
-    "entries": 1763,
-    "indexSha256": "5ae16aaa661279f8d99ca401d8ef58334581e4eba003ed118ab68c82e80671e0"
+    "version": "6.73.0",
+    "entries": 1766,
+    "indexSha256": "c64a764323ef8c71f250e9112d9930b0cde0bc0dfabb97b81e362f866679cd98",
+    "schemaSha256": "3096ef28fdfa927743d7abc82ff6bdcf417278cb0f0dbcd3634dadee6f24a06a",
+    "documentationDeclaredVersion": "6.73.1"
   },
   "gcp": {
     "version": "8.10.0",
-    "entries": 1205,
-    "indexSha256": "13ef21142faa7b6265c28bc9aa23403122fc98538f180815f91711c359322517"
+    "entries": 1396,
+    "indexSha256": "0cf531700915638d86907b61ad9a7935a21a31bfda7931a7492d729753da6afd",
+    "schemaSha256": "6071d9c47455d0a394e3d24b8036493e4573b647683ff86321ab4d1da85827e7",
+    "documentationDeclaredVersion": "8.10.0"
   }
 }

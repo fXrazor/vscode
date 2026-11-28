@@ -363,8 +363,10 @@ export function generate(p: Project): Generated {
 
 const depth = (p: Project, n: ArchNode) => {
   let d = 0;
+  const seen = new Set<string>([n.id]);
   let cur = nodeById(p, n.parentId);
-  while (cur) {
+  while (cur && !seen.has(cur.id)) {
+    seen.add(cur.id);
     d++;
     cur = nodeById(p, cur.parentId);
   }

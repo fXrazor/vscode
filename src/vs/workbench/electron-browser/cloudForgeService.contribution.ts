@@ -33,13 +33,16 @@ type CloudForgeServiceMethod =
 	| 'previewDraftSave' | 'applyDraftSave' | 'previewFocusedSave' | 'applyFocusedSave' | 'readResourceValues'
 	| 'previewFocusedSaveBatch' | 'applyFocusedSaveBatch'
 	| 'summarizeState' | 'listCloudConnections' | 'setCloudConnection' | 'storeCloudKey' | 'removeCloudConnection' | 'checkCloudSignIn' | 'listCloudAccounts'
-	| 'inspectDependencies' | 'readModule' | 'auditExportReadiness' | 'runEngineValidate' | 'runEnginePlan'
-	| 'checkOfflineMirrorReadiness' | 'runEngineInitOffline';
-type CloudForgeCatalogueMethod = 'inspectCatalogueSchemaFile' | 'importCatalogueSnapshot' | 'listCatalogueSnapshots' | 'listCatalogueTypes' | 'getResourceFormSchema' | 'getCatalogueCoverage' | 'renderResourceDraft' | 'listCloudRegions' | 'diffCatalogueSnapshots' | 'detectEngines' | 'listMirrorPackages' | 'extractProviderSchemaFromMirror' | 'importMirrorPackage' | 'evictMirrorPackage' | 'verifyMirrorIntegrity' | 'planMirrorCleanup';
+	| 'inspectDependencies' | 'readModule' | 'auditExportReadiness' | 'exportPortableBundle' | 'previewProviderUpgrade' | 'applyProviderUpgrade' | 'recoverUpgradeJournal' | 'runEngineValidate' | 'runEnginePlan' | 'runEngineFmt'
+	| 'checkOfflineMirrorReadiness' | 'runEngineInitOffline'
+	| 'getLearningRecord' | 'saveLearningRecord' | 'submitProposal' | 'reviewProposal' | 'issueMcpGrant' | 'checkTemplateCompatibility';
+type CloudForgeCatalogueMethod = 'inspectCatalogueSchemaFile' | 'importCatalogueSnapshot' | 'listCatalogueSnapshots' | 'listCatalogueTypes' | 'getResourceFormSchema' | 'getCatalogueCoverage' | 'renderResourceDraft' | 'listCloudRegions' | 'diffCatalogueSnapshots' | 'detectEngines' | 'listMirrorPackages' | 'extractProviderSchemaFromMirror' | 'importMirrorPackage' | 'listProviderVersions' | 'downloadProviderPackage' | 'evictMirrorPackage' | 'verifyMirrorIntegrity' | 'planMirrorCleanup' | 'selectTerraformSkills' | 'listBuiltinSkills' | 'getTopologyBlueprint' | 'listMcpGrants' | 'revokeMcpGrant' | 'listTemplates' | 'getTemplateDetails' | 'listTemplateSources' | 'importTemplatePackageFile' | 'removeCachedTemplate';
 type CloudForgeProjectMethod = 'createProject' | 'openProject' | 'grantProject' | 'forgetProjectAccess' | 'createWorkspaceFile' | 'inspectRepository' | 'importRepository' | 'removeRepository' | 'createArchitecture' | 'summarizeArchitectures' | 'installGit';
 
 const catalogueMethods: ReadonlySet<string> = new Set<CloudForgeCatalogueMethod>([
-	'inspectCatalogueSchemaFile', 'importCatalogueSnapshot', 'listCatalogueSnapshots', 'listCatalogueTypes', 'getResourceFormSchema', 'getCatalogueCoverage', 'renderResourceDraft', 'listCloudRegions', 'diffCatalogueSnapshots', 'detectEngines', 'listMirrorPackages', 'extractProviderSchemaFromMirror', 'importMirrorPackage', 'evictMirrorPackage', 'verifyMirrorIntegrity', 'planMirrorCleanup'
+	'inspectCatalogueSchemaFile', 'importCatalogueSnapshot', 'listCatalogueSnapshots', 'listCatalogueTypes', 'getResourceFormSchema', 'getCatalogueCoverage', 'renderResourceDraft', 'listCloudRegions', 'diffCatalogueSnapshots', 'detectEngines', 'listMirrorPackages', 'extractProviderSchemaFromMirror', 'importMirrorPackage', 'listProviderVersions', 'downloadProviderPackage', 'evictMirrorPackage', 'verifyMirrorIntegrity', 'planMirrorCleanup',
+	'selectTerraformSkills', 'listBuiltinSkills', 'getTopologyBlueprint', 'listMcpGrants', 'revokeMcpGrant',
+	'listTemplates', 'getTemplateDetails', 'listTemplateSources', 'importTemplatePackageFile', 'removeCachedTemplate'
 ]);
 
 /**
@@ -272,7 +275,7 @@ CommandsRegistry.registerCommand('_cloudforge.callService', async (accessor, met
 		if (!isRecord(params)) {
 			return failure('INVALID_PARAMS', 'The CloudForge request is invalid.');
 		}
-		if ((method === 'diffCatalogueSnapshots' || method === 'planMirrorCleanup') && (params.workspaceId !== undefined || params.architectureId !== undefined)) {
+		if ((method === 'diffCatalogueSnapshots' || method === 'planMirrorCleanup' || method === 'listMcpGrants') && (params.workspaceId !== undefined || params.architectureId !== undefined)) {
 			if (!isOpaqueId(params.workspaceId) || params.workspaceId !== activeWorkspaceId || !isOpaqueId(params.architectureId) || params.architectureId !== activeArchitectureId) {
 				return failure('SCOPE_DENIED', 'The requested architecture is not active in this window.');
 			}
@@ -290,8 +293,12 @@ CommandsRegistry.registerCommand('_cloudforge.callService', async (accessor, met
 		method !== 'previewFocusedSaveBatch' && method !== 'applyFocusedSaveBatch' &&
 		method !== 'summarizeState' && method !== 'listCloudConnections' && method !== 'setCloudConnection' && method !== 'storeCloudKey' && method !== 'removeCloudConnection' && method !== 'checkCloudSignIn' && method !== 'listCloudAccounts' &&
 		method !== 'inspectDependencies' && method !== 'readResourceValues' &&
-		method !== 'readModule' && method !== 'auditExportReadiness' && method !== 'runEngineValidate' &&
-		method !== 'runEnginePlan' && method !== 'checkOfflineMirrorReadiness' && method !== 'runEngineInitOffline'
+		method !== 'readModule' && method !== 'auditExportReadiness' && method !== 'exportPortableBundle' &&
+		method !== 'previewProviderUpgrade' && method !== 'applyProviderUpgrade' && method !== 'recoverUpgradeJournal' &&
+		method !== 'runEngineValidate' &&
+		method !== 'runEnginePlan' && method !== 'runEngineFmt' && method !== 'checkOfflineMirrorReadiness' && method !== 'runEngineInitOffline' &&
+		method !== 'getLearningRecord' && method !== 'saveLearningRecord' && method !== 'submitProposal' &&
+		method !== 'reviewProposal' && method !== 'issueMcpGrant' && method !== 'checkTemplateCompatibility'
 	) {
 		return failure('INVALID_PARAMS', 'The CloudForge request is invalid.');
 	}
@@ -317,10 +324,20 @@ CommandsRegistry.registerCommand('_cloudforge.callService', async (accessor, met
 		case 'summarizeState':
 		case 'readModule':
 		case 'auditExportReadiness':
+		case 'exportPortableBundle':
+		case 'previewProviderUpgrade':
+		case 'recoverUpgradeJournal':
 		case 'runEngineValidate':
 		case 'runEnginePlan':
+		case 'runEngineFmt':
 		case 'checkOfflineMirrorReadiness':
 		case 'runEngineInitOffline':
+		case 'getLearningRecord':
+		case 'saveLearningRecord':
+		case 'submitProposal':
+		case 'reviewProposal':
+		case 'issueMcpGrant':
+		case 'checkTemplateCompatibility':
 			if (!isOpaqueId(params.architectureId) || params.architectureId !== activeArchitectureId || (params.expectedSourceRevision !== undefined && (typeof params.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(params.expectedSourceRevision)))) {
 				return failure('SCOPE_DENIED', 'The requested architecture is not active in this window.');
 			}
@@ -331,6 +348,7 @@ CommandsRegistry.registerCommand('_cloudforge.callService', async (accessor, met
 		case 'applyFocusedSave':
 		case 'previewFocusedSaveBatch':
 		case 'applyFocusedSaveBatch':
+		case 'applyProviderUpgrade':
 			if (!isOpaqueId(params.architectureId) || params.architectureId !== activeArchitectureId || typeof params.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(params.expectedSourceRevision)) {
 				return failure('SCOPE_DENIED', 'The requested architecture is not active in this window.');
 			}

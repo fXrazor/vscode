@@ -1,1 +1,9 @@
-<svg id="Layer_1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024"><style>.st0{fill:#f6f6f6;fill-opacity:0}.st1{fill:#fff}.st2{fill:#167abf}</style><path class="st0" d="M1024 1024H0V0h1024v1024z"/><path class="st1" d="M1024 85.333v853.333H0V85.333h1024z"/><path class="st2" d="M0 85.333h298.667v853.333H0V85.333zm1024 0v853.333H384V85.333h640zm-554.667 160h341.333v-64H469.333v64zm341.334 533.334H469.333v64h341.333l.001-64zm128-149.334H597.333v64h341.333l.001-64zm0-149.333H597.333v64h341.333l.001-64zm0-149.333H597.333v64h341.333l.001-64z"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 375.625 375.625">
+  <title>CloudForge logo</title>
+  <rect id="background" width="375.625" height="375.625" rx="48" fill="#5B21FF"/>
+  <g id="forge-mark" fill="#FFFFFF" transform="translate(-54.1875 -93.4375)">
+    <polygon id="top" points="132,131 389,131 370.5,217 199,217 180.5,303 95,303"/>
+    <polygon id="middle" points="232.5,260 318.5,260 300,345.5 214,345.5"/>
+    <polygon id="bottom" points="128.5,345.5 214,345.5 195.5,431.5 110,431.5"/>
+  </g>
+</svg>

@@ -5,7 +5,7 @@
 import { useLayoutEffect, useRef, useState, type Dispatch, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
 import { useInternalNodes, useViewport, ViewportPortal } from '@xyflow/react';
 import type { Action, Architecture, DesignConnection, DesignEndpoint, DesignMode, Position } from './model.ts';
-import { connectionElementIds, elementEndpoint, endpointElementId, needsConnectionOverlay, pointEndpoint } from './connectionEndpoints.ts';
+import { connectionElementIds, elementEndpoint, endpointPorts, type EndpointPort, endpointElementId, needsConnectionOverlay, pointEndpoint, projectPerimeterAnchor } from './connectionEndpoints.ts';
 import { canConnectEndpoints, connectableElements, connectionAnchor } from './designConnections.ts';
 import { connectionDash, connectionPath } from './connectionGeometry.ts';
 import { ConnectionTools } from './ConnectionTools.tsx';
@@ -24,6 +24,8 @@ export function ConnectionOverlays({ architecture, mode, selectedId, showLabels,
 	const nodes = useInternalNodes([...new Set([...overlays, ...(selected ? [selected] : [])].flatMap(connectionElementIds))]);
 	const [preview, setPreview] = useState<Preview>();
 	const drag = useRef<{ side: 'source' | 'target' }>(undefined);
+	const [waypointPreview, setWaypointPreview] = useState<Position>();
+	const bendDrag = useRef(false);
 	const toolbar = useRef<HTMLDivElement>(null);
 	const [area, setArea] = useState({ width: 1000, height: 700, toolHeight: 210 });
 	useLayoutEffect(() => {
@@ -44,44 +46,80 @@ export function ConnectionOverlays({ architecture, mode, selectedId, showLabels,
 		if (!node) { return point; }
 		const drawing = architecture.items.find(item => item.id === endpoint.elementId);
 		const port = endpoint.port ?? (side === 'source' ? 'output' : 'input');
-		const handle = node.internals.handleBounds?.[port === 'output' ? 'source' : 'target']?.find(handle => handle.id === port);
-		if (handle && !drawing?.rotation) {
+		const handle = [...node.internals.handleBounds?.source ?? [], ...node.internals.handleBounds?.target ?? []].find(handle => handle.id === port);
+		if (handle && !drawing?.rotation && !endpoint.anchor) {
 			return { x: node.internals.positionAbsolute.x + handle.x + handle.width / 2, y: node.internals.positionAbsolute.y + handle.y + handle.height / 2 };
 		}
 		const element = drawing ?? architecture.resources.find(item => item.id === endpoint.elementId);
 		return element ? { x: point.x + node.internals.positionAbsolute.x - element.positions[mode].x, y: point.y + node.internals.positionAbsolute.y - element.positions[mode].y } : point;
 	}
 
-	function candidate(clientX: number, clientY: number, side: 'source' | 'target'): Preview {
-		let endpoint = pointEndpoint(flow.screenToFlowPosition({ x: clientX, y: clientY }));
-		const hit = document.elementsFromPoint(clientX, clientY).find(element => element.closest('.react-flow__node'));
+	/** Ctrl / Cmd drops the end freely without snapping to an element (as in Miro); Shift keeps the line at 45° steps. */
+	function candidate(clientX: number, clientY: number, side: 'source' | 'target', keys: { free?: boolean; straight?: boolean } = {}): Preview {
+		let position = flow.screenToFlowPosition({ x: clientX, y: clientY });
+		const other = selected && anchor(selected, side === 'source' ? 'target' : 'source', false);
+		if (keys.straight && other) { position = constrainAngle(other, position); }
+		let endpoint = pointEndpoint(position);
+		const hit = keys.free || keys.straight ? undefined : document.elementsFromPoint(clientX, clientY).find(element => element.closest('.react-flow__node'));
 		const node = hit?.closest<HTMLElement>('.react-flow__node');
 		const id = node?.dataset.id;
 		const target = connectableElements(architecture).find(item => item.id === id);
 		// Empty infrastructure container space is still canvas, not an invisible connection target.
 		if (target && (!node?.querySelector('.resource-container') || hit?.closest('.resource-container-heading, .react-flow__handle'))) {
 			const port = hit?.closest<HTMLElement>('.react-flow__handle')?.dataset.handleid;
-			endpoint = elementEndpoint(target.id, port === 'input' || port === 'output' ? port : side === 'source' ? 'output' : 'input');
+			if (port && endpointPorts.includes(port as EndpointPort)) {
+				endpoint = elementEndpoint(target.id, port as EndpointPort);
+			} else {
+				const drawing = architecture.items.find(item => item.id === target.id);
+				const rect = node?.getBoundingClientRect();
+				const topLeft = rect ? flow.screenToFlowPosition({ x: rect.left, y: rect.top }) : drawing?.positions[mode];
+				const bottomRight = rect ? flow.screenToFlowPosition({ x: rect.right, y: rect.bottom }) : undefined;
+				const box = drawing
+					? { x: drawing.positions[mode].x, y: drawing.positions[mode].y, width: drawing.width, height: drawing.height }
+					: topLeft && bottomRight ? { x: topLeft.x, y: topLeft.y, width: Math.max(1, bottomRight.x - topLeft.x), height: Math.max(1, bottomRight.y - topLeft.y) } : undefined;
+				if (box) {
+					const projected = projectPerimeterAnchor(box, position, drawing?.rotation ?? 0);
+					endpoint = elementEndpoint(target.id, projected.port, projected.anchor);
+				} else {
+					endpoint = elementEndpoint(target.id, side === 'source' ? 'output' : 'input');
+				}
+			}
 		}
 		const valid = !!selected && canConnectEndpoints(architecture, side === 'source' ? endpoint : selected.source, side === 'target' ? endpoint : selected.target, selected.id);
-		return { side, endpoint, valid, label: !valid ? 'Cannot connect here' : endpoint.kind === 'point' ? 'Loose canvas endpoint' : 'Attach to ' + target!.label };
+		const perimeterNote = endpoint.kind === 'element' && endpoint.anchor ? ' (perimeter)' : '';
+		return { side, endpoint, valid, label: !valid ? 'Cannot connect here' : endpoint.kind === 'point' ? keys.free ? 'Free point · snapping off' : keys.straight ? 'Straight · 45° steps' : 'Loose point · hold Ctrl to place freely' : 'Attach to ' + target!.label + perimeterNote };
 	}
 
 	const cancel = () => { drag.current = undefined; setPreview(undefined); };
 	function move(event: ReactPointerEvent<HTMLButtonElement>) {
-		if (drag.current) { setPreview(candidate(event.clientX, event.clientY, drag.current.side)); }
+		if (drag.current) { setPreview(candidate(event.clientX, event.clientY, drag.current.side, modifierKeys(event))); }
 	}
 	function release(event: ReactPointerEvent<HTMLButtonElement>) {
 		const state = drag.current; if (!state || !selected) { return; }
-		const next = candidate(event.clientX, event.clientY, state.side); cancel();
+		const next = candidate(event.clientX, event.clientY, state.side, modifierKeys(event)); cancel();
 		if (next.valid) { dispatch({ type: 'reconnectConnection', id: selected.id, side: state.side, endpoint: next.endpoint }); }
 	}
 	const update = (side: 'source' | 'target', endpoint: DesignEndpoint) => {
 		if (selected) { dispatch({ type: 'reconnectConnection', id: selected.id, side, endpoint }); }
 	};
+	const cancelBend = () => { bendDrag.current = false; setWaypointPreview(undefined); };
+	const moveBend = (event: ReactPointerEvent<HTMLButtonElement>) => {
+		if (!bendDrag.current) { return; }
+		const pos = flow.screenToFlowPosition({ x: event.clientX, y: event.clientY });
+		setWaypointPreview({ x: Math.round(pos.x * 10) / 10, y: Math.round(pos.y * 10) / 10 });
+	};
+	const releaseBend = (event: ReactPointerEvent<HTMLButtonElement>) => {
+		if (!bendDrag.current || !selected) { return; }
+		const pos = flow.screenToFlowPosition({ x: event.clientX, y: event.clientY });
+		cancelBend();
+		dispatch({ type: 'updateConnection', id: selected.id, patch: { waypoint: { x: Math.round(pos.x * 10) / 10, y: Math.round(pos.y * 10) / 10 } } });
+	};
 
 	const source = selected && anchor(selected, 'source', false); const target = selected && anchor(selected, 'target', false);
-	const toolWidth = Math.min(540, Math.max(200, area.width - 80));
+	const effectiveSelected = selected && waypointPreview ? { ...selected, waypoint: waypointPreview } : selected;
+	const selectedGeometry = effectiveSelected && source && target ? connectionPath(effectiveSelected, source.x, source.y, target.x, target.y) : undefined;
+	const midpoint = selectedGeometry ? { x: selectedGeometry[1], y: selectedGeometry[2] } : undefined;
+	const toolWidth = Math.min(900, Math.max(200, area.width - 80));
 	const centreX = source && target ? (source.x + target.x) / 2 * zoom + viewport.x : 80;
 	const upper = source && target ? Math.min(source.y, target.y) * zoom + viewport.y - area.toolHeight - 18 : 12;
 	const lower = source && target ? Math.max(source.y, target.y) * zoom + viewport.y + 18 : 12;
@@ -93,22 +131,24 @@ export function ConnectionOverlays({ architecture, mode, selectedId, showLabels,
 		<svg className="loose-connections" width="1" height="1" aria-label="Canvas design connections">
 			{overlays.map(link => {
 				const start = anchor(link, 'source'); const end = anchor(link, 'target'); if (!start || !end) { return null; }
-				const [path, labelX, labelY] = connectionPath(link, start.x, start.y, end.x, end.y);
+				const activeLink = link.id === selectedId && waypointPreview ? { ...link, waypoint: waypointPreview } : link;
+				const [path, labelX, labelY] = connectionPath(activeLink, start.x, start.y, end.x, end.y);
 				const marker = 'loose-arrow-' + encodeURIComponent(link.id); const active = link.id === selectedId;
 				const colour = link.stroke ?? 'var(--accent)'; const font = link.labelFontSize ?? 11;
 				const textY = labelY + (link.labelPosition === 'above' ? -18 : link.labelPosition === 'below' ? 18 : 0);
 				return <g key={link.id} className="react-flow__edge loose-connection" data-id={link.id} role="group" aria-roledescription="design connection" tabIndex={0} aria-label={'Design connection: ' + (link.label || 'canvas link')}
 					onClick={event => { event.stopPropagation(); onSelect(link.id); }}>
 					<defs><marker id={marker} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill={colour}/></marker></defs>
-					<path className="react-flow__edge-path" d={path} fill="none" stroke={colour} strokeWidth={link.width ?? 1.5} strokeDasharray={active ? '6 4' : connectionDash(link)} strokeLinecap="round" markerStart={link.startArrow ? `url(#${marker})` : undefined} markerEnd={link.endArrow === false ? undefined : `url(#${marker})`}/>
+					{active && <path className="connection-selection-halo" d={path} fill="none" stroke="var(--accent)" strokeOpacity={0.22} strokeWidth={(link.width ?? 1.5) + 8} strokeLinecap="round" pointerEvents="none"/>}
+						<path className="react-flow__edge-path" d={path} fill="none" stroke={colour} strokeWidth={link.width ?? 1.5} strokeDasharray={connectionDash(link)} strokeLinecap="round" markerStart={link.startArrow ? `url(#${marker})` : undefined} markerEnd={link.endArrow === false ? undefined : `url(#${marker})`}/>
 					<path className="loose-connection-hit" d={path} fill="none" stroke="transparent" strokeWidth={20 / zoom}/>
-					{link.label && (showLabels || active) && <g className="loose-connection-label"><rect x={labelX - (link.label.length * font * 0.6 + 12) / 2} y={textY - font * 0.7} width={link.label.length * font * 0.6 + 12} height={font * 1.4} rx={3} fill="var(--panel-solid)"/><text x={labelX} y={textY} textAnchor="middle" dominantBaseline="middle" fill={link.labelColor ?? 'var(--text)'} fontSize={font}>{link.label}</text></g>}
+					{link.label && (showLabels || active || labelIsAuthored(link)) && <g className="loose-connection-label"><rect x={labelX - (link.label.length * font * 0.6 + 12) / 2} y={textY - font * 0.7} width={link.label.length * font * 0.6 + 12} height={font * 1.4} rx={3} fill="var(--panel-solid)"/><text x={labelX} y={textY} textAnchor="middle" dominantBaseline="middle" fill={link.labelColor ?? 'var(--text)'} fontSize={font}>{link.label}</text></g>}
 				</g>;
 			})}
 		</svg>
 		{selected && !selected.id.includes('->') && (['source', 'target'] as const).map(side => {
 			const point = anchor(selected, side); if (!point) { return null; }
-			return <button key={side} className="connection-endpoint nodrag nopan" data-side={side} data-valid={preview?.side === side ? preview.valid : undefined} aria-label={(side === 'source' ? 'Start' : 'End') + ' connection endpoint'} title="Drag to move or reconnect · Arrow keys move · Shift moves 10 · Escape cancels"
+			return <button key={side} className="connection-endpoint nodrag nopan" data-side={side} data-valid={preview?.side === side ? preview.valid : undefined} aria-label={(side === 'source' ? 'Start' : 'End') + ' connection endpoint'} title="Drag to move or reconnect · Hold Ctrl to place freely without snapping · Shift keeps 45° steps · Arrow keys move · Escape cancels"
 				style={{ transform: `translate(${point.x}px,${point.y}px) scale(${1 / zoom})` }}
 				onPointerDown={event => { if (event.button !== 0) { return; } event.preventDefault(); event.stopPropagation(); event.currentTarget.focus({ preventScroll: true }); event.currentTarget.setPointerCapture(event.pointerId); drag.current = { side }; }}
 				onPointerMove={move} onPointerUp={release} onPointerCancel={cancel} onLostPointerCapture={cancel}
@@ -120,15 +160,41 @@ export function ConnectionOverlays({ architecture, mode, selectedId, showLabels,
 					if (direction) { event.preventDefault(); event.stopPropagation(); const step = event.shiftKey ? 10 : 1; update(side, pointEndpoint({ x: point.x + direction[0] * step, y: point.y + direction[1] * step })); }
 				}}/>;
 		})}
+		{selected && midpoint && <button className="connection-midpoint nodrag nopan" data-bent={selected.waypoint ? 'true' : undefined} aria-label="Drag to bend connection route"
+			title={selected.waypoint ? 'Drag to reshape route · Double-click or press Backspace to reset to automatic route · Arrow keys nudge · Escape cancels' : 'Drag to bend connection route around elements · Arrow keys nudge · Escape cancels'}
+			style={{ transform: `translate(${midpoint.x}px,${midpoint.y}px) scale(${1 / zoom}) rotate(45deg)` }}
+			onPointerDown={event => { if (event.button !== 0) { return; } event.preventDefault(); event.stopPropagation(); event.currentTarget.focus({ preventScroll: true }); event.currentTarget.setPointerCapture(event.pointerId); bendDrag.current = true; setWaypointPreview(midpoint); }}
+			onPointerMove={moveBend} onPointerUp={releaseBend} onPointerCancel={cancelBend} onLostPointerCapture={cancelBend}
+			onDoubleClick={event => { event.preventDefault(); event.stopPropagation(); cancelBend(); if (selected.waypoint) { dispatch({ type: 'updateConnection', id: selected.id, patch: { waypoint: undefined } }); } }}
+			onKeyDown={event => {
+				if (event.key === 'Escape' && bendDrag.current) { event.preventDefault(); event.stopPropagation(); cancelBend(); return; }
+				if ((event.key === 'Delete' || event.key === 'Backspace' || event.key === '0') && selected.waypoint) { event.preventDefault(); event.stopPropagation(); dispatch({ type: 'updateConnection', id: selected.id, patch: { waypoint: undefined } }); return; }
+				const directions: Record<string, number[]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+				const direction = directions[event.key];
+				if (direction) { event.preventDefault(); event.stopPropagation(); const step = event.shiftKey ? 10 : 1; const basePt = selected.waypoint ?? midpoint; dispatch({ type: 'updateConnection', id: selected.id, patch: { waypoint: { x: basePt.x + direction[0] * step, y: basePt.y + direction[1] * step } } }); }
+			}}/>}
+		{waypointPreview && selected && <span className="connection-drop-feedback" role="status" style={{ transform: `translate(${waypointPreview.x}px,${waypointPreview.y}px) scale(${1 / zoom})` }} data-valid="true">Bend route · double-click to reset</span>}
 		{preview && selected && <span className="connection-drop-feedback" role="status" style={{ transform: `translate(${anchor(selected, preview.side)?.x ?? 0}px,${anchor(selected, preview.side)?.y ?? 0}px) scale(${1 / zoom})` }} data-valid={preview.valid}>{preview.label}</span>}
 		{selected && source && target && <div ref={toolbar} className="selection-anchor connection-overlay-tools" style={{ transform: `translate(${world.x}px,${world.y}px) scale(${1 / zoom})`, width: toolWidth, '--selection-max-width': toolWidth + 'px' } as React.CSSProperties}>
 			<ConnectionTools connection={selected} dispatch={dispatch} onClose={onClose}>
-				{!selected.id.includes('->') && <details className="connection-endpoint-fields"><summary>Endpoints</summary><div>
+				{!selected.id.includes('->') && <div className="endpoint-field-list">
 					{(['source', 'target'] as const).map(side => <EndpointField key={side} architecture={architecture} connection={selected} side={side} point={side === 'source' ? source : target} onChange={endpoint => update(side, endpoint)}/>)}
-				</div></details>}
+				</div>}
 			</ConnectionTools>
 		</div>}
 	</ViewportPortal>;
+}
+
+/** A label someone typed stays visible; only the automatic service edge-kind labels hide until hover or Show labels. */
+export const labelIsAuthored = (link: DesignConnection) => !!link.label && (!link.origin || link.label !== link.origin.edgeKind);
+
+const modifierKeys = (event: { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }) => ({ free: event.ctrlKey || event.metaKey, straight: event.shiftKey });
+
+/** Keep a dragged end on the nearest 45° ray from the fixed end. */
+export function constrainAngle(from: Position, to: Position): Position {
+	const dx = to.x - from.x; const dy = to.y - from.y; const length = Math.hypot(dx, dy);
+	const angle = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * (Math.PI / 4);
+	return { x: Math.round((from.x + Math.cos(angle) * length) * 100) / 100, y: Math.round((from.y + Math.sin(angle) * length) * 100) / 100 };
 }
 
 function EndpointField({ architecture, connection, side, point, onChange }: { architecture: Architecture; connection: DesignConnection; side: 'source' | 'target'; point: Position; onChange: (endpoint: DesignEndpoint) => void }) {
@@ -136,7 +202,7 @@ function EndpointField({ architecture, connection, side, point, onChange }: { ar
 	return <fieldset><legend>{name}</legend><label>Attach to<select aria-label={name + ' endpoint target'} value={endpointElementId(endpoint) ?? ''} onChange={event => onChange(event.target.value ? elementEndpoint(event.target.value) : pointEndpoint(point))}>
 		<option value="">Loose canvas point</option>{connectableElements(architecture).map(element => <option key={element.id} value={element.id} disabled={!canConnectEndpoints(architecture, side === 'source' ? elementEndpoint(element.id) : connection.source, side === 'target' ? elementEndpoint(element.id) : connection.target, connection.id)}>{element.label}</option>)}
 	</select></label>
-		{endpoint.kind === 'element' ? <label>Port<select aria-label={name + ' endpoint port'} value={endpoint.port ?? (side === 'source' ? 'output' : 'input')} onChange={event => onChange({ ...endpoint, port: event.target.value as 'input' | 'output' })}><option value="input">Input / left</option><option value="output">Output / right</option></select></label> : <div className="endpoint-coordinates">
+		{endpoint.kind === 'element' ? <label>Port<select aria-label={name + ' endpoint port'} value={endpoint.port ?? (side === 'source' ? 'output' : 'input')} onChange={event => onChange({ ...endpoint, port: event.target.value as EndpointPort })}><option value="input">Input / left</option><option value="output">Output / right</option><option value="top">Top</option><option value="bottom">Bottom</option></select></label> : <div className="endpoint-coordinates">
 			{(['x', 'y'] as const).map(axis => <CoordinateInput key={axis + ':' + endpoint.position[axis]} label={name + ' endpoint ' + axis.toUpperCase()} value={endpoint.position[axis]} onCommit={value => onChange(pointEndpoint({ ...endpoint.position, [axis]: value }))}/>)}
 		</div>}
 	</fieldset>;

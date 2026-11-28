@@ -12,9 +12,15 @@ export type AttrType =
   | "bool"
   | "list"
   | "map"
+  | "json"
   | "block";
 
 export interface AttrDef {
+  /** Exact imported literal shape and member access; absent in inferred documentation. */
+  literalShape?: import('../../../../src/canvas/literalSchema.ts').LiteralShape;
+  readOnly?: boolean;
+  minItems?: number;
+  maxItems?: number;
   name: string;
   type: AttrType;
   required?: boolean;
@@ -24,6 +30,8 @@ export interface AttrDef {
   options?: string[];
   /** Resource types this argument may point at (makes relationship lines). */
   refTypes?: string[];
+  /** refTypes guessed from the argument name rather than curated (see referenceInference.ts). */
+  refInferred?: boolean;
   /** Which exported attribute of the referenced resource is used (default "id"). */
   refAttr?: string;
   /** Value is a CIDR (or list of CIDRs) and gets network validation. */
@@ -48,6 +56,8 @@ export interface InheritRule {
 }
 
 export interface ResourceDef {
+  /** Version of a captured executable schema, independent of the documentation catalogue version. */
+  schemaVersion?: string;
   /** Terraform resource type, also the catalogue id. */
   type: string;
   provider: ProviderId;

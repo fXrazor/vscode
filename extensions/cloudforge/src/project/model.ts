@@ -70,6 +70,41 @@ export type GitInstallStatus = 'installed' | 'wingetMissing' | 'failed' | 'cance
 
 export type CloneProvider = 'github' | 'gitlab' | 'bitbucket' | 'url';
 
+export type ProjectWindowPreference = 'ask' | 'newWindow' | 'currentWindow';
+
+export function parseProjectWindowPreference(value: unknown): ProjectWindowPreference {
+	if (value === 'newWindow' || value === 'currentWindow' || value === 'ask') {
+		return value;
+	}
+	return 'ask';
+}
+
+/**
+ * Decides whether opening or creating a project should reuse the current window, open a new window,
+ * or ask the user. An empty window is always reused directly.
+ */
+export function resolveProjectWindowOpenAction(
+	preference: ProjectWindowPreference,
+	hasOpenWorkspace: boolean
+): 'newWindow' | 'currentWindow' | 'ask' {
+	if (!hasOpenWorkspace) {
+		return 'currentWindow';
+	}
+	return preference;
+}
+
+/**
+ * When a user selects a CloudForge project directory containing a single `.code-workspace` file,
+ * returns that file name so the new window opens the full multi-repo workspace immediately.
+ */
+export function pickProjectWorkspaceEntry(
+	entries: readonly (readonly [string, number])[],
+	fileTypeFile: number
+): string | undefined {
+	const matches = entries.filter(([name, type]) => type === fileTypeFile && name.toLowerCase().endsWith('.code-workspace'));
+	return matches.length === 1 ? matches[0][0] : undefined;
+}
+
 const MAX_ITEMS = 1024;
 const findingCodes: ReadonlySet<string> = new Set<FindingCode>(['TFVARS_FILE', 'STATE_FILE', 'PROVIDER_CACHE', 'SENSITIVE_LITERAL']);
 

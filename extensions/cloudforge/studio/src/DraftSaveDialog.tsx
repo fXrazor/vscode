@@ -6,7 +6,7 @@
 import { useEffect, useRef } from 'react';
 import { ShieldCheck, TriangleAlert, X, Save } from 'lucide-react';
 import type { HostDraftSaveError, HostDraftSaveMerge, HostDraftSavePreview } from './webviewBridge.ts';
-import { describeMerge } from './draftSaveMerge.ts';
+import { describeMerge, describeSaveFinding } from './draftSaveMerge.ts';
 
 export interface DraftSaveDialogProps {
 	readonly open: boolean;
@@ -42,20 +42,33 @@ export function DraftSaveDialog({
 	onClose,
 }: DraftSaveDialogProps) {
 	const dialog = useRef<HTMLDialogElement>(null);
+	const backdropPress = useRef(false);
 
 	useEffect(() => {
 		const element = dialog.current;
 		if (!open) {
-			element?.close();
+			if (element?.open) {
+				element.close();
+			}
 			return;
 		}
 		const previous = document.activeElement as HTMLElement | null;
-		element?.showModal();
+		backdropPress.current = false;
+		if (element && !element.open) {
+			element.showModal();
+		}
 		return () => {
-			element?.close();
+			if (element?.open) {
+				element.close();
+			}
 			previous?.focus();
 		};
 	}, [open]);
+
+	function outsideDialog(x: number, y: number) {
+		const bounds = dialog.current?.getBoundingClientRect();
+		return !!bounds && (x < bounds.left || x > bounds.right || y < bounds.top || y > bounds.bottom);
+	}
 
 	return (
 		<dialog
@@ -66,11 +79,24 @@ export function DraftSaveDialog({
 				event.preventDefault();
 				onClose();
 			}}
+			onPointerDown={event => {
+				backdropPress.current = event.button === 0 && event.target === event.currentTarget && outsideDialog(event.clientX, event.clientY);
+			}}
+			onPointerUp={event => {
+				const dismiss = backdropPress.current && event.target === event.currentTarget && outsideDialog(event.clientX, event.clientY);
+				backdropPress.current = false;
+				if (dismiss) {
+					onClose();
+				}
+			}}
+			onPointerCancel={() => {
+				backdropPress.current = false;
+			}}
 		>
 			<header className="draft-save-header">
 				<div>
-					<h2 id="draft-save-title">Guarded Terraform Save</h2>
-					<p>Rust previews the exact file delta before any workspace write occurs.</p>
+					<h2 id="draft-save-title">Save Terraform file</h2>
+					<p>CloudForge previews the exact file changes before writing to your workspace.</p>
 				</div>
 				<button type="button" className="quiet-button" aria-label="Close save preview" onClick={onClose}>
 					<X size={16} />
@@ -133,7 +159,7 @@ export function DraftSaveDialog({
 								{preview.findings.map((finding, index) => (
 									<li key={`${finding.code}-${index}`}>
 										<TriangleAlert size={13} />
-										<span><code>{finding.code}</code> {finding.file}{finding.line ? `:${finding.line}` : ''}</span>
+										<span><strong>{describeSaveFinding(finding.code)}</strong> · <code>{finding.file}{finding.line ? `:${finding.line}` : ''}</code></span>
 									</li>
 								))}
 							</ul>
@@ -155,7 +181,7 @@ export function DraftSaveDialog({
 					onClick={onApply}
 				>
 					<Save size={14} />
-					<span>{busy ? 'Applying…' : 'Apply Save'}</span>
+					<span>{busy ? 'Saving…' : 'Save file'}</span>
 				</button>
 			</footer>
 		</dialog>

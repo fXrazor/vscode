@@ -6,14 +6,16 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, Check, CircleHelp, Layers, LockKeyhole, Trash2 } from 'lucide-react';
 import { variableError, variableTypes, type VariableDefinition } from './variables.ts';
 import { variableInputIssue, variableInputTypes } from './variableInputs.ts';
+import { VariableCollectionInput } from './VariableCollectionInput.tsx';
 
 function ValueControl({id,label,text,type,sensitive,onChange,issue,helpId,onBlur}:{
 	id:string;label:string;text:string;type:VariableDefinition['type'];sensitive:boolean;onChange:(value:string)=>void;issue?:string;helpId:string;onBlur:()=>void;
 }) {
 	const common={id,'aria-label':label,'aria-invalid':!!issue,'aria-describedby':helpId,value:text,onBlur,onChange:(event:React.ChangeEvent<HTMLInputElement|HTMLSelectElement|HTMLTextAreaElement>)=>onChange(event.target.value)};
 	if(sensitive){return <input {...common} type="password" autoComplete="off" spellCheck={false}/>;}
+	if(type==='list(string)'||type==='map(string)'){return <VariableCollectionInput key={type} id={id} label={label} text={text} type={type} onChange={onChange} issue={issue} helpId={helpId} onBlur={onBlur}/>;}
 	if(type==='bool'){return <select {...common}><option value="">Choose a value…</option><option value="true">True</option><option value="false">False</option><option value="null">Null · no value</option>{!['','true','false','null'].includes(text)&&<option value={text}>Review this value</option>}</select>;}
-	if(type==='list(string)'||type==='map(string)'||type==='any'){return <textarea {...common} className="variable-json-input" rows={3} placeholder={variableInputTypes[type].example} spellCheck={false}/>;}
+	if(type==='object'||type==='any'){return <textarea {...common} className="variable-json-input" rows={type==='object'?6:3} placeholder={variableInputTypes[type].example} spellCheck={false}/>;}
 	return <input {...common} type="text" inputMode={type==='number'?'decimal':undefined} placeholder={variableInputTypes[type].example} spellCheck={false}/>;
 }
 

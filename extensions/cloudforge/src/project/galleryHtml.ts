@@ -90,7 +90,7 @@ button { font: inherit; font-size: 13px; line-height: 20px; font-weight: 500; cu
 		<span class="spacer"></span>
 		<button class="secondary" id="refresh" type="button">Refresh</button>
 		<button class="secondary" id="templates" type="button">Templates</button>
-		<button class="primary" id="new" type="button">New Architecture</button>
+		<button class="primary" id="new" type="button">Add Architecture</button>
 	</div>
 	<p class="meta" id="count" aria-live="polite"></p>
 	<ul class="grid" id="grid" aria-label="Architectures"></ul>
@@ -182,7 +182,7 @@ button { font: inherit; font-size: 13px; line-height: 20px; font-weight: 500; cu
 		const total = state.cards.length;
 		countLabel.textContent = total === 0 ? '' : (cards.length === total ? total + (total === 1 ? ' architecture' : ' architectures') : cards.length + ' of ' + total + ' architectures');
 		empty.hidden = cards.length > 0;
-		empty.textContent = total === 0 ? 'This project has no architectures yet. Choose New Architecture or start from a template.' : 'No architectures match your search.';
+		empty.textContent = total === 0 ? 'This project has no architectures yet. Choose Add Architecture to start blank, from a template, a repo or a project bundle.' : 'No architectures match your search.';
 	}
 
 	window.addEventListener('message', event => {
@@ -190,7 +190,7 @@ button { font: inherit; font-size: 13px; line-height: 20px; font-weight: 500; cu
 		if (message && message.type === 'state') {
 			state = message;
 			document.getElementById('title').textContent = message.projectName || 'Architectures';
-			document.getElementById('crumbs').textContent = 'Projects / ' + (message.projectName || '');
+			document.getElementById('crumbs').textContent = message.projectName ? 'Projects / ' + message.projectName : 'Projects';
 			render();
 		}
 	});

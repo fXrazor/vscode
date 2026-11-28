@@ -16,8 +16,10 @@
  * - Never copies architecture data into a second store or fabricates unverified validation claims.
  */
 
+import { nodeAddress, resourceAddresses } from './resourceIdentity.ts';
 import { getDef } from './cloudlab-core/catalog/index.ts';
 import { catalogueIconFor } from './catalogue.ts';
+import { coreIcon } from './coreIcons.ts';
 import type { Architecture, DesignConnection, Position, Provider, Resource, ResourceBlock, ResourceKind } from './model.ts';
 import { elementEndpoint, endpointExists, endpointKey } from './connectionEndpoints.ts';
 import type { Diagnostic } from './diagnostics.ts';
@@ -32,6 +34,8 @@ import type {
 	HostPoint,
 	HostValidationRun,
 	HostViewport,
+	HostGraphViewState,
+	HostResourceAppearance,
 	HostViewState,
 } from './webviewBridge.ts';
 
@@ -46,7 +50,7 @@ export interface ProjectedGraphResult {
 	readonly hasSourceById: Readonly<Record<string, boolean>>;
 	readonly sourceRevision: string;
 	readonly status: 'complete' | 'partial';
-	/** Canvas ids that continue under a service node id (for example a palette resource after its first save). */
+	/** Old resource ID -> new opaque node ID when a refresh shifts Rust node IDs or adopts newly saved canvas nodes. */
 	readonly idRemap: Readonly<Record<string, string>>;
 }
 
@@ -147,14 +151,19 @@ function createResourceFromNode(node: HostNodeSummary, fallbackPosition: Positio
 	const preservedCatalogue = preserved?.catalogue && preserved.catalogue.type === node.resourceType && preserved.catalogue.iconMatch !== 'fallback'
 		? structuredClone(preserved.catalogue)
 		: undefined;
-	const catalogue = !isModule && mappedKind === 'generic' && node.resourceType && icon
+	// Keep the icon the resource already had (from the Library or Replace icon) instead of a type default.
+	const keptIcon = preserved?.catalogue?.type === node.resourceType && preserved.catalogue.icon && !preserved.catalogue.icon.endsWith('azure-resource-groups.svg') && preserved.catalogue.icon !== FALLBACK_ICONS[provider]
+		? preserved.catalogue.icon
+		: undefined;
+	const catalogueIcon = keptIcon ?? (node.resourceType && icon ? coreIcon(node.resourceType, icon.icon) : undefined);
+	const catalogue = !isModule && mappedKind === 'generic' && node.resourceType && icon && catalogueIcon
 		? preservedCatalogue ?? {
 			type: node.resourceType,
 			label: friendlyLabelForType(node.resourceType),
 			service: def?.service ?? friendlyLabelForType(node.resourceType),
 			category: def?.category ?? 'Other',
-			icon: icon.icon,
-			...(icon.fallback ? { iconMatch: 'fallback' } : {}),
+			icon: catalogueIcon,
+			...(icon.fallback && catalogueIcon === icon.icon ? { iconMatch: 'fallback' } : {}),
 			fields: (def?.attributes ?? [])
 				.filter(attr => attr.type !== 'block' && ['string', 'number', 'bool'].includes(attr.type))
 				.map(attr => ({
@@ -189,9 +198,10 @@ function createResourceFromNode(node: HostNodeSummary, fallbackPosition: Positio
 		...(node.sourceFile ? { sourceFile: node.sourceFile } : preserved?.sourceFile ? { sourceFile: preserved.sourceFile } : {}),
 		...(node.sourceLine !== undefined ? { sourceLine: node.sourceLine } : preserved?.sourceLine !== undefined ? { sourceLine: preserved.sourceLine } : {}),
 		...(node.label && node.label !== node.name ? { label: node.label } : {}),
-		region: preserved?.region ?? providerRegions[provider][0],
+		region: preserved?.region ?? (mappedKind === 'generic' ? '' : providerRegions[provider][0]),
 		settings: preserved ? { ...defaultSettings, ...preserved.settings } : defaultSettings,
 		blocks: preserved ? structuredClone(preserved.blocks) : [],
+		...(preserved?.terraformExtras ? { terraformExtras: structuredClone(preserved.terraformExtras) } : {}),
 		...(preserved?.fieldBindings ? { fieldBindings: structuredClone(preserved.fieldBindings) } : {}),
 		...(preserved?.resourceRefs ? { resourceRefs: structuredClone(preserved.resourceRefs) } : {}),
 		...(preserved?.inheritanceOverrides ? { inheritanceOverrides: [...preserved.inheritanceOverrides] } : {}),
@@ -253,26 +263,35 @@ function layoutNewResources(resources: Resource[], preservedIds: ReadonlySet<str
 
 	type Box = { width: number; height: number };
 
-	const shiftSubtree = (rootId: string, dx: number, dy: number) => {
+	const shiftSubtree = (rootId: string, dx: number, dy: number, visited = new Set<string>()) => {
+		if (visited.has(rootId)) {
+			return;
+		}
+		visited.add(rootId);
 		for (const child of childrenByParent.get(rootId) ?? []) {
+			if (visited.has(child.id)) {
+				continue;
+			}
 			if (!preservedIds.has(child.id)) {
 				child.positions = {
 					visual: { x: child.positions.visual.x + dx, y: child.positions.visual.y + dy },
 					technical: { x: child.positions.technical.x + dx, y: child.positions.technical.y + dy },
 				};
 			}
-			shiftSubtree(child.id, dx, dy);
+			shiftSubtree(child.id, dx, dy, visited);
 		}
 	};
 
 	// Bottom-up deterministic layout so containers measure their actual nested subtrees
 	// before sibling placement, preventing sibling cards from overlapping expanded containers.
-	const layoutSubtree = (resource: Resource): Box => {
+	const layoutSubtree = (resource: Resource, visited = new Set<string>()): Box => {
 		const container = isResourceContainer(resource);
-		if (!container) {
+		if (!container || visited.has(resource.id)) {
 			return { width: LEAF_W, height: LEAF_H };
 		}
-		const children = (childrenByParent.get(resource.id) ?? []).slice().sort((a, b) => {
+		const seen = new Set(visited);
+		seen.add(resource.id);
+		const children = (childrenByParent.get(resource.id) ?? []).filter(child => !seen.has(child.id)).slice().sort((a, b) => {
 			const containerDelta = Number(isResourceContainer(b)) - Number(isResourceContainer(a));
 			return containerDelta !== 0 ? containerDelta : a.name.localeCompare(b.name);
 		});
@@ -286,7 +305,7 @@ function layoutNewResources(resources: Resource[], preservedIds: ReadonlySet<str
 		}
 
 		// Measure every child subtree first (each child starts at local origin 0,0).
-		const measured = children.map(child => ({ child, box: layoutSubtree(child) }));
+		const measured = children.map(child => ({ child, box: layoutSubtree(child, seen) }));
 		const maxRowWidth = Math.max(920, ...measured.map(m => m.box.width));
 		let cursorX = PAD_X;
 		let cursorY = PAD_TOP;
@@ -356,70 +375,99 @@ function isServiceEdgeId(id: string): boolean {
 	return id.includes('->');
 }
 
-function remapElementEndpoint(endpoint: DesignConnection['source'], remapId: (id: string) => string): DesignConnection['source'] {
-	return endpoint.kind === 'element' ? { ...endpoint, elementId: remapId(endpoint.elementId) } : endpoint;
+function nodeIdentityKey(node: HostNodeSummary): string | undefined {
+	if (node.kind === 'module') {
+		return `module:${node.name}`;
+	}
+	if (node.kind === 'data' && node.resourceType) {
+		return `data:${node.resourceType}.${node.name}`;
+	}
+	if (node.kind === 'resource' && node.resourceType) {
+		return `resource:${node.resourceType}.${node.name}`;
+	}
+	return undefined;
 }
 
-function nodeAddress(node: HostNodeSummary): string | undefined {
-	return node.kind !== 'module' && node.resourceType ? node.resourceType + '.' + node.name : undefined;
+function resourceIdentityKey(resource: Resource): string {
+	const name = terraformIdentifier(resource);
+	if (resource.kind === 'module') {
+		return `module:${name}`;
+	}
+	return `resource:${resourceDefinition(resource).type}.${name}`;
 }
 
-/**
- * Pairs each service node with the canvas resource it continues. The service numbers its nodes
- * in file order (`node-1`, `node-2`, …), so an id alone can point at a different resource after
- * a save adds or removes blocks, and a resource placed from the palette carries a canvas id the
- * service never saw. Pairs are made in this order: same id and same Terraform address, then the
- * same address (the canvas resource that was just saved), then the same id and resource type (a
- * block renamed in the file). Each canvas resource continues at most one node.
- */
-export function matchPreviousResources(nodes: readonly HostNodeSummary[], previousResources: readonly Resource[]): Map<string, Resource> {
-	const matched = new Map<string, Resource>();
-	if (previousResources.length === 0) {
-		return matched;
+function isCompatiblePrevious(node: HostNodeSummary, candidate: Resource): boolean {
+	if (node.kind === 'module') {
+		return candidate.kind === 'module';
 	}
-	const used = new Set<string>();
-	const previousById = new Map(previousResources.map(resource => [resource.id, resource]));
-	const previousByAddress = new Map<string, Resource>();
-	const modulesByName = new Map<string, Resource>();
-	for (const resource of previousResources) {
-		if (resource.kind === 'module') {
-			if (!modulesByName.has(resource.name)) {
-				modulesByName.set(resource.name, resource);
-			}
+	if (candidate.kind === 'module') {
+		return false;
+	}
+	return !!node.resourceType && resourceDefinition(candidate).type === node.resourceType;
+}
+
+function remapDesignEndpoint(endpoint: DesignConnection['source'], idRemap: ReadonlyMap<string, string>): DesignConnection['source'] {
+	if (endpoint.kind === 'element') {
+		const nextId = idRemap.get(endpoint.elementId);
+		return nextId ? { ...endpoint, elementId: nextId } : endpoint;
+	}
+	return endpoint;
+}
+
+function remapResourceRefs(
+	refs: Resource['resourceRefs'],
+	idRemap: ReadonlyMap<string, string>,
+	validIds: ReadonlySet<string>
+): Resource['resourceRefs'] {
+	if (!refs) {
+		return undefined;
+	}
+	const out: NonNullable<Resource['resourceRefs']> = {};
+	for (const [key, binding] of Object.entries(refs)) {
+		const mappedRefs = binding.refs
+			.map(entry => ({ ...entry, resourceId: idRemap.get(entry.resourceId) ?? entry.resourceId }))
+			.filter(entry => validIds.has(entry.resourceId));
+		const mappedItems = binding.items?.map(item => item.kind === 'ref'
+			? { ...item, resourceId: idRemap.get(item.resourceId) ?? item.resourceId }
+			: item
+		).filter(item => item.kind !== 'ref' || validIds.has(item.resourceId));
+		if (mappedRefs.length > 0 || (mappedItems && mappedItems.length > 0)) {
+			out[key] = {
+				refs: mappedRefs,
+				...(mappedItems ? { items: mappedItems } : {}),
+			};
+		}
+	}
+	return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function remapDependencyStyles(
+	styles: Architecture['dependencyStyles'],
+	idRemap: ReadonlyMap<string, string>,
+	validIds: ReadonlySet<string>
+): Architecture['dependencyStyles'] {
+	if (!styles) {
+		return undefined;
+	}
+	const out: NonNullable<Architecture['dependencyStyles']> = {};
+	for (const [key, style] of Object.entries(styles)) {
+		if (!key.startsWith('dependency:')) {
+			out[key] = structuredClone(style);
 			continue;
 		}
-		const address = resourceAddress(resource);
-		if (!previousByAddress.has(address)) {
-			previousByAddress.set(address, resource);
-		}
-	}
-	const claim = (node: HostNodeSummary, resource: Resource | undefined) => {
-		if (resource && !used.has(resource.id) && !matched.has(node.id)) {
-			matched.set(node.id, resource);
-			used.add(resource.id);
-		}
-	};
-	for (const node of nodes) {
-		const previous = previousById.get(node.id);
-		const address = nodeAddress(node);
-		if (!previous) {
+		const rest = key.slice('dependency:'.length);
+		const sep = rest.indexOf(':');
+		if (sep < 0) {
+			out[key] = structuredClone(style);
 			continue;
 		}
-		if (address ? previous.kind !== 'module' && resourceAddress(previous) === address : node.kind === 'module' && previous.kind === 'module' && previous.name === node.name) {
-			claim(node, previous);
+		const source = idRemap.get(rest.slice(0, sep)) ?? rest.slice(0, sep);
+		const target = idRemap.get(rest.slice(sep + 1)) ?? rest.slice(sep + 1);
+		if (validIds.has(source) && validIds.has(target)) {
+			out[`dependency:${source}:${target}`] = structuredClone(style);
 		}
 	}
-	for (const node of nodes) {
-		const address = nodeAddress(node);
-		claim(node, address ? previousByAddress.get(address) : node.kind === 'module' ? modulesByName.get(node.name) : undefined);
-	}
-	for (const node of nodes) {
-		const previous = previousById.get(node.id);
-		if (previous && (node.kind === 'module' ? previous.kind === 'module' : previous.kind !== 'module' && !!node.resourceType && resourceDefinition(previous).type === node.resourceType)) {
-			claim(node, previous);
-		}
-	}
-	return matched;
+	return Object.keys(out).length > 0 ? out : undefined;
 }
 
 /**
@@ -430,32 +478,96 @@ export function projectGraphSnapshotToArchitecture(
 	snapshot: HostGraphSnapshot,
 	options: ProjectGraphOptions = {}
 ): ProjectedGraphResult {
-	const previousFor = matchPreviousResources(snapshot.nodes, options.previousArchitecture?.resources ?? []);
-	// Canvas ids that the service now knows under its own node id (a resource placed from the palette
-	// and then saved, or a node whose position in the file moved). Links to them follow the new id.
-	const idRemap = new Map<string, string>();
-	for (const [nodeId, previous] of previousFor) {
-		if (previous.id !== nodeId) {
-			idRemap.set(previous.id, nodeId);
+	const previousResources = options.previousArchitecture?.resources ?? [];
+	const previousById = new Map(previousResources.map(resource => [resource.id, resource]));
+	const previousByIdentity = new Map<string, Resource[]>();
+	for (const resource of previousResources) {
+		const key = resourceIdentityKey(resource);
+		const list = previousByIdentity.get(key) ?? [];
+		list.push(resource);
+		previousByIdentity.set(key, list);
+	}
+
+	// Match incoming nodes against previous resources in two passes so opaque Rust node ID shifts
+	// (e.g., adding a resource that sorts earlier in BTreeMap order) never cross-contaminate
+	// settings, blocks, or nesting between unrelated resource types.
+	const matchedPrevious = new Map<string, Resource>();
+	const claimedPreviousIds = new Set<string>();
+	const oldIdToNewId = new Map<string, string>();
+
+	// Pass 1: exact canonical Terraform address (`type.name` / `module.name`).
+	for (const node of snapshot.nodes) {
+		const identity = nodeIdentityKey(node);
+		if (!identity) {
+			continue;
+		}
+		const candidates = previousByIdentity.get(identity) ?? [];
+		const match = candidates.find(candidate => !claimedPreviousIds.has(candidate.id) && candidate.id === node.id)
+			?? candidates.find(candidate => !claimedPreviousIds.has(candidate.id));
+		if (match) {
+			matchedPrevious.set(node.id, match);
+			claimedPreviousIds.add(match.id);
+			oldIdToNewId.set(match.id, node.id);
 		}
 	}
-	const remapId = (id: string) => idRemap.get(id) ?? id;
-	const remapConnection = (connection: DesignConnection): DesignConnection => ({
-		...connection,
-		id: isServiceEdgeId(connection.id) ? connection.id.split('->').map(remapId).join('->') : connection.id,
-		source: remapElementEndpoint(connection.source, remapId),
-		target: remapElementEndpoint(connection.target, remapId),
-	});
-	const previousConnections = (options.previousArchitecture?.connections ?? []).map(remapConnection);
-	const previousConnectionsById = new Map(previousConnections.map(connection => [connection.id, connection]));
+
+	// Pass 2: fallback to same opaque node ID ONLY when the resource kind & type still match
+	// (covers in-place renames whose opaque ID stayed stable).
+	for (const node of snapshot.nodes) {
+		if (matchedPrevious.has(node.id)) {
+			continue;
+		}
+		const candidate = previousById.get(node.id);
+		if (candidate && !claimedPreviousIds.has(candidate.id) && isCompatiblePrevious(node, candidate)) {
+			matchedPrevious.set(node.id, candidate);
+			claimedPreviousIds.add(candidate.id);
+			oldIdToNewId.set(candidate.id, node.id);
+		}
+	}
+
+	const idRemapRecord: Record<string, string> = {};
+	for (const [oldId, newId] of oldIdToNewId) {
+		if (oldId !== newId) {
+			idRemapRecord[oldId] = newId;
+		}
+	}
+
+	const previousConnectionsById = new Map<string, DesignConnection>();
+	for (const connection of options.previousArchitecture?.connections ?? []) {
+		previousConnectionsById.set(connection.id, connection);
+		if (isServiceEdgeId(connection.id)) {
+			const [fromOld, toOld] = connection.id.split('->');
+			if (fromOld && toOld) {
+				const remappedEdgeId = `${oldIdToNewId.get(fromOld) ?? fromOld}->${oldIdToNewId.get(toOld) ?? toOld}`;
+				if (!previousConnectionsById.has(remappedEdgeId)) {
+					previousConnectionsById.set(remappedEdgeId, connection);
+				}
+			}
+		}
+	}
+
 	const viewPositions = options.viewState?.nodePositions?.visual ?? options.viewState?.nodePositions?.technical ?? {};
+	// Saved view state is keyed by the ids resources had when it was written; with its addresses, follow each
+	// resource to its current id and never hand one resource's position to the block that now has its old id.
+	const savedAddresses = options.viewState?.addresses;
+	const savedIdByAddress = new Map(Object.entries(savedAddresses ?? {}).map(([id, address]) => [address, id]));
+	const savedId = (node: HostNodeSummary): string | undefined => {
+		if (!savedAddresses) { return node.id; }
+		const address = nodeAddress(node);
+		const match = address ? savedIdByAddress.get(address) : undefined;
+		return match ?? (savedAddresses[node.id] === undefined ? node.id : undefined);
+	};
 	const hasSourceById: Record<string, boolean> = {};
 	const preservedIds = new Set<string>();
 
 	const resources: Resource[] = snapshot.nodes.map((node, index) => {
 		hasSourceById[node.id] = node.hasSource;
-		const previous = previousFor.get(node.id);
-		const savedPos = viewPositions[node.id];
+		const previous = matchedPrevious.get(node.id);
+		const viewId = savedId(node);
+		// Only reuse persisted viewState coordinates when either addresses verify the resource
+		// identity or no different previous resource previously occupied that opaque slot.
+		const canUseViewPos = !previous && viewId !== undefined && (!!savedAddresses || !options.previousArchitecture || !previousById.has(viewId));
+		const savedPos = canUseViewPos ? viewPositions[viewId] : undefined;
 		if (previous || savedPos) {
 			preservedIds.add(node.id);
 		}
@@ -463,22 +575,28 @@ export function projectGraphSnapshotToArchitecture(
 			? { x: savedPos.x, y: savedPos.y }
 			: { x: 80 + (index % 4) * 260, y: 80 + Math.floor(index / 4) * 190 };
 		const resource = createResourceFromNode(node, fallback, previous);
+		if (resource.visualParentId && typeof resource.visualParentId === 'string') {
+			resource.visualParentId = oldIdToNewId.get(resource.visualParentId) ?? resource.visualParentId;
+		}
 		if (!previous && savedPos) {
 			resource.positions = { visual: { ...savedPos }, technical: { ...savedPos } };
 		}
-		if (resource.resourceRefs && idRemap.size > 0) {
-			resource.resourceRefs = Object.fromEntries(Object.entries(resource.resourceRefs).map(([key, binding]) => [
-				key,
-				{ ...binding, refs: binding.refs.map(entry => ({ ...entry, resourceId: remapId(entry.resourceId) })) },
-			]));
-		}
-		if (typeof resource.visualParentId === 'string') {
-			resource.visualParentId = remapId(resource.visualParentId);
-		}
-		return resource;
+		const look = !previous && viewId !== undefined ? options.viewState?.appearance?.[viewId] : undefined;
+		return look ? withAppearance(resource, look) : resource;
 	});
 
 	const byId = new Map(resources.map(resource => [resource.id, resource]));
+	const validResourceIds = new Set(byId.keys());
+	for (const resource of resources) {
+		if (resource.resourceRefs) {
+			const remapped = remapResourceRefs(resource.resourceRefs, oldIdToNewId, validResourceIds);
+			if (remapped) {
+				resource.resourceRefs = remapped;
+			} else {
+				delete resource.resourceRefs;
+			}
+		}
+	}
 
 	// Collect candidate container parents from graph edges (both directions checked against schema rules).
 	const candidateParents = new Map<string, Resource[]>();
@@ -505,6 +623,14 @@ export function projectGraphSnapshotToArchitecture(
 		}
 	}
 
+	const remappedItems = (options.previousArchitecture?.items ?? []).map(item => {
+		const clone = structuredClone(item);
+		if (clone.members.length > 0) {
+			clone.members = [...new Set(clone.members.map(member => oldIdToNewId.get(member) ?? member))];
+		}
+		return clone;
+	});
+
 	// Assign the most specific compatible container first (e.g. Subnet > VNet > Resource Group),
 	// verifying cycle safety via `resourcePlacement`.
 	const baseArch: Architecture = {
@@ -513,17 +639,15 @@ export function projectGraphSnapshotToArchitecture(
 		name: options.previousArchitecture?.name ?? (snapshot.architectureName || 'CloudForge Architecture'),
 		variables: options.previousArchitecture?.variables ? structuredClone(options.previousArchitecture.variables) : [],
 		resources,
-		items: options.previousArchitecture?.items
-			? structuredClone(options.previousArchitecture.items).map(item => ({ ...item, members: item.members.map(remapId) }))
-			: [],
+		items: remappedItems,
 		connections: [],
 	};
 
 	// Sort parents shallowest-first so container chains establish cleanly.
 	const orderedResources = [...resources].sort((a, b) => containerSpecificity(a) - containerSpecificity(b));
 	for (const resource of orderedResources) {
-		const previousParentId = previousFor.get(resource.id)?.parentId;
-		const previousParent = previousParentId === undefined ? undefined : remapId(previousParentId);
+		const rawPreviousParent = matchedPrevious.get(resource.id)?.parentId;
+		const previousParent = rawPreviousParent ? (oldIdToNewId.get(rawPreviousParent) ?? rawPreviousParent) : undefined;
 		if (previousParent && byId.has(previousParent) && resourcePlacement(baseArch, resource, previousParent).ok) {
 			resource.parentId = previousParent;
 			continue;
@@ -573,20 +697,34 @@ export function projectGraphSnapshotToArchitecture(
 	// Studio-only presentation state is not in the service graph: carry the user's drawing links,
 	// groups and layer order through the refresh, pruned to elements that still exist.
 	const elementIds = new Set([...resources.map(resource => resource.id), ...baseArch.items.map(item => item.id)]);
+	for (const item of baseArch.items) {
+		if (item.members.length > 0) {
+			item.members = item.members.filter(id => elementIds.has(id));
+		}
+	}
 	const serviceEndpoints = new Set(connections.map(connection => endpointKey(connection.source, 'source') + '\u0000' + endpointKey(connection.target, 'target')));
-	for (const previous of previousConnections) {
-		if (isServiceEdgeId(previous.id) || !endpointExists(previous.source, elementIds) || !endpointExists(previous.target, elementIds)) {
+	for (const previous of options.previousArchitecture?.connections ?? []) {
+		const remappedSource = remapDesignEndpoint(previous.source, oldIdToNewId);
+		const remappedTarget = remapDesignEndpoint(previous.target, oldIdToNewId);
+		if (isServiceEdgeId(previous.id) || !endpointExists(remappedSource, elementIds) || !endpointExists(remappedTarget, elementIds)) {
 			continue;
 		}
-		if (serviceEndpoints.has(endpointKey(previous.source, 'source') + '\u0000' + endpointKey(previous.target, 'target')) || connections.some(connection => connection.id === previous.id)) {
+		if (serviceEndpoints.has(endpointKey(remappedSource, 'source') + '\u0000' + endpointKey(remappedTarget, 'target')) || connections.some(connection => connection.id === previous.id)) {
 			continue;
 		}
-		connections.push(structuredClone(previous));
+		connections.push({
+			...structuredClone(previous),
+			source: remappedSource,
+			target: remappedTarget,
+		});
 	}
 	const groups = (options.previousArchitecture?.groups ?? [])
-		.map(group => ({ ...group, members: group.members.map(remapId).filter(id => elementIds.has(id)) }))
+		.map(group => ({ ...group, members: [...new Set(group.members.map(id => oldIdToNewId.get(id) ?? id))].filter(id => elementIds.has(id)) }))
 		.filter(group => group.members.length > 1);
-	const layerOrder = options.previousArchitecture?.layerOrder?.map(remapId).filter(id => elementIds.has(id));
+	const layerOrder = options.previousArchitecture?.layerOrder
+		? [...new Set(options.previousArchitecture.layerOrder.map(id => oldIdToNewId.get(id) ?? id))].filter(id => elementIds.has(id))
+		: undefined;
+	const dependencyStyles = remapDependencyStyles(options.previousArchitecture?.dependencyStyles, oldIdToNewId, validResourceIds);
 
 	layoutNewResources(resources, preservedIds);
 
@@ -595,6 +733,7 @@ export function projectGraphSnapshotToArchitecture(
 		connections,
 		...(groups.length ? { groups } : {}),
 		...(layerOrder ? { layerOrder } : {}),
+		...(dependencyStyles ? { dependencyStyles } : {}),
 	});
 
 	return {
@@ -602,7 +741,7 @@ export function projectGraphSnapshotToArchitecture(
 		hasSourceById,
 		sourceRevision: snapshot.sourceRevision,
 		status: snapshot.status,
-		idRemap: Object.fromEntries(idRemap),
+		idRemap: idRemapRecord,
 	};
 }
 
@@ -880,6 +1019,33 @@ export function changedFilePayloads(
  * Serialize Studio's presentation state (mode, theme, selection, inspector, viewports, and
  * node positions) into the canonical `CanvasViewState` contract persisted by `CloudForgeCanvasPanel`.
  */
+/** Icon choices Terraform does not record (the Library icon, Replace icon, icon size), keyed by resource id. */
+function appearance(architecture: Architecture): Record<string, HostResourceAppearance> | undefined {
+	const out: Record<string, HostResourceAppearance> = {};
+	for (const resource of architecture.resources.slice(0, 512)) {
+		const icon = resource.catalogue?.icon && !resource.catalogue.icon.endsWith('azure-resource-groups.svg') ? resource.catalogue.icon : undefined;
+		const entry: HostResourceAppearance = {
+			...(icon ? { icon } : {}),
+			...(resource.iconSize ? { iconSize: resource.iconSize } : {}),
+			...(resource.iconKind ? { iconKind: resource.iconKind } : {}),
+			...(resource.iconOverride ? { override: { ...resource.iconOverride } } : {}),
+		};
+		if (Object.keys(entry).length) { out[resource.id] = entry; }
+	}
+	return Object.keys(out).length ? out : undefined;
+}
+
+/** Re-applies saved icon choices to a resource rebuilt from the Terraform graph. */
+function withAppearance(resource: Resource, look: HostResourceAppearance): Resource {
+	return {
+		...resource,
+		...(look.icon && resource.catalogue ? { catalogue: { ...resource.catalogue, icon: look.icon } } : {}),
+		...(look.iconSize ? { iconSize: look.iconSize } : {}),
+		...(look.iconKind && Object.hasOwn(resourceTypes, look.iconKind) ? { iconKind: look.iconKind as ResourceKind } : {}),
+		...(look.override ? { iconOverride: { ...look.override } } : {}),
+	};
+}
+
 export function buildHostViewState(params: {
 	readonly architecture: Architecture;
 	readonly mode: 'visual' | 'technical';
@@ -889,6 +1055,8 @@ export function buildHostViewState(params: {
 	readonly inspectorOpen: boolean;
 	readonly libraryOpen: boolean;
 	readonly viewports?: Partial<Record<'visual' | 'technical', HostViewport>>;
+	/** Graph presentation, persisted under its own key so pins never become design positions. */
+	readonly graph?: HostGraphViewState;
 }): HostViewState {
 	const visualPositions: Record<string, HostPoint> = {};
 	const technicalPositions: Record<string, HostPoint> = {};
@@ -935,6 +1103,9 @@ export function buildHostViewState(params: {
 		},
 		checkpoints: [],
 		sampleContext: null,
+		...(params.graph ? { graph: params.graph } : {}),
+		...(appearance(params.architecture) ? { appearance: appearance(params.architecture) } : {}),
+		addresses: resourceAddresses(params.architecture),
 	};
 }
 

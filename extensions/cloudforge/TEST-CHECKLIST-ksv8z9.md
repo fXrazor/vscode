@@ -9,7 +9,7 @@ Covers everything built in both repos on 25 November 2026 (updated for three-way
 - [ ] Rust: `node docs/protocol/fixtures/check-fixtures.mjs` reports the fixtures consistent.
 - [ ] Code OSS: build with the new service binary staged, then run the electron-main test `src/vs/code/test/electron-main/cloudForgeServiceChannel.test.ts`.
 - [ ] Code OSS: full type-check (`npm run compile` or the usual watch build). This covers `cloudForgeService.contribution.ts`, which couldn't be checked in the cloud.
-- [ ] Studio: `pnpm check` and tests (163 expected) in `extensions/cloudforge/studio`; extension tests (105 expected).
+- [ ] Studio: `pnpm check` and tests (258 expected after the 28 Nov merge with main) in `extensions/cloudforge/studio`; extension tests (169 expected).
 
 Use a test project with at least two architectures and one `.tf` file that has comments, a `tags = local.tags` line, a `lifecycle` block and a `dynamic` block.
 

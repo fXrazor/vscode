@@ -7,6 +7,7 @@
 // Stage 4 (offline validation runner), and Stage 5 (guarded Terraform draft save) JSON-RPC
 // responses into sanitized Architecture Canvas view models. Zero runtime `vscode` or DOM imports.
 
+import type { LiteralMember, LiteralShape } from './literalSchema.ts';
 import type {
 	CanvasCatalogueSnapshot,
 	CanvasChildModuleRef,
@@ -215,7 +216,35 @@ function mapRustAccess(value: unknown): FieldAccess {
 	}
 }
 
+/** Decode only the service's actual type/nested metadata; absent details stay absent. */
+export function readLiteralShape(type: unknown, nested?: unknown, depth = 0): LiteralShape | undefined {
+	if (depth > 16) { return undefined; }
+	if (isRecord(nested) && Array.isArray(nested.attributes) && ['single', 'group', 'list', 'set', 'map'].includes(String(nested.mode))) {
+		const members: Record<string, LiteralMember> = Object.create(null);
+		for (const item of nested.attributes) {
+			if (!isRecord(item) || typeof item.name !== 'string' || !/^[a-zA-Z0-9_]+$/.test(item.name)) { continue; }
+			members[item.name] = { shape: readLiteralShape(item.typeExpr, item.nested, depth + 1), access: item.access === 'required' || item.access === 'computedOnly' ? item.access : 'optional', description: typeof item.description === 'string' ? item.description.slice(0, 2048) : undefined, sensitive: item.sensitive === true };
+		}
+		const object: LiteralShape = { kind: 'object', members };
+		if (nested.mode === 'single' || nested.mode === 'group') { return object; }
+		return { kind: nested.mode as 'list' | 'set' | 'map', element: object, ...(Number.isInteger(nested.minItems) && Number(nested.minItems) >= 0 ? { minItems: Number(nested.minItems) } : {}), ...(Number.isInteger(nested.maxItems) && Number(nested.maxItems) > 0 ? { maxItems: Number(nested.maxItems) } : {}) };
+	}
+	if (!isRecord(type)) { return undefined; }
+	if (['string', 'number', 'bool', 'dynamic'].includes(String(type.kind))) { return { kind: type.kind as 'string' | 'number' | 'bool' | 'dynamic' }; }
+	if (['list', 'set', 'map'].includes(String(type.kind))) { return { kind: type.kind as 'list' | 'set' | 'map', element: readLiteralShape(type.element, undefined, depth + 1) }; }
+	if (type.kind === 'tuple' && Array.isArray(type.elements)) { return { kind: 'tuple', elements: type.elements.map(item => readLiteralShape(item, undefined, depth + 1) ?? { kind: 'dynamic' }) }; }
+	if (type.kind === 'object' && isRecord(type.members)) {
+		return { kind: 'object', members: Object.fromEntries(Object.entries(type.members).map(([name, member]) => [name, { shape: readLiteralShape(member, undefined, depth + 1) }])) };
+	}
+	return undefined;
+}
+
 function mapRustValueType(editor: unknown, typeExpr: unknown): FieldValueType {
+	// Preserve structural types even when a coverage-gap editor has only a text fallback.
+	if (isRecord(typeExpr)) {
+		if (typeExpr.kind === 'tuple') { return 'listString'; }
+		if (typeExpr.kind === 'dynamic') { return 'json'; }
+	}
 	if (typeof editor === 'string') {
 		switch (editor) {
 			case 'checkbox':
@@ -265,7 +294,8 @@ function mapRustAttributes(raw: unknown): FormAttribute[] {
 			continue;
 		}
 		const access = mapRustAccess(item.access);
-		const valueType = mapRustValueType(item.editor, item.typeExpr);
+		const literalShape = readLiteralShape(item.typeExpr, item.nested);
+		const valueType: FieldValueType = literalShape ? literalShape.kind === 'list' || literalShape.kind === 'set' || literalShape.kind === 'tuple' ? 'listString' : literalShape.kind === 'map' || literalShape.kind === 'object' ? 'mapString' : literalShape.kind === 'dynamic' ? 'json' : literalShape.kind : mapRustValueType(item.editor, item.typeExpr);
 		const description = isSafeString(item.description, 2048) && item.description.trim().length > 0
 			? item.description.trim()
 			: `${item.name} (${valueType})`;
@@ -274,6 +304,7 @@ function mapRustAttributes(raw: unknown): FormAttribute[] {
 			path: item.path,
 			access,
 			valueType,
+			...(literalShape ? { literalShape } : {}),
 			description,
 			...(item.sensitive === true ? { sensitive: true } : {}),
 			...(item.deprecated === true ? { deprecated: true } : {}),
@@ -282,8 +313,8 @@ function mapRustAttributes(raw: unknown): FormAttribute[] {
 	return attrs;
 }
 
-function mapRustBlocks(raw: unknown): FormBlockType[] {
-	if (!Array.isArray(raw)) {
+function mapRustBlocks(raw: unknown, depth = 0): FormBlockType[] {
+	if (!Array.isArray(raw) || depth > 32) {
 		return [];
 	}
 	const blocks: FormBlockType[] = [];
@@ -303,6 +334,8 @@ function mapRustBlocks(raw: unknown): FormBlockType[] {
 			description,
 			attributes,
 		});
+		// The service sends a recursive tree; Studio reconstructs it from full paths.
+		blocks.push(...mapRustBlocks(item.block.blocks, depth + 1));
 	}
 	return blocks;
 }
@@ -312,32 +345,12 @@ function shortProviderSource(address: string): string {
 	return segments.length === 3 ? `${segments[1]}/${segments[2]}` : address;
 }
 
-function providerDocsUrl(address: string, kind: SchemaKind, typeName: string): string {
+function providerDocsUrl(address: string, kind: SchemaKind, typeName: string, version: string): string {
 	const source = shortProviderSource(address);
 	const prefix = inferProviderTypePrefix(typeName);
 	const slug = prefix && typeName.startsWith(`${prefix}_`) ? typeName.slice(prefix.length + 1) : typeName;
 	const section = kind === 'dataSource' ? 'data-sources' : 'resources';
-	return `https://registry.terraform.io/providers/${source}/latest/docs/${section}/${slug}`;
-}
-
-function buildMinimalExampleHcl(kind: SchemaKind, typeName: string, attributes: readonly FormAttribute[]): string {
-	const keyword = kind === 'dataSource' ? 'data' : 'resource';
-	const req = attributes.filter(a => a.access === 'required').slice(0, 4);
-	const lines = [`${keyword} "${typeName}" "example" {`];
-	for (const attr of req) {
-		const sample = attr.valueType === 'bool'
-			? 'true'
-			: attr.valueType === 'number'
-				? '1'
-				: attr.valueType === 'listString'
-					? '["example"]'
-					: attr.valueType === 'mapString'
-						? '{}'
-						: '"example"';
-		lines.push(`  ${attr.name} = ${sample}`);
-	}
-	lines.push('}');
-	return lines.join('\n');
+	return `https://registry.terraform.io/providers/${source}/${encodeURIComponent(version)}/docs/${section}/${slug}`;
 }
 
 /**
@@ -394,8 +407,8 @@ export function mapRustFormSchemaToCanvasFormSchema(
 		providerSource: shortProviderSource(address),
 		providerVersion: version,
 		description,
-		docsUrl: bundledFallback?.docsUrl ?? providerDocsUrl(address, kind, typeName),
-		exampleHcl: bundledFallback?.exampleHcl ?? buildMinimalExampleHcl(kind, typeName, attributes),
+		docsUrl: providerDocsUrl(address, kind, typeName, version),
+		exampleHcl: '', // The service schema contains no verified documentation example.
 		attributes,
 		blocks,
 		outputs: outputs.length > 0 ? outputs : (bundledFallback?.outputs ?? []),
@@ -1132,10 +1145,14 @@ export function parseCloudRegionsPayload(value: unknown): CanvasCloudRegionsPayl
 }
 
 export function parseDependencyReport(value: unknown): CanvasDependencyReport | undefined {
+	if (!isRecord(value)) {
+		return undefined;
+	}
+	// The service serializes EngineName as openTofu; keep the existing Studio spelling.
+	const engine = value.engine === 'openTofu' ? 'opentofu' : value.engine;
 	if (
-		!isRecord(value) ||
 		!isSha256(value.sourceRevision) ||
-		(value.engine !== 'opentofu' && value.engine !== 'terraform') ||
+		(engine !== 'opentofu' && engine !== 'terraform') ||
 		typeof value.engineInferred !== 'boolean' ||
 		!isRecord(value.lockFile) ||
 		!Array.isArray(value.providers)
@@ -1168,10 +1185,12 @@ export function parseDependencyReport(value: unknown): CanvasDependencyReport | 
 		const requirementCount = Array.isArray(item.requirements) ? item.requirements.length : 0;
 		providers.push({
 			display: item.display,
+			...(isNonEmptyString(item.address, 256) && /^[a-z0-9.-]+\/[a-z0-9_-]+\/[a-z0-9_-]+$/i.test(item.address) ? { address: item.address.toLowerCase() } : {}),
 			status,
 			...(lockedVersion ? { lockedVersion } : {}),
 			conflictCount,
 			requirementCount,
+			...(isNonEmptyString(item.combined, 512) ? { constraint: item.combined } : {}),
 		});
 	}
 	const unusedLockEntries = Array.isArray(value.unusedLockEntries)
@@ -1180,9 +1199,10 @@ export function parseDependencyReport(value: unknown): CanvasDependencyReport | 
 	const diagnosticCount = Array.isArray(value.diagnostics) ? value.diagnostics.length : 0;
 	return {
 		sourceRevision: value.sourceRevision,
-		engine: value.engine,
+		engine,
 		engineInferred: value.engineInferred,
 		lockState,
+		lockEntries: Array.isArray(value.lockFile.entries) ? value.lockFile.entries.filter((entry): entry is { address: string; version: string } => isRecord(entry) && isNonEmptyString(entry.address, 256) && /^[a-z0-9.-]+\/[a-z0-9_-]+\/[a-z0-9_-]+$/i.test(entry.address) && isNonEmptyString(entry.version, 128)).map(entry => ({ address: entry.address.toLowerCase(), version: entry.version })) : [],
 		providers,
 		unusedLockEntries,
 		diagnosticCount,
@@ -1912,5 +1932,6 @@ export function parseEngineInitOfflineReport(value: unknown): CanvasEngineInitOf
 		exitCode: value.exitCode,
 		durationMs: value.durationMs,
 		summary: value.summary,
+		...(value.lockFileCreated === true ? { lockFileCreated: true } : {}),
 	};
 }

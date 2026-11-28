@@ -5,7 +5,7 @@
 
 import assert from 'assert';
 import type * as electron from 'electron';
-import { Event } from '../../../base/common/event.js';
+import { Emitter, Event } from '../../../base/common/event.js';
 import { URI } from '../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../base/test/common/utils.js';
 import { NullLogService } from '../../../platform/log/common/log.js';
@@ -650,6 +650,20 @@ suite('CloudForgeServiceChannel', () => {
 			architectureId: 'workspace-1-architecture-1',
 			cliConfigPath: 'C:\\evil.tofurc'
 		}), undefined);
+		assert.deepStrictEqual(validateCloudForgeServiceParams('runEngineInitOffline', {
+			workspaceId: 'workspace-1',
+			architectureId: 'workspace-1-architecture-1',
+			createLockFile: true
+		}), {
+			workspaceId: 'workspace-1',
+			architectureId: 'workspace-1-architecture-1',
+			createLockFile: true
+		});
+		assert.strictEqual(validateCloudForgeServiceParams('runEngineInitOffline', {
+			workspaceId: 'workspace-1',
+			architectureId: 'workspace-1-architecture-1',
+			createLockFile: 'yes'
+		}), undefined);
 
 		assert.deepStrictEqual(validateCloudForgeServiceParams('extractProviderSchemaFromMirror', {
 			address: 'registry.terraform.io/hashicorp/azurerm',
@@ -728,6 +742,91 @@ suite('CloudForgeServiceChannel', () => {
 		assert.strictEqual(validateCloudForgeServiceParams('planMirrorCleanup', { quotaBytes: 1024, workspaceId: 'workspace-1' }), undefined);
 	});
 
+	test('validates listProviderVersions params', () => {
+		const address = 'registry.opentofu.org/hashicorp/aws';
+		assert.deepStrictEqual(validateCloudForgeServiceParams('listProviderVersions', { address }), { address });
+		assert.deepStrictEqual(validateCloudForgeServiceParams('listProviderVersions', { address, refresh: true }), { address, refresh: true });
+		assert.strictEqual(validateCloudForgeServiceParams('listProviderVersions', { address, refresh: 'yes' }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('listProviderVersions', { address: 'https://evil/x/y' }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('listProviderVersions', { address, url: 'x' }), undefined);
+	});
+
+	test('validates Template Library params', () => {
+		assert.deepStrictEqual(validateCloudForgeServiceParams('listTemplates', {}), {});
+		assert.deepStrictEqual(
+			validateCloudForgeServiceParams('listTemplates', { query: 'hub spoke', providers: ['azure'], difficulties: ['advanced'], sort: 'name', offset: 0, limit: 20 }),
+			{ query: 'hub spoke', sort: 'name', offset: 0, limit: 20, providers: ['azure'], difficulties: ['advanced'] }
+		);
+		assert.strictEqual(validateCloudForgeServiceParams('listTemplates', { sort: 'popularity' }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('listTemplates', { limit: 0 }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('listTemplates', { limit: 201 }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('listTemplates', { providers: ['Azure'] }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('listTemplates', { providers: 'azure' }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('listTemplates', { query: 'x'.repeat(201) }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('listTemplates', { url: 'https://evil' }), undefined);
+
+		assert.deepStrictEqual(validateCloudForgeServiceParams('getTemplateDetails', { templateId: 'cloudforge.azure.hub-spoke' }), { templateId: 'cloudforge.azure.hub-spoke' });
+		assert.deepStrictEqual(validateCloudForgeServiceParams('getTemplateDetails', { templateId: 'cloudforge.azure.hub-spoke', version: '1.0.0' }), { templateId: 'cloudforge.azure.hub-spoke', version: '1.0.0' });
+		assert.strictEqual(validateCloudForgeServiceParams('getTemplateDetails', { templateId: '../etc' }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('getTemplateDetails', { templateId: 'single' }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('getTemplateDetails', { templateId: 'cloudforge.azure.hub-spoke', version: 'latest' }), undefined);
+
+		const scoped = { workspaceId: 'workspace-1', architectureId: 'architecture-1', templateId: 'cloudforge.azure.basic-vnet' };
+		assert.deepStrictEqual(validateCloudForgeServiceParams('checkTemplateCompatibility', scoped), scoped);
+		assert.strictEqual(validateCloudForgeServiceParams('checkTemplateCompatibility', { ...scoped, expectedSourceRevision: 'abc' }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('checkTemplateCompatibility', { workspaceId: 'workspace-1', templateId: 'cloudforge.azure.basic-vnet' }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('checkTemplateCompatibility', { ...scoped, rootPath: 'C:/x' }), undefined);
+
+		assert.deepStrictEqual(validateCloudForgeServiceParams('listTemplateSources', {}), {});
+		assert.strictEqual(validateCloudForgeServiceParams('listTemplateSources', { url: 'https://evil' }), undefined);
+
+		assert.deepStrictEqual(validateCloudForgeServiceParams('importTemplatePackageFile', {}), {});
+		assert.deepStrictEqual(validateCloudForgeServiceParams('importTemplatePackageFile', { replace: true, acceptHighRisk: false }), { replace: true, acceptHighRisk: false });
+		assert.strictEqual(validateCloudForgeServiceParams('importTemplatePackageFile', { archivePath: 'C:\\x.zip' }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('importTemplatePackageFile', { replace: 'yes' }), undefined);
+
+		assert.deepStrictEqual(validateCloudForgeServiceParams('removeCachedTemplate', { templateId: 'example.team.net', version: '1.0.0' }), { templateId: 'example.team.net', version: '1.0.0' });
+		assert.strictEqual(validateCloudForgeServiceParams('removeCachedTemplate', { templateId: 'example.team.net' }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('removeCachedTemplate', { templateId: '..', version: '1.0.0' }), undefined);
+	});
+
+	test('picks a template package in Electron main for importTemplatePackageFile and blocks UNC paths', async () => {
+		const cancelled = createBroker([contosoWindow]);
+		assert.deepStrictEqual(await cancelled.call(1, 'importTemplatePackageFile', {}), {
+			ok: false,
+			error: { code: 'CANCELLED', message: 'The CloudForge request was cancelled.' }
+		});
+		assert.deepStrictEqual(cancelled.dialogs.map(dialog => dialog.properties), [['openFile']]);
+		assert.deepStrictEqual(cancelled.callsByWindow(), { 1: [] });
+
+		const unc = createBroker([contosoWindow], { picked: ['\\\\server\\share\\template.zip'] });
+		assert.strictEqual((await unc.call(1, 'importTemplatePackageFile', {})).ok, false);
+		assert.deepStrictEqual(unc.callsByWindow(), { 1: [] });
+
+		const local = createBroker([contosoWindow], {
+			picked: ['D:\\Templates\\my-network.zip'],
+			reply: () => ({ imported: true, outcome: 'added', templateId: 'example.team.my-network', version: '1.0.0' })
+		});
+		const imported = await local.call(1, 'importTemplatePackageFile', { replace: true });
+		assert.strictEqual(imported.ok, true);
+		assert.deepStrictEqual(local.callsByWindow(), {
+			1: [{ method: 'importTemplatePackageFile', params: { replace: true, archivePath: 'D:\\Templates\\my-network.zip' } }]
+		});
+
+		await Promise.all([cancelled, unc, local].map(item => item.broker.stop()));
+	});
+
+	test('validates downloadProviderPackage params', () => {
+		const address = 'registry.terraform.io/hashicorp/azurerm';
+		assert.deepStrictEqual(validateCloudForgeServiceParams('downloadProviderPackage', { address, version: '3.116.0' }), { address, version: '3.116.0' });
+		assert.deepStrictEqual(validateCloudForgeServiceParams('downloadProviderPackage', { address, version: '3.116.0', platforms: ['windows_amd64', 'linux_amd64'], engine: 'terraform' }), { address, version: '3.116.0', platforms: ['windows_amd64', 'linux_amd64'], engine: 'terraform' });
+		assert.strictEqual(validateCloudForgeServiceParams('downloadProviderPackage', { address: 'hashicorp/azurerm', version: '3.116.0' }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('downloadProviderPackage', { address, version: '../3' }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('downloadProviderPackage', { address, version: '3.116.0', platforms: [] }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('downloadProviderPackage', { address, version: '3.116.0', platforms: ['../x'] }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('downloadProviderPackage', { address, version: '3.116.0', archivePath: 'C:\\x.zip' }), undefined);
+	});
+
 	test('picks a local .zip archive in Electron main for importMirrorPackage and blocks UNC paths', async () => {
 		const sha = 'a'.repeat(64);
 		const params = {
@@ -764,5 +863,300 @@ suite('CloudForgeServiceChannel', () => {
 		});
 
 		await Promise.all([cancelled, unc, local].map(item => item.broker.stop()));
+	});
+
+	test('validates Stage 12A skills, blueprints, learning, proposals, and scoped MCP grant parameters and attaches broker mcpCommand', async () => {
+		const rev = 'c'.repeat(64);
+		assert.deepStrictEqual(validateCloudForgeServiceParams('selectTerraformSkills', { taskKind: 'topology', prompt: 'Azure hub spoke', runtime: 'openTofu' }), { taskKind: 'topology', prompt: 'Azure hub spoke', runtime: 'openTofu' });
+		assert.strictEqual(validateCloudForgeServiceParams('selectTerraformSkills', { taskKind: 'deploy' }), undefined);
+		assert.deepStrictEqual(validateCloudForgeServiceParams('listBuiltinSkills', {}), {});
+		assert.deepStrictEqual(validateCloudForgeServiceParams('listBuiltinSkills', { category: 'cloudforge-diagram' }), { category: 'cloudforge-diagram' });
+		assert.strictEqual(validateCloudForgeServiceParams('listBuiltinSkills', { category: 'arbitrary' }), undefined);
+		assert.deepStrictEqual(validateCloudForgeServiceParams('getTopologyBlueprint', {}), {});
+		assert.deepStrictEqual(validateCloudForgeServiceParams('getTopologyBlueprint', { blueprintId: 'azure-hub-spoke' }), { blueprintId: 'azure-hub-spoke' });
+		assert.deepStrictEqual(validateCloudForgeServiceParams('getTopologyBlueprint', { blueprintId: 'aws-landing-zone', prefix: 'prod-uk', region: 'eu-west-2', cidrBaseOctet: 20 }), { blueprintId: 'aws-landing-zone', prefix: 'prod-uk', region: 'eu-west-2', cidrBaseOctet: 20 });
+		assert.strictEqual(validateCloudForgeServiceParams('getTopologyBlueprint', { prefix: 'prod-uk' }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('getTopologyBlueprint', { blueprintId: 'azure-hub-spoke', cidrBaseOctet: 255 }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('getTopologyBlueprint', { blueprintId: '../escape' }), undefined);
+
+		assert.deepStrictEqual(validateCloudForgeServiceParams('getLearningRecord', { workspaceId, architectureId: `${workspaceId}-architecture-1` }), { workspaceId, architectureId: `${workspaceId}-architecture-1` });
+		assert.strictEqual(validateCloudForgeServiceParams('getLearningRecord', { workspaceId, architectureId: `${workspaceId}-architecture-1`, path: 'C:\\x' }), undefined);
+		assert.ok(validateCloudForgeServiceParams('saveLearningRecord', {
+			workspaceId,
+			architectureId: `${workspaceId}-architecture-1`,
+			task: { title: 'Hub lab', mode: 'guided', objective: 'Build a VNet', requirements: [], assumptions: [], skillIds: ['terraform-style-guide'] },
+			notes: {}
+		}));
+		assert.strictEqual(validateCloudForgeServiceParams('saveLearningRecord', {
+			workspaceId,
+			architectureId: `${workspaceId}-architecture-1`,
+			task: { title: 'Bad mode', mode: 'auto', objective: 'x' }
+		}), undefined);
+
+		const validProposal = {
+			workspaceId,
+			architectureId: `${workspaceId}-architecture-1`,
+			origin: 'mcp:codex',
+			title: 'Add subnet',
+			summary: 'Adds snet-app',
+			baseSourceRevision: rev,
+			skillIds: ['cloudforge-diagram-authoring'],
+			requirementIds: ['req-1'],
+			files: [{ fileName: 'network.tf', contents: 'resource "azurerm_subnet" "app" {}\n', rationale: 'App tier' }]
+		};
+		assert.deepStrictEqual(validateCloudForgeServiceParams('submitProposal', validProposal), validProposal);
+		assert.strictEqual(validateCloudForgeServiceParams('submitProposal', { ...validProposal, files: [{ fileName: '../escape.tf', contents: 'a' }] }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('submitProposal', { ...validProposal, files: [{ fileName: 'secrets.tfvars', contents: 'a' }] }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('submitProposal', { ...validProposal, files: [{ fileName: 'main.tf', contents: 'a' }, { fileName: 'MAIN.tf', contents: 'b' }] }), undefined);
+
+		assert.deepStrictEqual(validateCloudForgeServiceParams('reviewProposal', { workspaceId, architectureId: `${workspaceId}-architecture-1`, proposalId: 'prop-1', action: 'markAccepted' }), { workspaceId, architectureId: `${workspaceId}-architecture-1`, proposalId: 'prop-1', action: 'markAccepted' });
+		assert.strictEqual(validateCloudForgeServiceParams('reviewProposal', { workspaceId, architectureId: `${workspaceId}-architecture-1`, proposalId: 'prop-1', action: 'apply' }), undefined);
+
+		assert.deepStrictEqual(validateCloudForgeServiceParams('issueMcpGrant', { workspaceId, architectureId: `${workspaceId}-architecture-1`, clientLabel: 'vscode-agent', ttlMinutes: 60 }), { workspaceId, architectureId: `${workspaceId}-architecture-1`, clientLabel: 'vscode-agent', ttlMinutes: 60 });
+		assert.strictEqual(validateCloudForgeServiceParams('issueMcpGrant', { workspaceId, architectureId: `${workspaceId}-architecture-1`, ttlMinutes: 2 }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('issueMcpGrant', { workspaceId, architectureId: `${workspaceId}-architecture-1`, ttlMinutes: 9999 }), undefined);
+		assert.deepStrictEqual(validateCloudForgeServiceParams('listMcpGrants', {}), {});
+		assert.strictEqual(validateCloudForgeServiceParams('listMcpGrants', { workspaceId }), undefined);
+		assert.deepStrictEqual(validateCloudForgeServiceParams('revokeMcpGrant', { grantId: 'cfmcp-1234' }), { grantId: 'cfmcp-1234' });
+
+		const { broker, call } = createBroker([contosoWindow], {
+			reply: () => ({
+				grantId: 'cfmcp-deadbeef',
+				grantIdPreview: 'cfmcp-de…ef',
+				displayName: 'Contoso Hub',
+				clientLabel: 'vscode-agent',
+				readOnly: false,
+				createdAt: '2026-11-26T00:00:00Z',
+				expiresAtEpoch: 1999999999,
+				active: true,
+				revoked: false,
+				mcpArgs: ['--mcp', '--grant', 'cfmcp-deadbeef']
+			})
+		});
+		const issued = await call(1, 'issueMcpGrant', { workspaceId, architectureId: `${workspaceId}-architecture-1`, clientLabel: 'vscode-agent' });
+		assert.strictEqual(issued.ok, true);
+		if (issued.ok) {
+			const payload = issued.value as Record<string, unknown>;
+			assert.strictEqual(payload.grantId, 'cfmcp-deadbeef');
+			assert.strictEqual(typeof payload.mcpCommand, 'string');
+			assert.ok(String(payload.mcpCommand).endsWith('cloudforge-service.exe'));
+		}
+		await broker.stop();
+	});
+
+	test('validates exportPortableBundle (with native folder picker) and runEngineFmt parameters', async () => {
+		const rev = 'e'.repeat(64);
+		assert.deepStrictEqual(validateCloudForgeServiceParams('runEngineFmt', { workspaceId, architectureId: `${workspaceId}-architecture-1`, mode: 'check', engine: 'openTofu' }), { workspaceId, architectureId: `${workspaceId}-architecture-1`, mode: 'check', engine: 'openTofu' });
+		assert.strictEqual(validateCloudForgeServiceParams('runEngineFmt', { workspaceId, architectureId: `${workspaceId}-architecture-1`, mode: 'apply' }), undefined);
+		assert.deepStrictEqual(validateCloudForgeServiceParams('runEngineFmt', { workspaceId, architectureId: `${workspaceId}-architecture-1`, expectedSourceRevision: rev, mode: 'apply' }), { workspaceId, architectureId: `${workspaceId}-architecture-1`, expectedSourceRevision: rev, mode: 'apply' });
+
+		assert.deepStrictEqual(validateCloudForgeServiceParams('exportPortableBundle', { workspaceId, architectureId: `${workspaceId}-architecture-1`, bundleName: 'contoso-export', platforms: ['windows_amd64', 'linux_amd64'] }), { workspaceId, architectureId: `${workspaceId}-architecture-1`, bundleName: 'contoso-export', platforms: ['windows_amd64', 'linux_amd64'] });
+		assert.strictEqual(validateCloudForgeServiceParams('exportPortableBundle', { workspaceId, architectureId: `${workspaceId}-architecture-1`, bundleName: 'contoso-export', destinationPath: 'C:\\Windows' }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('exportPortableBundle', { workspaceId, architectureId: `${workspaceId}-architecture-1`, bundleName: '../escape' }), undefined);
+
+		const local = createBroker([contosoWindow], {
+			picked: ['D:\\Exports'],
+			reply: () => ({ bundleName: 'contoso-export', verificationStatus: 'verified', bundleSha256: rev })
+		});
+		const exported = await local.call(1, 'exportPortableBundle', { workspaceId, architectureId: `${workspaceId}-architecture-1`, bundleName: 'contoso-export' });
+		assert.strictEqual(exported.ok, true);
+		assert.deepStrictEqual(local.callsByWindow(), {
+			1: [{ method: 'exportPortableBundle', params: { workspaceId, architectureId: `${workspaceId}-architecture-1`, bundleName: 'contoso-export', destinationPath: 'D:\\Exports' } }]
+		});
+		await local.broker.stop();
+	});
+
+	test('validates Stage 8C transactional provider upgrade and journal recovery parameters', async () => {
+		const rev = 'f'.repeat(64);
+		const proposalId = 'upgrade-' + 'a'.repeat(32);
+		assert.deepStrictEqual(validateCloudForgeServiceParams('previewProviderUpgrade', {
+			workspaceId,
+			architectureId: `${workspaceId}-architecture-1`,
+			providerAddress: 'hashicorp/azurerm',
+			targetVersion: '6.0.0',
+			targetConstraint: '~> 6.0',
+			engine: 'openTofu',
+			platforms: ['windows_amd64', 'linux_amd64']
+		}), {
+			workspaceId,
+			architectureId: `${workspaceId}-architecture-1`,
+			providerAddress: 'hashicorp/azurerm',
+			targetVersion: '6.0.0',
+			targetConstraint: '~> 6.0',
+			engine: 'openTofu',
+			platforms: ['windows_amd64', 'linux_amd64']
+		});
+		assert.strictEqual(validateCloudForgeServiceParams('previewProviderUpgrade', {
+			workspaceId,
+			architectureId: `${workspaceId}-architecture-1`,
+			providerAddress: '../escape',
+			targetVersion: '6.0.0'
+		}), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('previewProviderUpgrade', {
+			workspaceId,
+			architectureId: `${workspaceId}-architecture-1`,
+			providerAddress: 'hashicorp/azurerm',
+			targetVersion: '6.0.0-beta1'
+		}), undefined);
+
+		assert.deepStrictEqual(validateCloudForgeServiceParams('applyProviderUpgrade', {
+			workspaceId,
+			architectureId: `${workspaceId}-architecture-1`,
+			expectedSourceRevision: rev,
+			proposalId
+		}), {
+			workspaceId,
+			architectureId: `${workspaceId}-architecture-1`,
+			expectedSourceRevision: rev,
+			proposalId
+		});
+		assert.strictEqual(validateCloudForgeServiceParams('applyProviderUpgrade', {
+			workspaceId,
+			architectureId: `${workspaceId}-architecture-1`,
+			expectedSourceRevision: rev,
+			proposalId: 'not-an-upgrade-id'
+		}), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('applyProviderUpgrade', {
+			workspaceId,
+			architectureId: `${workspaceId}-architecture-1`,
+			proposalId
+		}), undefined);
+
+		assert.deepStrictEqual(validateCloudForgeServiceParams('recoverUpgradeJournal', {
+			workspaceId,
+			architectureId: `${workspaceId}-architecture-1`
+		}), {
+			workspaceId,
+			architectureId: `${workspaceId}-architecture-1`
+		});
+		assert.strictEqual(validateCloudForgeServiceParams('recoverUpgradeJournal', {
+			workspaceId,
+			architectureId: `${workspaceId}-architecture-1`,
+			extra: true
+		}), undefined);
+	});
+
+	test('validates listProviderVersions, downloadProviderPackage, and runEngineInitOffline createLockFile parity', () => {
+		assert.deepStrictEqual(validateCloudForgeServiceParams('listProviderVersions', {
+			address: 'registry.opentofu.org/hashicorp/azurerm',
+			refresh: true,
+			engine: 'openTofu'
+		}), {
+			address: 'registry.opentofu.org/hashicorp/azurerm',
+			refresh: true,
+			engine: 'openTofu'
+		});
+		assert.strictEqual(validateCloudForgeServiceParams('listProviderVersions', { address: 'hashicorp/azurerm' }), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('listProviderVersions', { address: 'registry.opentofu.org/hashicorp/azurerm', refresh: 'yes' }), undefined);
+
+		assert.deepStrictEqual(validateCloudForgeServiceParams('downloadProviderPackage', {
+			address: 'registry.opentofu.org/hashicorp/azurerm',
+			version: '5.14.0',
+			platforms: ['windows_amd64', 'linux_amd64'],
+			engine: 'openTofu'
+		}), {
+			address: 'registry.opentofu.org/hashicorp/azurerm',
+			version: '5.14.0',
+			platforms: ['windows_amd64', 'linux_amd64'],
+			engine: 'openTofu'
+		});
+		assert.strictEqual(validateCloudForgeServiceParams('downloadProviderPackage', {
+			address: 'registry.opentofu.org/hashicorp/azurerm',
+			version: '../escape'
+		}), undefined);
+		assert.strictEqual(validateCloudForgeServiceParams('downloadProviderPackage', {
+			address: 'registry.opentofu.org/hashicorp/azurerm',
+			version: '5.14.0',
+			platforms: []
+		}), undefined);
+
+		assert.deepStrictEqual(validateCloudForgeServiceParams('runEngineInitOffline', {
+			workspaceId,
+			architectureId: `${workspaceId}-architecture-1`,
+			createLockFile: true
+		}), {
+			workspaceId,
+			architectureId: `${workspaceId}-architecture-1`,
+			createLockFile: true
+		});
+		assert.strictEqual(validateCloudForgeServiceParams('runEngineInitOffline', {
+			workspaceId,
+			architectureId: `${workspaceId}-architecture-1`,
+			createLockFile: 'true'
+		}), undefined);
+	});
+
+	test('isolates separate CloudForge sidecar instances across multiple open windows and stops only closed windows', async () => {
+		const onOpen = new Emitter<{ readonly id: number }>();
+		const onDestroy = new Emitter<{ readonly id: number }>();
+		const activeWindows = new Map<number, FakeWindow>([[1, contosoWindow]]);
+		const created: Array<{ readonly service: FakeService; started: boolean; stopped: boolean }> = [];
+
+		const broker = new CloudForgeServiceBroker(
+			'C:\\app',
+			new NullLogService(),
+			{
+				onDidOpenWindow: onOpen.event,
+				onDidDestroyWindow: onDestroy.event,
+				getWindows: () => [...activeWindows.values()],
+				getWindowById: id => {
+					const win = activeWindows.get(id);
+					return win ? { openedWorkspace: win.openedWorkspace, win: null } : undefined;
+				}
+			},
+			{
+				resolveLocalWorkspace: async configPath => [...activeWindows.values()].find(win => win.resolved?.configPath.toString() === configPath.toString())?.resolved
+			},
+			{
+				showOpenDialog: async () => ({ canceled: true, filePaths: [] })
+			},
+			() => {
+				const entry = {
+					started: false,
+					stopped: false,
+					service: new FakeService((_method, params) => ({ echoProject: params.projectPath }))
+				};
+				const origStart = entry.service.start.bind(entry.service);
+				const origStop = entry.service.stop.bind(entry.service);
+				entry.service.start = async () => { entry.started = true; return origStart(); };
+				entry.service.stop = async () => { entry.stopped = true; return origStop(); };
+				created.push(entry);
+				return entry.service;
+			}
+		);
+
+		try {
+			assert.strictEqual(created.length, 1);
+			assert.strictEqual(created[0].started, true);
+
+			// Open a second independent project window
+			activeWindows.set(2, fabrikamWindow);
+			onOpen.fire({ id: 2 });
+			assert.strictEqual(created.length, 2);
+			assert.strictEqual(created[1].started, true);
+
+			const res1 = await broker.call<CloudForgeCallResult>('window:1', 'openProject', {});
+			const res2 = await broker.call<CloudForgeCallResult>('window:2', 'openProject', {});
+			assert.deepStrictEqual(res1, { ok: true, value: { echoProject: fsPath('C:\\Projects\\Contoso Platform') } });
+			assert.deepStrictEqual(res2, { ok: true, value: { echoProject: fsPath('D:\\Work\\Fabrikam') } });
+			assert.strictEqual(created[0].service.calls.length, 1);
+			assert.strictEqual(created[1].service.calls.length, 1);
+
+			// Closing window 1 stops only window 1's sidecar; window 2 continues serving requests
+			activeWindows.delete(1);
+			onDestroy.fire({ id: 1 });
+			assert.strictEqual(created[0].stopped, true);
+			assert.strictEqual(created[1].stopped, false);
+
+			const afterClose1 = await broker.call<CloudForgeCallResult>('window:1', 'openProject', {});
+			assert.strictEqual(afterClose1.ok, false);
+			const afterClose2 = await broker.call<CloudForgeCallResult>('window:2', 'openProject', {});
+			assert.deepStrictEqual(afterClose2, { ok: true, value: { echoProject: fsPath('D:\\Work\\Fabrikam') } });
+		} finally {
+			await broker.stop();
+			onOpen.dispose();
+			onDestroy.dispose();
+		}
+		assert.strictEqual(created[1].stopped, true);
 	});
 });

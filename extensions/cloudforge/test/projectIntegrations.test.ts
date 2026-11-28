@@ -12,6 +12,9 @@ import {
 	isSafeFolderName,
 	normalizeFsPathForMatch,
 	parseProjectResult,
+	parseProjectWindowPreference,
+	pickProjectWorkspaceEntry,
+	resolveProjectWindowOpenAction,
 	sanitizeRemoteUrl,
 	suggestArchitectureName,
 } from '../src/project/model.ts';
@@ -140,4 +143,33 @@ test('buildStartScreenContext offers a new project when none is open, and openab
 	assert.equal(context.moreArchitectures, 1);
 	const empty = parseProjectResult({ workspaceId: 'w2', kind: 'project', displayName: 'Fresh', hasWorkspaceFile: true, repositories: [], architectures: [], unimportedFolders: [] })!;
 	assert.deepEqual(buildStartScreenContext(empty), { projectOpen: true, projectName: 'Fresh', architectures: [], moreArchitectures: 0 });
+});
+
+test('multi-window project helpers resolve preferences and single .code-workspace entries cleanly', () => {
+	assert.equal(parseProjectWindowPreference('newWindow'), 'newWindow');
+	assert.equal(parseProjectWindowPreference('currentWindow'), 'currentWindow');
+	assert.equal(parseProjectWindowPreference('ask'), 'ask');
+	assert.equal(parseProjectWindowPreference('invalid'), 'ask');
+
+	// Empty window always reuses the current window without prompting
+	assert.equal(resolveProjectWindowOpenAction('ask', false), 'currentWindow');
+	assert.equal(resolveProjectWindowOpenAction('newWindow', false), 'currentWindow');
+	// Active workspace honors user preference
+	assert.equal(resolveProjectWindowOpenAction('ask', true), 'ask');
+	assert.equal(resolveProjectWindowOpenAction('newWindow', true), 'newWindow');
+	assert.equal(resolveProjectWindowOpenAction('currentWindow', true), 'currentWindow');
+
+	// Single .code-workspace file inside picked project directory is selected automatically
+	assert.equal(
+		pickProjectWorkspaceEntry([['cloudforge.project.json', 1], ['Platform.code-workspace', 1], ['architectures', 2]], 1),
+		'Platform.code-workspace'
+	);
+	assert.equal(
+		pickProjectWorkspaceEntry([['a.code-workspace', 1], ['b.code-workspace', 1]], 1),
+		undefined
+	);
+	assert.equal(
+		pickProjectWorkspaceEntry([['main.tf', 1]], 1),
+		undefined
+	);
 });

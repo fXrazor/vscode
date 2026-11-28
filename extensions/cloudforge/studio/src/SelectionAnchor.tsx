@@ -38,5 +38,5 @@ export function SelectionAnchor({ ids, canvas, children }: { ids: string[]; canv
 		measure();
 		return () => { cancelAnimationFrame(frame); resize.disconnect(); movement.disconnect(); };
 	}, [ids, canvas]);
-	return <NodeToolbar nodeId={ids} isVisible={!!ids.length} position={Position.Top} offset={14} className="selection-anchor"><div ref={content} className="selection-anchor-content">{children}</div></NodeToolbar>;
+	return <NodeToolbar nodeId={ids} isVisible={!!ids.length} position={Position.Top} offset={14} className="selection-anchor" style={{ zIndex: 30 }}><div ref={content} className="selection-anchor-content">{children}</div></NodeToolbar>;
 }

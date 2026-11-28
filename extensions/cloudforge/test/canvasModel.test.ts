@@ -163,6 +163,13 @@ test('view state sanitizer preserves valid independent theme/mode/viewports and 
 	assert.deepEqual(sanitizeViewState('corrupt'), defaultCanvasViewState());
 });
 
+test('graph presentation is stored apart from node positions and sanitised', () => {
+	const sanitized = sanitizeViewState({ nodePositions: { visual: { a: { x: 1, y: 2 } } }, graph: { lens: 'security', layout: 'nope', route: 'straight', density: 'compact', overlay: 'plan', spacing: 9999, height: 150, showMembership: true, expanded: ['a', 'a', 'bad\x00'], pins: { a: { x: 500, y: 600 }, b: { x: Number.NaN, y: 0 } } } });
+	assert.deepEqual(sanitized.graph, { lens: 'security', layout: 'layers', route: 'straight', density: 'compact', overlay: 'plan', spacing: 300, height: 150, showMembership: true, expanded: ['a'], pins: { a: { x: 500, y: 600 } } });
+	assert.deepEqual(sanitized.nodePositions, { visual: { a: { x: 1, y: 2 } } }, 'graph pins never leak into design positions');
+	assert.equal(sanitizeViewState({}).graph, undefined);
+});
+
 test('orientServiceEdgesForCanvas normalizes Rust dependent->prerequisite edges to left-to-right flow', () => {
 	const rawEdges = [
 		{ fromId: 'apps', toId: 'vnet_hub', kind: 'reference' },
@@ -174,4 +181,34 @@ test('orientServiceEdgesForCanvas normalizes Rust dependent->prerequisite edges 
 		{ fromId: 'hub', toId: 'vnet_hub', kind: 'explicit' },
 		{ fromId: 'a', toId: 'b', kind: 'custom' },
 	]);
+});
+
+test('view state keeps well-formed resource icon choices and drops unsafe ones', () => {
+	const state = sanitizeViewState({
+		appearance: {
+			'vm-1': { icon: 'catalog-icons/azure/azure-virtual-machine.svg', iconSize: 64, iconKind: 'vm', override: { provider: 'aws', icon: 'catalog-icons/aws/aws-ec2.svg', label: 'EC2' } },
+			'bad-path': { icon: '../../secret.svg' },
+			'bad-url': { icon: 'https://example.com/x.svg' },
+			'bad-size': { iconSize: 9999 },
+			'bad-provider': { override: { provider: 'other', icon: 'x.svg', label: 'X' } },
+		},
+	});
+	assert.deepEqual(state.appearance, {
+		'vm-1': { icon: 'catalog-icons/azure/azure-virtual-machine.svg', iconSize: 64, iconKind: 'vm', override: { provider: 'aws', icon: 'catalog-icons/aws/aws-ec2.svg', label: 'EC2' } },
+	});
+	assert.equal(sanitizeViewState({}).appearance, undefined);
+});
+
+test('view state keeps resource addresses so renumbered node ids can be followed', () => {
+	const state = sanitizeViewState({
+		addresses: {
+			'node-1': 'azurerm_resource_group.rg',
+			'node-2': 'module.network',
+			'node-3': 'not an address',
+			'node-4': 'azurerm_vm.${evil}',
+			'node-5': 42,
+		},
+	});
+	assert.deepEqual(state.addresses, { 'node-1': 'azurerm_resource_group.rg', 'node-2': 'module.network' });
+	assert.equal(sanitizeViewState({}).addresses, undefined);
 });

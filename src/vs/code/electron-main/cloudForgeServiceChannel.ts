@@ -41,10 +41,16 @@ const cloudForgeMethods: ReadonlySet<string> = new Set<CloudForgeServiceMethod>(
 	'previewFocusedSaveBatch', 'applyFocusedSaveBatch',
 	'inspectDependencies', 'readResourceValues', 'listCloudRegions', 'readModule',
 	'summarizeState', 'listCloudConnections', 'setCloudConnection', 'storeCloudKey', 'removeCloudConnection', 'checkCloudSignIn', 'listCloudAccounts',
-	'diffCatalogueSnapshots', 'auditExportReadiness',
-	'detectEngines', 'runEngineValidate', 'runEnginePlan',
+	'diffCatalogueSnapshots', 'auditExportReadiness', 'exportPortableBundle',
+	'previewProviderUpgrade', 'applyProviderUpgrade', 'recoverUpgradeJournal',
+	'detectEngines', 'runEngineValidate', 'runEnginePlan', 'runEngineFmt',
 	'listMirrorPackages', 'checkOfflineMirrorReadiness', 'runEngineInitOffline', 'extractProviderSchemaFromMirror',
-	'importMirrorPackage', 'evictMirrorPackage', 'verifyMirrorIntegrity', 'planMirrorCleanup'
+	'importMirrorPackage', 'listProviderVersions', 'downloadProviderPackage', 'evictMirrorPackage', 'verifyMirrorIntegrity', 'planMirrorCleanup',
+	'selectTerraformSkills', 'listBuiltinSkills', 'getTopologyBlueprint',
+	'getLearningRecord', 'saveLearningRecord', 'submitProposal', 'reviewProposal',
+	'issueMcpGrant', 'listMcpGrants', 'revokeMcpGrant',
+	'listTemplates', 'getTemplateDetails', 'checkTemplateCompatibility',
+	'listTemplateSources', 'importTemplatePackageFile', 'removeCachedTemplate'
 ]);
 
 /** The service allows `installGit` 10 minutes; the broker waits a little longer for its reply. */
@@ -58,6 +64,8 @@ const engineInitOfflineTimeoutMs = 125 * 1000;
 const extractMirrorSchemaTimeoutMs = 245 * 1000;
 /** Stage 10B `importMirrorPackage` streams & verifies large provider ZIP archives; wait 65 s. */
 const importMirrorPackageTimeoutMs = 65 * 1000;
+/** `downloadProviderPackage` lets the engine download for up to 600 s; the broker waits 610 s. */
+const downloadProviderPackageTimeoutMs = 610 * 1000;
 const maxPathLength = 32767;
 const maxNameLength = 255;
 const maxRemoteBytes = 2048;
@@ -86,6 +94,7 @@ const serviceErrorMessages: Readonly<Record<string, string>> = {
 	CONSENT_REQUIRED: 'CloudForge needs your permission to read this project.',
 	ALREADY_EXISTS: 'A CloudForge project or workspace file with that name already exists.',
 	SCHEMA_UNAVAILABLE: 'The requested provider schema snapshot or resource type is not available.',
+	REGISTRY_UNAVAILABLE: 'The provider registry could not be reached, or it has no release for that version and platform.',
 	CANCELLED: 'The CloudForge request was cancelled.',
 	SERVICE_UNAVAILABLE: 'The CloudForge service is unavailable.',
 	SERVICE_ERROR: 'The CloudForge service could not complete the request.'
@@ -93,6 +102,21 @@ const serviceErrorMessages: Readonly<Record<string, string>> = {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+const templateListSorts: ReadonlySet<string> = new Set(['recommended', 'name', 'difficulty', 'resources']);
+const templateListFacets = ['providers', 'categories', 'templateTypes', 'difficulties', 'certifications', 'sources'] as const;
+
+function isTemplateId(value: unknown): value is string {
+	return typeof value === 'string' && value.length <= 128 && /^[a-z0-9]+(-[a-z0-9]+)*(\.[a-z0-9]+(-[a-z0-9]+)*)+$/.test(value);
+}
+
+function isTemplateVersion(value: unknown): value is string {
+	return typeof value === 'string' && value.length <= 64 && /^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$/.test(value);
+}
+
+function isFacetList(value: unknown): value is string[] {
+	return Array.isArray(value) && value.length <= 32 && value.every(item => typeof item === 'string' && /^[a-z0-9-]{1,64}$/.test(item));
 }
 
 function hasOnlyKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
@@ -573,7 +597,7 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 			const names = new Set<string>();
 			let total = 0;
 			for (const file of value.files) {
-				if (!isRecord(file) || 'workspaceId' in file || 'architectureId' in file || 'expectedSourceRevision' in file) {
+				if (!isRecord(file) || Object.hasOwn(file, 'workspaceId') || Object.hasOwn(file, 'architectureId') || Object.hasOwn(file, 'expectedSourceRevision')) {
 					return undefined;
 				}
 				const checked = validateCloudForgeServiceParams('previewFocusedSave', {
@@ -735,8 +759,7 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 		}
 		case 'auditExportReadiness':
 		case 'runEngineValidate':
-		case 'runEnginePlan':
-		case 'runEngineInitOffline': {
+		case 'runEnginePlan': {
 			// Only a plan may name linked cloud connections; Rust checks each one's sign-in first.
 			const allowed = method === 'runEnginePlan'
 				? ['workspaceId', 'architectureId', 'expectedSourceRevision', 'engine', 'cloudProviders']
@@ -760,6 +783,157 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 				...(value.expectedSourceRevision === undefined ? {} : { expectedSourceRevision: value.expectedSourceRevision }),
 				...(value.engine === undefined ? {} : { engine: value.engine }),
 				...(Array.isArray(providers) && providers.length > 0 ? { cloudProviders: [...providers] } : {})
+			};
+		}
+		case 'runEngineInitOffline': {
+			if (!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'expectedSourceRevision', 'engine', 'createLockFile']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId)) {
+				return undefined;
+			}
+			if (value.expectedSourceRevision !== undefined && (typeof value.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(value.expectedSourceRevision))) {
+				return undefined;
+			}
+			if (value.engine !== undefined && value.engine !== 'openTofu' && value.engine !== 'terraform') {
+				return undefined;
+			}
+			if (value.createLockFile !== undefined && typeof value.createLockFile !== 'boolean') {
+				return undefined;
+			}
+			return {
+				workspaceId: value.workspaceId,
+				architectureId: value.architectureId,
+				...(value.expectedSourceRevision === undefined ? {} : { expectedSourceRevision: value.expectedSourceRevision }),
+				...(value.engine === undefined ? {} : { engine: value.engine }),
+				...(value.createLockFile === undefined ? {} : { createLockFile: value.createLockFile })
+			};
+		}
+		case 'runEngineFmt': {
+			if (!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'expectedSourceRevision', 'engine', 'mode']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId)) {
+				return undefined;
+			}
+			if (value.expectedSourceRevision !== undefined && (typeof value.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(value.expectedSourceRevision))) {
+				return undefined;
+			}
+			if (value.engine !== undefined && value.engine !== 'openTofu' && value.engine !== 'terraform') {
+				return undefined;
+			}
+			if (value.mode !== undefined && value.mode !== 'check' && value.mode !== 'apply') {
+				return undefined;
+			}
+			if (value.mode === 'apply' && value.expectedSourceRevision === undefined) {
+				return undefined;
+			}
+			return {
+				workspaceId: value.workspaceId,
+				architectureId: value.architectureId,
+				...(value.expectedSourceRevision === undefined ? {} : { expectedSourceRevision: value.expectedSourceRevision }),
+				...(value.engine === undefined ? {} : { engine: value.engine }),
+				...(value.mode === undefined ? {} : { mode: value.mode })
+			};
+		}
+		case 'exportPortableBundle': {
+			// `destinationPath` is strictly broker-owned (supplied via Electron-main native folder picker).
+			if (!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'expectedSourceRevision', 'bundleName', 'engine', 'platforms']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId) || !isPathComponent(value.bundleName) || value.bundleName.startsWith('.')) {
+				return undefined;
+			}
+			if (value.expectedSourceRevision !== undefined && (typeof value.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(value.expectedSourceRevision))) {
+				return undefined;
+			}
+			if (value.engine !== undefined && value.engine !== 'openTofu' && value.engine !== 'terraform') {
+				return undefined;
+			}
+			let platforms: string[] | undefined;
+			if (value.platforms !== undefined) {
+				if (!Array.isArray(value.platforms) || value.platforms.length === 0 || value.platforms.length > 8) {
+					return undefined;
+				}
+				platforms = [];
+				for (const item of value.platforms) {
+					if (typeof item !== 'string' || !/^[a-z0-9]{1,32}_[a-z0-9]{1,32}$/.test(item)) {
+						return undefined;
+					}
+					platforms.push(item);
+				}
+			}
+			return {
+				workspaceId: value.workspaceId,
+				architectureId: value.architectureId,
+				bundleName: value.bundleName,
+				...(value.expectedSourceRevision === undefined ? {} : { expectedSourceRevision: value.expectedSourceRevision }),
+				...(value.engine === undefined ? {} : { engine: value.engine }),
+				...(platforms === undefined ? {} : { platforms })
+			};
+		}
+		case 'previewProviderUpgrade': {
+			if (!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'expectedSourceRevision', 'providerAddress', 'targetVersion', 'targetConstraint', 'engine', 'platforms']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId)) {
+				return undefined;
+			}
+			if (value.expectedSourceRevision !== undefined && (typeof value.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(value.expectedSourceRevision))) {
+				return undefined;
+			}
+			if (typeof value.providerAddress !== 'string' || value.providerAddress.length === 0 || value.providerAddress.length > 256) {
+				return undefined;
+			}
+			const addrSegments = value.providerAddress.split('/');
+			if (addrSegments.length < 1 || addrSegments.length > 3 || !addrSegments.every(isSnapshotSegment)) {
+				return undefined;
+			}
+			if (typeof value.targetVersion !== 'string' || value.targetVersion.length === 0 || value.targetVersion.length > 64 || !/^[0-9]+\.[0-9]+\.[0-9]+$/.test(value.targetVersion)) {
+				return undefined;
+			}
+			if (value.targetConstraint !== undefined && (typeof value.targetConstraint !== 'string' || value.targetConstraint.trim().length === 0 || value.targetConstraint.length > 128 || /["\\\u0000-\u001f\u007f]/.test(value.targetConstraint))) {
+				return undefined;
+			}
+			if (value.engine !== undefined && value.engine !== 'openTofu' && value.engine !== 'terraform') {
+				return undefined;
+			}
+			let platforms: string[] | undefined;
+			if (value.platforms !== undefined) {
+				if (!Array.isArray(value.platforms) || value.platforms.length === 0 || value.platforms.length > 8) {
+					return undefined;
+				}
+				platforms = [];
+				for (const item of value.platforms) {
+					if (typeof item !== 'string' || !/^[a-z0-9]{1,32}_[a-z0-9]{1,32}$/.test(item)) {
+						return undefined;
+					}
+					platforms.push(item);
+				}
+			}
+			return {
+				workspaceId: value.workspaceId,
+				architectureId: value.architectureId,
+				providerAddress: value.providerAddress,
+				targetVersion: value.targetVersion,
+				...(value.expectedSourceRevision === undefined ? {} : { expectedSourceRevision: value.expectedSourceRevision }),
+				...(value.targetConstraint === undefined ? {} : { targetConstraint: value.targetConstraint }),
+				...(value.engine === undefined ? {} : { engine: value.engine }),
+				...(platforms === undefined ? {} : { platforms })
+			};
+		}
+		case 'applyProviderUpgrade': {
+			if (
+				!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'expectedSourceRevision', 'proposalId']) ||
+				!isOpaqueId(value.workspaceId) ||
+				!isOpaqueId(value.architectureId) ||
+				typeof value.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(value.expectedSourceRevision) ||
+				typeof value.proposalId !== 'string' || !/^upgrade-[0-9a-f]{32}$/.test(value.proposalId)
+			) {
+				return undefined;
+			}
+			return {
+				workspaceId: value.workspaceId,
+				architectureId: value.architectureId,
+				expectedSourceRevision: value.expectedSourceRevision,
+				proposalId: value.proposalId
+			};
+		}
+		case 'recoverUpgradeJournal': {
+			if (!hasOnlyKeys(value, ['workspaceId', 'architectureId']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId)) {
+				return undefined;
+			}
+			return {
+				workspaceId: value.workspaceId,
+				architectureId: value.architectureId
 			};
 		}
 		case 'checkOfflineMirrorReadiness': {
@@ -807,6 +981,132 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 			return {
 				address: value.address,
 				version: value.version,
+				...(value.engine === undefined ? {} : { engine: value.engine })
+			};
+		}
+		case 'listTemplates': {
+			if (!hasOnlyKeys(value, ['query', 'sort', 'offset', 'limit', ...templateListFacets])) {
+				return undefined;
+			}
+			if (value.query !== undefined && (typeof value.query !== 'string' || value.query.length > 200)) {
+				return undefined;
+			}
+			if (value.sort !== undefined && (typeof value.sort !== 'string' || !templateListSorts.has(value.sort))) {
+				return undefined;
+			}
+			if (value.offset !== undefined && (!Number.isInteger(value.offset) || (value.offset as number) < 0 || (value.offset as number) > 100_000)) {
+				return undefined;
+			}
+			if (value.limit !== undefined && (!Number.isInteger(value.limit) || (value.limit as number) < 1 || (value.limit as number) > 200)) {
+				return undefined;
+			}
+			const result: Record<string, unknown> = {};
+			for (const key of ['query', 'sort', 'offset', 'limit'] as const) {
+				if (value[key] !== undefined) {
+					result[key] = value[key];
+				}
+			}
+			for (const facet of templateListFacets) {
+				if (value[facet] !== undefined) {
+					if (!isFacetList(value[facet])) {
+						return undefined;
+					}
+					result[facet] = [...value[facet] as string[]];
+				}
+			}
+			return result;
+		}
+		case 'getTemplateDetails': {
+			if (!hasOnlyKeys(value, ['templateId', 'version']) || !isTemplateId(value.templateId) || (value.version !== undefined && !isTemplateVersion(value.version))) {
+				return undefined;
+			}
+			return { templateId: value.templateId, ...(value.version === undefined ? {} : { version: value.version }) };
+		}
+		case 'importTemplatePackageFile': {
+			// `archivePath` is broker-owned: it comes from the Electron-main native picker only.
+			if (!hasOnlyKeys(value, ['replace', 'acceptHighRisk'])) {
+				return undefined;
+			}
+			if ((value.replace !== undefined && typeof value.replace !== 'boolean') || (value.acceptHighRisk !== undefined && typeof value.acceptHighRisk !== 'boolean')) {
+				return undefined;
+			}
+			return {
+				...(value.replace === undefined ? {} : { replace: value.replace }),
+				...(value.acceptHighRisk === undefined ? {} : { acceptHighRisk: value.acceptHighRisk })
+			};
+		}
+		case 'removeCachedTemplate': {
+			if (!hasOnlyKeys(value, ['templateId', 'version']) || !isTemplateId(value.templateId) || !isTemplateVersion(value.version)) {
+				return undefined;
+			}
+			return { templateId: value.templateId, version: value.version };
+		}
+		case 'checkTemplateCompatibility': {
+			if (!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'expectedSourceRevision', 'templateId', 'version']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId) || !isTemplateId(value.templateId)) {
+				return undefined;
+			}
+			if (value.expectedSourceRevision !== undefined && (typeof value.expectedSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(value.expectedSourceRevision))) {
+				return undefined;
+			}
+			if (value.version !== undefined && !isTemplateVersion(value.version)) {
+				return undefined;
+			}
+			return {
+				workspaceId: value.workspaceId,
+				architectureId: value.architectureId,
+				templateId: value.templateId,
+				...(value.expectedSourceRevision === undefined ? {} : { expectedSourceRevision: value.expectedSourceRevision }),
+				...(value.version === undefined ? {} : { version: value.version })
+			};
+		}
+		case 'listProviderVersions': {
+			if (!hasOnlyKeys(value, ['address', 'refresh', 'engine']) || typeof value.address !== 'string') {
+				return undefined;
+			}
+			const segments = value.address.split('/');
+			if (segments.length !== 3 || !segments.every(isSnapshotSegment)) {
+				return undefined;
+			}
+			if (value.refresh !== undefined && typeof value.refresh !== 'boolean') {
+				return undefined;
+			}
+			if (value.engine !== undefined && value.engine !== 'openTofu' && value.engine !== 'terraform') {
+				return undefined;
+			}
+			return {
+				address: value.address,
+				...(value.refresh === undefined ? {} : { refresh: value.refresh }),
+				...(value.engine === undefined ? {} : { engine: value.engine })
+			};
+		}
+		case 'downloadProviderPackage': {
+			if (!hasOnlyKeys(value, ['address', 'version', 'platforms', 'engine']) || typeof value.address !== 'string' || !isSnapshotSegment(value.version)) {
+				return undefined;
+			}
+			const segments = value.address.split('/');
+			if (segments.length !== 3 || !segments.every(isSnapshotSegment)) {
+				return undefined;
+			}
+			if (value.engine !== undefined && value.engine !== 'openTofu' && value.engine !== 'terraform') {
+				return undefined;
+			}
+			let platforms: string[] | undefined;
+			if (value.platforms !== undefined) {
+				if (!Array.isArray(value.platforms) || value.platforms.length === 0 || value.platforms.length > 8) {
+					return undefined;
+				}
+				platforms = [];
+				for (const item of value.platforms) {
+					if (typeof item !== 'string' || !/^[a-z0-9]{1,32}_[a-z0-9]{1,32}$/.test(item)) {
+						return undefined;
+					}
+					platforms.push(item);
+				}
+			}
+			return {
+				address: value.address,
+				version: value.version,
+				...(platforms === undefined ? {} : { platforms }),
 				...(value.engine === undefined ? {} : { engine: value.engine })
 			};
 		}
@@ -888,6 +1188,7 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 		case 'detectEngines':
 		case 'listMirrorPackages':
 		case 'verifyMirrorIntegrity':
+		case 'listTemplateSources':
 			return hasOnlyKeys(value, []) ? {} : undefined;
 		case 'listCloudRegions': {
 			if (!hasOnlyKeys(value, ['provider', 'scope', 'configuredRegions'])) {
@@ -921,6 +1222,219 @@ export function validateCloudForgeServiceParams(method: string, value: unknown):
 				...(scope === undefined ? {} : { scope }),
 				...(configuredRegions === undefined ? {} : { configuredRegions })
 			};
+		}
+		case 'selectTerraformSkills': {
+			const validKinds = new Set(['generate', 'diagram', 'topology', 'refactor', 'review', 'test']);
+			if (!hasOnlyKeys(value, ['taskKind', 'prompt', 'runtime']) || typeof value.taskKind !== 'string' || !validKinds.has(value.taskKind)) {
+				return undefined;
+			}
+			if (value.prompt !== undefined && (typeof value.prompt !== 'string' || value.prompt.length > 4096 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(value.prompt))) {
+				return undefined;
+			}
+			if (value.runtime !== undefined && value.runtime !== 'openTofu' && value.runtime !== 'terraform' && value.runtime !== 'auto') {
+				return undefined;
+			}
+			return {
+				taskKind: value.taskKind,
+				...(value.prompt === undefined ? {} : { prompt: value.prompt }),
+				...(value.runtime === undefined ? {} : { runtime: value.runtime })
+			};
+		}
+		case 'listBuiltinSkills': {
+			const validCategories = new Set(['cloudforge-diagram', 'cloudforge-topology', 'cloudforge-workflow', 'terraform']);
+			if (!hasOnlyKeys(value, ['category'])) {
+				return undefined;
+			}
+			if (value.category !== undefined && (typeof value.category !== 'string' || !validCategories.has(value.category))) {
+				return undefined;
+			}
+			return value.category === undefined ? {} : { category: value.category };
+		}
+		case 'getTopologyBlueprint': {
+			if (!hasOnlyKeys(value, ['blueprintId', 'prefix', 'region', 'cidrBaseOctet'])) {
+				return undefined;
+			}
+			const hasCustom = value.prefix !== undefined || value.region !== undefined || value.cidrBaseOctet !== undefined;
+			if (value.blueprintId === undefined) {
+				return hasCustom ? undefined : {};
+			}
+			if (typeof value.blueprintId !== 'string' || !/^[a-z0-9-]{1,64}$/.test(value.blueprintId)) {
+				return undefined;
+			}
+			if (value.prefix !== undefined && (typeof value.prefix !== 'string' || !/^[a-z][a-z0-9-]{1,23}$/.test(value.prefix) || value.prefix.endsWith('-'))) {
+				return undefined;
+			}
+			if (value.region !== undefined && (typeof value.region !== 'string' || !/^[a-z0-9-]{2,32}$/.test(value.region))) {
+				return undefined;
+			}
+			if (value.cidrBaseOctet !== undefined && (typeof value.cidrBaseOctet !== 'number' || !Number.isSafeInteger(value.cidrBaseOctet) || value.cidrBaseOctet < 0 || value.cidrBaseOctet > 250)) {
+				return undefined;
+			}
+			return {
+				blueprintId: value.blueprintId,
+				...(value.prefix === undefined ? {} : { prefix: value.prefix }),
+				...(value.region === undefined ? {} : { region: value.region }),
+				...(value.cidrBaseOctet === undefined ? {} : { cidrBaseOctet: value.cidrBaseOctet })
+			};
+		}
+		case 'getLearningRecord': {
+			if (!hasOnlyKeys(value, ['workspaceId', 'architectureId']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId)) {
+				return undefined;
+			}
+			return { workspaceId: value.workspaceId, architectureId: value.architectureId };
+		}
+		case 'saveLearningRecord': {
+			if (!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'task', 'notes']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId)) {
+				return undefined;
+			}
+			const result: Record<string, unknown> = { workspaceId: value.workspaceId, architectureId: value.architectureId };
+			if (value.task !== undefined) {
+				if (value.task !== null) {
+					if (!isRecord(value.task) || !hasOnlyKeys(value.task, ['title', 'mode', 'objective', 'requirements', 'assumptions', 'skillIds'])) {
+						return undefined;
+					}
+					if (typeof value.task.title !== 'string' || value.task.title.length === 0 || value.task.title.length > 200) {
+						return undefined;
+					}
+					if (value.task.mode !== 'hint' && value.task.mode !== 'guided' && value.task.mode !== 'workedExample') {
+						return undefined;
+					}
+					if (typeof value.task.objective !== 'string' || value.task.objective.length > 4000) {
+						return undefined;
+					}
+					if (value.task.requirements !== undefined && (!Array.isArray(value.task.requirements) || value.task.requirements.length > 64)) {
+						return undefined;
+					}
+					if (value.task.assumptions !== undefined && (!Array.isArray(value.task.assumptions) || value.task.assumptions.length > 32)) {
+						return undefined;
+					}
+					if (value.task.skillIds !== undefined && (!Array.isArray(value.task.skillIds) || value.task.skillIds.length > 16)) {
+						return undefined;
+					}
+				}
+				result.task = value.task;
+			}
+			if (value.notes !== undefined) {
+				if (!isRecord(value.notes) || Object.keys(value.notes).length > 256) {
+					return undefined;
+				}
+				result.notes = value.notes;
+			}
+			return result;
+		}
+		case 'submitProposal': {
+			if (
+				!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'origin', 'title', 'summary', 'baseSourceRevision', 'skillIds', 'requirementIds', 'files']) ||
+				!isOpaqueId(value.workspaceId) ||
+				!isOpaqueId(value.architectureId) ||
+				typeof value.title !== 'string' || value.title.trim().length === 0 || value.title.length > 200 ||
+				typeof value.summary !== 'string' || value.summary.length > 2000 ||
+				typeof value.baseSourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(value.baseSourceRevision) ||
+				!Array.isArray(value.files) || value.files.length === 0 || value.files.length > 16
+			) {
+				return undefined;
+			}
+			if (value.origin !== undefined && (typeof value.origin !== 'string' || value.origin.length === 0 || value.origin.length > 64 || !/^[A-Za-z0-9:_-]+$/.test(value.origin))) {
+				return undefined;
+			}
+			if (value.skillIds !== undefined && (!Array.isArray(value.skillIds) || value.skillIds.length > 16 || !value.skillIds.every(item => typeof item === 'string' && /^[a-z0-9-]{1,64}$/.test(item)))) {
+				return undefined;
+			}
+			if (value.requirementIds !== undefined && (!Array.isArray(value.requirementIds) || value.requirementIds.length > 64 || !value.requirementIds.every(item => isOpaqueId(item)))) {
+				return undefined;
+			}
+			const files: { fileName: string; contents: string; rationale?: string }[] = [];
+			const seen = new Set<string>();
+			let totalBytes = 0;
+			for (const file of value.files) {
+				if (
+					!isRecord(file) || !hasOnlyKeys(file, ['fileName', 'contents', 'rationale']) ||
+					!isPathComponent(file.fileName) || file.fileName.startsWith('.') || !file.fileName.toLowerCase().endsWith('.tf') || file.fileName.length <= 3 ||
+					typeof file.contents !== 'string' || Buffer.byteLength(file.contents, 'utf8') > maxDraftBytes ||
+					(file.rationale !== undefined && (typeof file.rationale !== 'string' || file.rationale.length > 500))
+				) {
+					return undefined;
+				}
+				const lower = file.fileName.toLowerCase();
+				if (seen.has(lower)) {
+					return undefined;
+				}
+				seen.add(lower);
+				totalBytes += Buffer.byteLength(file.contents, 'utf8');
+				files.push({
+					fileName: file.fileName,
+					contents: file.contents,
+					...(file.rationale === undefined ? {} : { rationale: file.rationale })
+				});
+			}
+			if (totalBytes > maxBatchBytes) {
+				return undefined;
+			}
+			return {
+				workspaceId: value.workspaceId,
+				architectureId: value.architectureId,
+				...(value.origin === undefined ? {} : { origin: value.origin }),
+				title: value.title,
+				summary: value.summary,
+				baseSourceRevision: value.baseSourceRevision,
+				...(value.skillIds === undefined ? {} : { skillIds: [...value.skillIds as string[]] }),
+				...(value.requirementIds === undefined ? {} : { requirementIds: [...value.requirementIds as string[]] }),
+				files
+			};
+		}
+		case 'reviewProposal': {
+			if (
+				!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'proposalId', 'action']) ||
+				!isOpaqueId(value.workspaceId) ||
+				!isOpaqueId(value.architectureId) ||
+				!isOpaqueId(value.proposalId) ||
+				(value.action !== 'markAccepted' && value.action !== 'reject')
+			) {
+				return undefined;
+			}
+			return {
+				workspaceId: value.workspaceId,
+				architectureId: value.architectureId,
+				proposalId: value.proposalId,
+				action: value.action
+			};
+		}
+		case 'issueMcpGrant': {
+			if (!hasOnlyKeys(value, ['workspaceId', 'architectureId', 'clientLabel', 'ttlMinutes']) || !isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId)) {
+				return undefined;
+			}
+			if (value.clientLabel !== undefined && (typeof value.clientLabel !== 'string' || value.clientLabel.trim().length === 0 || value.clientLabel.length > 64 || !/^[A-Za-z0-9._ -]+$/.test(value.clientLabel))) {
+				return undefined;
+			}
+			if (value.ttlMinutes !== undefined && (typeof value.ttlMinutes !== 'number' || !Number.isSafeInteger(value.ttlMinutes) || value.ttlMinutes < 5 || value.ttlMinutes > 1440)) {
+				return undefined;
+			}
+			return {
+				workspaceId: value.workspaceId,
+				architectureId: value.architectureId,
+				...(value.clientLabel === undefined ? {} : { clientLabel: value.clientLabel.trim() }),
+				...(value.ttlMinutes === undefined ? {} : { ttlMinutes: value.ttlMinutes })
+			};
+		}
+		case 'listMcpGrants': {
+			if (!hasOnlyKeys(value, ['workspaceId', 'architectureId'])) {
+				return undefined;
+			}
+			const hasWs = value.workspaceId !== undefined;
+			const hasArch = value.architectureId !== undefined;
+			if (hasWs !== hasArch) {
+				return undefined;
+			}
+			if (hasWs && (!isOpaqueId(value.workspaceId) || !isOpaqueId(value.architectureId))) {
+				return undefined;
+			}
+			return hasWs ? { workspaceId: value.workspaceId, architectureId: value.architectureId } : {};
+		}
+		case 'revokeMcpGrant': {
+			if (!hasOnlyKeys(value, ['grantId']) || !isOpaqueId(value.grantId)) {
+				return undefined;
+			}
+			return { grantId: value.grantId };
 		}
 	}
 }
@@ -980,6 +1494,10 @@ export interface ICloudForgeRequestContext {
 	pickSchemaFile?(): Promise<string | undefined>;
 	/** Opens a native provider `.zip` archive picker owned by the calling window. `undefined` when cancelled. */
 	pickMirrorArchive?(): Promise<string | undefined>;
+	/** Opens a native export destination folder picker owned by the calling window. `undefined` when cancelled. */
+	pickExportDestination?(): Promise<string | undefined>;
+	/** Opens a native template package `.zip` picker owned by the calling window. `undefined` when cancelled. */
+	pickTemplatePackage?(): Promise<string | undefined>;
 }
 
 export type CloudForgeResolvedRequest =
@@ -1044,6 +1562,26 @@ export async function resolveCloudForgeRequest(method: CloudForgeServiceMethod, 
 			}
 			return { kind: 'call', params: { ...params, archivePath } };
 		}
+		case 'exportPortableBundle': {
+			const destinationPath = await context.pickExportDestination?.();
+			if (destinationPath === undefined) {
+				return { kind: 'failure', code: 'CANCELLED' };
+			}
+			if (!isLocalPath(destinationPath)) {
+				return { kind: 'failure', code: 'SCOPE_DENIED' };
+			}
+			return { kind: 'call', params: { ...params, destinationPath } };
+		}
+		case 'importTemplatePackageFile': {
+			const archivePath = await context.pickTemplatePackage?.();
+			if (archivePath === undefined) {
+				return { kind: 'failure', code: 'CANCELLED' };
+			}
+			if (!isLocalPath(archivePath)) {
+				return { kind: 'failure', code: 'SCOPE_DENIED' };
+			}
+			return { kind: 'call', params: { ...params, archivePath } };
+		}
 		default:
 			return { kind: 'call', params };
 	}
@@ -1059,6 +1597,21 @@ function completeCreateProject(value: unknown, parentPath: unknown): unknown {
 	}
 	const workspaceFile = URI.file(join(parentPath, value.folderName, value.workspaceFileName));
 	return { folderName: value.folderName, workspaceFileName: value.workspaceFileName, workspaceFile: workspaceFile.toString() };
+}
+
+/**
+ * Adds the packaged `cloudforge-service.exe` command path to an `issueMcpGrant` response so
+ * VS Code's open-source Agent View (`McpStdioServerDefinition`) and external CLI configs can
+ * launch the verified sidecar without ever letting extensions or webviews supply executable paths.
+ */
+function completeIssueMcpGrant(value: unknown, appRoot: string): unknown {
+	if (!isRecord(value) || typeof value.grantId !== 'string' || !Array.isArray(value.mcpArgs) || !value.mcpArgs.every(arg => typeof arg === 'string')) {
+		throw new CloudForgeServiceError('SERVICE_ERROR');
+	}
+	return {
+		...value,
+		mcpCommand: join(appRoot, 'cloudforge-service', 'cloudforge-service.exe')
+	};
 }
 
 function safeFailure(error: unknown): CloudForgeCallFailure {
@@ -1128,7 +1681,9 @@ export class CloudForgeServiceBroker implements IServerChannel<string> {
 				resolveScope: () => resolveCloudForgeWindowScope(window.openedWorkspace, configPath => this.workspacesManagementMainService.resolveLocalWorkspace(configPath)),
 				pickParentFolder: () => this.pickParentFolder(window.win ?? undefined),
 				pickSchemaFile: () => this.pickSchemaFile(window.win ?? undefined),
-				pickMirrorArchive: () => this.pickMirrorArchive(window.win ?? undefined)
+				pickMirrorArchive: () => this.pickMirrorArchive(window.win ?? undefined),
+				pickExportDestination: () => this.pickExportDestination(window.win ?? undefined),
+				pickTemplatePackage: () => this.pickTemplatePackage(window.win ?? undefined)
 			});
 			if (request.kind === 'failure') {
 				return safeFailure(new CloudForgeServiceError(request.code)) as T;
@@ -1143,10 +1698,14 @@ export class CloudForgeServiceBroker implements IServerChannel<string> {
 							? extractMirrorSchemaTimeoutMs
 							: method === 'importMirrorPackage' || method === 'verifyMirrorIntegrity'
 								? importMirrorPackageTimeoutMs
-								: undefined;
+								: method === 'downloadProviderPackage'
+									? downloadProviderPackageTimeoutMs
+									: undefined;
 			let value = await service.call(method, request.params, timeoutMs);
 			if (method === 'createProject') {
 				value = completeCreateProject(value, request.params.parentPath);
+			} else if (method === 'issueMcpGrant') {
+				value = completeIssueMcpGrant(value, this.appRoot);
 			}
 			const result: CloudForgeCallSuccess = { ok: true, value };
 			return result as T;
@@ -1202,6 +1761,31 @@ export class CloudForgeServiceBroker implements IServerChannel<string> {
 			buttonLabel: localize('cloudForge.importMirrorArchive', "Import Archive"),
 			properties: ['openFile'],
 			filters: [{ name: localize('cloudForge.providerZipFilter', "Provider Archive (.zip)"), extensions: ['zip'] }]
+		}, window);
+		if (result.canceled || result.filePaths.length !== 1) {
+			return undefined;
+		}
+		return result.filePaths[0];
+	}
+
+	private async pickExportDestination(window: electron.BrowserWindow | undefined): Promise<string | undefined> {
+		const result = await this.dialogMainService.showOpenDialog({
+			title: localize('cloudForge.pickExportDestination', "Choose Where to Save the Portable Terraform Bundle"),
+			buttonLabel: localize('cloudForge.exportHere', "Export Bundle Here"),
+			properties: ['openDirectory', 'createDirectory']
+		}, window);
+		if (result.canceled || result.filePaths.length !== 1) {
+			return undefined;
+		}
+		return result.filePaths[0];
+	}
+
+	private async pickTemplatePackage(window: electron.BrowserWindow | undefined): Promise<string | undefined> {
+		const result = await this.dialogMainService.showOpenDialog({
+			title: localize('cloudForge.pickTemplatePackage', "Choose a CloudForge Template Package (.zip)"),
+			buttonLabel: localize('cloudForge.importTemplatePackage', "Import Template"),
+			properties: ['openFile'],
+			filters: [{ name: localize('cloudForge.templateZipFilter', "CloudForge Template Package (.zip)"), extensions: ['zip'] }]
 		}, window);
 		if (result.canceled || result.filePaths.length !== 1) {
 			return undefined;

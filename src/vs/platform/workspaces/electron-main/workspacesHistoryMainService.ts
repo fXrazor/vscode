@@ -376,8 +376,8 @@ export class WorkspacesHistoryMainService extends Disposable implements IWorkspa
 	}
 
 	private async updateWindowsJumpList(): Promise<void> {
-		if (!isWindows) {
-			return; // only on windows
+		if (!isWindows || !this.environmentMainService.isBuilt) {
+			return; // only on built Windows installs; dev binaries launch default_app.asar without an app path
 		}
 
 		const jumpList: JumpListCategory[] = [];

@@ -2,15 +2,18 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
+import { normaliseInkStyle } from './ink.ts';
 import { endpointElementId, remapEndpoint } from './connectionEndpoints.ts';
 import { VariablePanel } from './VariablePanel.tsx';
 import { exportableArchitecture } from './variables.ts';
 import type { ShapeId } from './shapes.ts';
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
+import { catalogRevision, clearFormAttributes, ensureTypes, subscribeCatalog } from './cloudlab-core/catalog/index.ts';
+import { registerLiveFormSchema } from './providerCatalogue.ts';
 import type { ReactFlowInstance, Viewport } from '@xyflow/react';
 import {
 	createHistory, historyReducer, type Resource, type BoardItem, type DesignMode,
-	type Position, type Provider, type ResourceKind, type CatalogueEntry, type Architecture
+	type Position, type Provider, type ResourceKind, type CatalogueEntry, type Architecture, type Action
 } from './model.ts';
 import { blankArchitecture, providerRegions, resourceDefinition, sampleArchitecture } from './fixture.ts';
 import { StartScreen } from './StartScreen.tsx';
@@ -20,9 +23,14 @@ import { ResourceFields } from './ResourceFields.tsx';
 import { ResourceWorkspace } from './ResourceWorkspace.tsx';
 import { ResourceCatalogue } from './ResourceCatalogue.tsx';
 import { DesignCanvas } from './DesignCanvas.tsx';
+import { TechnicalGraph } from './TechnicalGraph.tsx';
+import { defaultGraphPresentation, graphEditAllowed, graphPresentationReducer, parseGraphPresentation, serialiseGraphPresentation } from './graphPresentation.ts';
+import { estateArchitecture } from './estateFixture.ts';
+import { hubSpokeArchitecture } from './graphFixtures.ts';
 import { CodePanel } from './CodePanel.tsx';
 import { ModuleImport, type ModuleReference } from './ModuleImport.tsx';
-import { loadCatalogue, registerServiceTypes } from './catalogue.ts';
+import { loadCatalogue, registerServiceTypes, withCatalogueIcons } from './catalogue.ts';
+import { catalogueIconsSnapshot, subscribeCatalogueIcons } from './coreIcons.ts';
 import { ArchitectureOverview } from './ArchitectureOverview.tsx';
 import { VisualTopbar } from './VisualTopbar.tsx';
 import { ArrowLeft, Scan, PanelsTopLeft, PanelRightClose, Code2, ListTree, Boxes, Variable, AlertCircle, FileCode2 } from 'lucide-react';
@@ -34,12 +42,14 @@ import { workflowTemplate } from './workflowTemplate.ts';
 import { createHostBridge, type HostCloudRegionsPayload, type HostDependencyReport, type HostDetectedEngine, type HostDraftSaveError, type HostDraftSavePreview, type HostEngineInitOfflineReport, type HostEnginePlanReport, type HostEngineValidateReport, type HostSaveAllPreview, type HostExportAuditReport, type HostGraphSnapshot, type HostModuleInspection, type HostNotice, type HostOfflineMirrorReadiness, type HostStartContext, type HostValidationRun } from './webviewBridge.ts';
 import type { LiveSchemaMap } from './liveSchema.ts';
 import { parseSchemaPreview, type SchemaPreview } from './resourceDraft.ts';
-import { hydrateResourceValues, parseResourceValues } from './resourceValues.ts';
+import { hydrateResourceValues, parseResourceValues, type FileResourceValues } from './resourceValues.ts';
+import { createRekeyer, snapshotIdMap, viewStateIdMap } from './resourceIdentity.ts';
 import { buildDraftSavePayload, buildHostViewState, changedFilePayloads, refreshPrevious, adoptSavedFiles, defaultTargetTfFile, projectGraphSnapshotToArchitecture, projectHostDiagnostics, sanitizeDraftTfFileName } from './serviceAdapter.ts';
 import { projectResourceFiles } from './terraformProjection.ts';
 import { DraftSaveDialog } from './DraftSaveDialog.tsx';
 import { SaveAllDialog } from './SaveAllDialog.tsx';
-import { presentationSvg } from './exportPresentation.ts';
+import { downloadSvg, presentationSvg } from './exportPresentation.ts';
+import { applyBundleLayout, buildProjectBundle, bundleConflicts, parseBundledArchitecture, readProjectBundle, toBase64 } from './projectBundle.ts';
 
 function detectInitialTheme(isHosted: boolean): 'light' | 'dark' {
 	if (!isHosted || typeof document === 'undefined') {
@@ -52,7 +62,11 @@ function detectInitialTheme(isHosted: boolean): 'light' | 'dark' {
 
 export function Studio() {
 	const hostBridge = useMemo(() => createHostBridge(), []);
-	const [history, dispatch] = useReducer(historyReducer, undefined, () => createHistory(hostBridge.isHosted ? blankArchitecture() : sampleArchitecture()));
+	const [history, dispatch] = useReducer(historyReducer, undefined, () => createHistory(hostBridge.isHosted ? blankArchitecture() : previewSample()));
+	// Graph presentation (lens, layout, pins, expansion) is never part of architecture history.
+	const [graphPresentation, presentGraph] = useReducer(graphPresentationReducer, defaultGraphPresentation);
+	const [ink, setInk] = useState(() => normaliseInkStyle({}));
+	const graphEdit = useCallback((action: Action) => { if (graphEditAllowed(action)) { dispatch(action); } }, []);
 	const [mode, setMode] = useState<DesignMode>('visual');
 	const modeRef = useRef(mode); modeRef.current = mode;
 	const [theme, setTheme] = useState<'light' | 'dark'>(() => detectInitialTheme(hostBridge.isHosted));
@@ -85,6 +99,8 @@ export function Studio() {
 	/** The canvas state and file names of the last successful save, adopted into the next baseline. */
 	const savedFilesRef = useRef<{ readonly state: Architecture; readonly files: ReadonlySet<string> } | null>(null);
 	const hostGraphRef = useRef<HostGraphSnapshot | null>(null);
+	const sourceValuesRef = useRef<ReturnType<typeof parseResourceValues>>(undefined);
+	const [sourceValues, setSourceValues] = useState<readonly FileResourceValues[] | undefined>(undefined);
 	const [hasSourceById, setHasSourceById] = useState<Readonly<Record<string, boolean>>>({});
 	const [hostNotice, setHostNotice] = useState<HostNotice | null>(null);
 	const [liveSchemas, setLiveSchemas] = useState<LiveSchemaMap>({});
@@ -110,6 +126,8 @@ export function Studio() {
 	const [saveError, setSaveError] = useState<HostDraftSaveError | null>(null);
 	const [saving, setSaving] = useState(false);
 	const [saveAllOpen, setSaveAllOpen] = useState(false);
+	const keyboardSaveRef = useRef<() => void>(() => undefined);
+	const reportedDirtyRef = useRef(false);
 	const [saveAllFiles, setSaveAllFiles] = useState<readonly string[]>([]);
 	const [saveAllPreview, setSaveAllPreview] = useState<HostSaveAllPreview | null>(null);
 	const [saveAllError, setSaveAllError] = useState<HostDraftSaveError | null>(null);
@@ -122,6 +140,42 @@ export function Studio() {
 	const viewport = useRef<Partial<Record<DesignMode, Viewport>>>({});
 	const variablesButton = useRef<HTMLButtonElement>(null);
 	const architecture = history.present;
+	// A bundle imported through Add Architecture: lay its canvas over the graph once it has loaded.
+	const pendingBundleLayout = useRef<Architecture | null>(null);
+	const [pendingLayoutTick, setPendingLayoutTick] = useState(0);
+	useEffect(() => {
+		const bundled = pendingBundleLayout.current;
+		if (!bundled || !history.present.resources.length) {
+			return;
+		}
+		pendingBundleLayout.current = null;
+		const result = applyBundleLayout(history.present, bundled);
+		dispatch({ type: 'applyContent', architecture: result.architecture });
+		setMessage('Restored the bundle layout: ' + result.matched + ' resources placed, ' + result.drawings + ' drawings, ' + result.connectors + ' connectors' + (result.unmatched ? '; ' + result.unmatched + ' could not be matched to the Terraform' : '') + '.');
+		requestAnimationFrame(() => requestAnimationFrame(() => { void flow?.fitView({ padding: 0.18 }); }));
+	}, [history.present, pendingLayoutTick, flow]);
+	// Provider definitions are metadata. Loading them never enters semantic project history.
+	const providerMetadataRevision = useSyncExternalStore(subscribeCatalog, catalogRevision);
+	const catalogueTypes = [...new Set(architecture.resources.filter(resource => resource.kind !== 'module').map(resource => resourceDefinition(resource).type))].sort().join(',');
+	useEffect(() => { void ensureTypes(catalogueTypes.split(',').filter(Boolean)); }, [catalogueTypes]);
+	useEffect(() => {
+		const graph = hostGraphRef.current, base = hostBaselineRef.current, values = sourceValuesRef.current;
+		if (!graph || !base || !values || values.sourceRevision !== graph.sourceRevision) { return; }
+		const hydrated = hydrateResourceValues(base, graph, values.resources, values.variables);
+		if (hydrated !== base) { dispatch({ type: 'rebase', architecture: hydrated, base }); setHostBaseline(hydrated); hostBaselineRef.current = hydrated; }
+	}, [providerMetadataRevision]);
+	// Resources rebuilt from the Terraform graph only know their type. Load each provider's catalogue and give them
+	// their catalogue icon instead of the shared placeholder; like provider metadata, this never adds an Undo step.
+	const catalogueIconRevision = useSyncExternalStore(subscribeCatalogueIcons, catalogueIconsSnapshot);
+	const resourceProviders = [...new Set(architecture.resources.filter(resource => resource.catalogue).map(resource => resource.provider))].sort().join(',');
+	useEffect(() => { for (const provider of resourceProviders.split(',').filter(Boolean)) { void loadCatalogue(provider as Provider).catch(() => undefined); } }, [resourceProviders]);
+	useEffect(() => {
+		const fixed = withCatalogueIcons(history.present);
+		if (fixed === history.present) { return; }
+		dispatch({ type: 'rebase', architecture: fixed });
+		const base = hostBaselineRef.current;
+		if (base) { const fixedBase = withCatalogueIcons(base); if (fixedBase !== base) { setHostBaseline(fixedBase); hostBaselineRef.current = fixedBase; } }
+	}, [catalogueIconRevision, history.present]);
 	const selected = architecture.resources.find(resource => resource.id === selectedId);
 	const workspaceResource = architecture.resources.find(resource=>resource.id===workspaceResourceId);
 	const openDetails = useCallback((id:string)=>{setSelectedId(id);setWorkspaceResourceId(id);setWorkspaceOpen(true);},[]);
@@ -145,22 +199,40 @@ export function Studio() {
 			return;
 		}
 		const unsubscribe = hostBridge.subscribe(incoming => {
+			try {
 			switch (incoming.type) {
 				case 'graph': {
 					setStartContext(null);
+					sourceValuesRef.current = undefined;
+					setSourceValues(undefined);
+					setModuleInspections({});
+					clearFormAttributes();
+					setLiveSchemas({});
+					setSchemaPreviews({});
+					requestedSchemasRef.current.clear();
 					const sameArch = hostArchitectureIdRef.current === incoming.graph.architectureId;
 					hostArchitectureIdRef.current = incoming.graph.architectureId;
 					// Project from what the files said last time, not from the canvas: unsaved canvas edits
 					// are then rebased onto the refresh instead of being folded into the new baseline.
 					const saved = savedFilesRef.current;
 					savedFilesRef.current = null;
-					const previousBaseline = sameArch && hostBaselineRef.current
+					// The service numbers nodes by position, so match resources to the new snapshot by Terraform
+					// address and rename Studio ids before anything is compared by id.
+					const idMap = sameArch ? snapshotIdMap(incoming.graph.nodes, [architectureRef.current, saved?.state, hostBaselineRef.current]) : new Map<string, string>();
+					const rekey = createRekeyer(idMap);
+					const priorBaseline = sameArch && hostBaselineRef.current
 						? (saved ? adoptSavedFiles(hostBaselineRef.current, saved.state, saved.files) : hostBaselineRef.current)
 						: null;
+					const previousBaseline = rekey(priorBaseline);
 					const projected = projectGraphSnapshotToArchitecture(incoming.graph, {
-						previousArchitecture: sameArch ? refreshPrevious(previousBaseline, architectureRef.current) : undefined,
+						previousArchitecture: sameArch ? refreshPrevious(previousBaseline, rekey(architectureRef.current)) : undefined,
 						viewState: incoming.viewState,
 					});
+					if (idMap.size) {
+						const id = (value: string) => idMap.get(value) ?? value;
+						setSelectedIds(current => current.some(item => idMap.has(item)) ? current.map(id) : current);
+						setWorkspaceResourceId(current => current && id(current));
+					}
 					setHostSnapshot(incoming.graph);
 					hostGraphRef.current = incoming.graph;
 					setEnginePlanReport(null);
@@ -179,13 +251,37 @@ export function Studio() {
 					if (typeof incoming.viewState?.inspectorOpen === 'boolean') {
 						setInspectorOpen(incoming.viewState.inspectorOpen);
 					}
+					const storedGraph = parseGraphPresentation(incoming.viewState?.graph);
+					if (storedGraph) {
+						presentGraph({ type: 'restore', state: storedGraph });
+					}
+					// Stored graph pins carry the ids of their last save; follow them by address like the canvas does.
+					const graphIdMap = new Map([...viewStateIdMap(incoming.graph.nodes, incoming.viewState?.addresses), ...idMap]);
+					if (graphIdMap.size) {
+						presentGraph({ type: 'rekey', map: graphIdMap });
+					}
 					if (incoming.viewState?.viewports) {
 						viewport.current = { ...viewport.current, ...incoming.viewState.viewports };
 					}
-					dispatch(sameArch ? { type: 'rebase', architecture: projected.architecture, ...(previousBaseline ? { base: previousBaseline } : {}) } : { type: 'replace', architecture: projected.architecture });
+					dispatch(sameArch ? { type: 'rebase', architecture: projected.architecture, ...(priorBaseline ? { base: priorBaseline } : {}), ...(idMap.size ? { rekey: idMap } : {}) } : { type: 'replace', architecture: projected.architecture });
 					setHostBaseline(projected.architecture);
 					hostBaselineRef.current = projected.architecture;
-					if (incoming.viewState?.selectedId && projected.architecture.resources.some(r => r.id === incoming.viewState?.selectedId)) {
+					if (sameArch && (idMap.size > 0 || Object.keys(projected.idRemap).length > 0)) {
+						const validIds = new Set([
+							...projected.architecture.resources.map(r => r.id),
+							...projected.architecture.items.map(i => i.id),
+						]);
+						setSelectedIds(prev => [...new Set(prev.map(id => projected.idRemap[id] ?? id))].filter(id => validIds.has(id)));
+						setWorkspaceResourceId(prev => {
+							if (!prev) { return prev; }
+							const next = projected.idRemap[prev] ?? prev;
+							if (!projected.architecture.resources.some(r => r.id === next)) {
+								setWorkspaceOpen(false);
+								return '';
+							}
+							return next;
+						});
+					} else if (incoming.viewState?.selectedId && projected.architecture.resources.some(r => r.id === incoming.viewState?.selectedId)) {
 						setSelectedId(incoming.viewState.selectedId);
 					} else {
 						// A resource saved for the first time continues under the service's node id.
@@ -239,6 +335,8 @@ export function Studio() {
 						break;
 					}
 					const hydrated = hydrateResourceValues(base, graph, parsed.resources, parsed.variables);
+					sourceValuesRef.current = parsed;
+					setSourceValues(parsed.resources);
 					if (hydrated !== base) {
 						dispatch({ type: 'rebase', architecture: hydrated, base });
 						setHostBaseline(hydrated);
@@ -251,7 +349,11 @@ export function Studio() {
 					break;
 				case 'liveSchema':
 					if (incoming.schema) {
+						registerLiveFormSchema(incoming.schema);
 						setLiveSchemas(prev => ({ ...prev, [incoming.typeName]: incoming.schema! }));
+					} else {
+						clearFormAttributes(incoming.typeName);
+						setLiveSchemas(prev => { const next = { ...prev }; delete next[incoming.typeName]; return next; });
 					}
 					break;
 				case 'cloudRegions':
@@ -333,7 +435,6 @@ export function Studio() {
 						setSaveError(null);
 						savedFilesRef.current = { state: architectureRef.current, files: new Set([incoming.result.applied.fileName]) };
 						setMessage('Saved ' + incoming.result.applied.fileName + ' · rev ' + incoming.result.applied.newSourceRevision.slice(0, 8));
-						hostBridge.post({ type: 'refresh' });
 					} else {
 						setSaveError(incoming.result.error);
 					}
@@ -356,7 +457,6 @@ export function Studio() {
 						setSaveAllError(null);
 						savedFilesRef.current = { state: architectureRef.current, files: new Set(incoming.result.applied.files.map(file => file.fileName)) };
 						setMessage('Saved ' + incoming.result.applied.files.map(file => file.fileName).join(', ') + ' · rev ' + incoming.result.applied.newSourceRevision.slice(0, 8));
-						hostBridge.post({ type: 'refresh' });
 					} else {
 						setSaveAllError(incoming.result.error);
 					}
@@ -386,12 +486,30 @@ export function Studio() {
 					setLibraryOpen(true);
 					setLibraryTab('templates');
 					break;
+				case 'applyBundleLayout':
+					try {
+						pendingBundleLayout.current = parseBundledArchitecture(incoming.architecture).architecture;
+						setPendingLayoutTick(tick => tick + 1);
+					} catch {
+						setMessage('The bundle layout could not be read; the Terraform was imported without it.');
+					}
+					break;
 				case 'exportResult':
 					setMessage(incoming.message);
 					break;
 				case 'focusModeChanged':
 					setFocusMode(incoming.active);
 					break;
+				case 'requestSave':
+					keyboardSaveRef.current();
+					break;
+			}
+			} catch (err) {
+				setSaving(false);
+				setValidating(false);
+				setPlanning(false);
+				setInitializingOffline(false);
+				setMessage(err instanceof Error ? 'Canvas update error: ' + err.message : 'Canvas update failed; refresh to recover.');
 			}
 		});
 		hostBridge.post({ type: 'ready' });
@@ -409,7 +527,7 @@ export function Studio() {
 		}
 		requestedSchemasRef.current.add(typeName);
 		hostBridge.post({ type: 'requestSchema', kind: 'resource', typeName });
-	}, [hostBridge, selected, liveSchemas]);
+	}, [hostBridge, selected, liveSchemas, hostSnapshot]);
 
 	// Mirror selection back to the extension host's native CloudForge Graph tree.
 	useEffect(() => {
@@ -437,22 +555,30 @@ export function Studio() {
 					inspectorOpen,
 					libraryOpen,
 					viewports: viewport.current,
+					graph: serialiseGraphPresentation(graphPresentation),
 				}),
 			});
 		}, 350);
 		return () => clearTimeout(timer);
-	}, [hostBridge, hostSnapshot, architecture, mode, theme, selectedId, workspaceOpen, inspectorOpen, libraryOpen]);
+	}, [hostBridge, hostSnapshot, architecture, mode, theme, selectedId, workspaceOpen, inspectorOpen, libraryOpen, graphPresentation]);
 
-	const inspectModuleResource = useCallback((moduleName: string) => {
-		if (!hostBridge.isHosted || !hostSnapshot || !moduleName) {
+	const inspectModulePath = useCallback((modulePath: readonly string[]) => {
+		if (!hostBridge.isHosted || !hostSnapshot || modulePath.length === 0) {
 			return;
 		}
+		const modKey = modulePath.join('.');
 		setModuleInspections(prev => ({
 			...prev,
-			[moduleName]: { loading: true, inspection: prev[moduleName]?.inspection ?? null },
+			[modKey]: { loading: true, inspection: prev[modKey]?.inspection ?? null },
 		}));
-		hostBridge.post({ type: 'requestModule', modulePath: [moduleName] });
+		hostBridge.post({ type: 'requestModule', modulePath });
 	}, [hostBridge, hostSnapshot]);
+
+	const inspectModuleResource = useCallback((moduleName: string) => {
+		if (moduleName) {
+			inspectModulePath([moduleName]);
+		}
+	}, [inspectModulePath]);
 
 	const openResource = useCallback((id: string) => {
 		setSelectedId(id);
@@ -590,6 +716,30 @@ export function Studio() {
 		openDraftSave(payloads[0]?.fileName);
 	}, [hostBridge, architecture, hostSnapshot, hostBaseline, requestSaveAll, openDraftSave]);
 
+	/** Ctrl+S / Cmd+S from VS Code: the same as the Save button, or a note when the files already match. */
+	keyboardSaveRef.current = () => {
+		if (!changedFilePayloads(architecture, hostSnapshot, hostBaseline).length) {
+			setMessage('Nothing to save: the Terraform files already match the canvas.');
+			return;
+		}
+		openSave();
+	};
+
+	// Tell VS Code whether the canvas has Terraform changes the files don't have yet, so its tab shows a dot.
+	useEffect(() => {
+		if (!hostBridge.isHosted) {
+			return;
+		}
+		const timer = setTimeout(() => {
+			const dirty = changedFilePayloads(architecture, hostSnapshot, hostBaseline).length > 0;
+			if (dirty !== reportedDirtyRef.current) {
+				reportedDirtyRef.current = dirty;
+				hostBridge.post({ type: 'dirtyState', dirty });
+			}
+		}, 400);
+		return () => clearTimeout(timer);
+	}, [hostBridge, architecture, hostSnapshot, hostBaseline]);
+
 	const applySaveAll = useCallback(() => {
 		if (!hostBridge.isHosted || !saveAllPreview) {
 			return;
@@ -598,18 +748,18 @@ export function Studio() {
 		hostBridge.post({ type: 'applySaveAll', previewToken: saveAllPreview.previewToken });
 	}, [hostBridge, saveAllPreview]);
 
-	const exportHostArtifact = useCallback((format: 'svg' | 'png') => {
+	const exportHostArtifact = useCallback((format: 'svg' | 'png', prepared?: string, suffix = '') => {
 		if (!hostBridge.isHosted) {
 			return;
 		}
 		void (async () => {
 			try {
-				const svg = await presentationSvg(architecture);
+				const svg = prepared ?? await presentationSvg(architecture);
 				if (format === 'svg') {
 					hostBridge.post({
 						type: 'exportArtifact',
 						format: 'svg',
-						suggestedFileName: sanitizeDraftTfFileName(architecture.name).replace(/\.tf$/, '.svg'),
+						suggestedFileName: sanitizeDraftTfFileName(architecture.name).replace(/\.tf$/, suffix + '.svg'),
 						content: svg,
 						encoding: 'utf8',
 					});
@@ -635,7 +785,7 @@ export function Studio() {
 					hostBridge.post({
 						type: 'exportArtifact',
 						format: 'png',
-						suggestedFileName: sanitizeDraftTfFileName(architecture.name).replace(/\.tf$/, '.png'),
+						suggestedFileName: sanitizeDraftTfFileName(architecture.name).replace(/\.tf$/, suffix + '.png'),
 						content: base64,
 						encoding: 'base64',
 					});
@@ -647,6 +797,62 @@ export function Studio() {
 			}
 		})();
 	}, [hostBridge, architecture]);
+
+	const exportProjectBundle = useCallback(() => {
+		void (async () => {
+			try {
+				let svg: string | undefined;
+				try { svg = await presentationSvg(architecture); } catch { svg = undefined; }
+				const bundle = await buildProjectBundle({
+					architecture,
+					svg,
+					source: hostBridge.isHosted
+						? { mode: 'hosted', sourceRevision: hostSnapshot?.sourceRevision, status: hostSnapshot?.status, unsavedChanges: hostBaseline ? history.present !== hostBaseline : history.past.length > 0 }
+						: { mode: 'sample' },
+				});
+				if (hostBridge.isHosted) {
+					hostBridge.post({ type: 'exportArtifact', format: 'bundle', suggestedFileName: bundle.fileName, content: toBase64(bundle.bytes), encoding: 'base64' });
+					return;
+				}
+				const url = URL.createObjectURL(new Blob([bundle.bytes as BlobPart], { type: 'application/zip' }));
+				const anchor = document.createElement('a');
+				anchor.href = url;
+				anchor.download = bundle.fileName;
+				anchor.click();
+				setTimeout(() => URL.revokeObjectURL(url), 1000);
+				setMessage('Exported ' + bundle.fileName + ' · ' + bundle.manifest.files.length + ' files');
+			} catch (err) {
+				setMessage(err instanceof Error ? err.message : 'Project export failed');
+			}
+		})();
+	}, [hostBridge, architecture, hostSnapshot, hostBaseline, history.present, history.past.length]);
+
+	const importProjectBundle = useCallback((file: File) => {
+		void (async () => {
+			try {
+				const bundle = await readProjectBundle(new Uint8Array(await file.arrayBuffer()));
+				const incoming = bundle.architecture;
+				const note = bundle.warnings.length ? ' · ' + bundle.warnings.join(' ') : '';
+				if (!hostBridge.isHosted) {
+					dispatch({ type: 'replace', architecture: incoming });
+					setSelectedIds([]);
+					setMessage('Opened ' + incoming.name + ' · ' + incoming.resources.length + ' resources, ' + incoming.items.length + ' drawings' + note);
+				} else {
+					const clashes = bundleConflicts(architecture, incoming);
+					if (clashes.length) {
+						setMessage('This bundle is already on the canvas (' + clashes.length + ' matching elements). Import it into an empty architecture instead.');
+						return;
+					}
+					dispatch({ type: 'mergeArchitecture', architecture: incoming });
+					setSelectedIds(incoming.resources.map(resource => resource.id));
+					setMessage('Imported ' + incoming.resources.length + ' resources and ' + incoming.items.length + ' drawings from ' + incoming.name + '. Use Save to preview and write the Terraform files.' + note);
+				}
+				requestAnimationFrame(() => requestAnimationFrame(() => { void flow?.fitView({ padding: 0.18 }); }));
+			} catch (err) {
+				setMessage(err instanceof Error ? err.message : 'Unable to import that bundle');
+			}
+		})();
+	}, [hostBridge, architecture, flow]);
 
 	useEffect(() => {
 		function handleKey(event: KeyboardEvent) {
@@ -768,7 +974,7 @@ export function Studio() {
      onUndo={() => dispatch({ type: 'undo' })} onRedo={() => dispatch({ type: 'redo' })} canRedo={!!history.future.length}
      theme={theme} onTheme={() => setTheme(value => value === 'light' ? 'dark' : 'light')}
 				onRename={name => dispatch({ type: 'renameArchitecture', name })}
-				onTechnical={() => switchMode('technical')} onExport={exportSample}
+				onTechnical={() => switchMode('technical')} onExport={exportSample} onExportBundle={exportProjectBundle} onImportBundle={importProjectBundle}
 				onToggleLibrary={() => setLibraryOpen(value => !value)} onToggleInspector={() => setInspectorOpen(value => !value)}
 				host={hostBridge.isHosted ? {
 					isHosted: true,
@@ -796,12 +1002,20 @@ export function Studio() {
 					}} resizeHandle={<PaneResizeHandle side="library" width={libraryWidth} minimum={346} onCommit={setLibraryWidth} />} />
 				<div className="design-area">
 					<div className="canvas-shell">
+						{mode === 'technical' ? <TechnicalGraph architecture={architecture} fileValues={sourceValues} theme={theme} presentation={graphPresentation} onPresentation={presentGraph}
+							selectedId={selectedId} onSelect={setSelectedId} onOpenDetails={openDetails} onEdit={graphEdit}
+							onInit={instance => setFlow(instance as never)} viewports={viewport}
+							onExportImage={(svg, format) => { if (hostBridge.isHosted) { exportHostArtifact(format, svg, '-graph'); } else { void downloadSvg(svg, format, sanitizeDraftTfFileName(architecture.name).replace(/\.tf$/, '') + '-graph').catch(() => setMessage('Graph export failed')); } }}
+							diagnostics={findings} hasSource={hasSourceById} onOpenSource={hostBridge.isHosted ? id => hostBridge.post({ type: 'openSource', nodeId: id }) : undefined}
+							moduleInspections={hostBridge.isHosted && hostSnapshot ? moduleInspections : undefined}
+							onInspectModule={hostBridge.isHosted && hostSnapshot ? inspectModulePath : undefined}
+							plan={enginePlanReport ? { sourceRevision: enginePlanReport.sourceRevision, stale: enginePlanReport.sourceRevision !== hostSnapshot?.sourceRevision || (hostBaseline ? history.present !== hostBaseline : false), changes: enginePlanReport.resourceChanges } : undefined} /> :
 						<DesignCanvas architecture={architecture} mode={mode} theme={theme} onThemeChange={setTheme} selectedId={selectedId} selectedIds={selectedIds} onSelectionChange={setSelectedIds} dispatch={dispatch}
 							onSelect={id => { setSelectedId(id); if (id && inspectorCategory === 'resources' && !architecture.resources.some(resource => resource.id === id)) { setDetailTab('form'); } }} onOpen={openResource} onOpenDetails={openDetails} onInit={setFlow} viewports={viewport}
-							onOpenShapes={openShapes} onAddItem={addItem} onAddResource={addResource}
+							onOpenShapes={openShapes} ink={ink} onInkChange={setInk} onAddItem={addItem} onAddResource={addResource}
        onAddCatalogue={(type, provider, position, parentId) => {
         void loadCatalogue(provider).then(snapshot => { const entry = snapshot.entries.find(entry => entry.type === type); if (entry) { addCatalogueResource(entry,provider,position,parentId); } }).catch(() => setMessage('Unable to load the provider catalogue.'));
-       }} />
+       }} />}
 						{startContext && <StartScreen context={startContext} onAction={(action, architectureId) => hostBridge.post({ type: 'startAction', action, ...(architectureId ? { architectureId } : {}) })} />}
 					</div>
 				</div>
@@ -832,7 +1046,7 @@ export function Studio() {
       ) : selected ? (
 						<>
        {detailTab === 'form' && <div>
-							<ResourceFields resource={selected} dispatch={dispatch} architecture={architecture} liveSchemas={liveSchemas} cloudRegions={hostCloudRegions} moduleInspection={hostBridge.isHosted && hostSnapshot && selected.kind === 'module' ? { loading: !!moduleInspections[selected.name]?.loading, inspection: moduleInspections[selected.name]?.inspection ?? null, error: moduleInspections[selected.name]?.error, onInspect: () => inspectModuleResource(selected.name) } : undefined} hasSource={hostBridge.isHosted && !!hasSourceById[selected.id]} onOpenSource={hostBridge.isHosted ? () => hostBridge.post({ type: 'openSource', nodeId: selected.id }) : undefined} onRevealResource={openResource} onManageVariables={()=>{setInspectorCategory('variables');setDetailTab('form');requestAnimationFrame(()=>variablesButton.current?.focus());}} />
+							<ResourceFields resource={selected} dispatch={dispatch} architecture={architecture} liveSchemas={liveSchemas} cloudRegions={hostCloudRegions} moduleInspection={hostBridge.isHosted && hostSnapshot && selected.kind === 'module' ? { loading: !!moduleInspections[selected.name]?.loading, inspection: moduleInspections[selected.name]?.inspection ?? null, error: moduleInspections[selected.name]?.error, onInspect: () => inspectModuleResource(selected.name) } : undefined} hasSource={hostBridge.isHosted && !!hasSourceById[selected.id]} onOpenSource={hostBridge.isHosted ? () => hostBridge.post({ type: 'openSource', nodeId: selected.id }) : undefined} onRevealResource={openResource} onConfigureTerraform={()=>{setDetailTab('code');setInspectorOpen(true);}} onManageVariables={()=>{setInspectorCategory('variables');setDetailTab('form');requestAnimationFrame(()=>variablesButton.current?.focus());}} />
 							<div className="inspector-section"><h3>Connections</h3>
 								<p>{architecture.connections.filter(connection => endpointElementId(connection.target) === selected.id).length} incoming · {architecture.connections.filter(connection => endpointElementId(connection.source) === selected.id).length} outgoing</p>
 								<span className="muted">Design relationships</span>
@@ -855,10 +1069,16 @@ export function Studio() {
 				</aside>
 			</div>
 			{message&&<div className="studio-action-status" role="status">{message}</div>}<footer className="sr-only"><span>{hostBridge.isHosted ? (hostSnapshot ? 'Connected · rev ' + hostSnapshot.sourceRevision.slice(0, 8) : 'Connecting') : (history.past.length ? 'Modified draft' : 'Original sample') + ' · In-memory preview'}</span></footer>
-			{workspaceResource && <ResourceWorkspace open={workspaceOpen} resource={workspaceResource} architecture={architecture} dispatch={dispatch} liveSchemas={liveSchemas} cloudRegions={hostCloudRegions} moduleInspection={hostBridge.isHosted && hostSnapshot && workspaceResource.kind === 'module' ? { loading: !!moduleInspections[workspaceResource.name]?.loading, inspection: moduleInspections[workspaceResource.name]?.inspection ?? null, error: moduleInspections[workspaceResource.name]?.error, onInspect: () => inspectModuleResource(workspaceResource.name) } : undefined} hostDiagnostics={hostFindings} hasSource={hostBridge.isHosted && !!hasSourceById[workspaceResource.id]} onOpenSource={hostBridge.isHosted ? () => hostBridge.post({ type: 'openSource', nodeId: workspaceResource.id }) : undefined} onSaveFile={hostBridge.isHosted && hostSnapshot ? file => openDraftSave(file) : undefined} onNavigate={id=>{setWorkspaceResourceId(id);setSelectedId(id);}} onClose={() => setWorkspaceOpen(false)} />}
+			{workspaceResource && <ResourceWorkspace open={workspaceOpen} resource={workspaceResource} schemaPreview={schemaPreviews[workspaceResource.id]} onRequestSchemaPreview={hostBridge.isHosted ? (resourceId, draft) => hostBridge.post({ type: 'renderResourceDraft', resourceId, draft }) : undefined} architecture={architecture} dispatch={dispatch} liveSchemas={liveSchemas} cloudRegions={hostCloudRegions} moduleInspection={hostBridge.isHosted && hostSnapshot && workspaceResource.kind === 'module' ? { loading: !!moduleInspections[workspaceResource.name]?.loading, inspection: moduleInspections[workspaceResource.name]?.inspection ?? null, error: moduleInspections[workspaceResource.name]?.error, onInspect: () => inspectModuleResource(workspaceResource.name) } : undefined} hostDiagnostics={hostFindings} hasSource={hostBridge.isHosted && !!hasSourceById[workspaceResource.id]} onOpenSource={hostBridge.isHosted ? () => hostBridge.post({ type: 'openSource', nodeId: workspaceResource.id }) : undefined} onSaveFile={hostBridge.isHosted && hostSnapshot ? file => openDraftSave(file) : undefined} onNavigate={id=>{setWorkspaceResourceId(id);setSelectedId(id);}} onClose={() => setWorkspaceOpen(false)} />}
 			{hostBridge.isHosted && <SaveAllDialog open={saveAllOpen} fileNames={saveAllFiles} busy={saving} preview={saveAllPreview} error={saveAllError} onRefreshPreview={requestSaveAll} onReviewFile={file => { setSaveAllOpen(false); openDraftSave(file); }} onApply={applySaveAll} onClose={() => setSaveAllOpen(false)} />}
 			{hostBridge.isHosted && <DraftSaveDialog open={saveDialogOpen} fileName={saveFileName} projectFiles={hostSnapshot ? projectResourceFiles(architecture) : undefined} contents={saveContents} busy={saving} preview={savePreview} error={saveError} onFileNameChange={setSaveFileName} onSelectProjectFile={selectDraftSaveProjectFile} onRefreshPreview={refreshDraftSavePreview} onApply={applyHostDraftSave} onClose={() => setSaveDialogOpen(false)} />}
 			{moduleImportOpen && <ModuleImport onClose={() => setModuleImportOpen(false)} onImport={importModule} />}
 		</div>
 	);
+}
+
+/** Preview-only sample selection; the hosted webview always receives the project from the extension. */
+function previewSample() {
+	try { const sample = new URLSearchParams(location.search).get('sample') ?? (location.hash.match(/^#(hub-spoke|estate)$/)?.[1] ?? null); if (sample === 'hub-spoke') { return hubSpokeArchitecture(); } if (sample === 'estate') { return estateArchitecture(); } } catch { /* Non-browser test environments use the default sample. */ }
+	return sampleArchitecture();
 }

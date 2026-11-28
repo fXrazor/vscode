@@ -77,6 +77,35 @@ export interface HostViewState {
 	readonly nodePositions: Partial<Record<'visual' | 'technical', Readonly<Record<string, HostPoint>>>>;
 	readonly checkpoints: readonly unknown[];
 	readonly sampleContext: unknown;
+	/** Technical Graph presentation and graph-only pins; never merged into nodePositions. */
+	readonly graph?: HostGraphViewState;
+	/** Per-resource icon choices, which Terraform does not record. The host keeps well-formed entries only. */
+	readonly appearance?: Readonly<Record<string, HostResourceAppearance>>;
+	/** Resource id → Terraform address when this state was written, so renumbered ids can be followed. */
+	readonly addresses?: Readonly<Record<string, string>>;
+}
+
+export interface HostResourceAppearance {
+	readonly icon?: string;
+	readonly iconSize?: number;
+	readonly iconKind?: string;
+	readonly override?: { readonly provider: 'azure' | 'aws' | 'gcp'; readonly icon: string; readonly label: string };
+}
+
+export interface HostGraphViewState {
+	readonly lens: string;
+	readonly layout: string;
+	readonly route: string;
+	readonly density: string;
+	readonly overlay: string;
+	readonly spacing: 'auto' | number;
+	readonly height: number;
+	readonly showMembership: boolean;
+	readonly showInputs?: boolean;
+	readonly expanded: readonly string[];
+	readonly collapsed?: readonly string[];
+	readonly pins: Readonly<Record<string, HostPoint>>;
+	readonly network?: { readonly sizeBy: number; readonly sizeCount: string; readonly spread: number; readonly linkLength: number; readonly spacing: number; readonly clusters: string; readonly labels: string; readonly links: string };
 }
 
 export interface HostCloudRegion {
@@ -404,7 +433,9 @@ export type HostInboundMessage =
 	| { readonly type: 'openExport' }
 	| { readonly type: 'openTemplates' }
 	| { readonly type: 'exportResult'; readonly ok: boolean; readonly message: string }
-	| { readonly type: 'focusModeChanged'; readonly active: boolean };
+	| { readonly type: 'applyBundleLayout'; readonly architecture: unknown }
+	| { readonly type: 'focusModeChanged'; readonly active: boolean }
+	| { readonly type: 'requestSave' };
 
 /** Start-screen buttons; the host maps each one to a fixed CloudForge or workbench command. */
 export type HostStartAction = 'createProject' | 'openProject' | 'createArchitecture' | 'switchArchitecture' | 'openArchitecture';
@@ -422,6 +453,7 @@ export type HostOutboundMessage =
 	| { readonly type: 'startAction'; readonly action: HostStartAction; readonly architectureId?: string }
 	| { readonly type: 'selectNode'; readonly nodeId: string | null }
 	| { readonly type: 'openSource'; readonly nodeId: string }
+	| { readonly type: 'dirtyState'; readonly dirty: boolean }
 	| { readonly type: 'renderResourceDraft'; readonly resourceId: string; readonly draft: ResourceDraft }
 	| { readonly type: 'openSourceLocation'; readonly sourceRevision: string; readonly fileName: string; readonly line?: number; readonly column?: number }
 	| { readonly type: 'refresh' }
@@ -438,7 +470,7 @@ export type HostOutboundMessage =
 	| { readonly type: 'requestEngineValidate'; readonly engine?: 'openTofu' | 'terraform' }
 	| { readonly type: 'requestEnginePlan'; readonly engine?: 'openTofu' | 'terraform' }
 	| { readonly type: 'requestEngineInitOffline'; readonly engine?: 'openTofu' | 'terraform' }
-	| { readonly type: 'exportArtifact'; readonly format: 'svg' | 'png' | 'markdown'; readonly suggestedFileName: string; readonly content: string; readonly encoding: 'utf8' | 'base64' };
+	| { readonly type: 'exportArtifact'; readonly format: 'svg' | 'png' | 'markdown' | 'bundle'; readonly suggestedFileName: string; readonly content: string; readonly encoding: 'utf8' | 'base64' };
 
 interface VsCodeWebviewApi {
 	postMessage(message: unknown): void;

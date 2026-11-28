@@ -3,10 +3,11 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 import type { Architecture, BoardItem, DesignMode, Position, ResourceBlock } from './model.ts';
+import type { ShapeId } from './shapes.ts';
 import { bindingKey, bindingTarget } from './fieldBindings.ts';
-import { fitResourceContainers, isResourceContainer, visualAncestors, visualDescendants, containedDescendants } from './resourceHierarchy.ts';
+import { fitResourceContainers, isResourceContainer, resourceDimensions, visualAncestors, visualDescendants, containedDescendants } from './resourceHierarchy.ts';
 import { iconSizeLimits, resourceIconSize } from './resourceGeometry.ts';
-import { connectionElementIds, endpointElementId, pointEndpoint, remapEndpoint } from './connectionEndpoints.ts';
+import { connectionElementIds, elementEndpoint, endpointElementId, pointEndpoint, remapEndpoint, type EndpointPort } from './connectionEndpoints.ts';
 import { connectionAnchor } from './designConnections.ts';
 import { projectResize, resizeAnchors, resizeLimits, type ResizeAnchor, type ResizeBox } from './resizeGeometry.ts';
 export { resizeAnchorPoint, resizeAnchors, resizeLimits, type ResizeAnchor } from './resizeGeometry.ts';
@@ -20,11 +21,78 @@ export type CanvasCommand =
 	| { kind: 'group'; ids: string[]; id: string }
 	| { kind: 'ungroup'; ids: string[] }
 	| { kind: 'arrange'; ids: string[]; direction: 'front' | 'forward' | 'backward' | 'back' }
-	| { kind: 'duplicate'; fragment: Architecture; idMap: Record<string, string>; offset: number }
+	| { kind: 'duplicate'; fragment: Architecture; idMap: Record<string, string>; offset: number; offsetY?: number }
 	/** Multi-object resize in one undo step, keeping the chosen corner fixed (top-left by default). */
 	| { kind: 'resize'; ids: string[]; mode: DesignMode; scale?: number; match?: 'width' | 'height' | 'size'; anchor?: ResizeAnchor }
 	/** Rotate drawings about their centres: `angle` sets an absolute angle, `by` turns each one. Resources stay upright. */
-	| { kind: 'rotate'; ids: string[]; angle?: number; by?: number };
+	| { kind: 'rotate'; ids: string[]; angle?: number; by?: number }
+	/** Miro-style wrap selection in a new frame sized to fit its members (1 atomic undo step). */
+	| { kind: 'frameSelection'; ids: string[]; id: string; mode: DesignMode; sizes?: Record<string, { width: number; height: number }>; label?: string }
+	/** Resize an existing frame tightly around its members (or visually enclosed elements if empty). */
+	| { kind: 'fitFrame'; id: string; mode: DesignMode; sizes?: Record<string, { width: number; height: number }> }
+	/** Miro-style Switch Type: convert sticky notes, shapes, and text boxes in place while preserving text, geometry, and links. */
+	| { kind: 'convertItem'; ids: string[]; targetKind: 'note' | 'shape' | 'text'; shape?: ShapeId }
+	/** Miro-style flowchart speed shortcut (Ctrl+Arrow): spawn a matching element in a direction and connect with directional ports. */
+	| { kind: 'spawnConnected'; sourceId: string; id: string; connectionId: string; direction: 'right' | 'left' | 'up' | 'down'; mode: DesignMode }
+	/** Atomic multi-item insertion (e.g. Miro paste-lines-as-sticky-notes cluster in 1 undo step). */
+	| { kind: 'addItems'; items: BoardItem[] };
+
+const pasteNotePalette = ['#fff0b5', '#d3f9d8', '#d0ebff', '#e5dbff', '#ffe3c4', '#ffd6e7'] as const;
+
+/** Parse pasted text lines (stripping bullets/numbering) into a tidy Miro sticky-note grid. */
+export function stickyClusterFromText(text: string, origin: Position, makeId: () => string, maxItems = 24): BoardItem[] {
+	const lines = text
+		.split(/\r?\n/)
+		.map(line => line.trim().replace(/^(?:[-*•▪◦]+|\d+[.)])\s+/, '').trim())
+		.filter(Boolean)
+		.slice(0, maxItems);
+	if (!lines.length) { return []; }
+	const width = 200; const height = 128; const gap = 24;
+	const cols = lines.length <= 3 ? lines.length : Math.min(4, Math.ceil(Math.sqrt(lines.length)));
+	const rows = Math.ceil(lines.length / cols);
+	const totalW = cols * width + (cols - 1) * gap;
+	const totalH = rows * height + (rows - 1) * gap;
+	const startX = Math.round(origin.x - totalW / 2);
+	const startY = Math.round(origin.y - totalH / 2);
+	return lines.map((line, index) => {
+		const col = index % cols; const row = Math.floor(index / cols);
+		const pos = { x: startX + col * (width + gap), y: startY + row * (height + gap) };
+		return {
+			id: makeId(),
+			kind: 'note',
+			text: line.slice(0, 400),
+			fill: lines.length === 1 ? '#fff0b5' : pasteNotePalette[row % pasteNotePalette.length],
+			width,
+			height,
+			positions: { visual: pos, technical: pos },
+			members: [],
+		};
+	});
+}
+
+/** BFS across design connections to find all elements connected to the current selection (Miro Select Connected). */
+export function connectedElementIds(architecture: Architecture, seedIds: readonly string[]): string[] {
+	const valid = new Set(canvasElements(architecture).map(item => item.id));
+	const visited = new Set(expandGroups(architecture, [...seedIds]).filter(id => valid.has(id)));
+	if (!visited.size) { return []; }
+	const adjacency = new Map<string, Set<string>>();
+	const link = (a: string, b: string) => {
+		if (!adjacency.has(a)) { adjacency.set(a, new Set()); }
+		adjacency.get(a)!.add(b);
+	};
+	for (const edge of architecture.connections) {
+		const s = endpointElementId(edge.source); const t = endpointElementId(edge.target);
+		if (s && t && valid.has(s) && valid.has(t)) { link(s, t); link(t, s); }
+	}
+	const queue = [...visited];
+	while (queue.length) {
+		const current = queue.shift()!;
+		for (const next of adjacency.get(current) ?? []) {
+			if (!visited.has(next)) { visited.add(next); queue.push(next); }
+		}
+	}
+	return expandGroups(architecture, [...visited]);
+}
 
 /** Degrees in [0, 360), rounded to 0.1°; 0 is stored as undefined so unrotated drawings stay unchanged. */
 export function normaliseRotation(degrees: number): number | undefined {
@@ -84,7 +152,7 @@ export function selectionFragment(architecture: Architecture, ids: string[], con
 
 export function applyCanvasCommand(architecture: Architecture, command: CanvasCommand): Architecture {
 	const elements = canvasElements(architecture); const byId = new Map(elements.map(element => [element.id, element]));
-	const expanded = 'ids' in command ? expandGroups(architecture, command.ids) : [];
+	const expanded = Object.hasOwn(command, 'ids') ? expandGroups(architecture, (command as { ids: string[] }).ids) : [];
 	const editable = new Set(expanded.filter(id => !byId.get(id)?.canvasLocked));
 	switch (command.kind) {
 		case 'move': {
@@ -120,7 +188,10 @@ export function applyCanvasCommand(architecture: Architecture, command: CanvasCo
 			let changed = false;
 			const items = architecture.items.map(item => {
 				if (!editable.has(item.id) || Object.entries(patch).every(([key, value]) => item[key as keyof BoardItem] === value)) { return item; }
-				changed = true; return { ...item, ...patch };
+				changed = true;
+				const next = { ...item, ...patch };
+				if (Object.hasOwn(patch, 'fontSize') && patch.fontSize === undefined) { delete next.fontSize; }
+				return next;
 			});
 			return changed ? { ...architecture, items } : architecture;
 		}
@@ -212,29 +283,135 @@ export function applyCanvasCommand(architecture: Architecture, command: CanvasCo
 		}
 		case 'duplicate': {
 			const fragment = command.fragment; const idMap = command.idMap;
+			const dx = command.offset; const dy = command.offsetY ?? command.offset;
 			const source = canvasElements(fragment); const newIds = source.map(item => idMap[item.id]);
-			if (newIds.some(id => !id || byId.has(id)) || new Set(newIds).size !== newIds.length || !Number.isFinite(command.offset)) { return architecture; }
+			if (newIds.some(id => !id || byId.has(id)) || new Set(newIds).size !== newIds.length || !Number.isFinite(dx) || !Number.isFinite(dy)) { return architecture; }
 			const names = new Set(architecture.resources.map(resource => resource.name)); const terraformNames = new Set(architecture.resources.map(resource => resource.terraformName ?? resource.name));
-			const offset = (positions: Record<DesignMode, Position>) => Object.fromEntries(Object.entries(positions).map(([mode, position]) => [mode, { x: position.x + command.offset, y: position.y + command.offset }])) as Record<DesignMode, Position>;
+			const offset = (positions: Record<DesignMode, Position>) => Object.fromEntries(Object.entries(positions).map(([mode, position]) => [mode, { x: position.x + dx, y: position.y + dy }])) as Record<DesignMode, Position>;
 			const resources = structuredClone(fragment.resources).map(resource => {
 				let index = 1; let name = resource.name + '-copy'; while (names.has(name)) { name = resource.name + '-copy-' + ++index; } names.add(name);
 				const base = (resource.terraformName ?? resource.name).replace(/[^A-Za-z0-9_-]/g, '_').replace(/^(?=[0-9-])/, '_');
 				let terraformName = base + '_copy'; index = 1; while (terraformNames.has(terraformName)) { terraformName = base + '_copy_' + ++index; } terraformNames.add(terraformName);
 				const cloneBlocks = (blocks: ResourceBlock[]): ResourceBlock[] => blocks.map(block => ({ ...block, id: idMap[resource.id] + ':' + block.id, blocks: cloneBlocks(block.blocks) }));
 				const fieldBindings = resource.fieldBindings && Object.fromEntries(Object.entries(resource.fieldBindings).map(([key, binding]) => { const target = bindingTarget(key); return [target?.kind === 'block' ? bindingKey({...target,blockId:idMap[resource.id] + ':' + target.blockId}) : key,binding]; }));
-				const resourceRefs = resource.resourceRefs && Object.fromEntries(Object.entries(resource.resourceRefs).map(([key, binding]) => { const target = bindingTarget(key); return [target?.kind === 'block' ? bindingKey({...target,blockId:idMap[resource.id] + ':' + target.blockId}) : key,{ refs: binding.refs.map(entry => ({ resourceId: idMap[entry.resourceId] ?? entry.resourceId, attribute: entry.attribute })) }]; }));
+				const resourceRefs = resource.resourceRefs && Object.fromEntries(Object.entries(resource.resourceRefs).map(([key, binding]) => { const target = bindingTarget(key); return [target?.kind === 'block' ? bindingKey({...target,blockId:idMap[resource.id] + ':' + target.blockId}) : key,{ refs: binding.refs.map(entry => ({ resourceId: idMap[entry.resourceId] ?? entry.resourceId, attribute: entry.attribute })), ...(binding.items ? { items: binding.items.map(entry => entry.kind === 'ref' ? { ...entry, resourceId: idMap[entry.resourceId] ?? entry.resourceId } : { ...entry }) } : {}) }]; }));
 				return { ...resource, id: idMap[resource.id], parentId:resource.parentId?(idMap[resource.parentId]??(architecture.resources.some(item=>item.id===resource.parentId)?resource.parentId:undefined)):undefined, visualParentId:resource.visualParentId?(idMap[resource.visualParentId]??(architecture.resources.some(item=>item.id===resource.visualParentId)?resource.visualParentId:undefined)):resource.visualParentId, name, terraformName, fieldBindings, resourceRefs, blocks: cloneBlocks(resource.blocks), canvasLocked: false, positions: offset(resource.positions) };
 			});
 			const items = structuredClone(fragment.items).map(item => ({ ...item, id: idMap[item.id], canvasLocked: false, positions: offset(item.positions), members: item.members.map(id => idMap[id]).filter(Boolean) }));
 			const groups = (fragment.groups ?? []).map(group => ({ ...group, id: idMap[group.id], members: group.members.map(id => idMap[id]).filter(Boolean) })).filter(group => group.id && group.members.length > 1);
 			const connections = fragment.connections.flatMap(link => {
-				const source = remapEndpoint(link.source, idMap, command.offset); const target = remapEndpoint(link.target, idMap, command.offset);
+				const source = remapEndpoint(link.source, idMap, dx, dy); const target = remapEndpoint(link.target, idMap, dx, dy);
 				if (!source || !target) { return []; }
 				const sourceId = endpointElementId(source); const targetId = endpointElementId(target);
-				return [{ ...link, id: idMap[link.id] ?? (sourceId && targetId ? sourceId + '-' + targetId : link.id + '-copy'), source, target }];
+				const waypoint = link.waypoint ? { x: link.waypoint.x + dx, y: link.waypoint.y + dy } : undefined;
+				return [{ ...link, id: idMap[link.id] ?? (sourceId && targetId ? sourceId + '-' + targetId : link.id + '-copy'), source, target, ...(waypoint ? { waypoint } : {}) }];
 			});
 			if ((!source.length && !connections.length) || new Set(connections.map(link => link.id)).size !== connections.length || connections.some(link => architecture.connections.some(existing => existing.id === link.id))) { return architecture; }
 			return { ...architecture, resources: [...architecture.resources, ...resources], items: [...architecture.items, ...items], groups: [...(architecture.groups ?? []), ...groups], connections: [...architecture.connections, ...connections], layerOrder: [...sceneOrder(architecture), ...sceneOrder(fragment).map(id => idMap[id])] };
+		}
+		case 'frameSelection': {
+			if (!command.id || byId.has(command.id)) { return architecture; }
+			const members = [...editable].filter(id => !architecture.items.some(item => item.id === id && item.kind === 'frame'));
+			if (!members.length) { return architecture; }
+			const boxOf = (id: string) => {
+				const element = byId.get(id)!;
+				const pos = element.positions[command.mode];
+				if (command.sizes?.[id]) { return { x: pos.x, y: pos.y, width: command.sizes[id].width, height: command.sizes[id].height }; }
+				if (Object.hasOwn(element, 'width')) { const item = element as BoardItem; return { x: pos.x, y: pos.y, width: item.width, height: item.height }; }
+				const resource = architecture.resources.find(item => item.id === id)!;
+				if (isResourceContainer(resource)) { const dim = resourceDimensions(architecture, resource, command.mode); return { x: pos.x, y: pos.y, width: dim.width, height: dim.height }; }
+				const side = command.mode === 'visual' ? resourceIconSize(resource) : 220;
+				return { x: pos.x, y: pos.y, width: side, height: command.mode === 'visual' ? side : 120 };
+			};
+			const boxes = members.map(boxOf);
+			const minX = Math.min(...boxes.map(box => box.x)); const minY = Math.min(...boxes.map(box => box.y));
+			const maxX = Math.max(...boxes.map(box => box.x + box.width)); const maxY = Math.max(...boxes.map(box => box.y + box.height));
+			const pos = { x: Math.round(minX - 36), y: Math.round(minY - 40) };
+			const width = Math.max(240, Math.round(maxX - minX + 72));
+			const height = Math.max(160, Math.round(maxY - minY + 76));
+			const frameIndex = architecture.items.filter(item => item.kind === 'frame').length + 1;
+			const frame: BoardItem = { id: command.id, kind: 'frame', text: command.label?.trim() || 'Frame ' + frameIndex, width, height, positions: { visual: pos, technical: pos }, members };
+			const memberSet = new Set(members);
+			const items = [...architecture.items.map(item => item.kind === 'frame' ? { ...item, members: item.members.filter(id => !memberSet.has(id)) } : item), frame];
+			return { ...architecture, items, layerOrder: [command.id, ...sceneOrder(architecture)] };
+		}
+		case 'fitFrame': {
+			const frame = architecture.items.find(item => item.id === command.id && item.kind === 'frame');
+			if (!frame || frame.canvasLocked) { return architecture; }
+			const boxOf = (id: string) => {
+				const element = byId.get(id)!;
+				const pos = element.positions[command.mode];
+				if (command.sizes?.[id]) { return { x: pos.x, y: pos.y, width: command.sizes[id].width, height: command.sizes[id].height }; }
+				if (Object.hasOwn(element, 'width')) { const item = element as BoardItem; return { x: pos.x, y: pos.y, width: item.width, height: item.height }; }
+				const resource = architecture.resources.find(item => item.id === id)!;
+				if (isResourceContainer(resource)) { const dim = resourceDimensions(architecture, resource, command.mode); return { x: pos.x, y: pos.y, width: dim.width, height: dim.height }; }
+				const side = command.mode === 'visual' ? resourceIconSize(resource) : 220;
+				return { x: pos.x, y: pos.y, width: side, height: command.mode === 'visual' ? side : 120 };
+			};
+			let members = frame.members.filter(id => byId.has(id) && id !== frame.id);
+			if (!members.length) {
+				const fp = frame.positions[command.mode];
+				members = elements.filter(element => {
+					if (element.id === frame.id || element.canvasLocked) { return false; }
+					if (architecture.items.some(item => item.id === element.id && item.kind === 'frame')) { return false; }
+					const box = boxOf(element.id);
+					const cx = box.x + box.width / 2; const cy = box.y + box.height / 2;
+					return cx >= fp.x && cx <= fp.x + frame.width && cy >= fp.y && cy <= fp.y + frame.height;
+				}).map(element => element.id);
+			}
+			if (!members.length) { return architecture; }
+			const boxes = members.map(boxOf);
+			const minX = Math.min(...boxes.map(box => box.x)); const minY = Math.min(...boxes.map(box => box.y));
+			const maxX = Math.max(...boxes.map(box => box.x + box.width)); const maxY = Math.max(...boxes.map(box => box.y + box.height));
+			const pos = { x: Math.round(minX - 36), y: Math.round(minY - 40) };
+			const width = Math.max(200, Math.round(maxX - minX + 72));
+			const height = Math.max(140, Math.round(maxY - minY + 76));
+			const unchanged = frame.positions[command.mode].x === pos.x && frame.positions[command.mode].y === pos.y && frame.width === width && frame.height === height && frame.members.length === members.length && frame.members.every((id, index) => id === members[index]);
+			if (unchanged) { return architecture; }
+			const memberSet = new Set(members);
+			const items = architecture.items.map(item => item.id === frame.id ? { ...item, width, height, positions: { visual: pos, technical: pos }, members } : item.kind === 'frame' ? { ...item, members: item.members.filter(id => !memberSet.has(id)) } : item);
+			return { ...architecture, items };
+		}
+		case 'convertItem': {
+			const convertible = new Set(['note', 'shape', 'text']);
+			let changed = false;
+			const items = architecture.items.map(item => {
+				if (!editable.has(item.id) || !convertible.has(item.kind)) { return item; }
+				const nextShape = command.targetKind === 'shape' ? (command.shape ?? item.shape ?? 'rectangle') : undefined;
+				if (item.kind === command.targetKind && item.shape === nextShape) { return item; }
+				changed = true;
+				const next: BoardItem = { ...item, kind: command.targetKind };
+				if (nextShape) { next.shape = nextShape; } else { delete next.shape; }
+				if (command.targetKind === 'note' && (!next.fill || next.fill === 'transparent')) { next.fill = '#fff0b5'; }
+				if (command.targetKind === 'text' && next.fill === '#fff0b5') { next.fill = 'transparent'; }
+				return next;
+			});
+			return changed ? { ...architecture, items } : architecture;
+		}
+		case 'spawnConnected': {
+			if (!command.id || !command.connectionId || byId.has(command.id) || architecture.connections.some(link => link.id === command.connectionId)) { return architecture; }
+			const source = architecture.items.find(item => item.id === command.sourceId && !item.canvasLocked && (item.kind === 'note' || item.kind === 'shape' || item.kind === 'text'));
+			if (!source) { return architecture; }
+			const gap = 72;
+			const origin = source.positions[command.mode];
+			const pos: Position = command.direction === 'right' ? { x: origin.x + source.width + gap, y: origin.y }
+				: command.direction === 'left' ? { x: origin.x - source.width - gap, y: origin.y }
+				: command.direction === 'down' ? { x: origin.x, y: origin.y + source.height + gap }
+				: { x: origin.x, y: origin.y - source.height - gap };
+			const ports: Record<'right' | 'left' | 'up' | 'down', [EndpointPort, EndpointPort]> = {
+				right: ['output', 'input'],
+				left: ['input', 'output'],
+				down: ['bottom', 'top'],
+				up: ['top', 'bottom'],
+			};
+			const [fromPort, toPort] = ports[command.direction];
+			const spawned: BoardItem = { ...source, id: command.id, text: '', positions: { visual: pos, technical: pos }, members: [], canvasLocked: false };
+			const link = { id: command.connectionId, source: elementEndpoint(source.id, fromPort), target: elementEndpoint(command.id, toPort), routing: 'elbow' as const };
+			return { ...architecture, items: [...architecture.items, spawned], connections: [...architecture.connections, link], layerOrder: [...sceneOrder(architecture), command.id] };
+		}
+		case 'addItems': {
+			if (!command.items.length || command.items.some(item => !item.id || byId.has(item.id)) || new Set(command.items.map(item => item.id)).size !== command.items.length) { return architecture; }
+			return { ...architecture, items: [...architecture.items, ...command.items], layerOrder: [...sceneOrder(architecture), ...command.items.map(item => item.id)] };
 		}
 	}
 }

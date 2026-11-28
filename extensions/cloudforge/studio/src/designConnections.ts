@@ -1,3 +1,7 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
 import type { Architecture, DesignMode } from './model.ts';
 import { resourceIconSize } from './resourceGeometry.ts';
 import { isResourceContainer, resourceDimensions } from './resourceHierarchy.ts';
@@ -29,11 +33,24 @@ export function connectionAnchor(architecture: Architecture, endpoint: DesignEnd
 	if (!value) { return undefined; }
 	if (value.kind === 'point') { return value.position; }
 	const id = value.elementId;
-	const right = (value.port ?? (side === 'source' ? 'output' : 'input')) === 'output';
+	const port = value.port ?? (side === 'source' ? 'output' : 'input'); const right = port === 'output';
 	const resource = architecture.resources.find(resource => resource.id === id);
-	if (resource) { const container=isResourceContainer(resource); const size = container ? resourceDimensions(architecture,resource,mode).width : mode === 'visual' ? resourceIconSize(resource) : 244; return { x: resource.positions[mode].x + (right ? size : 0), y: resource.positions[mode].y + (container?22:mode === 'visual' ? size / 2 : 100) }; }
+	if (resource) {
+		const container = isResourceContainer(resource); const box = container ? resourceDimensions(architecture, resource, mode) : undefined;
+		const size = box ? box.width : mode === 'visual' ? resourceIconSize(resource) : 244; const height = box ? box.height : mode === 'visual' ? resourceIconSize(resource) : 200;
+		const origin = resource.positions[mode];
+		if (value.anchor) { return { x: Math.round((origin.x + size * value.anchor.x) * 10) / 10, y: Math.round((origin.y + height * value.anchor.y) * 10) / 10 }; }
+		if (port === 'top' || port === 'bottom') { return { x: origin.x + size / 2, y: origin.y + (port === 'bottom' ? height : 0) }; }
+		return { x: origin.x + (right ? size : 0), y: origin.y + (container ? 22 : mode === 'visual' ? size / 2 : 100) };
+	}
 	const item = architecture.items.find(item => item.id === id && item.kind !== 'frame');
 	if (!item) { return undefined; }
-	const angle = (item.rotation ?? 0) * Math.PI / 180; const radius = (right ? 1 : -1) * item.width / 2;
-	return { x: item.positions[mode].x + item.width / 2 + radius * Math.cos(angle), y: item.positions[mode].y + item.height / 2 + radius * Math.sin(angle) };
+	const angle = (item.rotation ?? 0) * Math.PI / 180; const centre = { x: item.positions[mode].x + item.width / 2, y: item.positions[mode].y + item.height / 2 };
+	if (value.anchor) {
+		const lx = (value.anchor.x - 0.5) * item.width; const ly = (value.anchor.y - 0.5) * item.height;
+		return { x: Math.round((centre.x + lx * Math.cos(angle) - ly * Math.sin(angle)) * 10) / 10, y: Math.round((centre.y + lx * Math.sin(angle) + ly * Math.cos(angle)) * 10) / 10 };
+	}
+	if (port === 'top' || port === 'bottom') { const radius = (port === 'bottom' ? 1 : -1) * item.height / 2; return { x: centre.x - radius * Math.sin(angle), y: centre.y + radius * Math.cos(angle) }; }
+	const radius = (right ? 1 : -1) * item.width / 2;
+	return { x: centre.x + radius * Math.cos(angle), y: centre.y + radius * Math.sin(angle) };
 }

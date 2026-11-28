@@ -91,6 +91,9 @@ test('Stage 3 catalogue adapters parse snapshots, pick newest provider version, 
 					{ name: 'name', path: 'name', access: 'required', editor: 'text', encoding: 'plain', description: 'Storage account name.' },
 					{ name: 'https_traffic_only_enabled', path: 'https_traffic_only_enabled', access: 'optional', editor: 'checkbox', encoding: 'plain' },
 					{ name: 'primary_access_key', path: 'primary_access_key', access: 'computedOnly', editor: 'secret', encoding: 'plain', sensitive: true },
+					{ name: 'tuple_value', path: 'tuple_value', access: 'optional', editor: 'text', typeExpr: { kind: 'tuple', elements: [{ kind: 'number' }, { kind: 'bool' }] } },
+					{ name: 'dynamic_value', path: 'dynamic_value', access: 'optional', editor: { gap: 'Complex value' }, typeExpr: { kind: 'dynamic' } },
+					{ name: 'nested_values', path: 'nested_values', access: 'optional', nested: { mode: 'list', attributes: [] } },
 				],
 				blocks: [
 					{
@@ -102,7 +105,7 @@ test('Stage 3 catalogue adapters parse snapshots, pick newest provider version, 
 							attributes: [
 								{ name: 'versioning_enabled', path: 'blob_properties.versioning_enabled', access: 'optional', editor: 'checkbox', encoding: 'plain' },
 							],
-							blocks: [],
+							blocks: [{ name: 'delete_retention_policy', path: 'blob_properties.delete_retention_policy', maxItems: 1, block: { attributes: [{ name: 'days', path: 'blob_properties.delete_retention_policy.days', access: 'optional', typeExpr: { kind: 'number' } }], blocks: [] } }],
 						},
 					},
 				],
@@ -112,12 +115,17 @@ test('Stage 3 catalogue adapters parse snapshots, pick newest provider version, 
 	assert.ok(adapted);
 	assert.equal(adapted.providerSource, 'hashicorp/azurerm');
 	assert.equal(adapted.providerVersion, '5.14.0');
-	assert.equal(adapted.attributes.length, 3);
+	assert.equal(adapted.attributes.length, 6);
 	assert.equal(adapted.attributes[1].valueType, 'bool');
 	assert.equal(adapted.attributes[2].access, 'computedOnly');
 	assert.equal(adapted.attributes[2].sensitive, true);
-	assert.equal(adapted.blocks.length, 1);
+	assert.equal(adapted.attributes[3].valueType, 'listString');
+	assert.equal(adapted.attributes[4].valueType, 'json');
+	assert.equal(adapted.attributes[5].valueType, 'listString');
+	assert.equal(adapted.blocks.length, 2);
 	assert.equal(adapted.blocks[0].attributes[0].valueType, 'bool');
+	assert.equal(adapted.blocks[1].path, 'blob_properties.delete_retention_policy');
+	assert.equal(adapted.blocks[1].attributes[0].valueType, 'number');
 	assert.ok(adapted.outputs.some(o => o.name === 'primary_access_key' && o.knownAtApply));
 });
 
@@ -299,6 +307,22 @@ test('Stage 6 cloud regions and dependency report adapters parse sanitized paylo
 	assert.equal(deps.providers[1].conflictCount, 1);
 	assert.equal(deps.unusedLockEntries.length, 1);
 	assert.equal(deps.diagnosticCount, 1);
+});
+
+test('dependency reports accept the service engine name for a new OpenTofu project', () => {
+	const reply = {
+		sourceRevision: 'a'.repeat(64),
+		engine: 'openTofu',
+		engineInferred: true,
+		lockFile: { state: 'absent' },
+		providers: [{ address: 'registry.opentofu.org/hashicorp/null', display: 'hashicorp/null', status: 'unlocked', combined: '= 3.2.4' }],
+	};
+	const report = parseDependencyReport(reply);
+	assert.equal(report?.engine, 'opentofu');
+	assert.equal(report.lockState, 'absent');
+	assert.equal(report.providers[0].address, 'registry.opentofu.org/hashicorp/null');
+	assert.equal(report.providers[0].constraint, '= 3.2.4');
+	assert.equal(parseDependencyReport({ ...reply, engine: 'other' }), undefined);
 });
 
 test('Stage 7 module inspection adapter and Webview requestModule validation sanitize inputs', () => {
@@ -685,4 +709,10 @@ test('start-screen buttons parse to fixed actions only', () => {
 	assert.equal(parseWebviewMessage({ type: 'startAction', action: 'createProject', architectureId: 'arch-1' }), undefined);
 	assert.equal(parseWebviewMessage({ type: 'startAction', action: 'workbench.action.terminal.new' }), undefined);
 	assert.equal(parseWebviewMessage({ type: 'startAction', action: 'openArchitecture', architectureId: 'a\u0000b' }), undefined);
+});
+
+test('the Studio reports unsaved canvas changes so the tab can show a dot', () => {
+	assert.deepEqual(parseWebviewMessage({ type: 'dirtyState', dirty: true }), { type: 'dirtyState', dirty: true });
+	assert.deepEqual(parseWebviewMessage({ type: 'dirtyState', dirty: false }), { type: 'dirtyState', dirty: false });
+	assert.equal(parseWebviewMessage({ type: 'dirtyState', dirty: 'yes' }), undefined);
 });

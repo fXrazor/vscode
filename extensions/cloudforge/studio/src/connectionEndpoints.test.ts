@@ -5,7 +5,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHistory, historyReducer, type Architecture, type BoardItem, type History } from './model.ts';
-import { elementEndpoint as element, pointEndpoint as point, endpointElementId, normaliseArchitectureConnections } from './connectionEndpoints.ts';
+import { elementEndpoint as element, pointEndpoint as point, endpointElementId, endpointKey, needsConnectionOverlay, normaliseArchitectureConnections, normaliseEndpoint, projectPerimeterAnchor } from './connectionEndpoints.ts';
+import { connectionPath } from './connectionGeometry.ts';
 import { canConnectEndpoints, connectionAnchor } from './designConnections.ts';
 import { selectionFragment } from './canvasOperations.ts';
 import { presentationSvg } from './exportPresentation.ts';
@@ -163,4 +164,95 @@ test('endpoint commands cannot rewrite a service-derived edge or affect Terrafor
 	const guarded = createHistory({ ...board(), connections: [{ id: 'a->b', source: element('a'), target: element('b') }] });
 	assert.equal(historyReducer(guarded, { type: 'reconnectConnection', id: 'a->b', side: 'target', endpoint: point({ x: 8, y: 9 }) }), guarded);
 	assert.equal(canConnectEndpoints(h.present, element('missing'), point({ x: 8, y: 9 })), false);
+});
+
+test('draggable connection waypoints route elbow, curve, and straight paths, export cleanly, duplicate with offset, and undo in one step', async () => {
+	const { connectionPath } = await import('./connectionGeometry.ts');
+	let h = createHistory(board());
+	const beforeHcl = terraformCode(h.present);
+	h = historyReducer(h, { type: 'connectEndpoints', id: 'bent', source: element('a'), target: element('b') });
+
+	// Bend the connection through (260, 140)
+	h = historyReducer(h, { type: 'updateConnection', id: 'bent', patch: { waypoint: { x: 260, y: 140 } } });
+	assert.equal(h.past.length, 2);
+	assert.deepEqual(h.present.connections[0].waypoint, { x: 260, y: 140 });
+	assert.equal(terraformCode(h.present), beforeHcl);
+
+	// Invalid NaN waypoint or unchanged waypoint consumes zero history
+	assert.equal(historyReducer(h, { type: 'updateConnection', id: 'bent', patch: { waypoint: { x: Number.NaN, y: 10 } } }), h);
+	assert.equal(historyReducer(h, { type: 'updateConnection', id: 'bent', patch: { waypoint: { x: 260, y: 140 } } }), h);
+
+	// Shared geometry handles elbow, curve (passes through waypoint at t=0.5), and straight
+	const [elbowPath, ex, ey] = connectionPath(h.present.connections[0], 200, 50, 400, 50);
+	assert.equal(ex, 260); assert.equal(ey, 140);
+	assert.ok(elbowPath.includes(',140'), 'elbow routes along waypoint elevation y=140: ' + elbowPath);
+
+	const [svgPathCheck] = connectionPath(h.present.connections[0], 200, 50, 400, 180);
+	assert.ok(svgPathCheck.includes('260,'), 'vertical-step Z-elbow routes at waypoint x=260: ' + svgPathCheck);
+
+	const [curvePath, cx, cy] = connectionPath({ ...h.present.connections[0], routing: 'curve' }, 200, 50, 400, 50);
+	assert.equal(cx, 260); assert.equal(cy, 140);
+	assert.equal(curvePath, 'M200,50 Q220,230 400,50', 'quadratic Bezier passes through (260,140) at t=0.5');
+
+	const [straightPath] = connectionPath({ ...h.present.connections[0], routing: 'straight' }, 200, 50, 400, 50);
+	assert.equal(straightPath, 'M200,50 L260,140 L400,50');
+
+	// Duplicating offsets the waypoint cleanly
+	const fragment = selectionFragment(h.present, ['a', 'b'], ['bent']);
+	const dup = historyReducer(h, { type: 'canvas', command: { kind: 'duplicate', fragment, idMap: { a: 'a2', b: 'b2', bent: 'bent2' }, offset: 40 } });
+	assert.deepEqual(dup.present.connections.find(c => c.id === 'bent2')?.waypoint, { x: 300, y: 180 });
+
+	// SVG export uses the same bent route
+	const svg = await presentationSvg(h.present);
+	assert.ok(svg.includes(',140'), 'SVG export includes bent route at y=140');
+
+	// Resetting waypoint clears it in one step and Undo restores it
+	const reset = historyReducer(h, { type: 'updateConnection', id: 'bent', patch: { waypoint: undefined } });
+	assert.equal(reset.present.connections[0].waypoint, undefined);
+	assert.deepEqual(historyReducer(reset, { type: 'undo' }).present.connections[0].waypoint, { x: 260, y: 140 });
+});
+
+test('elements have four connection points: left, right, top and bottom', () => {
+	const architecture = sampleArchitecture();
+	const resource = architecture.resources.find(item => item.id === 'vm')!;
+	assert.deepEqual(normaliseEndpoint({ kind: 'element', elementId: 'vm', port: 'top' }), { kind: 'element', elementId: 'vm', port: 'top' });
+	assert.equal(normaliseEndpoint({ kind: 'element', elementId: 'vm', port: 'middle' }), undefined);
+	const top = connectionAnchor(architecture, element('vm', 'top'), 'source', 'visual')!;
+	const bottom = connectionAnchor(architecture, element('vm', 'bottom'), 'target', 'visual')!;
+	assert.equal(top.y, resource.positions.visual.y);
+	assert.ok(bottom.y > top.y && bottom.x === top.x);
+	const [path] = connectionPath({ id: 'x', source: element('vm', 'bottom'), target: element('nic', 'top') }, 0, 0, 100, 200);
+	assert.match(path, /^M ?0[ ,]0/);
+});
+
+test('arbitrary perimeter attachments project cleanly, follow moves/rotations, allow multiple links per side, and export identically', async () => {
+	const box = { x: 0, y: 0, width: 200, height: 100 };
+	// Near midpoint snaps cleanly to classic cardinal port without anchor
+	assert.deepEqual(projectPerimeterAnchor(box, { x: 198, y: 52 }), { port: 'output' });
+	// Off-centre right edge stores normalised perimeter anchor
+	assert.deepEqual(projectPerimeterAnchor(box, { x: 196, y: 20 }), { port: 'output', anchor: { x: 1, y: 0.2 } });
+	// Bottom edge 75% across
+	assert.deepEqual(projectPerimeterAnchor(box, { x: 150, y: 98 }), { port: 'bottom', anchor: { x: 0.75, y: 1 } });
+	// Invalid out-of-range anchor is rejected cleanly
+	assert.equal(normaliseEndpoint({ kind: 'element', elementId: 'a', port: 'output', anchor: { x: 1.5, y: 0.2 } }), undefined);
+	assert.equal(normaliseEndpoint({ kind: 'element', elementId: 'a', port: 'output', anchor: { x: Number.NaN, y: 0.2 } }), undefined);
+
+	// Two distinct connections on the same side of 'a' at different perimeter positions coexist cleanly
+	const upper = element('a', 'output', { x: 1, y: 0.2 });
+	const lower = element('a', 'output', { x: 1, y: 0.8 });
+	assert.notEqual(endpointKey(upper, 'source'), endpointKey(lower, 'source'));
+	let h = historyReducer(createHistory(board()), { type: 'connectEndpoints', id: 'c1', source: upper, target: element('b', 'input', { x: 0, y: 0.25 }) });
+	h = historyReducer(h, { type: 'connectEndpoints', id: 'c2', source: lower, target: element('b', 'input', { x: 0, y: 0.75 }) });
+	assert.equal(h.present.connections.length, 2);
+	assert.ok(needsConnectionOverlay(h.present.connections[0]));
+	assert.deepEqual(connectionAnchor(h.present, upper, 'source', 'visual'), { x: 200, y: 20 });
+	assert.deepEqual(connectionAnchor(h.present, lower, 'source', 'visual'), { x: 200, y: 80 });
+
+	// Rotated element transforms perimeter anchor around centre (90 deg clockwise: (200, 20) -> centre(100,50) + local(100,-30) -> (130, 150))
+	const rotated = historyReducer(h, { type: 'canvas', command: { kind: 'rotate', ids: ['a'], angle: 90 } });
+	assert.deepEqual(connectionAnchor(rotated.present, upper, 'source', 'visual'), { x: 130, y: 150 });
+
+	// SVG export renders both distinct perimeter y-coordinates (20 and 80)
+	const svg = await presentationSvg(h.present);
+	assert.ok(svg.includes(',20') && svg.includes(',80'), 'SVG export preserves exact perimeter attachment coordinates');
 });

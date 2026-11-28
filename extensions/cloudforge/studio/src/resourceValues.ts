@@ -8,11 +8,15 @@
 // Pure: no React or DOM. Only plain literals are copied; expressions, references and redacted
 // secrets keep the canvas value, and the three-way save keeps the file's text for those.
 
-import { providerRegions } from './fixture.ts';
+import { providerRegions, resourceDefinition } from './fixture.ts';
+import { withInferredReferenceTypes } from './referenceInference.ts';
 import type { Architecture, Resource, ResourceBlock } from './model.ts';
 import { projectTerraform } from './terraformProjection.ts';
 import type { HostGraphSnapshot } from './webviewBridge.ts';
-import { bindingKey, type FieldTarget } from './fieldBindings.ts';
+import { bindingKey, parseMixedListHclValue, type FieldTarget } from './fieldBindings.ts';
+import { getDef, type AttrDef } from './cloudlab-core/catalog/index.ts';
+import { parseHcl } from './cloudlab-core/hcl.ts';
+import { hasTerraformExtras, pruneTerraformExtras, type TerraformExtraBody } from './additionalTerraform.ts';
 import { variableTypes, type VariableDefinition, type VariableValue } from './variables.ts';
 
 export type FileValue =
@@ -57,7 +61,7 @@ function parseAttributes(value: unknown): Record<string, FileValue> {
 		if (!isRecord(entry)) {
 			continue;
 		}
-		if (entry.kind === 'literal' && 'value' in entry) {
+		if (entry.kind === 'literal' && Object.hasOwn(entry, 'value')) {
 			out[name] = { kind: 'literal', value: entry.value };
 		} else if (entry.kind === 'expression' && typeof entry.text === 'string') {
 			out[name] = { kind: 'expression', text: entry.text };
@@ -108,8 +112,15 @@ export function parseResourceValues(value: unknown): { readonly sourceRevision: 
 	return { sourceRevision: value.sourceRevision, resources, variables };
 }
 
+/** `var.NAME` or `var.NAME.a.b` (plain attribute access only; indexes and functions stay Terraform expressions). */
+function variableReference(text: string): { name: string; path: string[] } | undefined {
+	const match = /^var\.([A-Za-z_][A-Za-z0-9_-]*)((?:\.[A-Za-z_][A-Za-z0-9_-]*)*)$/.exec(text.trim());
+	return match ? { name: match[1], path: match[2] ? match[2].slice(1).split('.') : [] } : undefined;
+}
+
 const variableTypeOf = (text: string | undefined): VariableDefinition['type'] => {
 	const compact = (text ?? '').replace(/\s+/g, '');
+	if (/^object\(/.test(compact)) { return 'object'; }
 	return (variableTypes as readonly string[]).includes(compact) ? compact as VariableDefinition['type'] : text === undefined ? 'string' : 'any';
 };
 
@@ -249,11 +260,11 @@ export function hydrateResourceValues(architecture: Architecture, snapshot: Host
 		// A field written as exactly `var.NAME` becomes a canvas variable binding.
 		const bindVariable = (path: readonly string[], target: FieldTarget) => {
 			const found = valueAt(file, path);
-			const name = found?.kind === 'expression' ? /^var\.([A-Za-z_][A-Za-z0-9_-]*)$/.exec(found.text.trim())?.[1] : undefined;
-			const variableId = name ? variableIdByName.get(name) : undefined;
+			const parsed = found?.kind === 'expression' ? variableReference(found.text) : undefined;
+			const variableId = parsed ? variableIdByName.get(parsed.name) : undefined;
 			const key = bindingKey(target);
-			if (variableId && next.fieldBindings?.[key]?.variableId !== variableId) {
-				next.fieldBindings = { ...next.fieldBindings, [key]: { variableId } };
+			if (variableId && (next.fieldBindings?.[key]?.variableId !== variableId || (next.fieldBindings?.[key]?.path ?? []).join('.') !== parsed!.path.join('.'))) {
+				next.fieldBindings = { ...next.fieldBindings, [key]: parsed!.path.length ? { variableId, path: parsed!.path } : { variableId } };
 				touched = true;
 			}
 		};
@@ -322,6 +333,70 @@ export function hydrateResourceValues(architecture: Architecture, snapshot: Host
 					next.settings[field.name] = String(value);
 					touched = true;
 				}
+			}
+		}
+		// Definitions can arrive after source values. Reconcile the actual source paths once known.
+		// Labelled/dynamic bodies are excluded: this protocol does not carry their labels.
+		if (resource.kind !== 'module') {
+			const definitions = getDef(resourceDefinition(resource).type)?.attributes;
+			if (definitions) {
+				const existingBindings = bindings.get(resource.id) ?? [];
+				const transfer = (source: Pick<FileResourceValues, 'attributes' | 'blocks'>, fields: readonly AttrDef[], previous: readonly ResourceBlock[], oldExtras: TerraformExtraBody | undefined, blockId?: string): { values: Record<string, string>; blocks: ResourceBlock[]; extras: TerraformExtraBody } => {
+					const result: { values: Record<string, string>; blocks: ResourceBlock[]; extras: TerraformExtraBody } = { values: {}, blocks: [], extras: structuredClone(oldExtras ?? { attrs: {}, blocks: [] }) };
+					for (const definition of fields.filter(field => field.type !== 'block' && !field.readOnly).map(field => withInferredReferenceTypes(resourceDefinition(resource).type, field)!)) {
+						const field = source.attributes[definition.name];
+						if (!field || field.kind === 'redacted') { continue; }
+						const key = !blockId ? existingBindings.find(binding => binding.path.length === 1 && binding.path[0] === definition.name && binding.target === 'setting')?.key ?? definition.name : definition.name;
+						const target: FieldTarget = blockId ? { kind: 'block', blockId, name: definition.name } : definition.name === 'name' ? { kind: 'name' } : ['location', 'region'].includes(definition.name) ? { kind: 'region' } : { kind: 'setting', name: key };
+						const clearBinding = () => { const id = bindingKey(target); if (next.fieldBindings?.[id]) { next.fieldBindings = { ...next.fieldBindings }; delete next.fieldBindings[id]; } if (next.resourceRefs?.[id]) { next.resourceRefs = { ...next.resourceRefs }; delete next.resourceRefs[id]; } };
+						if (field.kind === 'expression' && typeof field.text === 'string' && field.text.length < 128 * 1024) {
+							const reference = variableReference(field.text);
+							if (reference && variableIdByName.has(reference.name)) { clearBinding(); next.fieldBindings = { ...next.fieldBindings, [bindingKey(target)]: reference.path.length ? { variableId: variableIdByName.get(reference.name)!, path: reference.path } : { variableId: variableIdByName.get(reference.name)! } }; delete result.extras.attrs[definition.name]; continue; }
+							try {
+								const parsed = parseHcl('value = ' + field.text);
+								if (!parsed.blocks.length && Object.keys(parsed.attrs).length === 1 && Object.hasOwn(parsed.attrs, 'value')) {
+									const mixed = parseMixedListHclValue(parsed.attrs.value, architecture, resource, definition, variables);
+									clearBinding();
+									if (mixed) {
+										next.resourceRefs = { ...next.resourceRefs, [bindingKey(target)]: mixed };
+										delete result.extras.attrs[definition.name];
+										result.values[key] = (blockId ? previous.find(block => block.id === blockId)?.values[key] : next.settings[key]) ?? '';
+									} else {
+										result.extras.attrs[definition.name] = parsed.attrs.value;
+									}
+								}
+							} catch { /* Preserve the source file; do not claim an unparsed expression is configured in the model. */ }
+						} else if (field.kind === 'literal') {
+							clearBinding();
+							delete result.extras.attrs[definition.name];
+							const text = textFor(field.value, blockId ? previous.find(block => block.id === blockId)?.values[key] ?? '' : next.settings[key] ?? '');
+							if (text !== undefined) {
+								if (!blockId && definition.name === 'name') { next.name = text; }
+								else if (!blockId && ['location', 'region'].includes(definition.name)) { if (!next.region || regionCode(next.region) !== regionCode(text)) { next.region = text; } }
+								else { result.values[key] = text; }
+							}
+						}
+					}
+					const occurrences = new Map<string, number>();
+					for (const block of source.blocks) {
+						const definition = fields.find(field => field.type === 'block' && field.name === block.name);
+						if (!definition) { continue; }
+						const index = occurrences.get(block.name) ?? 0; occurrences.set(block.name, index + 1);
+						const existing = previous.filter(item => item.type === block.name)[index];
+						const id = existing?.id ?? crypto.randomUUID();
+						const old = result.extras.blocks.find(item => item.resourceBlockId === id)?.body;
+						const converted = transfer(block, definition.children ?? [], existing?.blocks ?? [], old, id);
+						result.blocks.push({ id, type: block.name, values: { ...existing?.values, ...converted.values }, blocks: converted.blocks });
+						result.extras.blocks = result.extras.blocks.filter(item => item.resourceBlockId !== id);
+						if (hasTerraformExtras(converted.extras)) { result.extras.blocks.push({ type: block.name, labels: [], resourceBlockId: id, body: converted.extras }); }
+					}
+					return result;
+				};
+				const transferred = transfer(file, definitions, next.blocks, next.terraformExtras);
+				next.settings = { ...next.settings, ...transferred.values }; next.blocks = transferred.blocks;
+				next.terraformExtras = pruneTerraformExtras({ ...next, terraformExtras: transferred.extras }, next.blocks);
+				if (!hasTerraformExtras(next.terraformExtras)) { delete next.terraformExtras; }
+				touched ||= JSON.stringify(next) !== JSON.stringify(resource);
 			}
 		}
 		if (!touched) {

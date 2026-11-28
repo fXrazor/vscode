@@ -6,6 +6,7 @@
 /* eslint-disable no-restricted-globals */
 
 import { getPartsSplashColors, getPartsSplashLayoutMetrics, getPartsSplashPartRadius } from './partsSplash.js';
+import { cloudForgeStartupTheme, showCloudForgeStartupScreen } from './cloudForgeStartupScreen.js';
 
 (async function () {
 
@@ -25,10 +26,28 @@ import { getPartsSplashColors, getPartsSplashLayoutMetrics, getPartsSplashPartRa
 
 	//#region Splash Screen Helpers
 
+	let setStartupStatus: (status: string) => void = () => { };
+
 	function showSplash(configuration: INativeWindowConfiguration) {
 		performance.mark('code/willShowPartsSplash');
 		showDefaultSplash(configuration);
 		performance.mark('code/didShowPartsSplash');
+		showStartupScreen(configuration);
+	}
+
+	/** CloudForge startup screen over the parts splash; it only appears when loading is slow. */
+	function showStartupScreen(configuration: INativeWindowConfiguration) {
+		const automated = typeof configuration.extensionTestsPath === 'string' || configuration['enable-smoke-test-driver'] === true;
+		if (automated) {
+			return;
+		}
+		try {
+			const theme = cloudForgeStartupTheme(configuration.partsSplash?.baseTheme, configuration.colorScheme);
+			setStartupStatus = showCloudForgeStartupScreen({ theme, delayMs: 400, slowAfterMs: 8_000 });
+			setStartupStatus('Loading the workbench…');
+		} catch {
+			// Branding must never block startup.
+		}
 	}
 
 	function showDefaultSplash(configuration: INativeWindowConfiguration) {
@@ -749,6 +768,7 @@ import { getPartsSplashColors, getPartsSplashLayoutMetrics, getPartsSplashPartRa
 
 	// Mark start of workbench
 	performance.mark('code/didLoadWorkbenchMain');
+	setStartupStatus('Restoring your layout…');
 
 	// Load workbench
 	result.main(configuration);
