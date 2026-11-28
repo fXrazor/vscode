@@ -1,5 +1,14 @@
 # CloudForge Code OSS handoff
 
+## Template Library mock-up, round 3 — Claude — 28 November 2026
+
+Dale asked for a design pass with better cards and titles, and for proper icons and layouts in the previews. The mock-up (same link) now uses the Studio canvas's own icons from `extensions/cloudforge/studio/assets`, mapped through `catalogue/*.json` plus `studio/src/coreIcons.ts`. Nodes are icon-first like canvas `ResourceNode` (112×92); containers have a heading row with the icon, the name, the CIDR and "N inside". Cards have a provider badge, Mona Sans titles, a difficulty indicator, a strip of service icons, a hover lift and Quick look; the page and shelf titles were reworked too. **Icon gaps found in the canvas catalogue (fix in Phase 3 so the canvas and previews match):**
+- the GCP regional load balancer chain (`google_compute_forwarding_rule`, `_region_target_http_proxy`, `_region_url_map`, `_region_backend_service`, `_region_health_check`) all get `gcp-compute-engine.svg`; the mock-up uses `gcp-cloud-load-balancing.svg` and `gcp-cloud-monitoring.svg` instead;
+- `azurerm_public_ip` and `azurerm_subnet_network_security_group_association` still hit the placeholder in the catalogue (`coreIcons` covers them);
+- `kubernetes_*` has no icons at all; the mock-up falls back to a drawn glyph.
+
+The Impeccable design skill was not available in this session.
+
 ## Template Library mock-up, round 2 (Dale's feedback) — Claude — 28 November 2026
 
 Dale (28 Nov): keep this direction; make it fill large screens; make it look like Brainboard's template library so each architecture is visible in the preview. The mock-up (https://claude.ai/artifact/FfBc9j3xYDSaHtMJ1S3Usu, copy in project files `template-library/template-library-mockup.html`) now has a full-height window, wider grids at large widths, a sidebar hidden by clicking the Templates activity icon, card previews drawn from each template's layout (provider boundary, resource groups and networks as nested containers, resources as icon nodes, Terraform references as arrows), a large zoomable and draggable diagram on the details page, and Quick look on every card. **For the real build:** the preview must be drawn from `layout.json` plus the HCL references, with the same renderer the canvas uses. Today's built-in `layout.json` files hold positions only, so Phase 3 needs container nesting and sizes in the layout (or derives them from `resource_group_name`/`vnet` references). **Later, not v1:** (1) costs: an estimate on the template's details (a "Costs" tab), coming from the same cost engine as the builder, labelled with the region, the price date and its assumptions; the builder keeps the real per-project figure; (2) community templates: a contributor guide, submission checks and review, so others can publish templates.
